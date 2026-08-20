@@ -41,3 +41,19 @@ xvfb-run -a npm run prototype:smoke
 ```
 
 On a desktop session, `npm run prototype:smoke` does not require `xvfb-run`.
+
+## Agent skills
+
+### Issue tracker
+
+Issues and specs are tracked in GitHub Issues for `oldwinter/skills-desktop`.
+See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Use the five canonical triage labels without renaming.
+See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+This is a single-context repository. See `docs/agents/domain.md`.
