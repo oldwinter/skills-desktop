@@ -15,15 +15,44 @@ installation on an SSH host.
 **Inventory**: The normalized result of a read-only `npx skills list --json`
 invocation for one target. It is a snapshot, not a second source of truth.
 
-**Skill Identity**: A stable skill name plus its declared source. A filesystem
-path is evidence, not identity.
+**Skill Identity**: A stable, case-sensitive skill name plus its declared
+source. Missing source provenance leaves identity incomplete. A filesystem path
+is evidence, not identity.
 
-**Revision**: A content or source revision explicitly reported by an upstream
-source. Unknown remains unknown; it is not converted into an app-defined
+**Declared Source**: The exact, case-sensitive `(sourceType, source)` pair
+reported by `npx skills`. Skills Desktop does not rewrite or equate source
+aliases. `sourceUrl` is potentially sensitive provenance and replay evidence,
+not identity. A null `source` leaves Skill Identity incomplete.
+
+**Comparison Key**: A skill's case-sensitive name, used only to align possible
+matches across Target inventories. It is not Skill Identity; aligned entries
+with different declared sources remain a source mismatch.
+
+**Revision**: An opaque, immutable source revision explicitly reported through
+an authoritative `npx skills` interface and retained with its kind and
+authority. Unknown remains unknown; it is not converted into an app-defined
 semantic version.
 
-**Comparison**: A diff between two target inventories covering presence,
-source, harness availability, and known revision.
+**Source Reference**: A branch, tag, or other potentially mutable source ref.
+It is provenance, not a Revision or Content Fingerprint.
+
+**Content Fingerprint**: A content digest reported through an authoritative
+`npx skills` interface. Skills Desktop does not scan or hash installed skill
+directories to derive one. When none is reported, it remains unknown.
+
+**Unknown Evidence**: An authoritative field that is absent or unsupported.
+Unknown evidence establishes neither equality nor drift and does not make an
+Inventory stale.
+
+**Stale Inventory**: The last successful Inventory retained after a later
+refresh fails or its Target changes. Elapsed time alone does not make an
+Inventory stale. A stale Inventory may be inspected and compared, but cannot
+authorize a mutation.
+
+**Comparison**: A dimensioned diff between two Target inventories. It preserves
+presence, Declared Source, selected-harness availability, Revision, Content
+Fingerprint, and Inventory freshness outcomes rather than collapsing them into
+one status.
 
 **Command Plan**: Structured mutation intent rendered for review before any
 local or remote process is started. Preview strings are not executable input.
@@ -45,7 +74,6 @@ one or more targets. It never defines a second installation protocol.
 ## Open Decisions
 
 - Production module/package layout and state model.
-- Revision and content-fingerprint semantics when the CLI reports no version.
 - SSH transport, host-key policy, cancellation, and structured error mapping.
 - Persistence format for targets, collections, and non-authoritative snapshots.
 - Collection provenance, review, pinning, and update policy.
