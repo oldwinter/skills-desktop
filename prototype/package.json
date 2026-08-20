@@ -1,0 +1,26 @@
+{
+  "name": "skills-desktop-prototype",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "main": "electron/main.mjs",
+  "scripts": {
+    "prototype": "vite --host 127.0.0.1",
+    "prototype:build": "vite build",
+    "prototype:capture": "npm run prototype:build && node scripts/capture.mjs",
+    "prototype:electron": "npm run prototype:build && electron .",
+    "prototype:smoke": "npm run prototype:build && node scripts/electron-smoke.mjs"
+  },
+  "dependencies": {
+    "lucide": "^1.33.0"
+  },
+  "devDependencies": {
+    "electron": "^43.4.1",
+    "playwright": "^1.62.1",
+    "postcss-custom-media": "^12.0.1",
+    "vite": "^8.2.2"
+  },
+  "allowScripts": {
+    "electron@43.4.1": true
+  }
+}
