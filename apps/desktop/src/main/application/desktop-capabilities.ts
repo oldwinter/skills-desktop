@@ -7,6 +7,7 @@ import {
   type DesktopEvent,
   type PublicInventoryEntry,
   type PublicInventoryState,
+  type PublicCollectionPlan,
   type PublicMutationState,
   type RendererError,
   type TargetDefinition as PublicTargetDefinition,
@@ -21,6 +22,7 @@ import {
 import type { PreparedMutation } from "../adapters/skills-process.js";
 import type {
   DurableTargetDefinition,
+  CollectionAcknowledgement,
   InventorySnapshot,
   MutationGuard,
   RecoveryRecords,
@@ -32,6 +34,13 @@ import type {
 } from "../targets/skills-targets.js";
 import type { HostTrustChallenge } from "../ssh/openssh-target.js";
 import { compareTargetInventories } from "./comparison.js";
+import {
+  EMPTY_OFFICIAL_COLLECTION_CATALOG,
+  digestCanonicalJson,
+  projectOfficialCollections,
+  type OfficialCollectionCatalog,
+  validateOfficialCollectionCatalog,
+} from "./official-collections.js";
 
 const MAX_RETAINED_REVIEWS = 128;
 
@@ -78,6 +87,8 @@ export interface DesktopCapabilities {
 export interface DesktopCapabilitiesOptions {
   readonly clock?: () => Date;
   readonly id: () => string;
+  readonly officialCollectionCatalog?: unknown;
+  readonly platform?: NodeJS.Platform;
   readonly onReviewRequested?: (reviewId: string) => void;
   readonly recoveryRecords: RecoveryRecords;
   readonly scheduleEventDelivery?: (deliver: () => void) => void;
@@ -107,10 +118,16 @@ interface FreshTargetSession extends TargetSession {
 }
 
 interface TrustedReview {
+  readonly collectionPlan?: CollectionPlan;
   decision: "approve" | "reject" | undefined;
   readonly id: string;
   readonly prepared: PreparedMutation;
   readonly purpose: "cancel" | "execute";
+}
+
+interface CollectionPlan {
+  readonly preparedId: string;
+  readonly projection: PublicCollectionPlan;
 }
 
 interface HostTrustReview {
@@ -170,9 +187,7 @@ function projectEntries(
   }));
 }
 
-function remapRecoveredTargetId<
-  Value extends { readonly targetId: string },
->(
+function remapRecoveredTargetId<Value extends { readonly targetId: string }>(
   values: readonly Value[],
   fromTargetId: string,
   toTargetId: string,
@@ -278,6 +293,9 @@ export function createDesktopCapabilities(
   const scheduleEventDelivery = options.scheduleEventDelivery ?? queueMicrotask;
   const clock = options.clock ?? (() => new Date());
   const shutdownTimeoutMs = options.shutdownTimeoutMs ?? 3_000;
+  const platform = options.platform ?? process.platform;
+  let officialCollectionCatalog: OfficialCollectionCatalog =
+    EMPTY_OFFICIAL_COLLECTION_CATALOG;
   let target = options.skillsTargets.primaryTarget;
   const targetDefinitions = () => options.skillsTargets.definitions;
   const guardedTargetIds = new Set<string>();
@@ -294,9 +312,12 @@ export function createDesktopCapabilities(
   const preparedMutations = new Map<string, PreparedMutation>();
   const preparedDependencies = new Map<string, readonly string[]>();
   const reviews = new Map<string, TrustedReview>();
+  const collectionPlans = new Map<string, CollectionPlan>();
   const hostTrustReviews = new Map<string, HostTrustReview>();
   let inventoryState: PublicInventoryState = emptyInventoryState();
   let mutationState: PublicMutationState = emptyMutationState();
+  let collectionAcknowledgements: CollectionAcknowledgement[] = [];
+  let currentCollectionPlan: CollectionPlan | undefined;
   const inventoryStates = new Map<string, PublicInventoryState>();
   const mutationStates = new Map<string, PublicMutationState>();
   const freshTargetSessions = new Map<string, FreshTargetSession>();
@@ -419,8 +440,7 @@ export function createDesktopCapabilities(
     }
     while (hostTrustReviews.size >= MAX_RETAINED_REVIEWS) {
       const oldest = hostTrustReviews.entries().next().value as
-        | [string, HostTrustReview]
-        | undefined;
+        [string, HostTrustReview] | undefined;
       if (oldest === undefined) return;
       oldest[1].decision ??= "reject";
       hostTrustReviews.delete(oldest[0]);
@@ -465,11 +485,32 @@ export function createDesktopCapabilities(
         mutationStates.set(destinationTargetId, emptyMutationState());
       }
     }
-    rejectPendingReviews((review) =>
-      invalidatedPreparedIds.has(review.prepared.id) ||
-      (preparedDependencies.get(review.prepared.id) ?? [
-        review.prepared.targetId,
-      ]).includes(targetId),
+    for (const [planId, plan] of collectionPlans) {
+      if (!invalidatedPreparedIds.has(plan.preparedId)) continue;
+      collectionPlans.delete(planId);
+      if (currentCollectionPlan?.projection.id === planId) {
+        currentCollectionPlan = undefined;
+      }
+    }
+    rejectPendingReviews(
+      (review) =>
+        invalidatedPreparedIds.has(review.prepared.id) ||
+        (
+          preparedDependencies.get(review.prepared.id) ?? [
+            review.prepared.targetId,
+          ]
+        ).includes(targetId),
+    );
+  };
+
+  const discardCollectionPlan = (plan: CollectionPlan) => {
+    collectionPlans.delete(plan.projection.id);
+    preparedMutations.delete(plan.preparedId);
+    preparedDependencies.delete(plan.preparedId);
+    if (currentCollectionPlan === plan) currentCollectionPlan = undefined;
+    rejectPendingReviews(
+      (review) =>
+        review.collectionPlan === plan || review.prepared.id === plan.preparedId,
     );
   };
 
@@ -495,11 +536,28 @@ export function createDesktopCapabilities(
     }
   };
 
+  const collectionsForTarget = (
+    definition: TargetDefinition,
+    inventory: PublicInventoryState,
+  ) =>
+    projectOfficialCollections({
+      acknowledgements: collectionAcknowledgements,
+      catalog: officialCollectionCatalog,
+      inventory,
+      platform,
+      plan:
+        currentCollectionPlan?.projection.targetId === definition.id
+          ? currentCollectionPlan.projection
+          : null,
+      target: projectTarget(definition),
+    });
+
   const snapshotFor = (
     endpoint: EndpointState,
     eventSequence = endpoint.sequence,
   ): WorkspaceSnapshot => ({
     comparison: structuredClone(currentComparison()),
+    collections: collectionsForTarget(target, inventoryState),
     eventSequence,
     inventory: structuredClone(inventoryState),
     mutation: structuredClone(mutationState),
@@ -509,15 +567,17 @@ export function createDesktopCapabilities(
     target: projectTarget(target),
     targets: targetDefinitions().map((definition) => {
       const isActive = definition.id === target.id;
+      const targetInventory = isActive
+        ? structuredClone(inventoryState)
+        : structuredClone(
+            inventoryStates.get(definition.id) ?? emptyInventoryState(),
+          );
       return {
+        collections: collectionsForTarget(definition, targetInventory),
         deletionBlocked:
           guardedTargetIds.has(definition.id) ||
           targetDefinitions().length === 1,
-        inventory: isActive
-          ? structuredClone(inventoryState)
-          : structuredClone(
-              inventoryStates.get(definition.id) ?? emptyInventoryState(),
-            ),
+        inventory: targetInventory,
         mutation: isActive
           ? structuredClone(mutationState)
           : structuredClone(
@@ -624,9 +684,7 @@ export function createDesktopCapabilities(
       session,
     };
     activePreparation = preparation;
-    const promise = (async (): Promise<
-      Result<RequestValue, RequestError>
-    > => {
+    const promise = (async (): Promise<Result<RequestValue, RequestError>> => {
       try {
         const prepared = await preparation.session.process.prepareMutation({
           freshness: "fresh",
@@ -644,8 +702,7 @@ export function createDesktopCapabilities(
             ),
           );
         }
-        if (!prepared.ok)
-          return requestFailure(prepared.error as RequestError);
+        if (!prepared.ok) return requestFailure(prepared.error as RequestError);
         const preparedTargetId = preparation.session.binding.targetId;
         invalidatePreparedForTarget(preparedTargetId);
         preparedMutations.set(prepared.value.id, prepared.value);
@@ -826,6 +883,22 @@ export function createDesktopCapabilities(
         decision: review.decision,
         schemaVersion: 1,
         status: "settled",
+      };
+    }
+    if (review.collectionPlan !== undefined) {
+      return {
+        projection: {
+          collectionPlan: structuredClone(review.collectionPlan.projection),
+          expiresAt: review.prepared.expiresAt,
+          reviewId: review.id,
+          target: projectTarget(
+            targetDefinitions().find(
+              ({ id }) => id === review.prepared.targetId,
+            ) ?? target,
+          ),
+        },
+        schemaVersion: 1,
+        status: "pending",
       };
     }
     return {
@@ -1294,10 +1367,7 @@ export function createDesktopCapabilities(
               );
             }
 
-            if (
-              targetDefinitionsChanging &&
-              review.purpose === "execute"
-            ) {
+            if (targetDefinitionsChanging && review.purpose === "execute") {
               return targetChangeConflict();
             }
             if (
@@ -1319,6 +1389,9 @@ export function createDesktopCapabilities(
             review.decision = parsedDecision.data.decision;
             if (parsedDecision.data.decision === "reject") {
               if (review.purpose === "execute") {
+                if (review.collectionPlan !== undefined) {
+                  discardCollectionPlan(review.collectionPlan);
+                }
                 rejectReviewState(review);
               }
               return { ok: true, value: { operationId: review.id } };
@@ -1367,6 +1440,9 @@ export function createDesktopCapabilities(
               prepared.targetGeneration !== session.binding.generation ||
               prepared.targetId !== session.binding.targetId
             ) {
+              if (review.collectionPlan !== undefined) {
+                discardCollectionPlan(review.collectionPlan);
+              }
               const error = publicError(
                 "stale_inventory",
                 "Target or Inventory state changed before approval.",
@@ -1382,6 +1458,9 @@ export function createDesktopCapabilities(
               return requestFailure(error);
             }
             if (clock().getTime() >= Date.parse(prepared.expiresAt)) {
+              if (review.collectionPlan !== undefined) {
+                discardCollectionPlan(review.collectionPlan);
+              }
               const error = publicError(
                 "review_expired",
                 "The Trusted Review has expired.",
@@ -1409,6 +1488,86 @@ export function createDesktopCapabilities(
                   true,
                 ),
               );
+            }
+
+            if (review.collectionPlan !== undefined) {
+              const collectionPlan = review.collectionPlan;
+              const projection = collectionPlan.projection;
+              const release = officialCollectionCatalog.releases.find(
+                (candidate) =>
+                  candidate.manifest.collectionId === projection.collectionId &&
+                  candidate.manifest.releaseNumber ===
+                    projection.releaseNumber &&
+                  candidate.manifestDigest === projection.manifestDigest &&
+                  candidate.manifest.status === "active" &&
+                  candidate.receipt.status === "approved",
+              );
+              if (
+                release === undefined ||
+                currentCollectionPlan !== collectionPlan ||
+                collectionPlans.get(projection.id) !== collectionPlan ||
+                collectionPlan.preparedId !== prepared.id ||
+                projection.childPreparedDigest !== prepared.digest ||
+                digestCanonicalJson(projection.releaseEvidence) !==
+                  digestCanonicalJson({
+                    compatibility: release?.manifest.compatibility,
+                    receipt: release?.receipt,
+                    status: release?.manifest.status,
+                  }) ||
+                projection.targetGeneration !== session.binding.generation ||
+                projection.inventoryDigest !==
+                  digestCanonicalJson({
+                    inventory: session.inventory,
+                    inventoryId: session.inventoryId,
+                    targetGeneration: session.binding.generation,
+                  })
+              ) {
+                discardCollectionPlan(collectionPlan);
+                const error = publicError(
+                  "review_invalid",
+                  "The Collection Plan evidence changed before approval.",
+                  "review",
+                  false,
+                );
+                publishMutation({
+                  ...mutationState,
+                  activeOperationId: null,
+                  lastError: error,
+                  phase: "failed",
+                });
+                return requestFailure(error);
+              }
+              const acknowledgement: CollectionAcknowledgement = {
+                acknowledgedAt: clock().toISOString(),
+                collectionId: projection.collectionId,
+                kind: "release",
+                manifestDigest: projection.manifestDigest,
+                releaseNumber: projection.releaseNumber,
+              };
+              const nextAcknowledgements = [
+                ...collectionAcknowledgements.filter(
+                  ({ collectionId }) =>
+                    collectionId !== acknowledgement.collectionId,
+                ),
+                acknowledgement,
+              ].sort((left, right) =>
+                left.collectionId.localeCompare(right.collectionId),
+              );
+              const acknowledged = await options.recoveryRecords.commit({
+                acknowledgements: nextAcknowledgements,
+                type: "collections.acknowledgements.replace",
+              });
+              if (!acknowledged.ok) {
+                publishMutation({
+                  ...mutationState,
+                  activeOperationId: null,
+                  lastError: acknowledged.error,
+                  phase: "failed",
+                });
+                return requestFailure(acknowledged.error);
+              }
+              collectionAcknowledgements = nextAcknowledgements;
+              discardCollectionPlan(collectionPlan);
             }
 
             const operationId = options.id();
@@ -1753,6 +1912,244 @@ export function createDesktopCapabilities(
             });
           }
 
+          if (parsed.data.type === "collection.prepare") {
+            const request = parsed.data;
+            const requestedTarget = targetDefinitions().find(
+              ({ id }) => id === request.targetId,
+            );
+            const release = officialCollectionCatalog.releases.find(
+              (candidate) =>
+                candidate.manifest.collectionId === request.collectionId &&
+                candidate.manifest.releaseNumber === request.releaseNumber &&
+                candidate.manifestDigest === request.manifestDigest,
+            );
+            if (
+              requestedTarget === undefined ||
+              release === undefined ||
+              release.manifest.status !== "active" ||
+              release.receipt.status !== "approved"
+            ) {
+              return requestFailure(
+                publicError(
+                  "mutation_ineligible",
+                  "The selected Official Collection release is unavailable.",
+                  "collection",
+                  false,
+                ),
+              );
+            }
+            if (
+              activeMutation !== undefined ||
+              activeObservation !== undefined ||
+              activePreparation !== undefined
+            ) {
+              return requestFailure(
+                publicError(
+                  "mutation_conflict",
+                  "Another operation is active for this Target.",
+                  "coordinate",
+                  true,
+                ),
+              );
+            }
+            if (requestedTarget.id !== target.id) {
+              activateTarget(requestedTarget);
+            }
+            if (
+              mutationState.phase === "reconciliation-required" ||
+              freshTargetSession === undefined ||
+              inventoryState.freshness !== "fresh"
+            ) {
+              return requestFailure(
+                publicError(
+                  mutationState.phase === "reconciliation-required"
+                    ? "reconciliation_required"
+                    : "stale_inventory",
+                  "Fresh Inventory is required to plan this Collection.",
+                  "collection",
+                  true,
+                ),
+              );
+            }
+            const projected = projectOfficialCollections({
+              catalog: officialCollectionCatalog,
+              inventory: inventoryState,
+              platform,
+              target: projectTarget(target),
+            });
+            const publicRelease = projected.releases.find(
+              (candidate) =>
+                candidate.collectionId === request.collectionId &&
+                candidate.releaseNumber === request.releaseNumber &&
+                candidate.manifestDigest === request.manifestDigest,
+            );
+            const assessment = publicRelease?.assessments.find(
+              ({ scope }) => scope === request.scope,
+            );
+            const eligible =
+              publicRelease?.executable === true &&
+              assessment?.compatibility === "compatible" &&
+              assessment.inventoryFreshness === "fresh" &&
+              request.selections.every((selection) => {
+                const entry = assessment.entries.find(
+                  ({ name }) => name === selection.name,
+                );
+                return (
+                  entry?.selectable === true &&
+                  entry.selectionModes.includes(selection.mode)
+                );
+              });
+            if (!eligible || assessment === undefined) {
+              return requestFailure(
+                publicError(
+                  "mutation_ineligible",
+                  "One or more Collection selections are not executable.",
+                  "collection",
+                  false,
+                ),
+              );
+            }
+            const session = freshTargetSession;
+            const preparedResult = await runPreparation(
+              endpointState,
+              session,
+              {
+                names: request.selections.map(({ name }) => name),
+                scope: request.scope,
+                source: {
+                  revision: release.manifest.source.reviewedRevision,
+                  source: release.manifest.source.repository,
+                  sourceType: "github",
+                },
+                type: "add",
+              },
+            );
+            if (!preparedResult.ok) return preparedResult;
+            const prepared = preparedMutations.get(
+              preparedResult.value.operationId,
+            );
+            if (prepared === undefined) {
+              return requestFailure(
+                publicError(
+                  "review_invalid",
+                  "The Collection child plan could not be retained.",
+                  "collection",
+                  false,
+                ),
+              );
+            }
+            const assessmentDigest = digestCanonicalJson(assessment);
+            const inventoryDigest = digestCanonicalJson({
+              inventory: session.inventory,
+              inventoryId: session.inventoryId,
+              targetGeneration: session.binding.generation,
+            });
+            const planId = options.id();
+            const evidence = {
+              assessmentDigest,
+              childCommandPlan: projectCommandPlan(prepared.commandPlan),
+              childPreparedDigest: prepared.digest,
+              collectionId: request.collectionId,
+              expiresAt: prepared.expiresAt,
+              inventoryDigest,
+              manifestDigest: request.manifestDigest,
+              order: [
+                {
+                  names: request.selections.map(({ name }) => name),
+                  position: 1,
+                  targetId: request.targetId,
+                },
+              ],
+              releaseEvidence: {
+                compatibility: structuredClone(
+                  release.manifest.compatibility,
+                ),
+                receipt: structuredClone(release.receipt),
+                status: release.manifest.status,
+              },
+              releaseNumber: request.releaseNumber,
+              schemaVersion: 1 as const,
+              scope: request.scope,
+              selections: request.selections,
+              source: {
+                repository: release.manifest.source.repository,
+                reviewedRevision: release.manifest.source.reviewedRevision,
+              },
+              targetGeneration: requestedTarget.generation,
+              targetId: requestedTarget.id,
+            };
+            const plan: CollectionPlan = {
+              preparedId: prepared.id,
+              projection: {
+                ...evidence,
+                id: planId,
+                reviewDigest: digestCanonicalJson(evidence),
+              },
+            };
+            collectionPlans.set(planId, plan);
+            currentCollectionPlan = plan;
+            publishMutation({ ...mutationState });
+            return { ok: true, value: { operationId: planId } };
+          }
+
+          if (parsed.data.type === "collection.review.request") {
+            const plan = collectionPlans.get(parsed.data.collectionPlanId);
+            const prepared =
+              plan === undefined
+                ? undefined
+                : preparedMutations.get(plan.preparedId);
+            if (
+              plan === undefined ||
+              plan !== currentCollectionPlan ||
+              prepared === undefined ||
+              clock().getTime() >= Date.parse(prepared.expiresAt)
+            ) {
+              if (plan !== undefined) discardCollectionPlan(plan);
+              const error = publicError(
+                "review_invalid",
+                "The Collection Plan is unavailable for review.",
+                "review",
+                false,
+              );
+              if (plan !== undefined) {
+                const plannedTargetMutation =
+                  plan.projection.targetId === target.id
+                    ? mutationState
+                    : (mutationStates.get(plan.projection.targetId) ??
+                      emptyMutationState());
+                publishMutationForTarget(plan.projection.targetId, {
+                  ...plannedTargetMutation,
+                  activeOperationId: null,
+                  commandPlan: null,
+                  lastError: error,
+                  phase: "failed",
+                });
+              }
+              return requestFailure(error);
+            }
+            const reviewId = options.id();
+            rejectPendingReviews(
+              (review) =>
+                review.purpose === "execute" &&
+                review.prepared.id === prepared.id,
+            );
+            reviews.set(reviewId, {
+              collectionPlan: plan,
+              decision: undefined,
+              id: reviewId,
+              prepared,
+              purpose: "execute",
+            });
+            pruneReviews();
+            publishMutation({
+              ...mutationState,
+              lastError: null,
+              phase: "reviewing",
+            });
+            options.onReviewRequested?.(reviewId);
+            return { ok: true, value: { operationId: reviewId } };
+          }
+
           if (parsed.data.type === "comparison.open") {
             const leftTargetId = parsed.data.leftTargetId;
             const rightTargetId = parsed.data.rightTargetId;
@@ -1921,9 +2318,8 @@ export function createDesktopCapabilities(
             const reviewedTarget = targetDefinitions().find(
               ({ id }) => id === reviewedTargetId,
             );
-            const challenge = options.skillsTargets.pendingHostTrust(
-              reviewedTargetId,
-            );
+            const challenge =
+              options.skillsTargets.pendingHostTrust(reviewedTargetId);
             if (
               reviewedTarget === undefined ||
               reviewedTarget.kind !== "ssh" ||
@@ -2179,10 +2575,7 @@ export function createDesktopCapabilities(
             return promise;
           }
 
-          if (
-            activeMutation !== undefined ||
-            activePreparation !== undefined
-          ) {
+          if (activeMutation !== undefined || activePreparation !== undefined) {
             return requestFailure(
               publicError(
                 "mutation_conflict",
@@ -2231,9 +2624,7 @@ export function createDesktopCapabilities(
           if (activeObservation?.ownerEndpointId === endpointState.endpointId) {
             activeObservation.controller.abort();
           }
-          if (
-            activePreparation?.ownerEndpointId === endpointState.endpointId
-          ) {
+          if (activePreparation?.ownerEndpointId === endpointState.endpointId) {
             activePreparation.invalidated = true;
           }
           if (
@@ -2262,8 +2653,32 @@ export function createDesktopCapabilities(
     },
     async initialize() {
       if (initialized) return;
+      officialCollectionCatalog = validateOfficialCollectionCatalog(
+        options.officialCollectionCatalog ?? EMPTY_OFFICIAL_COLLECTION_CATALOG,
+      );
       initialized = true;
       const restored = await options.recoveryRecords.restore();
+      const restoredAcknowledgements = [
+        ...(restored.collectionAcknowledgements ?? []),
+      ];
+      collectionAcknowledgements = restoredAcknowledgements.filter(
+        (acknowledgement) =>
+          officialCollectionCatalog.releases.some(
+            (release) =>
+              release.manifest.collectionId === acknowledgement.collectionId &&
+              release.manifest.releaseNumber ===
+                acknowledgement.releaseNumber &&
+              release.manifestDigest === acknowledgement.manifestDigest,
+          ),
+      );
+      if (
+        collectionAcknowledgements.length !== restoredAcknowledgements.length
+      ) {
+        await options.recoveryRecords.commit({
+          acknowledgements: collectionAcknowledgements,
+          type: "collections.acknowledgements.replace",
+        });
+      }
       let restoredSnapshots = [...restored.inventorySnapshots];
       let restoredGuards = [...restored.mutationGuards];
       for (const snapshot of restoredSnapshots) {

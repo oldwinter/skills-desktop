@@ -22,15 +22,18 @@ const STORE_NAME = "inventorySnapshots" as const;
 const GUARD_STORE_NAME = "mutationGuards" as const;
 const TARGET_STORE_NAME = "targetDefinitions" as const;
 const HOST_TRUST_STORE_NAME = "hostTrustRecords" as const;
+const COLLECTION_STORE_NAME = "collectionAcknowledgements" as const;
 const DOCUMENT_NAME = "inventory-snapshots.json";
 const GUARD_DOCUMENT_NAME = "mutation-guards.json";
 const TARGET_DOCUMENT_NAME = "target-definitions.json";
 const TARGET_FAILURE_MARKER_NAME = "target-definitions.failure.json";
 const HOST_TRUST_DOCUMENT_NAME = "known_hosts";
 const HOST_TRUST_FAILURE_MARKER_NAME = "host-trust.failure.json";
+const COLLECTION_DOCUMENT_NAME = "collection-acknowledgements.json";
 const CURRENT_SCHEMA_VERSION = 3 as const;
 const CURRENT_GUARD_SCHEMA_VERSION = 2 as const;
 const CURRENT_TARGET_SCHEMA_VERSION = 3 as const;
+const CURRENT_COLLECTION_SCHEMA_VERSION = 1 as const;
 const targetIdSchema = z.string().uuid();
 const hostTrustRecordSchema = hostPublicKeySchema
   .extend({
@@ -277,6 +280,28 @@ const hostTrustFailureMarkerSchema = z
   })
   .strict();
 
+const collectionAcknowledgementSchema = z
+  .object({
+    acknowledgedAt: z.string().datetime({ offset: true }),
+    collectionId: z
+      .string()
+      .min(1)
+      .max(128)
+      .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
+    kind: z.enum(["release", "delta"]),
+    manifestDigest: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+    releaseNumber: z.number().int().positive(),
+  })
+  .strict();
+
+const collectionDocumentSchema = z
+  .object({
+    acknowledgements: z.array(collectionAcknowledgementSchema).max(1_000),
+    kind: z.literal("collection-acknowledgements"),
+    schemaVersion: z.literal(CURRENT_COLLECTION_SCHEMA_VERSION),
+  })
+  .strict();
+
 export type PersistedInventoryEntry = z.infer<typeof persistedEntrySchema>;
 
 export interface InventorySnapshot {
@@ -292,11 +317,15 @@ export interface RecoveryFailure {
   readonly store:
     | typeof GUARD_STORE_NAME
     | typeof HOST_TRUST_STORE_NAME
+    | typeof COLLECTION_STORE_NAME
     | typeof STORE_NAME
     | typeof TARGET_STORE_NAME;
 }
 
 export type HostTrustRecord = z.infer<typeof hostTrustRecordSchema>;
+export type CollectionAcknowledgement = z.infer<
+  typeof collectionAcknowledgementSchema
+>;
 
 export type DurableTargetDefinition = Omit<
   z.infer<typeof targetDefinitionSchema>,
@@ -315,6 +344,7 @@ export interface MutationGuard {
 }
 
 export interface RestoredRecoveryRecords {
+  readonly collectionAcknowledgements?: readonly CollectionAcknowledgement[];
   readonly failures: readonly RecoveryFailure[];
   readonly hostTrustRecords: readonly HostTrustRecord[];
   readonly inventorySnapshots: readonly InventorySnapshot[];
@@ -323,6 +353,10 @@ export interface RestoredRecoveryRecords {
 }
 
 export type DurableChange =
+  | {
+      readonly acknowledgements: readonly CollectionAcknowledgement[];
+      readonly type: "collections.acknowledgements.replace";
+    }
   | {
       readonly generation: number;
       readonly inventory: Inventory;
@@ -427,6 +461,7 @@ type CurrentDocument = z.infer<typeof currentDocumentSchema>;
 type GuardDocument = z.infer<typeof guardDocumentSchema>;
 type TargetDocument = z.infer<typeof targetDocumentSchema>;
 type TargetFailureMarker = z.infer<typeof targetFailureMarkerSchema>;
+type CollectionDocument = z.infer<typeof collectionDocumentSchema>;
 
 function allowlistSnapshot(
   change: Extract<DurableChange, { readonly type: "inventory.replace" }>,
@@ -499,14 +534,30 @@ export function createMemoryRecoveryRecords(
   initialGuards: readonly MutationGuard[] = [],
   initialTargets: readonly DurableTargetDefinition[] = [],
   initialHostTrust: readonly HostTrustRecord[] = [],
+  initialCollectionAcknowledgements: readonly CollectionAcknowledgement[] = [],
 ): RecoveryRecords {
   let snapshots = [...initialSnapshots];
   let mutationGuards = [...initialGuards];
   let targetDefinitions = structuredClone(initialTargets);
   let hostTrustRecords = structuredClone(initialHostTrust);
+  let collectionAcknowledgements = structuredClone(
+    initialCollectionAcknowledgements,
+  );
   return {
     async commit(change) {
-      if (change.type === "target.remap") {
+      if (change.type === "collections.acknowledgements.replace") {
+        const parsed = z
+          .array(collectionAcknowledgementSchema)
+          .max(1_000)
+          .safeParse(change.acknowledgements);
+        if (!parsed.success) {
+          return commitFailure(
+            "persist_failed",
+            "Collection Acknowledgement data did not pass durable validation.",
+          );
+        }
+        collectionAcknowledgements = structuredClone(parsed.data);
+      } else if (change.type === "target.remap") {
         if (
           change.fromTargetId.length === 0 ||
           !targetIdSchema.safeParse(change.toTargetId).success
@@ -605,6 +656,7 @@ export function createMemoryRecoveryRecords(
     },
     async restore() {
       return {
+        collectionAcknowledgements: structuredClone(collectionAcknowledgements),
         failures: [],
         hostTrustRecords: structuredClone(hostTrustRecords),
         inventorySnapshots: structuredClone(snapshots),
@@ -681,6 +733,10 @@ export function createJsonRecoveryRecords(
     options.directory,
     HOST_TRUST_FAILURE_MARKER_NAME,
   );
+  const collectionDocumentPath = join(
+    options.directory,
+    COLLECTION_DOCUMENT_NAME,
+  );
   const fileSystem = options.fileSystem ?? createNodeRecoveryFileSystem();
   let document: CurrentDocument = {
     kind: "inventory-snapshots",
@@ -715,6 +771,15 @@ export function createJsonRecoveryRecords(
   let hostTrustFailures: RecoveryFailure[] = [];
   let hostTrustLoaded = false;
   let hostTrustWriteBlocked = false;
+  let collectionDocument: CollectionDocument = {
+    acknowledgements: [],
+    kind: "collection-acknowledgements",
+    schemaVersion: CURRENT_COLLECTION_SCHEMA_VERSION,
+  };
+  let collectionFailures: RecoveryFailure[] = [];
+  let collectionsLoaded = false;
+  let collectionUnsupportedSchema = false;
+  let collectionWriteBlocked = false;
   let loaded = false;
   let unsupportedSchema = false;
   let writeBlocked = false;
@@ -775,6 +840,7 @@ export function createJsonRecoveryRecords(
       | GuardDocument
       | TargetDocument
       | TargetFailureMarker
+      | CollectionDocument
       | z.infer<typeof hostTrustFailureMarkerSchema>,
     name = DOCUMENT_NAME,
     destinationPath = documentPath,
@@ -786,6 +852,14 @@ export function createJsonRecoveryRecords(
       `inventory-snapshots.quarantine-${options.id()}.json`,
     );
     await fileSystem.rename(documentPath, quarantinePath);
+  };
+
+  const quarantineCollections = async () => {
+    const quarantinePath = join(
+      options.directory,
+      `collection-acknowledgements.quarantine-${options.id()}.json`,
+    );
+    await fileSystem.rename(collectionDocumentPath, quarantinePath);
   };
 
   const load = async () => {
@@ -1189,9 +1263,111 @@ export function createJsonRecoveryRecords(
     hostTrustRecords = parsed;
   };
 
+  const loadCollections = async () => {
+    if (collectionsLoaded) return;
+    collectionsLoaded = true;
+    collectionFailures = [];
+    let raw: string;
+    try {
+      raw = await fileSystem.readFile(collectionDocumentPath, "utf8");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+      collectionWriteBlocked = true;
+      collectionFailures = [
+        { code: "corrupt_store", store: COLLECTION_STORE_NAME },
+      ];
+      return;
+    }
+    let decoded: unknown;
+    try {
+      decoded = JSON.parse(raw);
+    } catch {
+      const quarantined = await quarantineCollections().then(
+        () => true,
+        () => false,
+      );
+      collectionWriteBlocked = !quarantined;
+      collectionFailures = [
+        { code: "corrupt_store", store: COLLECTION_STORE_NAME },
+      ];
+      return;
+    }
+    if (
+      typeof decoded === "object" &&
+      decoded !== null &&
+      "schemaVersion" in decoded &&
+      typeof decoded.schemaVersion === "number" &&
+      decoded.schemaVersion > CURRENT_COLLECTION_SCHEMA_VERSION
+    ) {
+      collectionUnsupportedSchema = true;
+      collectionFailures = [
+        { code: "unsupported_schema", store: COLLECTION_STORE_NAME },
+      ];
+      return;
+    }
+    const parsed = collectionDocumentSchema.safeParse(decoded);
+    if (!parsed.success) {
+      const quarantined = await quarantineCollections().then(
+        () => true,
+        () => false,
+      );
+      collectionWriteBlocked = !quarantined;
+      collectionFailures = [
+        { code: "corrupt_store", store: COLLECTION_STORE_NAME },
+      ];
+      return;
+    }
+    collectionDocument = parsed.data;
+  };
+
   return {
     commit(change) {
       return underApplicationLock(async () => {
+        if (change.type === "collections.acknowledgements.replace") {
+          await loadCollections();
+          if (collectionUnsupportedSchema) {
+            return commitFailure(
+              "unsupported_schema",
+              "Collection Acknowledgement data was written by a newer unsupported application version.",
+            );
+          }
+          if (collectionWriteBlocked) {
+            return commitFailure(
+              "persist_failed",
+              "Collection Acknowledgement data could not be read safely and will not be overwritten.",
+            );
+          }
+          const parsed = z
+            .array(collectionAcknowledgementSchema)
+            .max(1_000)
+            .safeParse(change.acknowledgements);
+          if (!parsed.success) {
+            return commitFailure(
+              "persist_failed",
+              "Collection Acknowledgement data did not pass durable validation.",
+            );
+          }
+          const nextDocument: CollectionDocument = {
+            acknowledgements: parsed.data,
+            kind: "collection-acknowledgements",
+            schemaVersion: CURRENT_COLLECTION_SCHEMA_VERSION,
+          };
+          try {
+            await writeDocument(
+              nextDocument,
+              COLLECTION_DOCUMENT_NAME,
+              collectionDocumentPath,
+            );
+            collectionDocument = nextDocument;
+            collectionFailures = [];
+            return { ok: true, value: undefined };
+          } catch {
+            return commitFailure(
+              "persist_failed",
+              "Collection Acknowledgements could not be saved.",
+            );
+          }
+        }
         if (change.type === "host-trust.replace") {
           await loadHostTrust();
           if (hostTrustWriteBlocked) {
@@ -1519,12 +1695,17 @@ export function createJsonRecoveryRecords(
         await loadGuards();
         await loadTargets();
         await loadHostTrust();
+        await loadCollections();
         return {
+          collectionAcknowledgements: structuredClone(
+            collectionDocument.acknowledgements,
+          ),
           failures: structuredClone([
             ...failures,
             ...guardFailures,
             ...targetFailures,
             ...hostTrustFailures,
+            ...collectionFailures,
           ]),
           hostTrustRecords: structuredClone(hostTrustRecords),
           inventorySnapshots: structuredClone(

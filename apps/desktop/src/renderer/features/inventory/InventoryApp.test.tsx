@@ -27,7 +27,7 @@ const snapshot: WorkspaceSnapshot = {
     cliVersion: "1.5.23",
     entries: [
       {
-        agents: ["Codex"],
+        agents: [],
         contentFingerprint: { status: "unknown" },
         declaredSource: { source: "example/skills", sourceType: "github" },
         name: "Case-Sensitive-Skill",
@@ -62,6 +62,99 @@ const snapshot: WorkspaceSnapshot = {
   },
 };
 
+const collectionSnapshot: WorkspaceSnapshot = {
+  ...snapshot,
+  collections: {
+    acknowledgements: [],
+    plan: null,
+    releases: [
+      {
+        assessments: [
+          {
+            compatibility: "compatible",
+            entries: [
+              {
+                inRelease: true,
+                name: "find-skills",
+                selectable: true,
+                selectionModes: ["add"],
+                status: "missing",
+              },
+              {
+                inRelease: true,
+                name: "tdd",
+                selectable: false,
+                selectionModes: [],
+                status: "source-conflict",
+              },
+            ],
+            inventoryFreshness: "fresh",
+            scope: "project",
+            targetGeneration: 1,
+            targetId: snapshot.target.id,
+          },
+          {
+            compatibility: "compatible",
+            entries: [
+              {
+                inRelease: true,
+                name: "find-skills",
+                selectable: true,
+                selectionModes: ["add"],
+                status: "missing",
+              },
+              {
+                inRelease: true,
+                name: "tdd",
+                selectable: true,
+                selectionModes: ["add"],
+                status: "missing",
+              },
+            ],
+            inventoryFreshness: "fresh",
+            scope: "global",
+            targetGeneration: 1,
+            targetId: snapshot.target.id,
+          },
+        ],
+        blockers: [],
+        collectionId: "skills-desktop-starter",
+        compatibility: {
+          cliVersion: "1.5.23",
+          harnesses: ["Codex"],
+          platforms: ["linux"],
+          requiredCapabilities: ["local"],
+        },
+        description: "Reviewed starter skills.",
+        executable: true,
+        manifestDigest: `sha256:${"a".repeat(64)}`,
+        receipt: {
+          author: "Author",
+          manifestDigest: `sha256:${"a".repeat(64)}`,
+          reviewLocation:
+            "https://github.com/oldwinter/skills-desktop/issues/20",
+          reviewPolicy: "official-collection-v1",
+          reviewedAt: "2026-08-22T05:00:00.000Z",
+          reviewer: "Reviewer",
+          schemaVersion: 1,
+          status: "approved",
+        },
+        releaseNumber: 1,
+        skills: ["find-skills", "tdd"],
+        source: {
+          repository: "vercel-labs/skills",
+          repositoryUrl: "https://github.com/vercel-labs/skills",
+          reviewedRevision: "0123456789abcdef0123456789abcdef01234567",
+          sourceType: "github",
+        },
+        status: "active",
+        supersedesDigest: null,
+        title: "Skills Desktop Starter",
+      },
+    ],
+  },
+};
+
 function clientFor(value: WorkspaceSnapshot): WorkspaceBridge {
   return {
     async cancelInventory(operationId) {
@@ -82,6 +175,9 @@ function clientFor(value: WorkspaceSnapshot): WorkspaceBridge {
     async prepareMutation() {
       return { ok: true, value: { operationId: "prepared-1" } };
     },
+    async prepareCollection() {
+      return { ok: true, value: { operationId: "collection-plan-1" } };
+    },
     async prepareComparison() {
       return { ok: true, value: { operationId: "prepared-comparison-1" } };
     },
@@ -96,6 +192,9 @@ function clientFor(value: WorkspaceSnapshot): WorkspaceBridge {
     },
     async requestHostTrustReview() {
       return { ok: true, value: { operationId: "host-trust-review-1" } };
+    },
+    async requestCollectionReview() {
+      return { ok: true, value: { operationId: "collection-review-1" } };
     },
     async requestReview() {
       return { ok: true, value: { operationId: "review-1" } };
@@ -123,6 +222,13 @@ describe("Local Target Inventory shell", () => {
     expect(screen.getAllByText("Case-Sensitive-Skill").length).toBeGreaterThan(
       0,
     );
+    const inventoryRow = screen
+      .getByRole("button", { name: "Case-Sensitive-Skill" })
+      .closest("tr");
+    expect(inventoryRow).not.toBeNull();
+    expect(
+      within(inventoryRow!).getByRole("cell", { name: "Codex" }),
+    ).toBeInTheDocument();
     expect(screen.getAllByText("example/skills").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Project").length).toBeGreaterThan(0);
     expect(screen.getByText("Fresh evidence")).toBeInTheDocument();
@@ -271,6 +377,102 @@ describe("Local Target Inventory shell", () => {
       "title",
       "Comparison",
     );
+  });
+
+  it("requires explicit eligible Collection selections before preparing", async () => {
+    const prepareCollection = vi.fn(async () => ({
+      ok: true as const,
+      value: { operationId: "collection-plan-1" },
+    }));
+    render(
+      <InventoryApp
+        client={{
+          ...clientFor(collectionSnapshot),
+          prepareCollection,
+        }}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Collections" }));
+    expect(
+      screen.getByRole("heading", { name: "Official Collections" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Missing")).toBeInTheDocument();
+    expect(screen.getByText("Source conflict")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Prepare plan" })).toBeDisabled();
+    expect(
+      screen.getByRole("checkbox", { name: "Select find-skills" }),
+    ).toBeEnabled();
+    expect(screen.getByRole("checkbox", { name: "Select tdd" })).toBeDisabled();
+
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: "Select find-skills" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Prepare plan" }));
+    await waitFor(() =>
+      expect(prepareCollection).toHaveBeenCalledWith({
+        collectionId: "skills-desktop-starter",
+        manifestDigest: `sha256:${"a".repeat(64)}`,
+        releaseNumber: 1,
+        scope: "project",
+        selections: [{ mode: "add", name: "find-skills" }],
+        targetId: snapshot.target.id,
+      }),
+    );
+  });
+
+  it("uses the selected Target's Collection assessment", async () => {
+    const otherTarget = {
+      ...snapshot.target,
+      id: "00000000-0000-4000-8000-000000000002",
+      label: "Other workspace",
+      workspaceLabel: "other",
+    };
+    const otherCollections = structuredClone(collectionSnapshot.collections!);
+    for (const assessment of otherCollections.releases[0]!.assessments) {
+      assessment.targetId = otherTarget.id;
+      assessment.entries[0] = {
+        inRelease: true,
+        name: "find-skills",
+        selectable: false,
+        selectionModes: [],
+        status: "source-conflict",
+      };
+    }
+    const targetState = {
+      deletionBlocked: false,
+      inventory: collectionSnapshot.inventory,
+      mutation: collectionSnapshot.mutation,
+    };
+    render(
+      <InventoryApp
+        client={clientFor({
+          ...collectionSnapshot,
+          targets: [
+            {
+              ...targetState,
+              collections: collectionSnapshot.collections,
+              target: collectionSnapshot.target,
+            },
+            {
+              ...targetState,
+              collections: otherCollections,
+              target: otherTarget,
+            },
+          ],
+        })}
+      />,
+    );
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: /Other workspace/ }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Collections" }));
+
+    expect(
+      screen.getByRole("checkbox", { name: "Select find-skills" }),
+    ).toBeDisabled();
+    expect(screen.getAllByText("Source conflict").length).toBeGreaterThan(0);
   });
 
   it.each([

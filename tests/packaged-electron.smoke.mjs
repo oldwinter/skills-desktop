@@ -503,11 +503,13 @@ try {
       "createTarget",
       "deleteTarget",
       "getSnapshot",
+      "prepareCollection",
       "prepareComparison",
       "prepareMutation",
       "reconcileMutation",
       "refreshInventory",
       "requestCancellationReview",
+      "requestCollectionReview",
       "requestHostTrustReview",
       "requestReview",
       "subscribe",
@@ -518,6 +520,37 @@ try {
       `Unexpected preload surface: ${rendererBoundary.bridgeKeys.join(", ")}`,
     );
   }
+  await first.page.evaluate(`(() => {
+    const button = document.querySelector('button[aria-label="Collections"]');
+    if (!(button instanceof HTMLButtonElement)) throw new Error("Collections navigation is unavailable.");
+    button.click();
+  })()`);
+  await first.page.waitFor(
+    `document.body?.textContent?.includes("Skills Desktop Starter") &&
+      document.body?.textContent?.includes("Independent review is pending.") &&
+      document.body?.textContent?.includes("435076e78988e1e6ec40d00b0b1d76bdbbc5419a")`,
+    "bundled Official Collection evidence",
+  );
+  const collectionBoundary = await first.page.evaluate(`({
+    prepareDisabled: [...document.querySelectorAll("button")].find(
+      (button) => button.textContent?.includes("Prepare plan"),
+    )?.disabled,
+    text: document.body.textContent ?? "",
+  })`);
+  if (
+    collectionBoundary.prepareDisabled !== true ||
+    !collectionBoundary.text.includes("vercel-labs/skills")
+  ) {
+    throw new Error(
+      "Pending bundled Collection became executable or lost pinned evidence.",
+    );
+  }
+  await first.page.evaluate(`(() => {
+    const button = document.querySelector('button[aria-label="Inventory"]');
+    if (!(button instanceof HTMLButtonElement)) throw new Error("Inventory navigation is unavailable.");
+    button.click();
+  })()`);
+  console.log("packaged smoke: pending Official Collection inspected");
   if (
     /SECRET_PROJECT_PATH|SECRET_HOME_PATH|SECRET_TOKEN|SECRET_RAW_STDERR/.test(
       rendererBoundary.text,

@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { describe, expect, it, vi } from "vitest";
 
 import type { Inventory } from "@skills-desktop/skills-runtime";
@@ -1917,7 +1919,15 @@ describe("DesktopCapabilities inventory role-session contract", () => {
       entry("unequal-source", null, { status: "unknown" }, "global"),
       entry("unknown", "example/source", { status: "unknown" }),
       entry("matched", "example/source", evidence("same")),
-      entry("scope-independent", "example/source", evidence("same"), "project"),
+      {
+        ...entry(
+          "scope-independent",
+          "example/source",
+          evidence("same"),
+          "project",
+        ),
+        agents: [],
+      },
     ];
     const rightEntries = [
       entry("source", "example/right", evidence("one")),
@@ -4201,5 +4211,721 @@ describe("DesktopCapabilities mutation role-session contract", () => {
     await execution;
     await shutdown;
     expect((await records.restore()).mutationGuards).toEqual([]);
+  });
+});
+
+describe("DesktopCapabilities Official Collection contract", () => {
+  const manifestDigest =
+    "sha256:baa005a7c8644f332c902328ae998c657ae4bc861ba2e5ce29bc4a2eb493af48";
+  const validCatalog = {
+    releases: [
+      {
+        manifest: {
+          collectionId: "skills-desktop-starter",
+          compatibility: {
+            cliVersion: "1.5.23",
+            harnesses: ["Codex"],
+            platforms: ["linux"],
+            requiredCapabilities: ["local"],
+          },
+          description: "Discover and install reviewed agent Skills.",
+          releaseNumber: 1,
+          schemaVersion: 1,
+          skills: ["find-skills", "tdd"],
+          source: {
+            repository: "vercel-labs/skills",
+            repositoryUrl: "https://github.com/vercel-labs/skills",
+            reviewedRevision: "0123456789abcdef0123456789abcdef01234567",
+            sourceType: "github",
+          },
+          status: "active",
+          supersedesDigest: null as string | null,
+          title: "Skills Desktop Starter",
+        },
+        manifestDigest,
+        receipt: {
+          author: "collection-author",
+          manifestDigest,
+          reviewLocation: "https://github.com/oldwinter/skills-desktop/pull/1",
+          reviewPolicy: "official-collection-v1",
+          reviewedAt: "2026-08-22T06:00:00.000Z",
+          reviewer: "independent-reviewer",
+          schemaVersion: 1,
+          status: "approved",
+        },
+      },
+    ],
+    schemaVersion: 1,
+  };
+
+  const canonicalize = (value: unknown): unknown =>
+    Array.isArray(value)
+      ? value.map(canonicalize)
+      : value !== null && typeof value === "object"
+        ? Object.fromEntries(
+            Object.entries(value)
+              .sort(([left], [right]) => left.localeCompare(right))
+              .map(([key, child]) => [key, canonicalize(child)]),
+          )
+        : value;
+  const digestFor = (manifest: unknown) =>
+    `sha256:${createHash("sha256")
+      .update(JSON.stringify(canonicalize(manifest)))
+      .digest("hex")}`;
+  const refreshEnvelopeDigest = (
+    release: (typeof validCatalog.releases)[number],
+  ) => {
+    release.manifestDigest = digestFor(release.manifest);
+    release.receipt.manifestDigest = release.manifestDigest;
+  };
+
+  it("fails startup closed when the bundled catalog has unknown fields", async () => {
+    const capabilities = createDesktopCapabilities({
+      id: () => "unused",
+      officialCollectionCatalog: {
+        releases: [],
+        schemaVersion: 1,
+        unexpectedExecutableData: true,
+      },
+      recoveryRecords: createMemoryRecoveryRecords(),
+      skillsTargets: targetsWith({
+        ...mutationNotExercised,
+        async observeInventory() {
+          return { ok: true, value: freshInventory };
+        },
+      }),
+    });
+
+    await expect(capabilities.initialize()).rejects.toThrow(
+      "Official Collection catalog",
+    );
+  });
+
+  it.each([
+    {
+      corrupt(catalog: typeof validCatalog) {
+        catalog.releases[0]!.manifestDigest = `sha256:${"0".repeat(64)}`;
+      },
+      name: "invalid manifest digest",
+    },
+    {
+      corrupt(catalog: typeof validCatalog) {
+        catalog.releases[0]!.manifest.skills = ["tdd", "tdd"];
+        refreshEnvelopeDigest(catalog.releases[0]!);
+      },
+      name: "duplicate Skill names",
+    },
+    {
+      corrupt(catalog: typeof validCatalog) {
+        catalog.releases[0]!.manifest.skills = ["tdd", "TDD"];
+        refreshEnvelopeDigest(catalog.releases[0]!);
+      },
+      name: "case-conflicting Skill names",
+    },
+    {
+      corrupt(catalog: typeof validCatalog) {
+        catalog.releases[0]!.manifest.source.reviewedRevision = "main";
+      },
+      name: "mutable source revision",
+    },
+    {
+      corrupt(catalog: typeof validCatalog) {
+        catalog.releases[0]!.manifest.source.repositoryUrl =
+          "https://gitlab.com/vercel-labs/skills";
+        refreshEnvelopeDigest(catalog.releases[0]!);
+      },
+      name: "unsupported source",
+    },
+    {
+      corrupt(catalog: typeof validCatalog) {
+        catalog.releases[0]!.receipt.reviewer = "collection-author";
+      },
+      name: "non-independent receipt",
+    },
+    {
+      corrupt(catalog: typeof validCatalog) {
+        const prior = catalog.releases[0]!;
+        const next = structuredClone(prior);
+        next.manifest.releaseNumber = 2;
+        next.manifest.status = "deprecated";
+        next.manifest.supersedesDigest = `sha256:${"f".repeat(64)}`;
+        refreshEnvelopeDigest(next);
+        catalog.releases.push(next);
+      },
+      name: "broken supersedes chain",
+    },
+    {
+      corrupt(catalog: typeof validCatalog) {
+        catalog.releases.push(structuredClone(catalog.releases[0]!));
+      },
+      name: "duplicate release identity",
+    },
+  ])("fails startup closed for $name", async ({ corrupt }) => {
+    const invalidCatalog = structuredClone(validCatalog);
+    corrupt(invalidCatalog);
+    const capabilities = createDesktopCapabilities({
+      id: () => "unused",
+      officialCollectionCatalog: invalidCatalog,
+      recoveryRecords: createMemoryRecoveryRecords(),
+      skillsTargets: targetsWith({
+        ...mutationNotExercised,
+        async observeInventory() {
+          return { ok: true, value: freshInventory };
+        },
+      }),
+    });
+
+    await expect(capabilities.initialize()).rejects.toThrow(
+      "Official Collection catalog",
+    );
+  });
+
+  it("fails startup closed when compatibility is missing", async () => {
+    const release = structuredClone(validCatalog.releases[0]!);
+    const { compatibility: _compatibility, ...manifest } = release.manifest;
+    const capabilities = createDesktopCapabilities({
+      id: () => "unused",
+      officialCollectionCatalog: {
+        releases: [{ ...release, manifest }],
+        schemaVersion: 1,
+      },
+      recoveryRecords: createMemoryRecoveryRecords(),
+      skillsTargets: targetsWith({
+        ...mutationNotExercised,
+        async observeInventory() {
+          return { ok: true, value: freshInventory };
+        },
+      }),
+    });
+
+    await expect(capabilities.initialize()).rejects.toThrow(
+      "Official Collection catalog",
+    );
+  });
+
+  it("assesses a valid active release against one Fresh Local Target", async () => {
+    const ids = ["refresh-collection", "inventory-collection"];
+    const capabilities = createDesktopCapabilities({
+      id: () => ids.shift() ?? "unexpected",
+      officialCollectionCatalog: validCatalog,
+      platform: "linux",
+      recoveryRecords: createMemoryRecoveryRecords(),
+      skillsTargets: targetsWith({
+        ...mutationNotExercised,
+        async observeInventory() {
+          return { ok: true, value: freshInventory };
+        },
+      }),
+    });
+    await capabilities.initialize();
+    const workspace = capabilities.attach(
+      {
+        endpointId: "workspace-collections",
+        role: "workspace",
+        sessionEpoch: "collections-epoch",
+      },
+      () => undefined,
+    );
+    await workspace.request({
+      targetId: target.id,
+      type: "inventory.refresh",
+      version: 1,
+    });
+
+    expect(await workspace.snapshot()).toMatchObject({
+      collections: {
+        acknowledgements: [],
+        plan: null,
+        releases: expect.arrayContaining([
+          expect.objectContaining({
+            assessments: expect.arrayContaining([
+              expect.objectContaining({
+                compatibility: "compatible",
+                entries: expect.arrayContaining([
+                  expect.objectContaining({
+                    name: "find-skills",
+                    selectable: true,
+                    status: "missing",
+                  }),
+                  expect.objectContaining({
+                    name: "tdd",
+                    selectable: false,
+                    status: "source-conflict",
+                  }),
+                ]),
+                inventoryFreshness: "fresh",
+                scope: "project",
+                targetGeneration: 1,
+                targetId: target.id,
+              }),
+            ]),
+            collectionId: "skills-desktop-starter",
+            executable: true,
+            manifestDigest,
+            releaseNumber: 1,
+            status: "active",
+          }),
+        ]),
+      },
+    });
+  });
+
+  it("projects and prepares a Collection for a selected non-active Local Target", async () => {
+    const otherTarget: TargetDefinition = {
+      ...target,
+      id: "00000000-0000-4000-8000-000000000003",
+      label: "Other workspace",
+      workspace: "/work/other",
+      workspaceLabel: "other",
+    };
+    const definitions = [target, otherTarget];
+    const preparedTargets: string[] = [];
+    const skillsTargets = createSkillsTargetsCatalog({
+      id: () => "unused-target-id",
+      initialTarget: target,
+      processFor(binding) {
+        return {
+          async executeConfirmed() {
+            return {
+              error: {
+                code: "confirmation_invalid" as const,
+                effects: "none" as const,
+                message: "Execution is not part of this test.",
+                phase: "execute",
+                retryable: false,
+              },
+              ok: false as const,
+            };
+          },
+          async observeInventory() {
+            return {
+              ok: true as const,
+              value:
+                binding.targetId === otherTarget.id
+                  ? {
+                      ...freshInventory,
+                      entries: [
+                        ...freshInventory.entries,
+                        {
+                          agents: ["Codex"],
+                          contentFingerprint: { status: "unknown" as const },
+                          declaredSource: {
+                            source: "vercel-labs/skills",
+                            sourceType: "github",
+                          },
+                          extensions: {},
+                          name: "find-skills",
+                          path: "/redacted/find-skills",
+                          revision: { status: "unknown" as const },
+                          scope: "project" as const,
+                          sourceUrl: null,
+                        },
+                      ],
+                    }
+                  : freshInventory,
+            };
+          },
+          async prepareMutation(input) {
+            preparedTargets.push(binding.targetId);
+            expect(input.intent).toEqual({
+              names: ["find-skills"],
+              scope: "project",
+              source: {
+                revision: "0123456789abcdef0123456789abcdef01234567",
+                source: "vercel-labs/skills",
+                sourceType: "github",
+              },
+              type: "add",
+            });
+            return {
+              ok: true as const,
+              value: {
+                commandPlan: {
+                  harness: "Codex",
+                  names: ["find-skills"],
+                  operation: "add" as const,
+                  preview:
+                    "npx skills@1.5.23 add https://github.com/vercel-labs/skills/archive/0123456789abcdef0123456789abcdef01234567.tar.gz --skill find-skills --agent codex --yes",
+                  schemaVersion: 1 as const,
+                  scope: "project" as const,
+                  source: {
+                    revision: "0123456789abcdef0123456789abcdef01234567",
+                    source: "vercel-labs/skills",
+                    sourceType: "github" as const,
+                  },
+                  targetId: binding.targetId,
+                  timeoutMs: 600_000,
+                },
+                digest: "f".repeat(64),
+                expiresAt: "2026-08-22T06:10:00.000Z",
+                id: "prepared-other-collection",
+                inventoryId: input.inventoryId,
+                targetGeneration: binding.generation,
+                targetId: binding.targetId,
+              },
+            };
+          },
+        };
+      },
+    });
+    const records = createMemoryRecoveryRecords(
+      [],
+      [],
+      definitions.map((definition) => ({
+        connectionReference: null,
+        generation: definition.generation,
+        harness: definition.harness,
+        id: definition.id,
+        kind: definition.kind,
+        label: definition.label,
+        workspace: definition.workspace,
+      })),
+    );
+    const ids = [
+      "refresh-other",
+      "inventory-other",
+      "refresh-primary",
+      "inventory-primary",
+      "collection-plan-other",
+    ];
+    let now = new Date("2026-08-22T06:00:00.000Z");
+    const capabilities = createDesktopCapabilities({
+      clock: () => now,
+      id: () => ids.shift() ?? "unexpected",
+      officialCollectionCatalog: validCatalog,
+      platform: "linux",
+      recoveryRecords: records,
+      skillsTargets,
+    });
+    await capabilities.initialize();
+    const workspace = capabilities.attach(
+      {
+        endpointId: "workspace-other-collection",
+        role: "workspace",
+        sessionEpoch: "other-collection-epoch",
+      },
+      () => undefined,
+    );
+    await workspace.request({
+      targetId: otherTarget.id,
+      type: "inventory.refresh",
+      version: 1,
+    });
+    await workspace.request({
+      targetId: target.id,
+      type: "inventory.refresh",
+      version: 1,
+    });
+
+    expect(await workspace.snapshot()).toMatchObject({
+      target: { id: target.id },
+      targets: [
+        {
+          collections: {
+            releases: [
+              {
+                assessments: expect.arrayContaining([
+                  expect.objectContaining({ targetId: target.id }),
+                ]),
+              },
+            ],
+          },
+          target: { id: target.id },
+        },
+        {
+          collections: {
+            releases: [
+              {
+                assessments: expect.arrayContaining([
+                  expect.objectContaining({ targetId: otherTarget.id }),
+                ]),
+              },
+            ],
+          },
+          target: { id: otherTarget.id },
+        },
+      ],
+    });
+    await expect(
+      workspace.request({
+        collectionId: "skills-desktop-starter",
+        manifestDigest,
+        releaseNumber: 1,
+        scope: "project",
+        selections: [{ mode: "reapply", name: "find-skills" }],
+        targetId: otherTarget.id,
+        type: "collection.prepare",
+        version: 1,
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      value: { operationId: "collection-plan-other" },
+    });
+    expect(preparedTargets).toEqual([otherTarget.id]);
+    await expect(workspace.snapshot()).resolves.toMatchObject({
+      collections: {
+        plan: { targetId: otherTarget.id },
+      },
+      target: { id: otherTarget.id },
+    });
+    now = new Date("2026-08-22T06:10:00.000Z");
+    await expect(
+      workspace.request({
+        collectionPlanId: "collection-plan-other",
+        type: "collection.review.request",
+        version: 1,
+      }),
+    ).resolves.toMatchObject({
+      error: { code: "review_invalid" },
+      ok: false,
+    });
+    await expect(workspace.snapshot()).resolves.toMatchObject({
+      collections: { plan: null },
+      mutation: { commandPlan: null, phase: "failed" },
+    });
+  });
+
+  it("reviews and executes one pinned child through the existing durable lifecycle", async () => {
+    const records = createMemoryRecoveryRecords();
+    const lifecycle: string[] = [];
+    const capturedIntents: unknown[] = [];
+    const process: SkillsProcess = {
+      async executeConfirmed({ confirmation }) {
+        lifecycle.push("executeConfirmed");
+        expect(confirmation).toEqual({
+          digest: "c".repeat(64),
+          preparedMutationId: "prepared-collection",
+        });
+        return {
+          ok: true,
+          value: {
+            effects: { status: "content-unverified" as const },
+            inventory: {
+              ...freshInventory,
+              entries: [
+                ...freshInventory.entries,
+                {
+                  agents: ["Codex"],
+                  contentFingerprint: { status: "unknown" as const },
+                  declaredSource: {
+                    source: "vercel-labs/skills",
+                    sourceType: "github",
+                  },
+                  extensions: {},
+                  name: "find-skills",
+                  path: "/redacted/find-skills",
+                  revision: { status: "unknown" as const },
+                  scope: "project" as const,
+                  sourceUrl: null,
+                },
+              ],
+            },
+            preparedMutationId: "prepared-collection",
+            process: {
+              disposition: "completed" as const,
+              exitCode: 0,
+              termination: "known" as const,
+            },
+          },
+        };
+      },
+      async observeInventory() {
+        return { ok: true, value: freshInventory };
+      },
+      async prepareMutation(input) {
+        capturedIntents.push(input.intent);
+        return {
+          ok: true,
+          value: {
+            commandPlan: {
+              harness: "Codex",
+              names: ["find-skills"],
+              operation: "add" as const,
+              preview:
+                "npx skills@1.5.23 add https://github.com/vercel-labs/skills/archive/0123456789abcdef0123456789abcdef01234567.tar.gz --skill find-skills --agent codex --yes",
+              schemaVersion: 1 as const,
+              scope: "project" as const,
+              source: {
+                revision: "0123456789abcdef0123456789abcdef01234567",
+                source: "vercel-labs/skills",
+                sourceType: "github" as const,
+              },
+              targetId: target.id,
+              timeoutMs: 600_000,
+            },
+            digest: "c".repeat(64),
+            expiresAt: "2026-08-22T06:10:00.000Z",
+            id: "prepared-collection",
+            inventoryId: input.inventoryId,
+            targetGeneration: 1,
+            targetId: target.id,
+          },
+        };
+      },
+    };
+    const ids = [
+      "refresh-collection",
+      "inventory-collection",
+      "collection-plan",
+      "collection-review",
+      "collection-execution",
+    ];
+    const capabilities = createDesktopCapabilities({
+      clock: () => new Date("2026-08-22T06:00:00.000Z"),
+      id: () => ids.shift() ?? "unexpected",
+      officialCollectionCatalog: validCatalog,
+      platform: "linux",
+      recoveryRecords: {
+        async commit(change) {
+          lifecycle.push(change.type);
+          return records.commit(change);
+        },
+        restore: () => records.restore(),
+      },
+      skillsTargets: targetsWith(process),
+    });
+    await capabilities.initialize();
+    lifecycle.length = 0;
+    const workspace = capabilities.attach(
+      {
+        endpointId: "workspace-collection-lifecycle",
+        role: "workspace",
+        sessionEpoch: "collection-lifecycle-epoch",
+      },
+      () => undefined,
+    );
+    await workspace.request({
+      targetId: target.id,
+      type: "inventory.refresh",
+      version: 1,
+    });
+    lifecycle.length = 0;
+
+    expect(
+      await workspace.request({
+        collectionId: "skills-desktop-starter",
+        manifestDigest,
+        releaseNumber: 1,
+        scope: "project",
+        selections: [{ mode: "add", name: "tdd" }],
+        targetId: target.id,
+        type: "collection.prepare",
+        version: 1,
+      }),
+    ).toMatchObject({
+      error: { code: "mutation_ineligible" },
+      ok: false,
+    });
+    expect(capturedIntents).toEqual([]);
+
+    expect(
+      await workspace.request({
+        collectionId: "skills-desktop-starter",
+        manifestDigest,
+        releaseNumber: 1,
+        scope: "project",
+        selections: [{ mode: "add", name: "find-skills" }],
+        targetId: target.id,
+        type: "collection.prepare",
+        version: 1,
+      }),
+    ).toEqual({ ok: true, value: { operationId: "collection-plan" } });
+    expect(capturedIntents).toEqual([
+      {
+        names: ["find-skills"],
+        scope: "project",
+        source: {
+          revision: "0123456789abcdef0123456789abcdef01234567",
+          source: "vercel-labs/skills",
+          sourceType: "github",
+        },
+        type: "add",
+      },
+    ]);
+    expect(await workspace.snapshot()).toMatchObject({
+      collections: {
+        plan: {
+          childCommandPlan: {
+            names: ["find-skills"],
+            operation: "add",
+            source: {
+              revision: "0123456789abcdef0123456789abcdef01234567",
+              source: "vercel-labs/skills",
+            },
+          },
+          collectionId: "skills-desktop-starter",
+          id: "collection-plan",
+          manifestDigest,
+          releaseNumber: 1,
+          reviewDigest: expect.stringMatching(/^sha256:[a-f0-9]{64}$/),
+          scope: "project",
+          selections: [{ mode: "add", name: "find-skills" }],
+          targetGeneration: 1,
+          targetId: target.id,
+        },
+      },
+    });
+    expect(
+      await workspace.request({
+        collectionPlanId: "collection-plan",
+        type: "collection.review.request",
+        version: 1,
+      }),
+    ).toEqual({ ok: true, value: { operationId: "collection-review" } });
+    const review = capabilities.attach(
+      {
+        endpointId: "review-collection-lifecycle",
+        reviewId: "collection-review",
+        role: "review",
+        sessionEpoch: "review-collection-epoch",
+      },
+      () => undefined,
+    );
+    expect(await review.snapshot()).toMatchObject({
+      projection: {
+        collectionPlan: {
+          collectionId: "skills-desktop-starter",
+          manifestDigest,
+          selections: [{ mode: "add", name: "find-skills" }],
+        },
+        reviewId: "collection-review",
+      },
+      status: "pending",
+    });
+
+    expect(
+      await review.request({
+        decision: "approve",
+        type: "review.decide",
+        version: 1,
+      }),
+    ).toEqual({
+      ok: true,
+      value: { operationId: "collection-execution" },
+    });
+    expect(lifecycle).toEqual([
+      "collections.acknowledgements.replace",
+      "guard.put",
+      "executeConfirmed",
+      "inventory.replace",
+      "guard.clear",
+    ]);
+    expect((await records.restore()).collectionAcknowledgements).toEqual([
+      {
+        acknowledgedAt: "2026-08-22T06:00:00.000Z",
+        collectionId: "skills-desktop-starter",
+        kind: "release",
+        manifestDigest,
+        releaseNumber: 1,
+      },
+    ]);
+    expect((await records.restore()).mutationGuards).toEqual([]);
+    expect(await workspace.snapshot()).toMatchObject({
+      inventory: { freshness: "fresh" },
+      mutation: {
+        outcome: { effects: { status: "content-unverified" } },
+        phase: "succeeded",
+      },
+    });
   });
 });

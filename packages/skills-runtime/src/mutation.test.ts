@@ -8,13 +8,21 @@ describe("Mutation Intent schema", () => {
       mutationIntentSchema.parse({
         names: ["tdd"],
         scope: "project",
-        source: { source: "example/skills", sourceType: "github" },
+        source: {
+          revision: "0123456789abcdef0123456789abcdef01234567",
+          source: "example/skills",
+          sourceType: "github",
+        },
         type: "add",
       }),
     ).toEqual({
       names: ["tdd"],
       scope: "project",
-      source: { source: "example/skills", sourceType: "github" },
+      source: {
+        revision: "0123456789abcdef0123456789abcdef01234567",
+        source: "example/skills",
+        sourceType: "github",
+      },
       type: "add",
     });
     expect(
@@ -31,6 +39,16 @@ describe("Mutation Intent schema", () => {
       { command: "npx skills remove tdd", scope: "project", type: "remove" },
       { names: ["tdd"], scope: "project", type: "experimental_install" },
       { names: ["tdd"], scope: "project", type: "add-list" },
+      {
+        names: ["tdd"],
+        scope: "project",
+        source: {
+          revision: "main",
+          source: "example/skills",
+          sourceType: "github",
+        },
+        type: "add",
+      },
       {
         flags: ["--yes"],
         names: ["tdd"],

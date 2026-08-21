@@ -4,6 +4,7 @@ import type {
   PublicInventoryState,
   TargetDefinition,
 } from "../../contracts/workspace.js";
+import { isInventoryEntryAvailableToHarness } from "../../contracts/inventory-availability.js";
 
 type ComparisonRow = PublicComparison["rows"][number];
 type EvidenceDimension = ComparisonRow["dimensions"]["revision"];
@@ -157,7 +158,9 @@ function harnessAvailability(
   harness: string,
 ): ComparisonRow["left"]["harnessAvailability"] {
   if (entries.length === 0) return "absent";
-  return entries.some((entry) => entry.agents.includes(harness))
+  return entries.some((entry) =>
+    isInventoryEntryAvailableToHarness(entry, harness),
+  )
     ? "available"
     : "unavailable";
 }

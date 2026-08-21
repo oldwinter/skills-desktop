@@ -22,6 +22,8 @@ const CHANNELS = {
   cancel: "workspace:inventory:cancel",
   compare: "workspace:comparison:open",
   comparisonPrepare: "workspace:comparison:prepare",
+  collectionPrepare: "workspace:collection:prepare",
+  collectionReview: "workspace:collection:review-request",
   event: "workspace:event",
   hostTrustReview: "workspace:host-trust:review",
   refresh: "workspace:inventory:refresh",
@@ -203,6 +205,51 @@ export function registerDesktopIpc(input: {
             destinationTargetId,
             rowKey,
             type: "comparison.prepare",
+            version: 1,
+          }),
+        );
+      } catch {
+        return internalFailure();
+      }
+    },
+  );
+  input.ipcMain.handle(
+    CHANNELS.collectionPrepare,
+    async (event, request: unknown) => {
+      const endpoint = authorized(event, "workspace");
+      if (endpoint === undefined) return authorizationFailure();
+      const fields =
+        typeof request === "object" && request !== null
+          ? (request as Record<string, unknown>)
+          : {};
+      try {
+        return workspaceRequestResultSchema.parse(
+          await endpoint.session.request({
+            collectionId: fields.collectionId,
+            manifestDigest: fields.manifestDigest,
+            releaseNumber: fields.releaseNumber,
+            scope: fields.scope,
+            selections: fields.selections,
+            targetId: fields.targetId,
+            type: "collection.prepare",
+            version: 1,
+          }),
+        );
+      } catch {
+        return internalFailure();
+      }
+    },
+  );
+  input.ipcMain.handle(
+    CHANNELS.collectionReview,
+    async (event, collectionPlanId: unknown) => {
+      const endpoint = authorized(event, "workspace");
+      if (endpoint === undefined) return authorizationFailure();
+      try {
+        return workspaceRequestResultSchema.parse(
+          await endpoint.session.request({
+            collectionPlanId,
+            type: "collection.review.request",
             version: 1,
           }),
         );
@@ -433,6 +480,8 @@ export function registerDesktopIpc(input: {
       input.ipcMain.removeHandler(CHANNELS.cancel);
       input.ipcMain.removeHandler(CHANNELS.compare);
       input.ipcMain.removeHandler(CHANNELS.comparisonPrepare);
+      input.ipcMain.removeHandler(CHANNELS.collectionPrepare);
+      input.ipcMain.removeHandler(CHANNELS.collectionReview);
       input.ipcMain.removeHandler(CHANNELS.targetCreate);
       input.ipcMain.removeHandler(CHANNELS.targetDelete);
       input.ipcMain.removeHandler(CHANNELS.targetUpdate);

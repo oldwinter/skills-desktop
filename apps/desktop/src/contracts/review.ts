@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import {
   commandPlanSchema,
+  publicCollectionPlanSchema,
   rendererErrorSchema,
   targetDefinitionSchema,
   workspaceRequestResultSchema,
@@ -30,32 +31,41 @@ const hostTrustReviewProjectionSchema = z
   })
   .strict();
 
-export const reviewSnapshotSchema = z
-  .discriminatedUnion("status", [
-    z
-      .object({
-        schemaVersion: z.literal(1),
-        status: z.literal("unavailable"),
-      })
-      .strict(),
-    z
-      .object({
-        projection: z.union([
-          reviewProjectionSchema,
-          hostTrustReviewProjectionSchema,
-        ]),
-        schemaVersion: z.literal(1),
-        status: z.literal("pending"),
-      })
-      .strict(),
-    z
-      .object({
-        decision: z.enum(["approve", "reject"]),
-        schemaVersion: z.literal(1),
-        status: z.literal("settled"),
-      })
-      .strict(),
-  ]);
+const collectionReviewProjectionSchema = z
+  .object({
+    collectionPlan: publicCollectionPlanSchema,
+    expiresAt: z.string().datetime({ offset: true }),
+    reviewId: z.string().min(1).max(256),
+    target: targetDefinitionSchema,
+  })
+  .strict();
+
+export const reviewSnapshotSchema = z.discriminatedUnion("status", [
+  z
+    .object({
+      schemaVersion: z.literal(1),
+      status: z.literal("unavailable"),
+    })
+    .strict(),
+  z
+    .object({
+      projection: z.union([
+        reviewProjectionSchema,
+        hostTrustReviewProjectionSchema,
+        collectionReviewProjectionSchema,
+      ]),
+      schemaVersion: z.literal(1),
+      status: z.literal("pending"),
+    })
+    .strict(),
+  z
+    .object({
+      decision: z.enum(["approve", "reject"]),
+      schemaVersion: z.literal(1),
+      status: z.literal("settled"),
+    })
+    .strict(),
+]);
 
 export type ReviewSnapshot = z.infer<typeof reviewSnapshotSchema>;
 

@@ -21,6 +21,7 @@ import {
   WifiOff,
 } from "lucide-react";
 
+import { isInventoryEntryAvailableToHarness } from "../../../contracts/inventory-availability.js";
 import type {
   DesktopEvent,
   PublicInventoryEntry,
@@ -30,11 +31,12 @@ import type {
   WorkspaceSnapshot,
 } from "../../../contracts/workspace.js";
 import { ComparisonView } from "../comparison/ComparisonView.js";
+import { CollectionsView } from "../collections/CollectionsView.js";
 import { TargetsView } from "../targets/TargetsView.js";
 
 type ScopeFilter = "all" | "global" | "project";
 type SelectedIdentity = Pick<PublicInventoryEntry, "name" | "scope">;
-type WorkspaceView = "comparison" | "inventory" | "targets";
+type WorkspaceView = "collections" | "comparison" | "inventory" | "targets";
 
 function freshnessLabel(
   freshness: WorkspaceSnapshot["inventory"]["freshness"],
@@ -232,6 +234,8 @@ export function InventoryApp({ client }: { readonly client: WorkspaceBridge }) {
       ? baseSnapshot
       : {
           ...baseSnapshot,
+          collections:
+            selectedTargetState.collections ?? baseSnapshot.collections,
           inventory: selectedTargetState.inventory,
           mutation: selectedTargetState.mutation,
           target: selectedTargetState.target,
@@ -479,9 +483,10 @@ export function InventoryApp({ client }: { readonly client: WorkspaceBridge }) {
               <span>Comparison</span>
             </button>
             <button
+              aria-current={view === "collections" ? "page" : undefined}
               aria-label="Collections"
-              className="nav-item"
-              disabled
+              className={`nav-item${view === "collections" ? " nav-item--active" : ""}`}
+              onClick={() => setView("collections")}
               title="Collections"
               type="button"
             >
@@ -759,7 +764,10 @@ export function InventoryApp({ client }: { readonly client: WorkspaceBridge }) {
                               </span>
                             </td>
                             <td data-label="Harness">
-                              {entry.agents.includes(snapshot.target.harness)
+                              {isInventoryEntryAvailableToHarness(
+                                entry,
+                                snapshot.target.harness,
+                              )
                                 ? snapshot.target.harness
                                 : "Not linked"}
                             </td>
@@ -992,6 +1000,8 @@ export function InventoryApp({ client }: { readonly client: WorkspaceBridge }) {
             snapshot={snapshot}
             targets={targetStates}
           />
+        ) : view === "collections" ? (
+          <CollectionsView client={client} snapshot={snapshot} />
         ) : (
           <TargetsView
             client={client}

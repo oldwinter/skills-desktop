@@ -60,6 +60,32 @@ describe("Remote Bootstrap Wire Protocol", () => {
     });
   });
 
+  it("round-trips one pinned GitHub add as structured mutation data", () => {
+    const request = {
+      harness: "Codex",
+      mutation: {
+        names: ["find-skills"],
+        scope: "project" as const,
+        source: {
+          revision: "0123456789abcdef0123456789abcdef01234567",
+          source: "vercel-labs/skills",
+          sourceType: "github" as const,
+        },
+        type: "add" as const,
+      },
+      operation: "mutate" as const,
+      protocolVersion: WIRE_PROTOCOL_VERSION,
+      requestId: "mutation-pinned-add",
+      type: "request" as const,
+      workspace: "/srv/workspace",
+    };
+
+    expect(decodeWireFrames(encodeWireFrame(request))).toEqual({
+      ok: true,
+      value: [request],
+    });
+  });
+
   it("round-trips a request-id-bound cancellation", () => {
     const request = {
       operation: "cancel" as const,

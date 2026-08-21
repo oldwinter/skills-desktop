@@ -152,7 +152,28 @@ code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; fo
 .command-preview { display: block; padding: 9px; color: var(--text); background: var(--surface-muted); border-radius: var(--radius-control); }
 .mutation-outcome { color: var(--text-secondary); font-size: var(--font-size-meta); }
 
-.comparison-workspace, .targets-workspace { display: grid; grid-template-rows: auto auto auto minmax(0, 1fr); min-width: 0; min-height: 0; overflow: hidden; }
+.comparison-workspace, .collections-workspace, .targets-workspace { display: grid; grid-template-rows: auto auto auto minmax(0, 1fr); min-width: 0; min-height: 0; overflow: hidden; }
+.collection-controls { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(180px, 240px); align-items: end; gap: 12px; padding: 0 20px 14px; }
+.collection-controls label { display: grid; gap: 5px; color: var(--text-tertiary); font-size: var(--font-size-meta); }
+.collection-controls select { width: 100%; height: 40px; padding: 0 9px; color: var(--text); background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--radius-control); }
+.collection-table-wrap { min-width: 0; min-height: 0; overflow: auto; padding: 0 20px 20px; }
+.collection-table { width: 100%; border-spacing: 0; background: var(--surface); box-shadow: 0 0 0 1px var(--line); border-radius: var(--radius-panel); overflow: hidden; table-layout: fixed; }
+.collection-table th { height: 36px; padding: 0 10px; color: var(--text-tertiary); background: #fafbfc; border-bottom: 1px solid var(--line); font-size: var(--font-size-meta); font-weight: 600; text-align: left; }
+.collection-table th:nth-child(1) { width: 48px; }
+.collection-table th:nth-child(2) { width: 28%; }
+.collection-table th:nth-child(3) { width: 42%; }
+.collection-table td { min-width: 0; height: 52px; padding: 7px 10px; border-bottom: 1px solid var(--line); font-size: var(--font-size-meta); overflow-wrap: anywhere; }
+.collection-table tr:last-child td { border-bottom: 0; }
+.collection-status { display: inline-flex; min-height: 24px; align-items: center; padding: 2px 7px; border-radius: 4px; font-size: var(--font-size-meta); font-weight: 600; }
+.collection-status--missing, .collection-status--unchanged { color: var(--healthy); background: var(--healthy-soft); }
+.collection-status--present-content-unknown, .collection-status--removal-candidate { color: var(--warning); background: var(--warning-soft); }
+.collection-status--source-conflict, .collection-status--incompatible { color: var(--danger); background: var(--danger-soft); }
+.collection-description { padding: 14px 0; color: var(--text-secondary); font-size: var(--font-size-meta); border-bottom: 1px solid var(--line); }
+.collection-primary-action { width: 100%; margin-top: 16px; }
+.collection-plan-summary { display: grid; gap: 10px; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--line); }
+.collection-plan-summary header { display: flex; align-items: center; gap: 7px; }
+.collection-plan-summary h3 { font-size: var(--font-size-ui); }
+.collection-plan-summary code { overflow-wrap: anywhere; }
 .comparison-controls { display: grid; grid-template-columns: minmax(160px, 1fr) 40px minmax(160px, 1fr) auto; align-items: end; gap: 10px; padding: 0 20px 14px; }
 .comparison-controls label, .target-form label { display: grid; min-width: 0; gap: 5px; color: var(--text-tertiary); font-size: var(--font-size-meta); }
 .comparison-controls select, .target-form select, .target-form input { min-width: 0; width: 100%; height: 40px; padding: 0 9px; color: var(--text); background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--radius-control); }
@@ -231,7 +252,7 @@ code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; fo
   .nav-item { width: auto; flex: 0 0 auto; }
   .target-section, .target-facts, .rail-version { display: none; }
   .inventory-workspace { display: block; overflow: visible; }
-  .comparison-workspace, .targets-workspace { display: block; overflow: visible; }
+  .comparison-workspace, .collections-workspace, .targets-workspace { display: block; overflow: visible; }
   .page-heading { padding: 16px 14px 10px; }
   .mobile-target-summary { display: flex; align-items: center; gap: 5px; overflow-wrap: anywhere; }
   .state-banner { margin: 0 14px 10px; align-items: flex-start; flex-wrap: wrap; }
@@ -245,6 +266,14 @@ code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; fo
   .comparison-controls > .text-button { grid-column: 2; grid-row: 2; }
   .paired-status { grid-template-columns: 1fr; margin: 0 14px 12px; }
   .comparison-table-wrap { overflow: visible; padding: 0 14px 14px; }
+  .collection-controls { grid-template-columns: 1fr; padding: 0 14px 12px; }
+  .collection-table-wrap { overflow: visible; padding: 0 14px 14px; }
+  .collection-table, .collection-table tbody { display: block; box-shadow: none; background: transparent; }
+  .collection-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); }
+  .collection-table tr { display: grid; grid-template-columns: 40px minmax(0, 1fr); margin-bottom: 8px; padding: 8px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-panel); }
+  .collection-table td { display: grid; height: auto; min-height: 44px; gap: 4px; align-content: center; padding: 5px 8px; border: 0; }
+  .collection-table td:nth-child(n+3) { grid-column: 2; }
+  .collection-table td::before { content: attr(data-label); color: var(--text-tertiary); font-size: var(--font-size-meta); font-weight: 600; }
   .comparison-table, .comparison-table tbody { display: block; box-shadow: none; background: transparent; }
   .comparison-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0,0,0); }
   .comparison-table tr { display: block; margin-bottom: 8px; padding: 8px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-panel); }

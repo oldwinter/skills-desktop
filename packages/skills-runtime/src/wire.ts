@@ -24,6 +24,7 @@ export type WireMutation =
       readonly names: readonly string[];
       readonly scope: "global" | "project";
       readonly source: {
+        readonly revision?: string;
         readonly source: string;
         readonly sourceType: "github";
       };
@@ -181,12 +182,20 @@ export function validateWireRequest(
   const githubSource = (candidate: unknown) => {
     if (
       !isRecord(candidate) ||
-      !exactKeys(candidate, ["source", "sourceType"])
+      !exactKeys(
+        candidate,
+        candidate.revision === undefined
+          ? ["source", "sourceType"]
+          : ["revision", "source", "sourceType"],
+      )
     ) {
       return false;
     }
     return (
       candidate.sourceType === "github" &&
+      (candidate.revision === undefined ||
+        (typeof candidate.revision === "string" &&
+          /^[a-f0-9]{40}$/.test(candidate.revision))) &&
       typeof candidate.source === "string" &&
       candidate.source.length >= 3 &&
       candidate.source.length <= 256 &&

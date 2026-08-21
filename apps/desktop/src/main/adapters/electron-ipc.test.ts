@@ -126,6 +126,38 @@ describe("Electron IPC sender authorization", () => {
       version: 1,
     });
     await expect(
+      handlers.get("workspace:collection:prepare")!(authorizedEvent as never, {
+        collectionId: "skills-desktop-starter",
+        executable: "must-not-cross-ipc",
+        manifestDigest: `sha256:${"a".repeat(64)}`,
+        releaseNumber: 1,
+        scope: "project",
+        selections: [{ mode: "add", name: "find-skills" }],
+        targetId: "00000000-0000-4000-8000-000000000001",
+      }),
+    ).resolves.toMatchObject({ error: { code: "invalid_request" }, ok: false });
+    expect(session.request).toHaveBeenLastCalledWith({
+      collectionId: "skills-desktop-starter",
+      manifestDigest: `sha256:${"a".repeat(64)}`,
+      releaseNumber: 1,
+      scope: "project",
+      selections: [{ mode: "add", name: "find-skills" }],
+      targetId: "00000000-0000-4000-8000-000000000001",
+      type: "collection.prepare",
+      version: 1,
+    });
+    await expect(
+      handlers.get("workspace:collection:review-request")!(
+        authorizedEvent as never,
+        "collection-plan-1",
+      ),
+    ).resolves.toMatchObject({ error: { code: "invalid_request" }, ok: false });
+    expect(session.request).toHaveBeenLastCalledWith({
+      collectionPlanId: "collection-plan-1",
+      type: "collection.review.request",
+      version: 1,
+    });
+    await expect(
       handlers.get("workspace:target:create")!(authorizedEvent as never, {
         connectionReference: "build-host",
         harness: "Codex",

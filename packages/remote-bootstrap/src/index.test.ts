@@ -290,7 +290,7 @@ const { join } = require("node:path");
 appendFileSync(join(process.env.HOME, "invocations.ndjson"), JSON.stringify(process.argv.slice(2)) + "\\n");
 const operation = process.argv.slice(2).slice(2).join(" ");
 if (operation === "--version") process.stdout.write("1.5.23\\n");
-else if (operation === "add example/skills --skill new-skill --agent codex --global --yes") process.stdout.write("added\\n");
+else if (operation === "add https://github.com/example/skills/archive/0123456789abcdef0123456789abcdef01234567.tar.gz --skill new-skill --agent codex --global --yes") process.stdout.write("added\\n");
 else if (operation === "update project-skill --project --yes") process.stdout.write("updated\\n");
 else if (operation === "list --json" || operation === "list --global --json") process.stdout.write("[]");
 else process.exitCode = 2;
@@ -306,7 +306,11 @@ else process.exitCode = 2;
         {
           names: ["new-skill"],
           scope: "global" as const,
-          source: { source: "example/skills", sourceType: "github" as const },
+          source: {
+            revision: "0123456789abcdef0123456789abcdef01234567",
+            source: "example/skills",
+            sourceType: "github" as const,
+          },
           type: "add" as const,
         },
         {
@@ -352,7 +356,7 @@ else process.exitCode = 2;
           "--yes",
           "skills@1.5.23",
           "add",
-          "example/skills",
+          "https://github.com/example/skills/archive/0123456789abcdef0123456789abcdef01234567.tar.gz",
           "--skill",
           "new-skill",
           "--agent",

@@ -5,6 +5,7 @@ import { basename, resolve } from "node:path";
 import { app } from "electron";
 
 import { createDesktopCapabilities } from "./application/desktop-capabilities.js";
+import { BUNDLED_OFFICIAL_COLLECTION_CATALOG } from "./application/bundled-official-collections.js";
 import {
   createSpawnProcessRunner,
   createLocalSkillsProcess,
@@ -90,8 +91,10 @@ export async function createCompositionRoot(options?: {
   const capabilities = createDesktopCapabilities({
     clock: () => new Date(),
     id: randomUUID,
+    officialCollectionCatalog: BUNDLED_OFFICIAL_COLLECTION_CATALOG,
     onReviewRequested: options?.onReviewRequested,
     recoveryRecords,
+    platform: process.platform,
     skillsTargets,
   });
   await capabilities.initialize();

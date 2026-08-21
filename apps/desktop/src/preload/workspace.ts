@@ -6,6 +6,7 @@ import {
   workspaceSnapshotResultSchema,
   type DesktopEvent,
   type MutationIntent,
+  type PrepareCollectionRequest,
   type TargetDraft,
   type WorkspaceBridge,
 } from "../contracts/workspace.js";
@@ -45,6 +46,13 @@ const bridge: WorkspaceBridge = Object.freeze({
       await ipcRenderer.invoke("workspace:mutation:prepare", targetId, intent),
     );
   },
+  async prepareCollection(
+    request: Omit<PrepareCollectionRequest, "type" | "version">,
+  ) {
+    return workspaceRequestResultSchema.parse(
+      await ipcRenderer.invoke("workspace:collection:prepare", request),
+    );
+  },
   async prepareComparison(
     comparisonId: string,
     rowKey: string,
@@ -77,6 +85,14 @@ const bridge: WorkspaceBridge = Object.freeze({
   async requestHostTrustReview(targetId: string) {
     return workspaceRequestResultSchema.parse(
       await ipcRenderer.invoke("workspace:host-trust:review", targetId),
+    );
+  },
+  async requestCollectionReview(collectionPlanId: string) {
+    return workspaceRequestResultSchema.parse(
+      await ipcRenderer.invoke(
+        "workspace:collection:review-request",
+        collectionPlanId,
+      ),
     );
   },
   async requestReview(preparedMutationId: string) {

@@ -13,7 +13,11 @@ import { delimiter, join } from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
-import { CLI_PACKAGE, CLI_VERSION } from "@skills-desktop/skills-runtime";
+import {
+  CLI_PACKAGE,
+  CLI_VERSION,
+  type Inventory,
+} from "@skills-desktop/skills-runtime";
 
 import {
   createLocalSkillsProcess,
@@ -23,6 +27,10 @@ import {
   type ProcessInvocation,
   type ProcessRunner,
 } from "./local-skills-process.js";
+import {
+  observedMutationEffects,
+  prepareMutationPlan,
+} from "./skills-process.js";
 
 const projectOutput = JSON.stringify([
   {
@@ -77,6 +85,42 @@ function scriptedRunner(): ProcessRunner & {
 }
 
 describe("Local SkillsProcess inventory contract", () => {
+  it("reports pinned archive installs with absent CLI provenance as content-unverified", () => {
+    expect(
+      observedMutationEffects(
+        {
+          names: ["find-skills"],
+          scope: "project",
+          source: {
+            revision: "435076e78988e1e6ec40d00b0b1d76bdbbc5419a",
+            source: "vercel-labs/skills",
+            sourceType: "github",
+          },
+          type: "add",
+        },
+        {
+          cliVersion: CLI_VERSION,
+          entries: [
+            {
+              agents: [],
+              contentFingerprint: { status: "unknown" },
+              declaredSource: { source: null, sourceType: null },
+              extensions: {},
+              name: "find-skills",
+              path: "/workspace/.agents/skills/find-skills",
+              revision: { status: "unknown" },
+              scope: "project",
+              sourceUrl: null,
+            },
+          ],
+          observedAt: "2026-08-22T06:00:00.000Z",
+          schemaVersion: 1,
+        },
+        "Codex",
+      ),
+    ).toEqual({ status: "content-unverified" });
+  });
+
   it.each(["linux", "darwin"] as const)(
     "verifies the dialect once and publishes one complete project-and-global Inventory on %s",
     async (platform) => {
@@ -577,6 +621,85 @@ setInterval(() => undefined, 1000);
 });
 
 describe("Local SkillsProcess mutation contract", () => {
+  it("uses canonical Codex availability for remove, update, and update-all", () => {
+    const inventory: Inventory = {
+      cliVersion: CLI_VERSION,
+      entries: [
+        {
+          agents: [],
+          contentFingerprint: { status: "unknown" },
+          declaredSource: { source: null, sourceType: null },
+          extensions: {},
+          name: "canonical-skill",
+          path: "/workspace/.agents/skills/canonical-skill",
+          revision: { status: "unknown" },
+          scope: "project",
+          sourceUrl: null,
+        },
+      ],
+      observedAt: "2026-08-22T06:00:00.000Z",
+      schemaVersion: 1,
+    };
+    const intents = [
+      {
+        names: ["canonical-skill"],
+        scope: "project" as const,
+        type: "remove" as const,
+      },
+      {
+        names: ["canonical-skill"],
+        scope: "project" as const,
+        type: "update" as const,
+      },
+      { scope: "project" as const, type: "update-all" as const },
+    ];
+
+    for (const intent of intents) {
+      expect(
+        prepareMutationPlan({
+          binding: {
+            generation: 1,
+            harness: "Codex",
+            targetId: "00000000-0000-4000-8000-000000000001",
+          },
+          clock: () => new Date("2026-08-22T06:00:00.000Z"),
+          id: () => `prepared-${intent.type}`,
+          input: {
+            freshness: "fresh",
+            intent,
+            inventory,
+            inventoryId: "canonical-inventory",
+          },
+        }),
+      ).toMatchObject({
+        ok: true,
+        value: { mutation: { names: ["canonical-skill"] } },
+      });
+    }
+    expect(
+      observedMutationEffects(
+        {
+          names: ["canonical-skill"],
+          scope: "project",
+          type: "remove",
+        },
+        inventory,
+        "Codex",
+      ),
+    ).toEqual({ status: "not-observed" });
+    expect(
+      observedMutationEffects(
+        {
+          names: ["canonical-skill"],
+          scope: "project",
+          type: "update",
+        },
+        inventory,
+        "Codex",
+      ),
+    ).toEqual({ status: "content-unverified" });
+  });
+
   it("expands update-all from Fresh Inventory into a bound review-only Command Plan", async () => {
     const runner = scriptedRunner();
     const skillsProcess = createLocalSkillsProcess({
@@ -1045,7 +1168,7 @@ describe("Local SkillsProcess mutation contract", () => {
     {
       expectedArgs: [
         "add",
-        "example/skills",
+        "https://github.com/example/skills/archive/0123456789abcdef0123456789abcdef01234567.tar.gz",
         "--skill",
         "new-skill",
         "--agent",
@@ -1056,7 +1179,11 @@ describe("Local SkillsProcess mutation contract", () => {
       intent: {
         names: ["new-skill"],
         scope: "global" as const,
-        source: { source: "example/skills", sourceType: "github" as const },
+        source: {
+          revision: "0123456789abcdef0123456789abcdef01234567",
+          source: "example/skills",
+          sourceType: "github" as const,
+        },
         type: "add" as const,
       },
     },

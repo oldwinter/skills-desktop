@@ -1,10 +1,7 @@
 import { useEffect, useState } from "react";
 import { AlertCircle, Check, Clock3, ShieldCheck, X } from "lucide-react";
 
-import type {
-  ReviewBridge,
-  ReviewSnapshot,
-} from "../contracts/review.js";
+import type { ReviewBridge, ReviewSnapshot } from "../contracts/review.js";
 import type { RendererError } from "../contracts/workspace.js";
 
 function scopeLabel(scope: "global" | "project") {
@@ -38,8 +35,7 @@ export function ReviewSurface({ client }: { readonly client: ReviewBridge }) {
     }
     if (decision === "approve") {
       setSettledMessage(
-        snapshot?.status === "pending" &&
-          "fingerprint" in snapshot.projection
+        snapshot?.status === "pending" && "fingerprint" in snapshot.projection
           ? "Host trust confirmed"
           : "Mutation started",
       );
@@ -100,7 +96,8 @@ export function ReviewSurface({ client }: { readonly client: ReviewBridge }) {
           <div>
             <p>Trusted Review</p>
             <h1>
-              Review {trustAction === "rotation" ? "changed host key" : "host key"}
+              Review{" "}
+              {trustAction === "rotation" ? "changed host key" : "host key"}
             </h1>
           </div>
         </header>
@@ -145,6 +142,147 @@ export function ReviewSurface({ client }: { readonly client: ReviewBridge }) {
           >
             <Check aria-hidden="true" size={16} />
             {pendingDecision === "approve" ? "Confirming" : "Approve"}
+          </button>
+        </div>
+      </main>
+    );
+  }
+
+  if ("collectionPlan" in snapshot.projection) {
+    const { collectionPlan, target } = snapshot.projection;
+    return (
+      <main className="review-surface">
+        <header className="review-heading">
+          <span className="review-mark">
+            <ShieldCheck aria-hidden="true" size={20} />
+          </span>
+          <div>
+            <p>Trusted Review</p>
+            <h1>Review Official Collection</h1>
+          </div>
+        </header>
+        <dl className="review-facts">
+          <div>
+            <dt>Collection</dt>
+            <dd>{collectionPlan.collectionId}</dd>
+          </div>
+          <div>
+            <dt>Release</dt>
+            <dd>{collectionPlan.releaseNumber}</dd>
+          </div>
+          <div>
+            <dt>Target</dt>
+            <dd>
+              {target.label} / generation {collectionPlan.targetGeneration}
+            </dd>
+          </div>
+          <div>
+            <dt>Scope</dt>
+            <dd>{scopeLabel(collectionPlan.scope)}</dd>
+          </div>
+          <div className="review-facts__wide">
+            <dt>Pinned source</dt>
+            <dd>
+              {collectionPlan.source.repository}@
+              {collectionPlan.source.reviewedRevision}
+            </dd>
+          </div>
+          <div>
+            <dt>Release status</dt>
+            <dd>{collectionPlan.releaseEvidence.status}</dd>
+          </div>
+          <div>
+            <dt>Compatibility</dt>
+            <dd>
+              CLI {collectionPlan.releaseEvidence.compatibility.cliVersion} /{" "}
+              {collectionPlan.releaseEvidence.compatibility.platforms.join(
+                ", ",
+              )}{" "}
+              / {collectionPlan.releaseEvidence.compatibility.harnesses.join(", ")}
+            </dd>
+          </div>
+          <div>
+            <dt>Manifest author</dt>
+            <dd>{collectionPlan.releaseEvidence.receipt.author}</dd>
+          </div>
+          <div>
+            <dt>Independent reviewer</dt>
+            <dd>{collectionPlan.releaseEvidence.receipt.reviewer}</dd>
+          </div>
+          <div>
+            <dt>Reviewed at</dt>
+            <dd>{collectionPlan.releaseEvidence.receipt.reviewedAt}</dd>
+          </div>
+          <div>
+            <dt>Review policy</dt>
+            <dd>{collectionPlan.releaseEvidence.receipt.reviewPolicy}</dd>
+          </div>
+          <div className="review-facts__wide">
+            <dt>Review location</dt>
+            <dd>{collectionPlan.releaseEvidence.receipt.reviewLocation}</dd>
+          </div>
+          <div className="review-facts__wide">
+            <dt>Selected skills</dt>
+            <dd>
+              {collectionPlan.selections
+                .map(({ mode, name }) => `${name} (${mode})`)
+                .join(", ")}
+            </dd>
+          </div>
+          <div className="review-facts__wide">
+            <dt>Manifest digest</dt>
+            <dd>{collectionPlan.manifestDigest}</dd>
+          </div>
+          <div className="review-facts__wide">
+            <dt>Review digest</dt>
+            <dd>{collectionPlan.reviewDigest}</dd>
+          </div>
+          <div className="review-facts__wide">
+            <dt>Assessment digest</dt>
+            <dd>{collectionPlan.assessmentDigest}</dd>
+          </div>
+          <div className="review-facts__wide">
+            <dt>Inventory digest</dt>
+            <dd>{collectionPlan.inventoryDigest}</dd>
+          </div>
+          <div className="review-facts__wide">
+            <dt>Child prepared digest</dt>
+            <dd>{collectionPlan.childPreparedDigest}</dd>
+          </div>
+          <div>
+            <dt>Execution order</dt>
+            <dd>
+              {collectionPlan.order.map(({ position }) => position).join(", ")}
+            </dd>
+          </div>
+          <div>
+            <dt>Expires</dt>
+            <dd>{collectionPlan.expiresAt}</dd>
+          </div>
+        </dl>
+        <section className="review-plan" aria-labelledby="review-plan-heading">
+          <h2 id="review-plan-heading">Child Command Plan</h2>
+          <code>{collectionPlan.childCommandPlan.preview}</code>
+        </section>
+        <div className="review-actions">
+          <button
+            className="review-button"
+            disabled={pendingDecision !== undefined}
+            onClick={() => void decide("reject")}
+            type="button"
+          >
+            <X aria-hidden="true" size={16} />
+            Reject
+          </button>
+          <button
+            aria-label="Approve Official Collection plan"
+            className="review-button review-button--primary"
+            disabled={pendingDecision !== undefined}
+            onClick={() => void decide("approve")}
+            type="button"
+          >
+            <Check aria-hidden="true" size={16} />
+            {pendingDecision === "approve" ? "Applying" : "Approve"}
           </button>
         </div>
       </main>

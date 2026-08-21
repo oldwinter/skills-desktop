@@ -9,6 +9,7 @@ import {
   type PublicError,
   type Result,
 } from "@skills-desktop/skills-runtime";
+import { isInventoryEntryAvailableToHarness } from "../../contracts/inventory-availability.js";
 
 const PREPARED_MUTATION_TTL_MS = 10 * 60_000;
 const REMOVE_TIMEOUT_MS = 2 * 60_000;
@@ -36,6 +37,7 @@ export interface CommandPlan {
   readonly schemaVersion: 1;
   readonly scope: "global" | "project";
   readonly source: {
+    readonly revision?: string;
     readonly source: string;
     readonly sourceType: "github";
   } | null;
@@ -151,9 +153,13 @@ function mutationArguments(intent: NormalizedMutation, harness: string) {
         ? ["--project"]
         : [];
   if (intent.type === "add") {
+    const source =
+      intent.source.revision === undefined
+        ? intent.source.source
+        : `https://github.com/${intent.source.source}/archive/${intent.source.revision}.tar.gz`;
     return [
       "add",
-      intent.source.source,
+      source,
       "--skill",
       ...intent.names,
       "--agent",
@@ -214,7 +220,7 @@ export function prepareMutationPlan(options: {
   const matchingEntries = input.inventory.entries.filter(
     (entry) =>
       entry.scope === parsedIntent.data.scope &&
-      entry.agents.includes(options.binding!.harness),
+      isInventoryEntryAvailableToHarness(entry, options.binding!.harness),
   );
   const mutation: NormalizedMutation =
     parsedIntent.data.type === "update-all"
@@ -301,27 +307,53 @@ export function observedMutationEffects(
   if (mutation.type === "remove") {
     return {
       status: mutation.names.every(
-        (name) => !matches(name)?.agents.includes(harness),
+        (name) => {
+          const entry = matches(name);
+          return (
+            entry === undefined ||
+            !isInventoryEntryAvailableToHarness(entry, harness)
+          );
+        },
       )
         ? "verified"
         : "not-observed",
     };
   }
   if (mutation.type === "add") {
+    const observed = mutation.names.every((name) => {
+      const entry = matches(name);
+      const availableToHarness =
+        entry !== undefined &&
+        isInventoryEntryAvailableToHarness(entry, harness);
+      if (!availableToHarness || entry === undefined) return false;
+      const declaredSourceMatches =
+        entry.declaredSource.sourceType === mutation.source.sourceType &&
+        entry.declaredSource.source === mutation.source.source;
+      const declaredSourceIsAbsent =
+        entry.declaredSource.sourceType === null &&
+        entry.declaredSource.source === null;
+      return (
+        declaredSourceMatches ||
+        (mutation.source.revision !== undefined && declaredSourceIsAbsent)
+      );
+    });
     return {
-      status: mutation.names.every((name) => {
-        const entry = matches(name);
-        return (
-          entry?.agents.includes(harness) === true &&
-          entry.declaredSource.sourceType === mutation.source.sourceType &&
-          entry.declaredSource.source === mutation.source.source
-        );
-      })
-        ? "verified"
+      status: observed
+        ? mutation.source.revision === undefined
+          ? "verified"
+          : "content-unverified"
         : "not-observed",
     };
   }
-  if (mutation.names.some((name) => !matches(name)?.agents.includes(harness))) {
+  if (
+    mutation.names.some((name) => {
+      const entry = matches(name);
+      return (
+        entry === undefined ||
+        !isInventoryEntryAvailableToHarness(entry, harness)
+      );
+    })
+  ) {
     return { status: "not-observed" };
   }
   return { status: "content-unverified" };

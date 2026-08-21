@@ -140,6 +140,10 @@ export const commandPlanSchema = z
     scope: z.enum(["global", "project"]),
     source: z
       .object({
+        revision: z
+          .string()
+          .regex(/^[a-f0-9]{40}$/)
+          .optional(),
         source: z.string().min(1).max(256),
         sourceType: z.literal("github"),
       })
@@ -188,15 +192,6 @@ export const publicMutationStateSchema = z
       "succeeded",
     ]),
     reconciliationDeadline: z.string().datetime({ offset: true }).nullable(),
-  })
-  .strict();
-
-export const publicTargetStateSchema = z
-  .object({
-    deletionBlocked: z.boolean(),
-    inventory: publicInventoryStateSchema,
-    mutation: publicMutationStateSchema,
-    target: targetDefinitionSchema,
   })
   .strict();
 
@@ -259,10 +254,172 @@ export const publicComparisonSchema = z
   })
   .strict();
 
+const collectionAssessmentEntrySchema = z
+  .object({
+    inRelease: z.boolean(),
+    name: z.string().min(1).max(256),
+    selectable: z.boolean(),
+    selectionModes: z.array(z.enum(["add", "reapply"])).max(2),
+    status: z.enum([
+      "incompatible",
+      "missing",
+      "present-content-unknown",
+      "removal-candidate",
+      "source-conflict",
+      "unchanged",
+    ]),
+  })
+  .strict();
+
+const collectionAssessmentSchema = z
+  .object({
+    compatibility: z.enum(["compatible", "incompatible"]),
+    entries: z.array(collectionAssessmentEntrySchema).max(256),
+    inventoryFreshness: z.enum(["fresh", "none", "stale"]),
+    scope: z.enum(["global", "project"]),
+    targetGeneration: z.number().int().positive(),
+    targetId: targetIdSchema,
+  })
+  .strict();
+
+const collectionCompatibilitySchema = z
+  .object({
+    cliVersion: z.literal("1.5.23"),
+    harnesses: z.array(z.string().min(1).max(128)).max(64),
+    platforms: z.array(z.enum(["darwin", "linux", "win32"])).max(3),
+    requiredCapabilities: z.array(z.literal("local")).max(1),
+  })
+  .strict();
+
+const collectionReceiptSchema = z
+  .object({
+    author: z.string().min(1).max(256),
+    manifestDigest: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+    reviewLocation: z.string().url().max(2_048).nullable(),
+    reviewPolicy: z.literal("official-collection-v1"),
+    reviewedAt: z.string().datetime({ offset: true }).nullable(),
+    reviewer: z.string().min(1).max(256).nullable(),
+    schemaVersion: z.literal(1),
+    status: z.enum(["approved", "pending"]),
+  })
+  .strict();
+
+const publicCollectionReleaseSchema = z
+  .object({
+    assessments: z.array(collectionAssessmentSchema).length(2),
+    blockers: z.array(z.string().min(1).max(512)).max(8),
+    collectionId: z.string().min(1).max(128),
+    compatibility: collectionCompatibilitySchema,
+    description: z.string().min(1).max(1_024),
+    executable: z.boolean(),
+    manifestDigest: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+    receipt: collectionReceiptSchema,
+    releaseNumber: z.number().int().positive(),
+    skills: z.array(z.string().min(1).max(256)).max(128),
+    source: z
+      .object({
+        repository: z.string().min(3).max(256),
+        repositoryUrl: z.string().url().max(512),
+        reviewedRevision: z.string().regex(/^[a-f0-9]{40}$/),
+        sourceType: z.literal("github"),
+      })
+      .strict(),
+    status: z.enum(["active", "deprecated", "revoked"]),
+    supersedesDigest: z
+      .string()
+      .regex(/^sha256:[a-f0-9]{64}$/)
+      .nullable(),
+    title: z.string().min(1).max(256),
+  })
+  .strict();
+
+export const collectionAcknowledgementSchema = z
+  .object({
+    acknowledgedAt: z.string().datetime({ offset: true }),
+    collectionId: z.string().min(1).max(128),
+    kind: z.enum(["release", "delta"]),
+    manifestDigest: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+    releaseNumber: z.number().int().positive(),
+  })
+  .strict();
+
+export const publicCollectionPlanSchema = z
+  .object({
+    assessmentDigest: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+    childCommandPlan: commandPlanSchema,
+    childPreparedDigest: z.string().regex(/^[a-f0-9]{64}$/),
+    collectionId: z.string().min(1).max(128),
+    expiresAt: z.string().datetime({ offset: true }),
+    id: z.string().min(1).max(256),
+    inventoryDigest: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+    manifestDigest: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+    order: z
+      .array(
+        z
+          .object({
+            names: z.array(z.string().min(1).max(256)).min(1).max(128),
+            position: z.number().int().positive(),
+            targetId: targetIdSchema,
+          })
+          .strict(),
+      )
+      .length(1),
+    releaseEvidence: z
+      .object({
+        compatibility: collectionCompatibilitySchema,
+        receipt: collectionReceiptSchema,
+        status: z.enum(["active", "deprecated", "revoked"]),
+      })
+      .strict(),
+    releaseNumber: z.number().int().positive(),
+    reviewDigest: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+    schemaVersion: z.literal(1),
+    scope: z.enum(["global", "project"]),
+    selections: z
+      .array(
+        z
+          .object({
+            mode: z.enum(["add", "reapply"]),
+            name: z.string().min(1).max(256),
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(128),
+    source: z
+      .object({
+        repository: z.string().min(3).max(256),
+        reviewedRevision: z.string().regex(/^[a-f0-9]{40}$/),
+      })
+      .strict(),
+    targetGeneration: z.number().int().positive(),
+    targetId: targetIdSchema,
+  })
+  .strict();
+
+export const publicCollectionsStateSchema = z
+  .object({
+    acknowledgements: z.array(collectionAcknowledgementSchema).max(1_000),
+    plan: publicCollectionPlanSchema.nullable(),
+    releases: z.array(publicCollectionReleaseSchema).max(1_000),
+  })
+  .strict();
+
+export const publicTargetStateSchema = z
+  .object({
+    collections: publicCollectionsStateSchema.optional(),
+    deletionBlocked: z.boolean(),
+    inventory: publicInventoryStateSchema,
+    mutation: publicMutationStateSchema,
+    target: targetDefinitionSchema,
+  })
+  .strict();
+
 export const workspaceSnapshotSchema = z
   .object({
     eventSequence: z.number().int().nonnegative(),
     comparison: publicComparisonSchema.nullable().optional(),
+    collections: publicCollectionsStateSchema.optional(),
     inventory: publicInventoryStateSchema,
     mutation: publicMutationStateSchema,
     schemaVersion: z.literal(1),
@@ -405,6 +562,42 @@ export const prepareComparisonRequestSchema = z
   })
   .strict();
 
+export const prepareCollectionRequestSchema = z
+  .object({
+    collectionId: z.string().min(1).max(128),
+    manifestDigest: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+    releaseNumber: z.number().int().positive(),
+    scope: z.enum(["global", "project"]),
+    selections: z
+      .array(
+        z
+          .object({
+            mode: z.enum(["add", "reapply"]),
+            name: z.string().min(1).max(256),
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(128)
+      .refine(
+        (selections) =>
+          new Set(selections.map(({ name }) => name)).size ===
+          selections.length,
+      ),
+    targetId: targetIdSchema,
+    type: z.literal("collection.prepare"),
+    version: z.literal(1),
+  })
+  .strict();
+
+export const requestCollectionReviewSchema = z
+  .object({
+    collectionPlanId: z.string().min(1).max(256),
+    type: z.literal("collection.review.request"),
+    version: z.literal(1),
+  })
+  .strict();
+
 export const workspaceRequestSchema = z.discriminatedUnion("type", [
   refreshRequestSchema,
   cancelRequestSchema,
@@ -418,6 +611,8 @@ export const workspaceRequestSchema = z.discriminatedUnion("type", [
   deleteTargetRequestSchema,
   openComparisonRequestSchema,
   prepareComparisonRequestSchema,
+  prepareCollectionRequestSchema,
+  requestCollectionReviewSchema,
 ]);
 
 export const workspaceRequestResultSchema = z.discriminatedUnion("ok", [
@@ -435,6 +630,13 @@ export type MutationIntent = z.infer<typeof mutationIntentSchema>;
 export type PublicInventoryEntry = z.infer<typeof publicInventoryEntrySchema>;
 export type PublicInventoryState = z.infer<typeof publicInventoryStateSchema>;
 export type PublicComparison = z.infer<typeof publicComparisonSchema>;
+export type PublicCollectionsState = z.infer<
+  typeof publicCollectionsStateSchema
+>;
+export type PublicCollectionPlan = z.infer<typeof publicCollectionPlanSchema>;
+export type PrepareCollectionRequest = z.infer<
+  typeof prepareCollectionRequestSchema
+>;
 export type PublicMutationState = z.infer<typeof publicMutationStateSchema>;
 export type RendererError = z.infer<typeof rendererErrorSchema>;
 export type TargetDefinition = z.infer<typeof targetDefinitionSchema>;
@@ -461,6 +663,9 @@ export interface WorkspaceBridge {
     rowKey: string,
     destinationTargetId: string,
   ): Promise<WorkspaceRequestResult>;
+  prepareCollection(
+    request: Omit<PrepareCollectionRequest, "type" | "version">,
+  ): Promise<WorkspaceRequestResult>;
   getSnapshot(): Promise<WorkspaceSnapshotResult>;
   prepareMutation(
     targetId: string,
@@ -469,6 +674,9 @@ export interface WorkspaceBridge {
   reconcileMutation(targetId: string): Promise<WorkspaceRequestResult>;
   refreshInventory(targetId: string): Promise<WorkspaceRequestResult>;
   requestHostTrustReview(targetId: string): Promise<WorkspaceRequestResult>;
+  requestCollectionReview(
+    collectionPlanId: string,
+  ): Promise<WorkspaceRequestResult>;
   requestCancellationReview(
     operationId: string,
   ): Promise<WorkspaceRequestResult>;

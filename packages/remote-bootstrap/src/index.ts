@@ -408,7 +408,7 @@ const isWireRequest = (value) => validateWireRequest(
           ? ["--project"]
           : [];
       const args = mutation.type === "add"
-        ? ["add", mutation.source.source, "--skill", ...mutation.names, "--agent", request.harness.toLowerCase(), ...scopeFlag, "--yes"]
+        ? ["add", mutation.source.revision === undefined ? mutation.source.source : "https://github.com/" + mutation.source.source + "/archive/" + mutation.source.revision + ".tar.gz", "--skill", ...mutation.names, "--agent", request.harness.toLowerCase(), ...scopeFlag, "--yes"]
         : mutation.type === "remove"
           ? ["remove", ...mutation.names, "--agent", request.harness.toLowerCase(), ...scopeFlag, "--yes"]
           : ["update", ...mutation.names, ...scopeFlag, "--yes"];

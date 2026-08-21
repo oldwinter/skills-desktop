@@ -17,6 +17,10 @@ const scopeSchema = z.enum(["global", "project"]);
 
 const githubSourceSchema = z
   .object({
+    revision: z
+      .string()
+      .regex(/^[a-f0-9]{40}$/)
+      .optional(),
     source: z
       .string()
       .min(3)

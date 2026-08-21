@@ -1132,3 +1132,117 @@ describe("RecoveryRecords Mutation Guard contract", () => {
     ).toMatchObject({ error: { code: "persist_failed" }, ok: false });
   });
 });
+
+describe("RecoveryRecords Collection Acknowledgement contract", () => {
+  const acknowledgement = {
+    acknowledgedAt: "2026-08-22T06:00:00.000Z",
+    collectionId: "skills-desktop-starter",
+    kind: "release" as const,
+    manifestDigest: `sha256:${"a".repeat(64)}`,
+    releaseNumber: 1,
+  };
+
+  it("restores only strict acknowledgement records in memory", async () => {
+    const records = createMemoryRecoveryRecords();
+    expect(
+      await records.commit({
+        acknowledgements: [acknowledgement],
+        type: "collections.acknowledgements.replace",
+      }),
+    ).toEqual({ ok: true, value: undefined });
+    expect((await records.restore()).collectionAcknowledgements).toEqual([
+      acknowledgement,
+    ]);
+
+    expect(
+      await records.commit({
+        acknowledgements: [
+          {
+            ...acknowledgement,
+            plan: "must-not-persist",
+          } as unknown as typeof acknowledgement,
+        ],
+        type: "collections.acknowledgements.replace",
+      }),
+    ).toMatchObject({ error: { code: "persist_failed" }, ok: false });
+  });
+
+  it("keeps acknowledgements in an independent allowlisted JSON document", async () => {
+    const directory = await temporaryDirectory();
+    const records = createJsonRecoveryRecords({
+      directory,
+      id: () => "collection-write",
+    });
+    expect(
+      await records.commit({
+        acknowledgements: [acknowledgement],
+        type: "collections.acknowledgements.replace",
+      }),
+    ).toEqual({ ok: true, value: undefined });
+
+    const persisted = await readFile(
+      join(directory, "collection-acknowledgements.json"),
+      "utf8",
+    );
+    expect(JSON.parse(persisted)).toEqual({
+      acknowledgements: [acknowledgement],
+      kind: "collection-acknowledgements",
+      schemaVersion: 1,
+    });
+    expect(persisted).not.toMatch(
+      /inventory|command|plan|assessment|prepared/i,
+    );
+
+    await expect(
+      createJsonRecoveryRecords({
+        directory,
+        id: () => "collection-restart",
+      }).restore(),
+    ).resolves.toMatchObject({
+      collectionAcknowledgements: [acknowledgement],
+    });
+  });
+
+  it("quarantines corrupt acknowledgements before accepting a clean replacement", async () => {
+    const directory = await temporaryDirectory();
+    await writeFile(
+      join(directory, "collection-acknowledgements.json"),
+      "not json",
+    );
+    const records = createJsonRecoveryRecords({
+      directory,
+      id: () => "collection-corrupt",
+    });
+
+    await expect(records.restore()).resolves.toMatchObject({
+      collectionAcknowledgements: [],
+      failures: [
+        { code: "corrupt_store", store: "collectionAcknowledgements" },
+      ],
+    });
+    await expect(
+      readFile(
+        join(
+          directory,
+          "collection-acknowledgements.quarantine-collection-corrupt.json",
+        ),
+        "utf8",
+      ),
+    ).resolves.toBe("not json");
+    await expect(
+      records.commit({
+        acknowledgements: [acknowledgement],
+        type: "collections.acknowledgements.replace",
+      }),
+    ).resolves.toEqual({ ok: true, value: undefined });
+    await expect(
+      createJsonRecoveryRecords({
+        directory,
+        id: () => "collection-recovered",
+      }).restore(),
+    ).resolves.toMatchObject({
+      collectionAcknowledgements: [acknowledgement],
+      failures: [],
+    });
+  });
+});
