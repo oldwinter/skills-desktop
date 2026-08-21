@@ -16,7 +16,11 @@ export default defineConfig({
   },
   ssr: {
     external: ["electron"],
-    noExternal: ["zod", "@skills-desktop/skills-runtime"],
+    noExternal: [
+      "zod",
+      "@skills-desktop/remote-bootstrap",
+      "@skills-desktop/skills-runtime",
+    ],
     target: "node",
   },
 });

@@ -396,6 +396,11 @@ export function InventoryApp({ client }: { readonly client: WorkspaceBridge }) {
     if (result.ok) setActionError(undefined);
     else setActionError(result.error);
   };
+  const requestHostTrustReview = async () => {
+    const result = await client.requestHostTrustReview(snapshot.target.id);
+    if (result.ok) setActionError(undefined);
+    else setActionError(result.error);
+  };
 
   return (
     <div className="app-shell">
@@ -407,7 +412,11 @@ export function InventoryApp({ client }: { readonly client: WorkspaceBridge }) {
           <span>Skills Desktop</span>
         </div>
         <div className="header-target">
-          <HardDrive aria-hidden="true" size={15} />
+          {snapshot.target.kind === "ssh" ? (
+            <Server aria-hidden="true" size={15} />
+          ) : (
+            <HardDrive aria-hidden="true" size={15} />
+          )}
           <span>{snapshot.target.label}</span>
           <span aria-hidden="true">/</span>
           <code>{snapshot.target.workspaceLabel}</code>
@@ -533,7 +542,11 @@ export function InventoryApp({ client }: { readonly client: WorkspaceBridge }) {
                     aria-label="Target summary"
                     className="mobile-target-summary"
                   >
-                    <HardDrive aria-hidden="true" size={14} />
+                    {snapshot.target.kind === "ssh" ? (
+                      <Server aria-hidden="true" size={14} />
+                    ) : (
+                      <HardDrive aria-hidden="true" size={14} />
+                    )}
                     {snapshot.target.label} / {snapshot.target.workspaceLabel} /{" "}
                     {snapshot.target.harness}
                   </p>
@@ -567,6 +580,21 @@ export function InventoryApp({ client }: { readonly client: WorkspaceBridge }) {
               </section>
 
               <InventoryStatus snapshot={snapshot} />
+              {snapshot.inventory.lastError?.code === "host_trust_required" ||
+              snapshot.inventory.lastError?.code === "host_key_changed" ? (
+                <div className="state-banner state-banner--warning" role="status">
+                  <ShieldCheck aria-hidden="true" size={16} />
+                  <span>Host identity review required</span>
+                  <button
+                    className="text-button"
+                    onClick={() => void requestHostTrustReview()}
+                    type="button"
+                  >
+                    <ShieldCheck aria-hidden="true" size={15} />
+                    Review host identity
+                  </button>
+                </div>
+              ) : null}
               {snapshot.mutation.phase === "reconciliation-required" ? (
                 <div className="state-banner state-banner--danger" role="alert">
                   <AlertCircle aria-hidden="true" size={16} />

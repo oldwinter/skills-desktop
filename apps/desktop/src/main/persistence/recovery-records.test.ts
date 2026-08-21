@@ -704,6 +704,7 @@ describe("RecoveryRecords Target Definition contract", () => {
     expect(restored.targetDefinitions).toEqual([
       {
         connectionReference: "build-host",
+        executionBindingDigest: null,
         generation: 1,
         harness: "Codex",
         id: "00000000-0000-4000-8000-00000000000a",
@@ -718,7 +719,7 @@ describe("RecoveryRecords Target Definition contract", () => {
       ),
     ).toEqual({
       kind: "target-definitions",
-      schemaVersion: 2,
+      schemaVersion: 3,
       targets: restored.targetDefinitions,
     });
   });
@@ -752,14 +753,16 @@ describe("RecoveryRecords Target Definition contract", () => {
     expect(restored.targetDefinitions).toEqual(
       legacyDocument.targets.map((definition) => ({
         ...definition,
+        executionBindingDigest: null,
         generation: 1,
       })),
     );
     expect(JSON.parse(await readFile(targetPath, "utf8"))).toMatchObject({
       kind: "target-definitions",
-      schemaVersion: 2,
+      schemaVersion: 3,
       targets: legacyDocument.targets.map((definition) => ({
         ...definition,
+        executionBindingDigest: null,
         generation: 1,
       })),
     });
@@ -768,13 +771,53 @@ describe("RecoveryRecords Target Definition contract", () => {
     ).toEqual(legacyDocument);
   });
 
+  it("migrates v2 Target Definitions to a nullable effective-binding digest", async () => {
+    const directory = await temporaryDirectory();
+    const targetPath = join(directory, "target-definitions.json");
+    await mkdir(directory, { recursive: true });
+    const legacyDocument = {
+      kind: "target-definitions",
+      schemaVersion: 2,
+      targets: [
+        {
+          connectionReference: "build-host",
+          generation: 4,
+          harness: "Codex",
+          id: "00000000-0000-4000-8000-000000000018",
+          kind: "ssh",
+          label: "Build host",
+          workspace: "/srv/skills",
+        },
+      ],
+    };
+    await writeFile(targetPath, JSON.stringify(legacyDocument), "utf8");
+
+    const restored = await createJsonRecoveryRecords({
+      directory,
+      id: () => "target-v2-migration",
+      platform: "linux",
+    }).restore();
+
+    expect(restored.targetDefinitions).toEqual([
+      { ...legacyDocument.targets[0], executionBindingDigest: null },
+    ]);
+    expect(JSON.parse(await readFile(targetPath, "utf8"))).toEqual({
+      kind: "target-definitions",
+      schemaVersion: 3,
+      targets: restored.targetDefinitions,
+    });
+    expect(JSON.parse(await readFile(`${targetPath}.v2.backup`, "utf8"))).toEqual(
+      legacyDocument,
+    );
+  });
+
   it("refuses to overwrite Target Definitions from a newer schema", async () => {
     const directory = await temporaryDirectory();
     const targetPath = join(directory, "target-definitions.json");
     await mkdir(directory, { recursive: true });
     const newerDocument = {
       kind: "target-definitions",
-      schemaVersion: 3,
+      schemaVersion: 4,
       targets: [],
     };
     await writeFile(targetPath, JSON.stringify(newerDocument), "utf8");

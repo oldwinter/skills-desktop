@@ -74,6 +74,11 @@ const bridge: WorkspaceBridge = Object.freeze({
       await ipcRenderer.invoke("workspace:review:cancel-request", operationId),
     );
   },
+  async requestHostTrustReview(targetId: string) {
+    return workspaceRequestResultSchema.parse(
+      await ipcRenderer.invoke("workspace:host-trust:review", targetId),
+    );
+  },
   async requestReview(preparedMutationId: string) {
     return workspaceRequestResultSchema.parse(
       await ipcRenderer.invoke("workspace:review:request", preparedMutationId),

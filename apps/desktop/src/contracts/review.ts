@@ -18,6 +18,18 @@ const reviewProjectionSchema = z
   })
   .strict();
 
+const hostTrustReviewProjectionSchema = z
+  .object({
+    algorithm: z.string().min(1).max(128),
+    expiresAt: z.string().datetime({ offset: true }),
+    fingerprint: z.string().min(1).max(256),
+    identity: z.string().min(1).max(2_048),
+    reviewId: z.string().min(1).max(256),
+    target: targetDefinitionSchema,
+    trustAction: z.enum(["first-use", "rotation"]),
+  })
+  .strict();
+
 export const reviewSnapshotSchema = z
   .discriminatedUnion("status", [
     z
@@ -28,7 +40,10 @@ export const reviewSnapshotSchema = z
       .strict(),
     z
       .object({
-        projection: reviewProjectionSchema,
+        projection: z.union([
+          reviewProjectionSchema,
+          hostTrustReviewProjectionSchema,
+        ]),
         schemaVersion: z.literal(1),
         status: z.literal("pending"),
       })

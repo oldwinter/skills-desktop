@@ -30,6 +30,7 @@ import type {
   TargetDefinition,
   TargetSession,
 } from "../targets/skills-targets.js";
+import type { HostTrustChallenge } from "../ssh/openssh-target.js";
 import { compareTargetInventories } from "./comparison.js";
 
 const MAX_RETAINED_REVIEWS = 128;
@@ -110,6 +111,13 @@ interface TrustedReview {
   readonly id: string;
   readonly prepared: PreparedMutation;
   readonly purpose: "cancel" | "execute";
+}
+
+interface HostTrustReview {
+  readonly challenge: HostTrustChallenge;
+  decision: "approve" | "reject" | undefined;
+  readonly id: string;
+  readonly targetId: string;
 }
 
 interface ActiveMutation {
@@ -210,6 +218,7 @@ function projectTarget(target: TargetDefinition): PublicTargetDefinition {
 function durableTarget(target: TargetDefinition): DurableTargetDefinition {
   return {
     connectionReference: target.connectionReference ?? null,
+    executionBindingDigest: target.executionBindingDigest ?? null,
     generation: target.generation,
     harness: target.harness,
     id: target.id,
@@ -222,6 +231,7 @@ function durableTarget(target: TargetDefinition): DurableTargetDefinition {
 function targetFromDurable(target: DurableTargetDefinition): TargetDefinition {
   return {
     ...target,
+    executionBindingDigest: target.executionBindingDigest ?? null,
     workspaceLabel:
       target.kind === "ssh"
         ? posix.basename(target.workspace) || target.workspace
@@ -284,6 +294,7 @@ export function createDesktopCapabilities(
   const preparedMutations = new Map<string, PreparedMutation>();
   const preparedDependencies = new Map<string, readonly string[]>();
   const reviews = new Map<string, TrustedReview>();
+  const hostTrustReviews = new Map<string, HostTrustReview>();
   let inventoryState: PublicInventoryState = emptyInventoryState();
   let mutationState: PublicMutationState = emptyMutationState();
   const inventoryStates = new Map<string, PublicInventoryState>();
@@ -398,6 +409,29 @@ export function createDesktopCapabilities(
       reviews.delete(reviewId);
       if (reviews.size <= MAX_RETAINED_REVIEWS) return;
     }
+  };
+
+  const pruneHostTrustReviews = () => {
+    for (const [reviewId, review] of hostTrustReviews) {
+      if (hostTrustReviews.size < MAX_RETAINED_REVIEWS) return;
+      if (review.decision === undefined) continue;
+      hostTrustReviews.delete(reviewId);
+    }
+    while (hostTrustReviews.size >= MAX_RETAINED_REVIEWS) {
+      const oldest = hostTrustReviews.entries().next().value as
+        | [string, HostTrustReview]
+        | undefined;
+      if (oldest === undefined) return;
+      oldest[1].decision ??= "reject";
+      hostTrustReviews.delete(oldest[0]);
+    }
+  };
+
+  const rejectPendingHostTrustReviews = () => {
+    for (const review of hostTrustReviews.values()) {
+      review.decision ??= "reject";
+    }
+    pruneHostTrustReviews();
   };
 
   const rejectPendingReviews = (
@@ -657,8 +691,52 @@ export function createDesktopCapabilities(
     operationId: string,
     controller: AbortController,
   ): Promise<Result<RequestValue, RequestError>> => {
-    const opened = await options.skillsTargets.open(target.id);
+    let opened = await options.skillsTargets.open(target.id);
     if (!opened.ok) return finishWithError(opened.error);
+
+    if ("status" in opened.value && opened.value.status === "binding-changed") {
+      const proposal = opened.value.proposal;
+      const committed = await options.recoveryRecords.commit({
+        targets: proposal.definitions.map(durableTarget),
+        type: "targets.replace",
+      });
+      if (!committed.ok) return finishWithError(committed.error);
+      options.skillsTargets.replaceDefinitions(proposal.definitions);
+      target = proposal.target;
+      freshTargetSession = undefined;
+      freshTargetSessions.delete(target.id);
+      invalidatePreparedForTarget(target.id);
+      inventoryState = {
+        ...inventoryState,
+        freshness: staleAfterFailure(inventoryState.freshness),
+        lastError: targetGenerationStaleError(),
+      };
+      mutationState = emptyMutationState();
+      storeActiveTargetState();
+      opened = await options.skillsTargets.open(target.id);
+      if (!opened.ok) return finishWithError(opened.error);
+    }
+    if ("status" in opened.value) {
+      const trustChanged =
+        opened.value.status === "trust-required" &&
+        opened.value.challenge.kind === "rotation";
+      return finishWithError(
+        publicError(
+          opened.value.status === "trust-required"
+            ? trustChanged
+              ? "host_key_changed"
+              : "host_trust_required"
+            : "target_unavailable",
+          opened.value.status === "trust-required"
+            ? trustChanged
+              ? "The SSH host key changed and requires explicit rotation review."
+              : "This SSH Target requires explicit host-key review."
+            : "The Target binding changed during opening.",
+          "trust",
+          false,
+        ),
+      );
+    }
 
     const observed = await opened.value.process.observeInventory({
       signal: controller.signal,
@@ -705,6 +783,38 @@ export function createDesktopCapabilities(
   };
 
   const reviewSnapshotFor = (endpoint: EndpointState): ReviewSnapshot => {
+    const hostTrustReview =
+      endpoint.reviewId === undefined
+        ? undefined
+        : hostTrustReviews.get(endpoint.reviewId);
+    if (hostTrustReview !== undefined) {
+      if (hostTrustReview.decision !== undefined) {
+        return {
+          decision: hostTrustReview.decision,
+          schemaVersion: 1,
+          status: "settled",
+        };
+      }
+      const reviewedTarget = targetDefinitions().find(
+        ({ id }) => id === hostTrustReview.targetId,
+      );
+      if (reviewedTarget === undefined) {
+        return { schemaVersion: 1, status: "unavailable" };
+      }
+      return {
+        projection: {
+          algorithm: hostTrustReview.challenge.algorithm,
+          expiresAt: hostTrustReview.challenge.expiresAt,
+          fingerprint: hostTrustReview.challenge.fingerprint,
+          identity: hostTrustReview.challenge.identity,
+          reviewId: hostTrustReview.id,
+          target: projectTarget(reviewedTarget),
+          trustAction: hostTrustReview.challenge.kind,
+        },
+        schemaVersion: 1,
+        status: "pending",
+      };
+    }
     const review =
       endpoint.reviewId === undefined
         ? undefined
@@ -934,6 +1044,16 @@ export function createDesktopCapabilities(
   ): Promise<Result<RequestValue, RequestError>> => {
     const opened = await options.skillsTargets.open(target.id);
     if (!opened.ok) return requestFailure(opened.error);
+    if ("status" in opened.value) {
+      return requestFailure(
+        publicError(
+          "target_unavailable",
+          "The Target is not ready for reconciliation.",
+          "open",
+          true,
+        ),
+      );
+    }
     const observed = await opened.value.process.observeInventory({
       signal: new AbortController().signal,
     });
@@ -1038,6 +1158,123 @@ export function createDesktopCapabilities(
 
           if (endpointState.role === "review") {
             const parsedDecision = reviewDecisionRequestSchema.safeParse(input);
+            const hostTrustReview =
+              endpointState.reviewId === undefined
+                ? undefined
+                : hostTrustReviews.get(endpointState.reviewId);
+            if (hostTrustReview !== undefined) {
+              if (
+                !parsedDecision.success ||
+                hostTrustReview.decision !== undefined
+              ) {
+                return requestFailure(
+                  publicError(
+                    "unauthorized",
+                    "This review window cannot make that request.",
+                    "authorize",
+                    false,
+                  ),
+                );
+              }
+              if (parsedDecision.data.decision === "reject") {
+                hostTrustReview.decision = "reject";
+                return {
+                  ok: true,
+                  value: { operationId: hostTrustReview.id },
+                };
+              }
+              if (
+                targetDefinitionsChanging ||
+                activePreparation !== undefined ||
+                activeMutation !== undefined ||
+                activeObservation !== undefined
+              ) {
+                return requestFailure(
+                  publicError(
+                    "mutation_conflict",
+                    "Another operation is active for a Target.",
+                    "coordinate",
+                    true,
+                  ),
+                );
+              }
+              const reviewedTarget = targetDefinitions().find(
+                ({ id }) => id === hostTrustReview.targetId,
+              );
+              if (
+                reviewedTarget === undefined ||
+                reviewedTarget.generation !==
+                  hostTrustReview.challenge.targetGeneration ||
+                clock().getTime() >=
+                  Date.parse(hostTrustReview.challenge.expiresAt)
+              ) {
+                return requestFailure(
+                  publicError(
+                    "host_trust_invalid",
+                    "The host-trust review is unavailable or expired.",
+                    "trust",
+                    false,
+                  ),
+                );
+              }
+              targetDefinitionsChanging = true;
+              try {
+                const proposed = options.skillsTargets.proposeHostTrust(
+                  reviewedTarget.id,
+                  hostTrustReview.challenge.id,
+                );
+                if (!proposed.ok) return requestFailure(proposed.error);
+                const committed = await options.recoveryRecords.commit({
+                  targets: proposed.value.definitions.map(durableTarget),
+                  type: "targets.replace",
+                });
+                if (!committed.ok) return requestFailure(committed.error);
+                const confirmed = await options.skillsTargets.commitHostTrust(
+                  reviewedTarget.id,
+                  hostTrustReview.challenge.id,
+                  reviewedTarget.generation,
+                );
+                options.skillsTargets.replaceDefinitions(
+                  proposed.value.definitions,
+                );
+                const replacement = proposed.value.target;
+                freshTargetSessions.delete(replacement.id);
+                invalidatePreparedForTarget(replacement.id);
+                const priorInventory =
+                  replacement.id === target.id
+                    ? inventoryState
+                    : (inventoryStates.get(replacement.id) ??
+                      emptyInventoryState());
+                const nextInventory: PublicInventoryState = {
+                  ...priorInventory,
+                  activeOperationId: null,
+                  freshness: staleAfterFailure(priorInventory.freshness),
+                  lastError: targetGenerationStaleError(),
+                  phase: "ready",
+                };
+                inventoryStates.set(replacement.id, nextInventory);
+                mutationStates.set(replacement.id, emptyMutationState());
+                if (replacement.id === target.id) {
+                  target = replacement;
+                  freshTargetSession = undefined;
+                  inventoryState = nextInventory;
+                  mutationState = emptyMutationState();
+                }
+                if (!confirmed.ok) {
+                  hostTrustReview.decision = "reject";
+                  publish({ ...inventoryState });
+                  return requestFailure(confirmed.error);
+                }
+                hostTrustReview.decision = "approve";
+                publish({ ...inventoryState });
+                return {
+                  ok: true,
+                  value: { operationId: hostTrustReview.id },
+                };
+              } finally {
+                targetDefinitionsChanging = false;
+              }
+            }
             const review =
               endpointState.reviewId === undefined
                 ? undefined
@@ -1679,6 +1916,50 @@ export function createDesktopCapabilities(
             ]);
           }
 
+          if (parsed.data.type === "host-trust.review") {
+            const reviewedTargetId = parsed.data.targetId;
+            const reviewedTarget = targetDefinitions().find(
+              ({ id }) => id === reviewedTargetId,
+            );
+            const challenge = options.skillsTargets.pendingHostTrust(
+              reviewedTargetId,
+            );
+            if (
+              reviewedTarget === undefined ||
+              reviewedTarget.kind !== "ssh" ||
+              challenge === undefined ||
+              challenge.targetGeneration !== reviewedTarget.generation ||
+              clock().getTime() >= Date.parse(challenge.expiresAt)
+            ) {
+              return requestFailure(
+                publicError(
+                  "host_trust_invalid",
+                  "No current SSH host key is available for review.",
+                  "trust",
+                  false,
+                ),
+              );
+            }
+            for (const review of hostTrustReviews.values()) {
+              if (
+                review.targetId === reviewedTarget.id &&
+                review.decision === undefined
+              ) {
+                review.decision = "reject";
+              }
+            }
+            pruneHostTrustReviews();
+            const reviewId = options.id();
+            hostTrustReviews.set(reviewId, {
+              challenge,
+              decision: undefined,
+              id: reviewId,
+              targetId: reviewedTarget.id,
+            });
+            options.onReviewRequested?.(reviewId);
+            return { ok: true, value: { operationId: reviewId } };
+          }
+
           if (parsed.data.type === "inventory.cancel") {
             if (activeObservation?.id === parsed.data.operationId) {
               activeObservation.controller.abort();
@@ -1959,6 +2240,15 @@ export function createDesktopCapabilities(
             endpointState.role === "review" &&
             endpointState.reviewId !== undefined
           ) {
+            const hostTrustReview = hostTrustReviews.get(
+              endpointState.reviewId,
+            );
+            if (
+              hostTrustReview !== undefined &&
+              hostTrustReview.decision === undefined
+            ) {
+              hostTrustReview.decision = "reject";
+            }
             const review = reviews.get(endpointState.reviewId);
             if (review !== undefined && review.decision === undefined) {
               review.decision = "reject";
@@ -2178,6 +2468,7 @@ export function createDesktopCapabilities(
       observation?.controller.abort();
       if (preparation !== undefined) preparation.invalidated = true;
       rejectPendingReviews();
+      rejectPendingHostTrustReviews();
       shutdownPromise = (async () => {
         const operations = [
           observation?.promise,

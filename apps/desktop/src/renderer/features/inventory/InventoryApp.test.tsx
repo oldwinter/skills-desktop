@@ -94,6 +94,9 @@ function clientFor(value: WorkspaceSnapshot): WorkspaceBridge {
     async requestCancellationReview() {
       return { ok: true, value: { operationId: "cancel-review-1" } };
     },
+    async requestHostTrustReview() {
+      return { ok: true, value: { operationId: "host-trust-review-1" } };
+    },
     async requestReview() {
       return { ok: true, value: { operationId: "review-1" } };
     },
@@ -734,5 +737,56 @@ describe("Local Target Inventory shell", () => {
       }),
     );
     expect(await screen.findByText("Target created")).toBeInTheDocument();
+  });
+
+  it("requests isolated host trust review from a trust-required SSH state", async () => {
+    const requestHostTrustReview = vi.fn(async () => ({
+      ok: true as const,
+      value: { operationId: "host-trust-review-1" },
+    }));
+    const sshSnapshot: WorkspaceSnapshot = {
+      ...snapshot,
+      inventory: {
+        ...snapshot.inventory,
+        entries: [],
+        freshness: "none",
+        lastError: {
+          code: "host_trust_required",
+          effects: "none",
+          message: "This SSH Target requires explicit host-key review.",
+          phase: "trust",
+          retryable: false,
+        },
+        phase: "error",
+      },
+      target: {
+        connectionReference: "build-host",
+        generation: 2,
+        harness: "Codex",
+        id: "00000000-0000-4000-8000-000000000018",
+        kind: "ssh",
+        label: "Build host",
+        workspace: "/srv/skills",
+        workspaceLabel: "skills",
+      },
+    };
+    render(
+      <InventoryApp
+        client={{
+          ...clientFor(sshSnapshot),
+          requestHostTrustReview,
+        }}
+      />,
+    );
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Review host identity" }),
+    );
+
+    await waitFor(() =>
+      expect(requestHostTrustReview).toHaveBeenCalledWith(
+        "00000000-0000-4000-8000-000000000018",
+      ),
+    );
   });
 });

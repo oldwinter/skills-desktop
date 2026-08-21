@@ -333,6 +333,7 @@ try {
       "reconcileMutation",
       "refreshInventory",
       "requestCancellationReview",
+      "requestHostTrustReview",
       "requestReview",
       "subscribe",
       "updateTarget",
@@ -673,8 +674,11 @@ try {
     ),
   );
   if (
-    targetDocument.schemaVersion !== 2 ||
-    targetDocument.targets.length !== 2
+    targetDocument.schemaVersion !== 3 ||
+    targetDocument.targets.length !== 2 ||
+    targetDocument.targets.some(
+      ({ executionBindingDigest }) => executionBindingDigest !== null,
+    )
   ) {
     throw new Error("Packaged Target Definitions were not durably restored.");
   }

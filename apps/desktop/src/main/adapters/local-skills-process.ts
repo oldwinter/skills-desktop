@@ -59,7 +59,15 @@ export class ProcessBoundaryError extends Error {
 export type ObservationError =
   | InventoryParseError
   | PublicError<
-      "cancelled" | "cli_incompatible" | "mutation_conflict" | "process_failed"
+      | "cancelled"
+      | "cli_incompatible"
+      | "mutation_conflict"
+      | "process_failed"
+      | "remote_protocol_mismatch"
+      | "remote_protocol_violation"
+      | "remote_runtime_unavailable"
+      | "transport_failed"
+      | "transport_lost"
     >;
 
 export interface CommandPlan {

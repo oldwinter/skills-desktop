@@ -23,6 +23,7 @@ const CHANNELS = {
   compare: "workspace:comparison:open",
   comparisonPrepare: "workspace:comparison:prepare",
   event: "workspace:event",
+  hostTrustReview: "workspace:host-trust:review",
   refresh: "workspace:inventory:refresh",
   mutationPrepare: "workspace:mutation:prepare",
   mutationReconcile: "workspace:mutation:reconcile",
@@ -303,6 +304,24 @@ export function registerDesktopIpc(input: {
     },
   );
   input.ipcMain.handle(
+    CHANNELS.hostTrustReview,
+    async (event, targetId: unknown) => {
+      const endpoint = authorized(event, "workspace");
+      if (endpoint === undefined) return authorizationFailure();
+      try {
+        return workspaceRequestResultSchema.parse(
+          await endpoint.session.request({
+            targetId,
+            type: "host-trust.review",
+            version: 1,
+          }),
+        );
+      } catch {
+        return internalFailure();
+      }
+    },
+  );
+  input.ipcMain.handle(
     CHANNELS.requestReview,
     async (event, preparedMutationId: unknown) => {
       const endpoint = authorized(event, "workspace");
@@ -409,6 +428,7 @@ export function registerDesktopIpc(input: {
     dispose() {
       for (const webContentsId of endpoints.keys()) detach(webContentsId);
       input.ipcMain.removeHandler(CHANNELS.snapshot);
+      input.ipcMain.removeHandler(CHANNELS.hostTrustReview);
       input.ipcMain.removeHandler(CHANNELS.refresh);
       input.ipcMain.removeHandler(CHANNELS.cancel);
       input.ipcMain.removeHandler(CHANNELS.compare);

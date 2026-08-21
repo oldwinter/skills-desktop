@@ -82,4 +82,63 @@ describe("Trusted Review surface", () => {
       "Mutation started",
     );
   });
+
+  it("shows a changed host key assignment and approves without receiving key authority", async () => {
+    const approve = vi.fn(async () => ({
+      ok: true as const,
+      value: { operationId: "trust-review-1" },
+    }));
+    const client: ReviewBridge = {
+      approve,
+      async getReview() {
+        return {
+          ok: true as const,
+          value: {
+            projection: {
+              algorithm: "ssh-ed25519",
+              expiresAt: "2026-08-22T10:05:00.000Z",
+              fingerprint: "SHA256:reviewed-fingerprint",
+              identity: "deploy@resolved.internal:2222",
+              reviewId: "trust-review-1",
+              target: {
+                connectionReference: "build-host",
+                generation: 4,
+                harness: "Codex",
+                id: "00000000-0000-4000-8000-000000000018",
+                kind: "ssh" as const,
+                label: "Build host",
+                workspace: "/srv/skills",
+                workspaceLabel: "skills",
+              },
+              trustAction: "rotation" as const,
+            },
+            schemaVersion: 1 as const,
+            status: "pending" as const,
+          },
+        };
+      },
+      async reject() {
+        return {
+          ok: true as const,
+          value: { operationId: "trust-review-1" },
+        };
+      },
+    };
+    render(<ReviewSurface client={client} />);
+
+    expect(
+      await screen.findByRole("heading", { name: "Review changed host key" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("deploy@resolved.internal:2222")).toBeInTheDocument();
+    expect(screen.getByText("ssh-ed25519")).toBeInTheDocument();
+    expect(screen.getByText("SHA256:reviewed-fingerprint")).toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Approve host key rotation" }),
+    );
+    await waitFor(() => expect(approve).toHaveBeenCalledWith());
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "Host trust confirmed",
+    );
+  });
 });

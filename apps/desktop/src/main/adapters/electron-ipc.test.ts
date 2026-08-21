@@ -115,6 +115,17 @@ describe("Electron IPC sender authorization", () => {
       version: 1,
     });
     await expect(
+      handlers.get("workspace:host-trust:review")!(
+        authorizedEvent as never,
+        "00000000-0000-4000-8000-000000000018",
+      ),
+    ).resolves.toMatchObject({ error: { code: "invalid_request" }, ok: false });
+    expect(session.request).toHaveBeenLastCalledWith({
+      targetId: "00000000-0000-4000-8000-000000000018",
+      type: "host-trust.review",
+      version: 1,
+    });
+    await expect(
       handlers.get("workspace:target:create")!(authorizedEvent as never, {
         connectionReference: "build-host",
         harness: "Codex",

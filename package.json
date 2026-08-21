@@ -22,6 +22,7 @@
     "check:imports": "node scripts/check-imports.mjs",
     "verify": "npm run typecheck && npm run check:imports && npm test && npm run build",
     "smoke:cli": "vitest run --config vitest.smoke.config.ts tests/real-cli.smoke.test.ts",
+    "smoke:ssh": "vitest run --config vitest.ssh-smoke.config.ts",
     "package:linux": "npm run build && npm exec --workspace @skills-desktop/desktop electron-forge package -- --platform=linux --arch=x64",
     "smoke:packaged": "npm run package:linux && xvfb-run -a node tests/packaged-electron.smoke.mjs"
   },

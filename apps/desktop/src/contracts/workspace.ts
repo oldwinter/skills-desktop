@@ -7,6 +7,9 @@ export const rendererErrorCodeSchema = z.enum([
   "cli_incompatible",
   "conflicting_inventory_entry",
   "duplicate_inventory_entry",
+  "host_key_changed",
+  "host_trust_invalid",
+  "host_trust_required",
   "internal_error",
   "confirmation_expired",
   "confirmation_invalid",
@@ -18,13 +21,20 @@ export const rendererErrorCodeSchema = z.enum([
   "mutation_ineligible",
   "persist_failed",
   "process_failed",
+  "remote_protocol_mismatch",
+  "remote_protocol_violation",
+  "remote_runtime_unavailable",
   "reconciliation_required",
   "reconciliation_wait",
   "review_expired",
   "review_invalid",
   "stale_inventory",
+  "ssh_config_invalid",
   "target_not_found",
   "target_unavailable",
+  "transport_failed",
+  "transport_lost",
+  "transport_unavailable",
   "unauthorized",
   "unsupported_schema",
 ]);
@@ -326,6 +336,14 @@ export const requestReviewSchema = z
   })
   .strict();
 
+export const requestHostTrustReviewSchema = z
+  .object({
+    targetId: targetIdSchema,
+    type: z.literal("host-trust.review"),
+    version: z.literal(1),
+  })
+  .strict();
+
 export const requestCancellationReviewSchema = z
   .object({
     operationId: z.string().min(1).max(256),
@@ -392,6 +410,7 @@ export const workspaceRequestSchema = z.discriminatedUnion("type", [
   cancelRequestSchema,
   prepareMutationRequestSchema,
   requestReviewSchema,
+  requestHostTrustReviewSchema,
   requestCancellationReviewSchema,
   reconcileMutationRequestSchema,
   createTargetRequestSchema,
@@ -449,6 +468,7 @@ export interface WorkspaceBridge {
   ): Promise<WorkspaceRequestResult>;
   reconcileMutation(targetId: string): Promise<WorkspaceRequestResult>;
   refreshInventory(targetId: string): Promise<WorkspaceRequestResult>;
+  requestHostTrustReview(targetId: string): Promise<WorkspaceRequestResult>;
   requestCancellationReview(
     operationId: string,
   ): Promise<WorkspaceRequestResult>;

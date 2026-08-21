@@ -17,7 +17,7 @@ export function ReviewSurface({ client }: { readonly client: ReviewBridge }) {
   const [pendingDecision, setPendingDecision] = useState<
     "approve" | "reject"
   >();
-  const [started, setStarted] = useState(false);
+  const [settledMessage, setSettledMessage] = useState("Review rejected");
 
   useEffect(() => {
     void client.getReview().then((result) => {
@@ -36,7 +36,14 @@ export function ReviewSurface({ client }: { readonly client: ReviewBridge }) {
       setError(result.error);
       return;
     }
-    if (decision === "approve") setStarted(true);
+    if (decision === "approve") {
+      setSettledMessage(
+        snapshot?.status === "pending" &&
+          "fingerprint" in snapshot.projection
+          ? "Host trust confirmed"
+          : "Mutation started",
+      );
+    } else setSettledMessage("Review rejected");
     setSnapshot({ decision, schemaVersion: 1, status: "settled" });
   };
 
@@ -75,7 +82,70 @@ export function ReviewSurface({ client }: { readonly client: ReviewBridge }) {
       <main className="review-surface">
         <div className="review-settled" role="status">
           <Check aria-hidden="true" size={20} />
-          {started ? "Mutation started" : "Review rejected"}
+          {settledMessage}
+        </div>
+      </main>
+    );
+  }
+
+  if ("fingerprint" in snapshot.projection) {
+    const { algorithm, fingerprint, identity, target, trustAction } =
+      snapshot.projection;
+    return (
+      <main className="review-surface">
+        <header className="review-heading">
+          <span className="review-mark">
+            <ShieldCheck aria-hidden="true" size={20} />
+          </span>
+          <div>
+            <p>Trusted Review</p>
+            <h1>
+              Review {trustAction === "rotation" ? "changed host key" : "host key"}
+            </h1>
+          </div>
+        </header>
+        <dl className="review-facts">
+          <div>
+            <dt>Target</dt>
+            <dd>{target.label}</dd>
+          </div>
+          <div>
+            <dt>Effective identity</dt>
+            <dd>{identity}</dd>
+          </div>
+          <div>
+            <dt>Algorithm</dt>
+            <dd>{algorithm}</dd>
+          </div>
+          <div className="review-facts__wide">
+            <dt>SHA-256 fingerprint</dt>
+            <dd>{fingerprint}</dd>
+          </div>
+        </dl>
+        <div className="review-actions">
+          <button
+            className="review-button"
+            disabled={pendingDecision !== undefined}
+            onClick={() => void decide("reject")}
+            type="button"
+          >
+            <X aria-hidden="true" size={16} />
+            Reject
+          </button>
+          <button
+            aria-label={
+              trustAction === "rotation"
+                ? "Approve host key rotation"
+                : "Trust host key"
+            }
+            className="review-button review-button--primary"
+            disabled={pendingDecision !== undefined}
+            onClick={() => void decide("approve")}
+            type="button"
+          >
+            <Check aria-hidden="true" size={16} />
+            {pendingDecision === "approve" ? "Confirming" : "Approve"}
+          </button>
         </div>
       </main>
     );

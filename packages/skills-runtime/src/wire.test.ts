@@ -1,0 +1,81 @@
+import { describe, expect, it } from "vitest";
+
+import {
+  decodeWireFrames,
+  encodeWireFrame,
+  WIRE_PROTOCOL_VERSION,
+} from "./wire.js";
+
+describe("Remote Bootstrap Wire Protocol", () => {
+  it("round-trips one closed observation request through a length-prefixed frame", () => {
+    const request = {
+      harness: "Codex",
+      operation: "observe" as const,
+      protocolVersion: WIRE_PROTOCOL_VERSION,
+      requestId: "observe-1",
+      type: "request" as const,
+      workspace: "/srv/workspace; printf unsafe",
+    };
+
+    expect(decodeWireFrames(encodeWireFrame(request))).toEqual({
+      ok: true,
+      value: [request],
+    });
+  });
+
+  it.each([
+    {
+      bytes: new Uint8Array([0, 0, 0, 10, 123]),
+      code: "incomplete_frame",
+      name: "truncated payload",
+    },
+    {
+      bytes: new Uint8Array([0, 0, 0, 1, 0xff]),
+      code: "invalid_frame",
+      name: "invalid UTF-8",
+    },
+    {
+      bytes: new Uint8Array([0, 0, 0, 2, 123, 125]),
+      code: "invalid_frame",
+      name: "unknown frame shape",
+    },
+    {
+      bytes: new Uint8Array([0x7f, 0xff, 0xff, 0xff]),
+      code: "frame_too_large",
+      name: "oversized length",
+    },
+  ])("rejects $name", ({ bytes, code }) => {
+    expect(decodeWireFrames(bytes)).toMatchObject({
+      error: { code },
+      ok: false,
+    });
+  });
+
+  it("rejects protocol contamination between otherwise valid frames", () => {
+    const hello = encodeWireFrame({
+      bootstrapDigest: "a".repeat(64),
+      protocolVersion: WIRE_PROTOCOL_VERSION,
+      type: "hello",
+    });
+    const contaminated = new Uint8Array(hello.length + 1);
+    contaminated.set(hello);
+    contaminated[hello.length] = 0x0a;
+
+    expect(decodeWireFrames(contaminated)).toMatchObject({
+      error: { code: "incomplete_frame" },
+      ok: false,
+    });
+  });
+
+  it("refuses to encode an unbounded structured error", () => {
+    expect(() =>
+      encodeWireFrame({
+        code: "remote_operation_failed",
+        message: "x".repeat(513),
+        protocolVersion: WIRE_PROTOCOL_VERSION,
+        requestId: "observe-1",
+        type: "failure",
+      }),
+    ).toThrow();
+  });
+});

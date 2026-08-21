@@ -5,6 +5,7 @@ import type { Inventory } from "@skills-desktop/skills-runtime";
 import { createMemoryRecoveryRecords } from "../persistence/recovery-records.js";
 import type { SkillsProcess } from "../adapters/local-skills-process.js";
 import { createSkillsTargetsCatalog } from "../targets/local-skills-targets.js";
+import type { OpenSshTargetAccess } from "../ssh/openssh-target.js";
 import {
   createDesktopCapabilities,
   type DesktopEvent,
@@ -2283,6 +2284,205 @@ describe("DesktopCapabilities inventory role-session contract", () => {
       mutation: {
         commandPlan: null,
         phase: "idle",
+      },
+    });
+  });
+});
+
+describe("DesktopCapabilities SSH host-trust role-session contract", () => {
+  it("requires isolated reviewed trust before publishing a remote Inventory", async () => {
+    const sshTarget: TargetDefinition = {
+      connectionReference: "build-host",
+      executionBindingDigest: null,
+      generation: 1,
+      harness: "Codex",
+      id: "00000000-0000-4000-8000-000000000018",
+      kind: "ssh",
+      label: "Build host",
+      workspace: "/srv/skills",
+      workspaceLabel: "skills",
+    };
+    let trusted = false;
+    let durableGeneration = 0;
+    const access: OpenSshTargetAccess = {
+      async confirm(challengeId, reviewedTarget) {
+        expect(challengeId).toBe("challenge-1");
+        expect(reviewedTarget.generation).toBe(2);
+        expect(durableGeneration).toBe(3);
+        trusted = true;
+        return {
+          ok: true,
+          value: { bindingDigest: "a".repeat(64), kind: "first-use" },
+        };
+      },
+      async inspect(reviewedTarget) {
+        if (trusted) {
+          return {
+            ok: true,
+            value: {
+              binding: {
+                bindingDigest: "a".repeat(64),
+                connectionReference: "build-host",
+                hostKey: { algorithm: "ssh-ed25519", key: "AQIDBA==" },
+                hostKeyIdentity: "[resolved.internal]:2222",
+                hostname: "resolved.internal",
+                port: 2222,
+                trustStorePath: "/application/known_hosts",
+                user: "deploy",
+                wireDialect: {
+                  bootstrapDigest: "b".repeat(64),
+                  protocolVersion: 1,
+                },
+              },
+              bindingDigest: "a".repeat(64),
+              status: "ready",
+            },
+          };
+        }
+        return {
+          ok: true,
+          value: {
+            bindingDigest: "a".repeat(64),
+            challenge: {
+              algorithm: "ssh-ed25519",
+              expiresAt: "2026-08-22T10:05:00.000Z",
+              fingerprint: "SHA256:reviewed-fingerprint",
+              id: "challenge-1",
+              identity: "deploy@resolved.internal:2222",
+              kind: "first-use",
+              targetGeneration: reviewedTarget.generation,
+              targetId: reviewedTarget.id,
+            },
+            status: "trust-required",
+          },
+        };
+      },
+      pendingChallenge(reviewedTargetId) {
+        return trusted || reviewedTargetId !== sshTarget.id
+          ? undefined
+          : {
+              algorithm: "ssh-ed25519",
+              expiresAt: "2026-08-22T10:05:00.000Z",
+              fingerprint: "SHA256:reviewed-fingerprint",
+              id: "challenge-1",
+              identity: "deploy@resolved.internal:2222",
+              kind: "first-use",
+              targetGeneration: 2,
+              targetId: sshTarget.id,
+            };
+      },
+    };
+    const process: SkillsProcess = {
+      ...mutationNotExercised,
+      async observeInventory() {
+        return { ok: true, value: freshInventory };
+      },
+    };
+    const targets = createSkillsTargetsCatalog({
+      id: () => "00000000-0000-4000-8000-000000000099",
+      initialTarget: sshTarget,
+      processFor: () => process,
+      sshAccess: access,
+    });
+    const presented: string[] = [];
+    let sequence = 0;
+    const memoryRecords = createMemoryRecoveryRecords();
+    const capabilities = createDesktopCapabilities({
+      clock: () => new Date("2026-08-22T10:00:00.000Z"),
+      id: () => `operation-${++sequence}`,
+      onReviewRequested: (reviewId) => presented.push(reviewId),
+      recoveryRecords: {
+        async commit(record) {
+          const committed = await memoryRecords.commit(record);
+          if (committed.ok && record.type === "targets.replace") {
+            durableGeneration = Math.max(
+              ...record.targets.map(({ generation }) => generation),
+            );
+          }
+          return committed;
+        },
+        restore: () => memoryRecords.restore(),
+      },
+      skillsTargets: targets,
+    });
+    await capabilities.initialize();
+    const workspace = capabilities.attach(
+      {
+        endpointId: "workspace-ssh-trust",
+        role: "workspace",
+        sessionEpoch: "workspace-epoch",
+      },
+      () => undefined,
+    );
+
+    await expect(
+      workspace.request({
+        targetId: sshTarget.id,
+        type: "inventory.refresh",
+        version: 1,
+      }),
+    ).resolves.toMatchObject({
+      error: { code: "host_trust_required" },
+      ok: false,
+    });
+    await expect(workspace.snapshot()).resolves.toMatchObject({
+      inventory: {
+        freshness: "none",
+        lastError: { code: "host_trust_required" },
+        phase: "error",
+      },
+      target: { generation: 2 },
+    });
+
+    const reviewRequested = await workspace.request({
+      targetId: sshTarget.id,
+      type: "host-trust.review",
+      version: 1,
+    });
+    expect(reviewRequested).toMatchObject({ ok: true });
+    if (!reviewRequested.ok) throw new Error();
+    expect(presented).toEqual([reviewRequested.value.operationId]);
+    const review = capabilities.attach(
+      {
+        endpointId: "review-ssh-trust",
+        reviewId: reviewRequested.value.operationId,
+        role: "review",
+        sessionEpoch: "review-epoch",
+      },
+      () => undefined,
+    );
+    await expect(review.snapshot()).resolves.toMatchObject({
+      projection: {
+        algorithm: "ssh-ed25519",
+        fingerprint: "SHA256:reviewed-fingerprint",
+        identity: "deploy@resolved.internal:2222",
+        trustAction: "first-use",
+      },
+      status: "pending",
+    });
+    await expect(
+      review.request({
+        decision: "approve",
+        type: "review.decide",
+        version: 1,
+      }),
+    ).resolves.toMatchObject({ ok: true });
+    await expect(workspace.snapshot()).resolves.toMatchObject({
+      target: { generation: 3 },
+    });
+
+    await expect(
+      workspace.request({
+        targetId: sshTarget.id,
+        type: "inventory.refresh",
+        version: 1,
+      }),
+    ).resolves.toMatchObject({ ok: true });
+    await expect(workspace.snapshot()).resolves.toMatchObject({
+      inventory: {
+        entries: [{ name: "tdd" }],
+        freshness: "fresh",
+        phase: "ready",
       },
     });
   });

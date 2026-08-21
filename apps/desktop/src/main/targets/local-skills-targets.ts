@@ -7,6 +7,7 @@ import type { Result } from "@skills-desktop/skills-runtime";
 
 import type { RendererError, TargetDraft } from "../../contracts/workspace.js";
 import type { SkillsProcess } from "../adapters/local-skills-process.js";
+import type { OpenSshTargetAccess } from "../ssh/openssh-target.js";
 import type {
   EffectiveTargetBinding,
   SkillsTargets,
@@ -91,6 +92,7 @@ export function createSkillsTargetsCatalog(input: {
   readonly initialTarget: TargetDefinition;
   readonly legacyIdFor?: (target: TargetDefinition) => string | undefined;
   readonly processFor: (binding: EffectiveTargetBinding) => SkillsProcess;
+  readonly sshAccess?: OpenSshTargetAccess;
 }): SkillsTargets {
   if (!uuidSchema.safeParse(input.initialTarget.id).success) {
     throw new Error("SkillsTargets requires an application-generated UUID.");
@@ -130,6 +132,10 @@ export function createSkillsTargetsCatalog(input: {
           normalized.value.connectionReference);
     const target: TargetDefinition = {
       ...normalized.value,
+      executionBindingDigest:
+        existing === undefined || executionChanged
+          ? null
+          : (existing.executionBindingDigest ?? null),
       generation:
         existing === undefined
           ? 1
@@ -152,6 +158,47 @@ export function createSkillsTargetsCatalog(input: {
   };
 
   return {
+    async commitHostTrust(targetId, challengeId, expectedGeneration) {
+      const selected = definitions.find(({ id }) => id === targetId);
+      if (selected === undefined) {
+        return definitionError(
+          "target_not_found",
+          "Target was not found.",
+          "trust",
+        );
+      }
+      if (selected.kind !== "ssh" || input.sshAccess === undefined) {
+        return definitionError(
+          "target_unavailable",
+          "SSH host trust is not available in this build.",
+          "trust",
+        );
+      }
+      if (selected.generation !== expectedGeneration) {
+        return definitionError(
+          "host_trust_invalid",
+          "The host-trust review no longer matches this Target.",
+          "trust",
+        );
+      }
+      const confirmed = await input.sshAccess.confirm(challengeId, selected);
+      if (!confirmed.ok) return confirmed;
+      const target: TargetDefinition = {
+        ...selected,
+        executionBindingDigest: confirmed.value.bindingDigest,
+        generation: selected.generation + 1,
+      };
+      return {
+        ok: true,
+        value: {
+          definitions: definitions.map((definition) =>
+            definition.id === target.id ? target : definition,
+          ),
+          executionChanged: true,
+          target,
+        },
+      };
+    },
     get definitions() {
       return definitions;
     },
@@ -171,11 +218,63 @@ export function createSkillsTargetsCatalog(input: {
         );
       }
       if (selected.kind === "ssh") {
-        return definitionError(
-          "target_unavailable",
-          "SSH Target refresh is not available in this build.",
-          "open",
-        );
+        if (input.sshAccess === undefined) {
+          return definitionError(
+            "target_unavailable",
+            "SSH Target refresh is not available in this build.",
+            "open",
+          );
+        }
+        const inspected = await input.sshAccess.inspect(selected);
+        if (!inspected.ok) return inspected;
+        if (
+          (selected.executionBindingDigest ?? null) !==
+          inspected.value.bindingDigest
+        ) {
+          const target: TargetDefinition = {
+            ...selected,
+            executionBindingDigest: inspected.value.bindingDigest,
+            generation: selected.generation + 1,
+          };
+          return {
+            ok: true,
+            value: {
+              proposal: {
+                definitions: definitions.map((definition) =>
+                  definition.id === target.id ? target : definition,
+                ),
+                executionChanged: true,
+                target,
+              },
+              status: "binding-changed",
+            },
+          };
+        }
+        if (inspected.value.status === "trust-required") {
+          return {
+            ok: true,
+            value: {
+              challenge: inspected.value.challenge,
+              status: "trust-required",
+            },
+          };
+        }
+        const binding: EffectiveTargetBinding = {
+          generation: selected.generation,
+          harness: selected.harness,
+          kind: selected.kind,
+          ssh: inspected.value.binding,
+          targetId: selected.id,
+          workspace: selected.workspace,
+        };
+        return {
+          ok: true,
+          value: {
+            binding,
+            process: input.processFor(binding),
+            target: selected,
+          },
+        };
       }
       const binding: EffectiveTargetBinding = {
         generation: selected.generation,
@@ -190,6 +289,40 @@ export function createSkillsTargetsCatalog(input: {
           binding,
           process: input.processFor(binding),
           target: selected,
+        },
+      };
+    },
+    pendingHostTrust(targetId) {
+      return input.sshAccess?.pendingChallenge(targetId);
+    },
+    proposeHostTrust(targetId, challengeId) {
+      const selected = definitions.find(({ id }) => id === targetId);
+      const challenge = input.sshAccess?.pendingChallenge(targetId);
+      if (
+        selected === undefined ||
+        selected.kind !== "ssh" ||
+        challenge === undefined ||
+        challenge.id !== challengeId ||
+        challenge.targetGeneration !== selected.generation
+      ) {
+        return definitionError(
+          "host_trust_invalid",
+          "The host-trust review no longer matches this Target.",
+          "trust",
+        );
+      }
+      const target: TargetDefinition = {
+        ...selected,
+        generation: selected.generation + 1,
+      };
+      return {
+        ok: true,
+        value: {
+          definitions: definitions.map((definition) =>
+            definition.id === target.id ? target : definition,
+          ),
+          executionChanged: true,
+          target,
         },
       };
     },
@@ -237,6 +370,7 @@ export function createLocalSkillsTargets(input: {
   readonly canonicalizeLocalWorkspace?: (workspace: string) => Promise<string>;
   readonly id: () => string;
   readonly processFor: (binding: EffectiveTargetBinding) => SkillsProcess;
+  readonly sshAccess?: OpenSshTargetAccess;
   readonly workspace: string;
   readonly workspaceLabel: string;
 }): SkillsTargets {
@@ -263,5 +397,6 @@ export function createLocalSkillsTargets(input: {
       return `local-codex-${workspaceIdentity}`;
     },
     processFor: input.processFor,
+    sshAccess: input.sshAccess,
   });
 }

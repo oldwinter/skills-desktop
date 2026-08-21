@@ -26,7 +26,7 @@ const TARGET_DOCUMENT_NAME = "target-definitions.json";
 const TARGET_FAILURE_MARKER_NAME = "target-definitions.failure.json";
 const CURRENT_SCHEMA_VERSION = 3 as const;
 const CURRENT_GUARD_SCHEMA_VERSION = 2 as const;
-const CURRENT_TARGET_SCHEMA_VERSION = 2 as const;
+const CURRENT_TARGET_SCHEMA_VERSION = 3 as const;
 const targetIdSchema = z.string().uuid();
 
 const persistedEvidenceSchema = z.discriminatedUnion("status", [
@@ -169,6 +169,11 @@ const legacyGuardDocumentSchema = z
 const targetDefinitionSchema = z
   .object({
     connectionReference: z.string().min(1).max(256).nullable(),
+    executionBindingDigest: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/)
+      .nullable()
+      .default(null),
     generation: z.number().int().positive(),
     harness: z.string().min(1).max(128),
     id: targetIdSchema,
@@ -180,7 +185,8 @@ const targetDefinitionSchema = z
   .superRefine((target, context) => {
     if (
       (target.kind === "local" && target.connectionReference !== null) ||
-      (target.kind === "ssh" && target.connectionReference === null)
+      (target.kind === "ssh" && target.connectionReference === null) ||
+      (target.kind === "local" && target.executionBindingDigest !== null)
     ) {
       context.addIssue({
         code: "custom",
@@ -219,6 +225,29 @@ const legacyTargetDocumentSchema = z
   })
   .strict();
 
+const legacyV2TargetDocumentSchema = z
+  .object({
+    kind: z.literal("target-definitions"),
+    schemaVersion: z.literal(2),
+    targets: z
+      .array(
+        z
+          .object({
+            connectionReference: z.string().min(1).max(256).nullable(),
+            generation: z.number().int().positive(),
+            harness: z.string().min(1).max(128),
+            id: targetIdSchema,
+            kind: z.enum(["local", "ssh"]),
+            label: z.string().min(1).max(256),
+            workspace: z.string().min(1).max(4_096),
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(1_000),
+  })
+  .strict();
+
 const targetFailureMarkerSchema = z
   .object({
     failure: z.enum(["corrupt_store", "migration_failed"]),
@@ -243,7 +272,12 @@ export interface RecoveryFailure {
     typeof GUARD_STORE_NAME | typeof STORE_NAME | typeof TARGET_STORE_NAME;
 }
 
-export type DurableTargetDefinition = z.infer<typeof targetDefinitionSchema>;
+export type DurableTargetDefinition = Omit<
+  z.infer<typeof targetDefinitionSchema>,
+  "executionBindingDigest"
+> & {
+  readonly executionBindingDigest?: string | null;
+};
 
 export interface MutationGuard {
   readonly deadline: string;
@@ -932,8 +966,9 @@ export function createJsonRecoveryRecords(
       return;
     }
 
-    const legacy = legacyTargetDocumentSchema.safeParse(decoded);
-    if (!legacy.success) {
+    const legacyV2 = legacyV2TargetDocumentSchema.safeParse(decoded);
+    const legacyV1 = legacyTargetDocumentSchema.safeParse(decoded);
+    if (!legacyV2.success && !legacyV1.success) {
       await quarantineAndMarkTargets("corrupt_store").catch(() => undefined);
       targetWriteBlocked = true;
       targetFailures = [{ code: "corrupt_store", store: TARGET_STORE_NAME }];
@@ -943,9 +978,16 @@ export function createJsonRecoveryRecords(
     const migrated = targetDocumentSchema.safeParse({
       kind: "target-definitions",
       schemaVersion: CURRENT_TARGET_SCHEMA_VERSION,
-      targets: legacy.data.targets.map((definition) => ({
+      targets: (legacyV2.success
+        ? legacyV2.data.targets
+        : legacyV1.success
+          ? legacyV1.data.targets.map((definition) => ({
+              ...definition,
+              generation: 1,
+            }))
+          : []).map((definition) => ({
         ...definition,
-        generation: 1,
+        executionBindingDigest: null,
       })),
     });
     if (!migrated.success) {
@@ -959,7 +1001,7 @@ export function createJsonRecoveryRecords(
     try {
       await fileSystem.copyFile(
         targetDocumentPath,
-        `${targetDocumentPath}.v1.backup`,
+        `${targetDocumentPath}.${legacyV2.success ? "v2" : "v1"}.backup`,
         constants.COPYFILE_EXCL,
       );
       await writeDocument(
