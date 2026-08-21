@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import type { SkillsProcess } from "../adapters/local-skills-process.js";
-import { createLocalSkillsTargets } from "./local-skills-targets.js";
+import {
+  createLocalSkillsTargets,
+  createSkillsTargetsCatalog,
+} from "./local-skills-targets.js";
 
 const process: SkillsProcess = {
   async executeConfirmed() {
@@ -43,9 +46,10 @@ const process: SkillsProcess = {
 };
 
 describe("Local SkillsTargets identity", () => {
-  it("owns the canonical workspace and freezes it into each opened Effective Binding", async () => {
+  it("uses generated stable identity and opens each restored Local definition with a frozen binding", async () => {
     const bindings: unknown[] = [];
     const first = createLocalSkillsTargets({
+      id: () => "00000000-0000-4000-8000-00000000000f",
       processFor(binding) {
         bindings.push(binding);
         return process;
@@ -53,48 +57,153 @@ describe("Local SkillsTargets identity", () => {
       workspace: "/work/alpha",
       workspaceLabel: "alpha",
     });
-    const same = createLocalSkillsTargets({
-      processFor: () => process,
-      workspace: "/work/alpha",
-      workspaceLabel: "alpha-renamed-label",
-    }).primaryTarget;
-    const other = createLocalSkillsTargets({
-      processFor: () => process,
-      workspace: "/work/beta",
-      workspaceLabel: "beta",
-    }).primaryTarget;
 
-    expect(first.primaryTarget.id).toBe(same.id);
-    expect(first.primaryTarget.id).not.toBe(other.id);
+    expect(first.primaryTarget.id).toBe("00000000-0000-4000-8000-00000000000f");
     expect(first.primaryTarget).toMatchObject({
       generation: 1,
       workspace: "/work/alpha",
     });
-    expect(first.primaryTarget.id).not.toContain("/work/alpha");
 
-    const opened = await first.open(first.primaryTarget.id);
+    first.replaceDefinitions([
+      first.primaryTarget,
+      {
+        connectionReference: null,
+        generation: 3,
+        harness: "Codex",
+        id: "00000000-0000-4000-8000-00000000000d",
+        kind: "local",
+        label: "Other workspace",
+        workspace: "/work/beta",
+        workspaceLabel: "beta",
+      },
+      {
+        connectionReference: "build-host",
+        generation: 2,
+        harness: "Codex",
+        id: "00000000-0000-4000-8000-00000000000e",
+        kind: "ssh",
+        label: "Build host",
+        workspace: "/srv/project",
+        workspaceLabel: "project",
+      },
+    ]);
+
+    const opened = await first.open("00000000-0000-4000-8000-00000000000d");
     expect(opened).toMatchObject({
       ok: true,
       value: {
         binding: {
-          generation: 1,
+          generation: 3,
           harness: "Codex",
           kind: "local",
-          targetId: first.primaryTarget.id,
-          workspace: "/work/alpha",
+          targetId: "00000000-0000-4000-8000-00000000000d",
+          workspace: "/work/beta",
         },
         process,
-        target: first.primaryTarget,
+        target: { id: "00000000-0000-4000-8000-00000000000d" },
       },
     });
     expect(bindings).toEqual([
       {
-        generation: 1,
+        generation: 3,
         harness: "Codex",
         kind: "local",
-        targetId: first.primaryTarget.id,
-        workspace: "/work/alpha",
+        targetId: "00000000-0000-4000-8000-00000000000d",
+        workspace: "/work/beta",
       },
     ]);
+    await expect(
+      first.open("00000000-0000-4000-8000-00000000000e"),
+    ).resolves.toMatchObject({
+      error: { code: "target_unavailable", phase: "open" },
+      ok: false,
+    });
+  });
+
+  it("owns UUID creation, canonical workspaces, and Generation proposals", async () => {
+    const catalog = createSkillsTargetsCatalog({
+      canonicalizeLocalWorkspace: async (workspace) =>
+        workspace === "/work/alias" ? "/work/real" : workspace,
+      id: () => "00000000-0000-4000-8000-000000000017",
+      initialTarget: {
+        connectionReference: null,
+        generation: 1,
+        harness: "Codex",
+        id: "00000000-0000-4000-8000-000000000001",
+        kind: "local",
+        label: "This device",
+        workspace: "/work/alpha",
+        workspaceLabel: "alpha",
+      },
+      processFor: () => process,
+    });
+
+    const created = await catalog.proposeCreate({
+      connectionReference: null,
+      harness: "Codex",
+      kind: "local",
+      label: "Alias workspace",
+      workspace: "/work/alias",
+    });
+    expect(created).toMatchObject({
+      ok: true,
+      value: {
+        executionChanged: false,
+        target: {
+          generation: 1,
+          id: "00000000-0000-4000-8000-000000000017",
+          workspace: "/work/real",
+          workspaceLabel: "real",
+        },
+      },
+    });
+    expect(catalog.definitions).toHaveLength(1);
+    if (!created.ok) throw new Error("Expected a Target proposal.");
+    catalog.replaceDefinitions(created.value.definitions);
+
+    const updated = await catalog.proposeUpdate(created.value.target.id, {
+      connectionReference: null,
+      harness: "Codex",
+      kind: "local",
+      label: "Moved workspace",
+      workspace: "/work/next",
+    });
+    expect(updated).toMatchObject({
+      ok: true,
+      value: {
+        executionChanged: true,
+        target: { generation: 2, workspace: "/work/next" },
+      },
+    });
+  });
+
+  it("rejects a generated Target identity that is not a UUID", async () => {
+    const catalog = createSkillsTargetsCatalog({
+      id: () => "not-a-uuid",
+      initialTarget: {
+        connectionReference: null,
+        generation: 1,
+        harness: "Codex",
+        id: "00000000-0000-4000-8000-000000000001",
+        kind: "local",
+        label: "This device",
+        workspace: "/work/alpha",
+        workspaceLabel: "alpha",
+      },
+      processFor: () => process,
+    });
+
+    await expect(
+      catalog.proposeCreate({
+        connectionReference: "build-host",
+        harness: "Codex",
+        kind: "ssh",
+        label: "Build host",
+        workspace: "/srv/project",
+      }),
+    ).resolves.toMatchObject({
+      error: { code: "internal_error" },
+      ok: false,
+    });
   });
 });

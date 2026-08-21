@@ -55,7 +55,7 @@ const snapshot: WorkspaceSnapshot = {
   target: {
     generation: 1,
     harness: "Codex",
-    id: "local-target",
+    id: "00000000-0000-4000-8000-000000000001",
     kind: "local",
     label: "This device",
     workspaceLabel: "skills-desktop",
@@ -67,11 +67,23 @@ function clientFor(value: WorkspaceSnapshot): WorkspaceBridge {
     async cancelInventory(operationId) {
       return { ok: true, value: { operationId } };
     },
+    async compareTargets() {
+      return { ok: true, value: { operationId: "comparison-1" } };
+    },
+    async createTarget() {
+      return { ok: true, value: { operationId: "created-target" } };
+    },
+    async deleteTarget(targetId) {
+      return { ok: true, value: { operationId: targetId } };
+    },
     async getSnapshot() {
       return { ok: true, value };
     },
     async prepareMutation() {
       return { ok: true, value: { operationId: "prepared-1" } };
+    },
+    async prepareComparison() {
+      return { ok: true, value: { operationId: "prepared-comparison-1" } };
     },
     async reconcileMutation() {
       return { ok: true, value: { operationId: "reconcile-1" } };
@@ -87,6 +99,9 @@ function clientFor(value: WorkspaceSnapshot): WorkspaceBridge {
     },
     subscribe() {
       return () => undefined;
+    },
+    async updateTarget(targetId) {
+      return { ok: true, value: { operationId: targetId } };
     },
   };
 }
@@ -405,7 +420,7 @@ describe("Local Target Inventory shell", () => {
             schemaVersion: 1,
             scope: "project",
             source: null,
-            targetId: "local-target",
+            targetId: "00000000-0000-4000-8000-000000000001",
             timeoutMs: 600_000,
           },
           lastError: null,
@@ -420,22 +435,27 @@ describe("Local Target Inventory shell", () => {
     render(<InventoryApp client={client} />);
 
     fireEvent.click(
-      (await screen.findAllByRole("button", {
-        name: "Case-Sensitive-Skill",
-      }))[0]!,
+      (
+        await screen.findAllByRole("button", {
+          name: "Case-Sensitive-Skill",
+        })
+      )[0]!,
     );
-    fireEvent.click(
-      screen.getByRole("button", { name: "Prepare update" }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Prepare update" }));
     await waitFor(() =>
-      expect(prepareMutation).toHaveBeenCalledWith("local-target", {
-        names: ["Case-Sensitive-Skill"],
-        scope: "project",
-        type: "update",
-      }),
+      expect(prepareMutation).toHaveBeenCalledWith(
+        "00000000-0000-4000-8000-000000000001",
+        {
+          names: ["Case-Sensitive-Skill"],
+          scope: "project",
+          type: "update",
+        },
+      ),
     );
 
-    expect(screen.getByRole("heading", { name: "Command Plan" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Command Plan" }),
+    ).toBeInTheDocument();
     expect(
       screen.getByText(
         "npx skills@1.5.23 update Case-Sensitive-Skill --project --yes",
@@ -474,5 +494,245 @@ describe("Local Target Inventory shell", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "The exact Skill intent is not supported.",
     );
+  });
+
+  it("selects and swaps paired Targets in the dimensioned Comparison view", async () => {
+    const rightTarget = {
+      connectionReference: "build-host",
+      generation: 2,
+      harness: "Codex",
+      id: "00000000-0000-4000-8000-00000000000a",
+      kind: "ssh" as const,
+      label: "Build host",
+      workspace: "/srv/skills-desktop",
+      workspaceLabel: "skills-desktop",
+    };
+    const targetStates = [
+      {
+        deletionBlocked: false,
+        inventory: snapshot.inventory,
+        mutation: snapshot.mutation,
+        target: {
+          ...snapshot.target,
+          connectionReference: null,
+          workspace: "/work/skills-desktop",
+        },
+      },
+      {
+        deletionBlocked: false,
+        inventory: { ...snapshot.inventory, freshness: "stale" as const },
+        mutation: snapshot.mutation,
+        target: rightTarget,
+      },
+    ];
+    const comparison = {
+      id: "comparison-1",
+      leftFreshness: "fresh" as const,
+      leftTargetId: "00000000-0000-4000-8000-000000000001",
+      rightFreshness: "stale" as const,
+      rightTargetId: "00000000-0000-4000-8000-00000000000a",
+      rows: [
+        {
+          dimensions: {
+            contentFingerprint: "unknown" as const,
+            declaredSource: "matched" as const,
+            presence: "left-only" as const,
+            revision: "unknown" as const,
+          },
+          key: "Case-Sensitive-Skill",
+          left: {
+            entries: snapshot.inventory.entries,
+            freshness: "fresh" as const,
+            harnessAvailability: "available" as const,
+          },
+          right: {
+            entries: [],
+            freshness: "stale" as const,
+            harnessAvailability: "absent" as const,
+          },
+          summary: "missing" as const,
+        },
+      ],
+    };
+    const compareTargets = vi.fn(async (leftTargetId, rightTargetId) => ({
+      ok: true as const,
+      value: { operationId: `${leftTargetId}:${rightTargetId}` },
+    }));
+    const client = {
+      ...clientFor({ ...snapshot, comparison, targets: targetStates }),
+      compareTargets,
+    };
+    render(<InventoryApp client={client} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Comparison" }));
+    expect(
+      screen.getByRole("heading", { name: "Comparison" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("cell", { name: "Case-Sensitive-Skill" }),
+    ).toBeInTheDocument();
+    expect(screen.getAllByText("Missing")).toHaveLength(2);
+    expect(screen.getByText("stale evidence")).toBeInTheDocument();
+    expect(
+      screen.getByText("Source: github / example/skills"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Revision: Unknown")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Prepare for Right" }),
+    ).toBeDisabled();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Swap comparison Targets" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Compare" }));
+    await waitFor(() =>
+      expect(compareTargets).toHaveBeenCalledWith(
+        "00000000-0000-4000-8000-00000000000a",
+        "00000000-0000-4000-8000-000000000001",
+      ),
+    );
+  });
+
+  it("shows reconciliation as a comparison planning block even with Fresh evidence", async () => {
+    const rightTarget = {
+      connectionReference: null,
+      generation: 1,
+      harness: "Codex",
+      id: "00000000-0000-4000-8000-00000000000a",
+      kind: "local" as const,
+      label: "Right device",
+      workspace: "/work/right",
+      workspaceLabel: "right",
+    };
+    const rightMutation = {
+      ...snapshot.mutation,
+      lastError: {
+        code: "reconciliation_required" as const,
+        effects: "possible" as const,
+        message: "Recovery is required.",
+        phase: "restore",
+        retryable: false,
+      },
+      phase: "reconciliation-required" as const,
+      reconciliationDeadline: "2026-08-21T10:10:00.000Z",
+    };
+    const comparison = {
+      id: "comparison-reconciliation",
+      leftFreshness: "fresh" as const,
+      leftTargetId: snapshot.target.id,
+      rightFreshness: "fresh" as const,
+      rightTargetId: rightTarget.id,
+      rows: [
+        {
+          dimensions: {
+            contentFingerprint: "not-applicable" as const,
+            declaredSource: "not-applicable" as const,
+            presence: "left-only" as const,
+            revision: "not-applicable" as const,
+          },
+          key: "Case-Sensitive-Skill",
+          left: {
+            entries: snapshot.inventory.entries,
+            freshness: "fresh" as const,
+            harnessAvailability: "available" as const,
+          },
+          right: {
+            entries: [],
+            freshness: "fresh" as const,
+            harnessAvailability: "absent" as const,
+          },
+          summary: "missing" as const,
+        },
+      ],
+    };
+    render(
+      <InventoryApp
+        client={clientFor({
+          ...snapshot,
+          comparison,
+          targets: [
+            {
+              deletionBlocked: false,
+              inventory: snapshot.inventory,
+              mutation: snapshot.mutation,
+              target: {
+                ...snapshot.target,
+                connectionReference: null,
+                workspace: "/work/skills-desktop",
+              },
+            },
+            {
+              deletionBlocked: true,
+              inventory: snapshot.inventory,
+              mutation: rightMutation,
+              target: rightTarget,
+            },
+          ],
+        })}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Comparison" }));
+
+    expect(
+      screen.getByText("Blocked: reconciliation required"),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Reconciliation is required",
+    );
+    expect(
+      screen.getByRole("button", { name: "Prepare for Right" }),
+    ).toBeDisabled();
+  });
+
+  it("creates an SSH Target through the structured Targets editor", async () => {
+    const createTarget = vi.fn(async () => ({
+      ok: true as const,
+      value: { operationId: "created-ssh-target" },
+    }));
+    const client = {
+      ...clientFor({
+        ...snapshot,
+        targets: [
+          {
+            deletionBlocked: true,
+            inventory: snapshot.inventory,
+            mutation: snapshot.mutation,
+            target: {
+              ...snapshot.target,
+              connectionReference: null,
+              workspace: "/work/skills-desktop",
+            },
+          },
+        ],
+      }),
+      createTarget,
+    };
+    render(<InventoryApp client={client} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Targets" }));
+    fireEvent.click(screen.getByRole("button", { name: "New Target" }));
+    fireEvent.click(screen.getByRole("button", { name: "SSH" }));
+    fireEvent.change(screen.getByLabelText("Display label"), {
+      target: { value: "Build host" },
+    });
+    fireEvent.change(screen.getByLabelText("Canonical workspace"), {
+      target: { value: "/srv/skills" },
+    });
+    fireEvent.change(screen.getByLabelText("OpenSSH connection reference"), {
+      target: { value: "build-host" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save Target" }));
+
+    await waitFor(() =>
+      expect(createTarget).toHaveBeenCalledWith({
+        connectionReference: "build-host",
+        harness: "Codex",
+        kind: "ssh",
+        label: "Build host",
+        workspace: "/srv/skills",
+      }),
+    );
+    expect(await screen.findByText("Target created")).toBeInTheDocument();
   });
 });

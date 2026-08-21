@@ -17,9 +17,15 @@ describe("Electron IPC sender authorization", () => {
 
   it("accepts only the registered main frame at its exact role URL", () => {
     expect(isAuthorizedSender(endpoint, sender)).toBe(true);
-    expect(isAuthorizedSender(endpoint, { ...sender, webContentsId: 18 })).toBe(false);
-    expect(isAuthorizedSender(endpoint, { ...sender, role: "review" })).toBe(false);
-    expect(isAuthorizedSender(endpoint, { ...sender, isMainFrame: false })).toBe(false);
+    expect(isAuthorizedSender(endpoint, { ...sender, webContentsId: 18 })).toBe(
+      false,
+    );
+    expect(isAuthorizedSender(endpoint, { ...sender, role: "review" })).toBe(
+      false,
+    );
+    expect(
+      isAuthorizedSender(endpoint, { ...sender, isMainFrame: false }),
+    ).toBe(false);
     expect(
       isAuthorizedSender(endpoint, {
         ...sender,
@@ -29,9 +35,15 @@ describe("Electron IPC sender authorization", () => {
   });
 
   it("returns bounded errors for hostile frames and invalid main output", async () => {
-    const handlers = new Map<string, (event: never, ...args: unknown[]) => unknown>();
+    const handlers = new Map<
+      string,
+      (event: never, ...args: unknown[]) => unknown
+    >();
     const ipcMain = {
-      handle(channel: string, handler: (event: never, ...args: unknown[]) => unknown) {
+      handle(
+        channel: string,
+        handler: (event: never, ...args: unknown[]) => unknown,
+      ) {
         handlers.set(channel, handler);
       },
       removeHandler: vi.fn(),
@@ -89,6 +101,39 @@ describe("Electron IPC sender authorization", () => {
       type: "inventory.refresh",
       version: 1,
     });
+    await expect(
+      handlers.get("workspace:comparison:open")!(
+        authorizedEvent as never,
+        "00000000-0000-4000-8000-00000000000b",
+        "00000000-0000-4000-8000-00000000000c",
+      ),
+    ).resolves.toMatchObject({ error: { code: "invalid_request" }, ok: false });
+    expect(session.request).toHaveBeenLastCalledWith({
+      leftTargetId: "00000000-0000-4000-8000-00000000000b",
+      rightTargetId: "00000000-0000-4000-8000-00000000000c",
+      type: "comparison.open",
+      version: 1,
+    });
+    await expect(
+      handlers.get("workspace:target:create")!(authorizedEvent as never, {
+        connectionReference: "build-host",
+        harness: "Codex",
+        kind: "ssh",
+        label: "Build host",
+        workspace: "/srv/project",
+      }),
+    ).resolves.toMatchObject({ error: { code: "invalid_request" }, ok: false });
+    expect(session.request).toHaveBeenLastCalledWith({
+      definition: {
+        connectionReference: "build-host",
+        harness: "Codex",
+        kind: "ssh",
+        label: "Build host",
+        workspace: "/srv/project",
+      },
+      type: "target.create",
+      version: 1,
+    });
 
     const reviewMainFrame = { url: "skills-desktop://review/index.html" };
     const reviewContents = {
@@ -114,7 +159,7 @@ describe("Electron IPC sender authorization", () => {
     await expect(
       handlers.get("workspace:mutation:prepare")!(
         reviewEvent as never,
-        "local-target",
+        "00000000-0000-4000-8000-000000000001",
         { names: ["tdd"], scope: "project", type: "remove" },
       ),
     ).resolves.toMatchObject({ error: { code: "unauthorized" }, ok: false });

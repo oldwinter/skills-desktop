@@ -6,6 +6,7 @@ import {
   workspaceSnapshotResultSchema,
   type DesktopEvent,
   type MutationIntent,
+  type TargetDraft,
   type WorkspaceBridge,
 } from "../contracts/workspace.js";
 
@@ -15,12 +16,47 @@ const bridge: WorkspaceBridge = Object.freeze({
       await ipcRenderer.invoke("workspace:inventory:cancel", operationId),
     );
   },
+  async compareTargets(leftTargetId: string, rightTargetId: string) {
+    return workspaceRequestResultSchema.parse(
+      await ipcRenderer.invoke(
+        "workspace:comparison:open",
+        leftTargetId,
+        rightTargetId,
+      ),
+    );
+  },
+  async createTarget(definition: TargetDraft) {
+    return workspaceRequestResultSchema.parse(
+      await ipcRenderer.invoke("workspace:target:create", definition),
+    );
+  },
+  async deleteTarget(targetId: string) {
+    return workspaceRequestResultSchema.parse(
+      await ipcRenderer.invoke("workspace:target:delete", targetId),
+    );
+  },
   async getSnapshot() {
-    return workspaceSnapshotResultSchema.parse(await ipcRenderer.invoke("workspace:snapshot:get"));
+    return workspaceSnapshotResultSchema.parse(
+      await ipcRenderer.invoke("workspace:snapshot:get"),
+    );
   },
   async prepareMutation(targetId: string, intent: MutationIntent) {
     return workspaceRequestResultSchema.parse(
       await ipcRenderer.invoke("workspace:mutation:prepare", targetId, intent),
+    );
+  },
+  async prepareComparison(
+    comparisonId: string,
+    rowKey: string,
+    destinationTargetId: string,
+  ) {
+    return workspaceRequestResultSchema.parse(
+      await ipcRenderer.invoke(
+        "workspace:comparison:prepare",
+        comparisonId,
+        rowKey,
+        destinationTargetId,
+      ),
     );
   },
   async reconcileMutation(targetId: string) {
@@ -49,6 +85,11 @@ const bridge: WorkspaceBridge = Object.freeze({
     };
     ipcRenderer.on("workspace:event", receive);
     return () => ipcRenderer.removeListener("workspace:event", receive);
+  },
+  async updateTarget(targetId: string, definition: TargetDraft) {
+    return workspaceRequestResultSchema.parse(
+      await ipcRenderer.invoke("workspace:target:update", targetId, definition),
+    );
   },
 });
 

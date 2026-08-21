@@ -4,6 +4,7 @@ import type { Inventory } from "@skills-desktop/skills-runtime";
 
 import { createMemoryRecoveryRecords } from "../persistence/recovery-records.js";
 import type { SkillsProcess } from "../adapters/local-skills-process.js";
+import { createSkillsTargetsCatalog } from "../targets/local-skills-targets.js";
 import {
   createDesktopCapabilities,
   type DesktopEvent,
@@ -14,7 +15,7 @@ import {
 const target: TargetDefinition = {
   generation: 1,
   harness: "Codex",
-  id: "local-target",
+  id: "00000000-0000-4000-8000-000000000001",
   kind: "local",
   label: "This device",
   workspace: "/work/skills-desktop",
@@ -79,38 +80,15 @@ const mutationNotExercised: Pick<
   },
 };
 
-function targetsWith(process: SkillsProcess): SkillsTargets {
-  return {
-    async open(targetId) {
-      if (targetId !== target.id) {
-        return {
-          error: {
-            code: "target_not_found",
-            effects: "none",
-            message: "Target was not found.",
-            phase: "open",
-            retryable: false,
-          },
-          ok: false,
-        };
-      }
-      return {
-        ok: true,
-        value: {
-          binding: {
-            generation: target.generation,
-            harness: target.harness,
-            kind: target.kind,
-            targetId: target.id,
-            workspace: target.workspace,
-          },
-          process,
-          target,
-        },
-      };
-    },
-    primaryTarget: target,
-  };
+function targetsWith(
+  process: SkillsProcess,
+  id: () => string = () => "00000000-0000-4000-8000-000000000010",
+): SkillsTargets {
+  return createSkillsTargetsCatalog({
+    id,
+    initialTarget: target,
+    processFor: () => process,
+  });
 }
 
 describe("DesktopCapabilities inventory role-session contract", () => {
@@ -121,8 +99,10 @@ describe("DesktopCapabilities inventory role-session contract", () => {
         entries: [
           {
             agents: ["Codex"],
+            contentFingerprint: { status: "unknown" },
             declaredSource: { source: null, sourceType: null },
             name: "restored",
+            revision: { status: "unknown" },
             scope: "global",
           },
         ],
@@ -213,11 +193,96 @@ describe("DesktopCapabilities inventory role-session contract", () => {
     ).toEqual([
       {
         agents: ["Codex"],
+        contentFingerprint: { status: "unknown" },
         declaredSource: { source: "example/skills", sourceType: "github" },
         name: "tdd",
+        revision: { status: "unknown" },
         scope: "project",
       },
     ]);
+  });
+
+  it("keeps current UUID evidence when fixed-point records collide during reattachment", async () => {
+    const legacyTargetId = "local-codex-0123456789abcdef01234567";
+    const records = createMemoryRecoveryRecords(
+      [
+        {
+          cliVersion: "1.5.23",
+          entries: [],
+          generation: 1,
+          observedAt: "2026-08-21T09:00:00.000Z",
+          targetId: legacyTargetId,
+        },
+        {
+          cliVersion: "1.5.23",
+          entries: [],
+          generation: 1,
+          observedAt: "2026-08-21T10:00:00.000Z",
+          targetId: target.id,
+        },
+      ],
+      [
+        {
+          deadline: "2026-08-21T09:10:00.000Z",
+          effects: "possible",
+          generation: 1,
+          operationId: "legacy-mutation",
+          phase: "reconciliation-required",
+          targetId: legacyTargetId,
+        },
+        {
+          deadline: "2026-08-21T10:10:00.000Z",
+          effects: "possible",
+          generation: 1,
+          operationId: "current-mutation",
+          phase: "reconciliation-required",
+          targetId: target.id,
+        },
+      ],
+    );
+    const capabilities = createDesktopCapabilities({
+      id: () => "operation-legacy-remap",
+      recoveryRecords: records,
+      skillsTargets: createSkillsTargetsCatalog({
+        id: () => "00000000-0000-4000-8000-000000000010",
+        initialTarget: target,
+        legacyIdFor: () => legacyTargetId,
+        processFor: () => ({
+          ...mutationNotExercised,
+          async observeInventory() {
+            return { ok: true as const, value: freshInventory };
+          },
+        }),
+      }),
+    });
+
+    await capabilities.initialize();
+    const workspace = capabilities.attach(
+      {
+        endpointId: "workspace-legacy-remap",
+        role: "workspace",
+        sessionEpoch: "epoch-legacy-remap",
+      },
+      () => undefined,
+    );
+
+    await expect(workspace.snapshot()).resolves.toMatchObject({
+      inventory: {
+        freshness: "stale",
+        observedAt: "2026-08-21T10:00:00.000Z",
+        phase: "ready",
+      },
+      mutation: {
+        phase: "reconciliation-required",
+        reconciliationDeadline: "2026-08-21T10:10:00.000Z",
+      },
+      target: { id: target.id },
+    });
+    await expect(records.restore()).resolves.toMatchObject({
+      inventorySnapshots: [{ targetId: target.id }],
+      mutationGuards: [{ targetId: target.id }],
+      targetDefinitions: [{ id: target.id }],
+    });
   });
 
   it("keeps the last complete Inventory as stale when a later refresh fails", async () => {
@@ -622,16 +687,1960 @@ describe("DesktopCapabilities inventory role-session contract", () => {
     });
     await pending;
   });
+
+  it("creates, edits, and deletes durable Target Definitions with stable generated identity", async () => {
+    const records = createMemoryRecoveryRecords(
+      [],
+      [],
+      [
+        {
+          connectionReference: null,
+          generation: target.generation,
+          harness: target.harness,
+          id: target.id,
+          kind: target.kind,
+          label: target.label,
+          workspace: target.workspace,
+        },
+      ],
+    );
+    const capabilities = createDesktopCapabilities({
+      id: () => "00000000-0000-4000-8000-000000000002",
+      recoveryRecords: records,
+      skillsTargets: targetsWith(
+        {
+          ...mutationNotExercised,
+          async observeInventory() {
+            return { ok: true, value: freshInventory };
+          },
+        },
+        () => "00000000-0000-4000-8000-000000000002",
+      ),
+    });
+    await capabilities.initialize();
+    const session = capabilities.attach(
+      {
+        endpointId: "workspace-targets",
+        role: "workspace",
+        sessionEpoch: "epoch-targets",
+      },
+      () => undefined,
+    );
+
+    await expect(
+      session.request({
+        definition: {
+          connectionReference: "build-host",
+          harness: "Codex",
+          kind: "ssh",
+          label: "Build host",
+          workspace: "/srv/skills",
+        },
+        type: "target.create",
+        version: 1,
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      value: { operationId: "00000000-0000-4000-8000-000000000002" },
+    });
+
+    await expect(
+      session.request({
+        definition: {
+          connectionReference: "build-host",
+          harness: "Codex",
+          kind: "ssh",
+          label: "CI builder",
+          workspace: "/srv/skills-next/../skills-next",
+        },
+        targetId: "00000000-0000-4000-8000-000000000002",
+        type: "target.update",
+        version: 1,
+      }),
+    ).resolves.toMatchObject({ ok: true });
+
+    await expect(session.snapshot()).resolves.toMatchObject({
+      targets: [
+        { target: { id: "00000000-0000-4000-8000-000000000001" } },
+        {
+          target: {
+            connectionReference: "build-host",
+            generation: 2,
+            harness: "Codex",
+            id: "00000000-0000-4000-8000-000000000002",
+            kind: "ssh",
+            label: "CI builder",
+            workspace: "/srv/skills-next",
+          },
+        },
+      ],
+    });
+    await expect(records.restore()).resolves.toMatchObject({
+      targetDefinitions: [
+        { id: "00000000-0000-4000-8000-000000000001" },
+        {
+          generation: 2,
+          id: "00000000-0000-4000-8000-000000000002",
+          label: "CI builder",
+        },
+      ],
+    });
+
+    await expect(
+      session.request({
+        targetId: "00000000-0000-4000-8000-000000000002",
+        type: "target.delete",
+        version: 1,
+      }),
+    ).resolves.toMatchObject({ ok: true });
+    await expect(session.snapshot()).resolves.toMatchObject({
+      targets: [{ target: { id: "00000000-0000-4000-8000-000000000001" } }],
+    });
+  });
+
+  it("retains independent explicitly refreshed Target Sessions", async () => {
+    const otherTarget: TargetDefinition = {
+      ...target,
+      id: "00000000-0000-4000-8000-000000000003",
+      label: "Other workspace",
+      workspace: "/work/other",
+      workspaceLabel: "other",
+    };
+    const definitions = [target, otherTarget];
+    const inventoryFor = (name: string): Inventory => ({
+      ...freshInventory,
+      entries: [{ ...freshInventory.entries[0]!, name }],
+    });
+    const skillsTargets = createSkillsTargetsCatalog({
+      id: () => "00000000-0000-4000-8000-000000000011",
+      initialTarget: target,
+      processFor(binding) {
+        return {
+          ...mutationNotExercised,
+          async observeInventory() {
+            return {
+              ok: true as const,
+              value: inventoryFor(
+                binding.targetId === target.id ? "left-skill" : "right-skill",
+              ),
+            };
+          },
+        };
+      },
+    });
+    const records = createMemoryRecoveryRecords(
+      [],
+      [],
+      definitions.map((definition) => ({
+        connectionReference: null,
+        generation: definition.generation,
+        harness: definition.harness,
+        id: definition.id,
+        kind: definition.kind,
+        label: definition.label,
+        workspace: definition.workspace,
+      })),
+    );
+    let nextId = 0;
+    const capabilities = createDesktopCapabilities({
+      id: () => `operation-${++nextId}`,
+      recoveryRecords: records,
+      skillsTargets,
+    });
+    await capabilities.initialize();
+    const session = capabilities.attach(
+      {
+        endpointId: "workspace-multiple-targets",
+        role: "workspace",
+        sessionEpoch: "epoch-multiple-targets",
+      },
+      () => undefined,
+    );
+
+    await session.request({
+      targetId: target.id,
+      type: "inventory.refresh",
+      version: 1,
+    });
+    await session.request({
+      targetId: otherTarget.id,
+      type: "inventory.refresh",
+      version: 1,
+    });
+
+    await expect(session.snapshot()).resolves.toMatchObject({
+      targets: [
+        {
+          inventory: {
+            entries: [{ name: "left-skill" }],
+            freshness: "fresh",
+          },
+          target: { id: target.id },
+        },
+        {
+          inventory: {
+            entries: [{ name: "right-skill" }],
+            freshness: "fresh",
+          },
+          target: { id: otherTarget.id },
+        },
+      ],
+    });
+  });
+
+  it("advances generation while retaining prior Inventory as explicitly stale evidence", async () => {
+    const records = createMemoryRecoveryRecords(
+      [
+        {
+          cliVersion: "1.5.23",
+          entries: freshInventory.entries.map((entry) => ({
+            agents: [...entry.agents],
+            contentFingerprint: { ...entry.contentFingerprint },
+            declaredSource: { ...entry.declaredSource },
+            name: entry.name,
+            revision: { ...entry.revision },
+            scope: entry.scope,
+          })),
+          generation: 1,
+          observedAt: freshInventory.observedAt,
+          targetId: target.id,
+        },
+      ],
+      [],
+      [
+        {
+          connectionReference: null,
+          generation: 1,
+          harness: target.harness,
+          id: target.id,
+          kind: "local",
+          label: target.label,
+          workspace: target.workspace,
+        },
+      ],
+    );
+    const capabilities = createDesktopCapabilities({
+      id: () => "unused-id",
+      recoveryRecords: records,
+      skillsTargets: targetsWith({
+        ...mutationNotExercised,
+        async observeInventory() {
+          return { ok: true, value: freshInventory };
+        },
+      }),
+    });
+    await capabilities.initialize();
+    const session = capabilities.attach(
+      {
+        endpointId: "workspace-generation",
+        role: "workspace",
+        sessionEpoch: "epoch-generation",
+      },
+      () => undefined,
+    );
+
+    await session.request({
+      definition: {
+        connectionReference: null,
+        harness: target.harness,
+        kind: "local",
+        label: target.label,
+        workspace: "/work/skills-desktop-next",
+      },
+      targetId: target.id,
+      type: "target.update",
+      version: 1,
+    });
+
+    await expect(session.snapshot()).resolves.toMatchObject({
+      inventory: {
+        entries: [{ name: "tdd" }],
+        freshness: "stale",
+        lastError: { code: "stale_inventory", phase: "target" },
+      },
+      target: { generation: 2, workspace: "/work/skills-desktop-next" },
+    });
+
+    const restarted = createDesktopCapabilities({
+      id: () => "unused-restart-id",
+      recoveryRecords: records,
+      skillsTargets: targetsWith({
+        ...mutationNotExercised,
+        async observeInventory() {
+          return { ok: true, value: freshInventory };
+        },
+      }),
+    });
+    await restarted.initialize();
+    const restartedSession = restarted.attach(
+      {
+        endpointId: "workspace-generation-restart",
+        role: "workspace",
+        sessionEpoch: "epoch-generation-restart",
+      },
+      () => undefined,
+    );
+    await expect(restartedSession.snapshot()).resolves.toMatchObject({
+      inventory: {
+        entries: [{ name: "tdd" }],
+        freshness: "stale",
+        lastError: { code: "stale_inventory" },
+      },
+      target: { generation: 2 },
+    });
+  });
+
+  it("rejects Target changes while its Inventory observation is active", async () => {
+    const otherTarget: TargetDefinition = {
+      ...target,
+      id: "00000000-0000-4000-8000-000000000004",
+      label: "Other Target",
+      workspace: "/work/other",
+      workspaceLabel: "other",
+    };
+    let observationStarted!: () => void;
+    let releaseObservation!: () => void;
+    const started = new Promise<void>((resolve) => {
+      observationStarted = resolve;
+    });
+    const blocked = new Promise<void>((resolve) => {
+      releaseObservation = resolve;
+    });
+    const records = createMemoryRecoveryRecords(
+      [],
+      [],
+      [target, otherTarget].map((definition) => ({
+        connectionReference: definition.connectionReference ?? null,
+        generation: definition.generation,
+        harness: definition.harness,
+        id: definition.id,
+        kind: definition.kind,
+        label: definition.label,
+        workspace: definition.workspace,
+      })),
+    );
+    const capabilities = createDesktopCapabilities({
+      id: () => "race-operation",
+      recoveryRecords: records,
+      skillsTargets: targetsWith({
+        ...mutationNotExercised,
+        async observeInventory() {
+          observationStarted();
+          await blocked;
+          return { ok: true, value: freshInventory };
+        },
+      }),
+    });
+    await capabilities.initialize();
+    const session = capabilities.attach(
+      {
+        endpointId: "workspace-target-race",
+        role: "workspace",
+        sessionEpoch: "epoch-target-race",
+      },
+      () => undefined,
+    );
+
+    const refresh = session.request({
+      targetId: target.id,
+      type: "inventory.refresh",
+      version: 1,
+    });
+    await started;
+    await expect(
+      session.request({
+        definition: {
+          connectionReference: null,
+          harness: target.harness,
+          kind: target.kind,
+          label: target.label,
+          workspace: "/work/changed-during-refresh",
+        },
+        targetId: target.id,
+        type: "target.update",
+        version: 1,
+      }),
+    ).resolves.toMatchObject({
+      error: { code: "mutation_conflict", phase: "coordinate" },
+      ok: false,
+    });
+    await expect(
+      session.request({
+        targetId: target.id,
+        type: "target.delete",
+        version: 1,
+      }),
+    ).resolves.toMatchObject({
+      error: { code: "mutation_conflict", phase: "coordinate" },
+      ok: false,
+    });
+    releaseObservation();
+    await expect(refresh).resolves.toMatchObject({ ok: true });
+    await expect(session.snapshot()).resolves.toMatchObject({
+      inventory: { freshness: "fresh" },
+      target: { generation: 1, id: target.id, workspace: target.workspace },
+    });
+  });
+
+  it("reserves a Target while an execution-relevant update is proposed", async () => {
+    let releaseCanonicalization!: () => void;
+    let canonicalizationStarted!: () => void;
+    const canonicalizationBlocked = new Promise<void>((resolve) => {
+      releaseCanonicalization = resolve;
+    });
+    const started = new Promise<void>((resolve) => {
+      canonicalizationStarted = resolve;
+    });
+    let observations = 0;
+    const skillsTargets = createSkillsTargetsCatalog({
+      async canonicalizeLocalWorkspace(workspace) {
+        canonicalizationStarted();
+        await canonicalizationBlocked;
+        return workspace;
+      },
+      id: () => "00000000-0000-4000-8000-000000000018",
+      initialTarget: target,
+      processFor: () => ({
+        ...mutationNotExercised,
+        async observeInventory() {
+          observations += 1;
+          return { ok: true, value: freshInventory };
+        },
+      }),
+    });
+    const records = createMemoryRecoveryRecords([], [], [
+      {
+        connectionReference: null,
+        generation: target.generation,
+        harness: target.harness,
+        id: target.id,
+        kind: target.kind,
+        label: target.label,
+        workspace: target.workspace,
+      },
+    ]);
+    const capabilities = createDesktopCapabilities({
+      id: () => "target-change-operation",
+      recoveryRecords: records,
+      skillsTargets,
+    });
+    await capabilities.initialize();
+    const session = capabilities.attach(
+      {
+        endpointId: "workspace-change-first",
+        role: "workspace",
+        sessionEpoch: "epoch-change-first",
+      },
+      () => undefined,
+    );
+
+    const update = session.request({
+      definition: {
+        connectionReference: null,
+        harness: target.harness,
+        kind: target.kind,
+        label: target.label,
+        workspace: "/work/changed-first",
+      },
+      targetId: target.id,
+      type: "target.update",
+      version: 1,
+    });
+    await started;
+    await expect(
+      session.request({
+        targetId: target.id,
+        type: "inventory.refresh",
+        version: 1,
+      }),
+    ).resolves.toMatchObject({
+      error: { code: "mutation_conflict", phase: "coordinate" },
+      ok: false,
+    });
+    expect(observations).toBe(0);
+
+    releaseCanonicalization();
+    await expect(update).resolves.toMatchObject({ ok: true });
+    await expect(session.snapshot()).resolves.toMatchObject({
+      inventory: { freshness: "none" },
+      target: { generation: 2, workspace: "/work/changed-first" },
+    });
+  });
+
+  it("reserves the Target session and discards preparation after owner teardown", async () => {
+    const unrelatedTarget: TargetDefinition = {
+      ...target,
+      id: "00000000-0000-4000-8000-000000000026",
+      label: "Unrelated Target",
+      workspace: "/work/unrelated",
+      workspaceLabel: "unrelated",
+    };
+    let releasePreparation!: () => void;
+    let preparationStarted!: () => void;
+    const blocked = new Promise<void>((resolve) => {
+      releasePreparation = resolve;
+    });
+    const started = new Promise<void>((resolve) => {
+      preparationStarted = resolve;
+    });
+    const capabilities = createDesktopCapabilities({
+      id: () => "preparation-race-operation",
+      recoveryRecords: createMemoryRecoveryRecords(
+        [],
+        [],
+        [target, unrelatedTarget].map((definition) => ({
+          connectionReference: null,
+          generation: definition.generation,
+          harness: definition.harness,
+          id: definition.id,
+          kind: definition.kind,
+          label: definition.label,
+          workspace: definition.workspace,
+        })),
+      ),
+      skillsTargets: targetsWith({
+        ...mutationNotExercised,
+        async observeInventory() {
+          return { ok: true as const, value: freshInventory };
+        },
+        async prepareMutation(input) {
+          preparationStarted();
+          await blocked;
+          return {
+            ok: true as const,
+            value: {
+              commandPlan: {
+                harness: target.harness,
+                names: ["tdd"],
+                operation: "remove" as const,
+                preview: "review-only preview",
+                schemaVersion: 1 as const,
+                scope: "project" as const,
+                source: null,
+                targetId: target.id,
+                timeoutMs: 30_000,
+              },
+              digest: "a".repeat(64),
+              expiresAt: "2099-01-01T00:10:00.000Z",
+              id: "prepared-during-race",
+              inventoryId: input.inventoryId,
+              targetGeneration: target.generation,
+              targetId: target.id,
+            },
+          };
+        },
+      }),
+    });
+    await capabilities.initialize();
+    const session = capabilities.attach(
+      {
+        endpointId: "workspace-preparation-race",
+        role: "workspace",
+        sessionEpoch: "epoch-preparation-race",
+      },
+      () => undefined,
+    );
+    await session.request({
+      targetId: target.id,
+      type: "inventory.refresh",
+      version: 1,
+    });
+
+    const preparation = session.request({
+      intent: { names: ["tdd"], scope: "project", type: "remove" },
+      targetId: target.id,
+      type: "mutation.prepare",
+      version: 1,
+    });
+    await started;
+    await expect(
+      session.request({
+        definition: {
+          connectionReference: null,
+          harness: target.harness,
+          kind: target.kind,
+          label: target.label,
+          workspace: "/work/changed-during-preparation",
+        },
+        targetId: target.id,
+        type: "target.update",
+        version: 1,
+      }),
+    ).resolves.toMatchObject({
+      error: { code: "mutation_conflict", phase: "coordinate" },
+      ok: false,
+    });
+    await expect(
+      session.request({
+        targetId: target.id,
+        type: "target.delete",
+        version: 1,
+      }),
+    ).resolves.toMatchObject({
+      error: { code: "mutation_conflict", phase: "coordinate" },
+      ok: false,
+    });
+    await expect(
+      session.request({
+        definition: {
+          connectionReference: null,
+          harness: unrelatedTarget.harness,
+          kind: unrelatedTarget.kind,
+          label: "Renamed unrelated Target",
+          workspace: unrelatedTarget.workspace,
+        },
+        targetId: unrelatedTarget.id,
+        type: "target.update",
+        version: 1,
+      }),
+    ).resolves.toMatchObject({ ok: true });
+    await expect(
+      session.request({
+        targetId: unrelatedTarget.id,
+        type: "target.delete",
+        version: 1,
+      }),
+    ).resolves.toMatchObject({ ok: true });
+
+    session.teardown();
+    releasePreparation();
+    await expect(preparation).resolves.toMatchObject({
+      error: { code: "cancelled", phase: "prepare" },
+      ok: false,
+    });
+    const replacementSession = capabilities.attach(
+      {
+        endpointId: "workspace-after-preparation-race",
+        role: "workspace",
+        sessionEpoch: "epoch-after-preparation-race",
+      },
+      () => undefined,
+    );
+    await expect(replacementSession.snapshot()).resolves.toMatchObject({
+      mutation: { commandPlan: null, phase: "idle" },
+      target: { generation: 1, workspace: target.workspace },
+    });
+  });
+
+  it("blocks edit and deletion for a guarded Target", async () => {
+    const guardedTarget = {
+      ...target,
+      id: "00000000-0000-4000-8000-000000000005",
+      workspace: "/work/guarded",
+      workspaceLabel: "guarded",
+    };
+    const records = createMemoryRecoveryRecords(
+      [],
+      [
+        {
+          deadline: "2026-08-21T10:10:00.000Z",
+          effects: "possible",
+          generation: 1,
+          operationId: "guarded-operation",
+          phase: "reconciliation-required",
+          targetId: guardedTarget.id,
+        },
+      ],
+      [target, guardedTarget].map((definition) => ({
+        connectionReference: null,
+        generation: definition.generation,
+        harness: definition.harness,
+        id: definition.id,
+        kind: definition.kind,
+        label: definition.label,
+        workspace: definition.workspace,
+      })),
+    );
+    const capabilities = createDesktopCapabilities({
+      id: () => "unused-id",
+      recoveryRecords: records,
+      skillsTargets: targetsWith({
+        ...mutationNotExercised,
+        async observeInventory() {
+          return { ok: true, value: freshInventory };
+        },
+      }),
+    });
+    await capabilities.initialize();
+    const session = capabilities.attach(
+      {
+        endpointId: "workspace-guarded-target",
+        role: "workspace",
+        sessionEpoch: "epoch-guarded-target",
+      },
+      () => undefined,
+    );
+
+    await expect(
+      session.request({
+        targetId: guardedTarget.id,
+        type: "target.delete",
+        version: 1,
+      }),
+    ).resolves.toMatchObject({
+      error: { code: "reconciliation_required" },
+      ok: false,
+    });
+    await expect(
+      session.request({
+        definition: {
+          connectionReference: null,
+          harness: "Codex",
+          kind: "local",
+          label: "Changed label",
+          workspace: guardedTarget.workspace,
+        },
+        targetId: guardedTarget.id,
+        type: "target.update",
+        version: 1,
+      }),
+    ).resolves.toMatchObject({
+      error: { code: "reconciliation_required" },
+      ok: false,
+    });
+    await expect(session.snapshot()).resolves.toMatchObject({
+      targets: [
+        { target: { id: target.id } },
+        { deletionBlocked: true, target: { id: guardedTarget.id } },
+      ],
+    });
+  });
+
+  it("reattaches a retained legacy Guard when its Target is created", async () => {
+    const legacyTargetId = "local-codex-fedcba9876543210fedcba98";
+    const createdTargetId = "00000000-0000-4000-8000-000000000027";
+    const legacyWorkspace = "/work/legacy-retained";
+    const records = createMemoryRecoveryRecords(
+      [
+        {
+          cliVersion: "1.5.23",
+          entries: [],
+          generation: 1,
+          observedAt: "2026-08-20T08:00:00.000Z",
+          targetId: legacyTargetId,
+        },
+      ],
+      [
+        {
+          deadline: "2026-08-20T08:10:00.000Z",
+          effects: "possible",
+          generation: 1,
+          operationId: "retained-legacy-guard",
+          phase: "reconciliation-required",
+          targetId: legacyTargetId,
+        },
+      ],
+      [
+        {
+          connectionReference: null,
+          generation: target.generation,
+          harness: target.harness,
+          id: target.id,
+          kind: target.kind,
+          label: target.label,
+          workspace: target.workspace,
+        },
+      ],
+    );
+    const capabilities = createDesktopCapabilities({
+      id: () => "same-session-legacy-operation",
+      recoveryRecords: records,
+      skillsTargets: createSkillsTargetsCatalog({
+        id: () => createdTargetId,
+        initialTarget: target,
+        legacyIdFor(definition) {
+          return definition.workspace === legacyWorkspace
+            ? legacyTargetId
+            : undefined;
+        },
+        processFor: () => ({
+          ...mutationNotExercised,
+          async observeInventory() {
+            return { ok: true as const, value: freshInventory };
+          },
+        }),
+      }),
+    });
+    await capabilities.initialize();
+    const session = capabilities.attach(
+      {
+        endpointId: "workspace-retained-legacy",
+        role: "workspace",
+        sessionEpoch: "epoch-retained-legacy",
+      },
+      () => undefined,
+    );
+
+    await expect(
+      session.request({
+        definition: {
+          connectionReference: null,
+          harness: "Codex",
+          kind: "local",
+          label: "Recovered workspace",
+          workspace: legacyWorkspace,
+        },
+        type: "target.create",
+        version: 1,
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      value: { operationId: createdTargetId },
+    });
+    await expect(records.restore()).resolves.toMatchObject({
+      inventorySnapshots: [{ targetId: createdTargetId }],
+      mutationGuards: [{ targetId: createdTargetId }],
+    });
+    await expect(session.snapshot()).resolves.toMatchObject({
+      targets: [
+        { target: { id: target.id } },
+        {
+          deletionBlocked: true,
+          inventory: { freshness: "stale" },
+          mutation: { phase: "reconciliation-required" },
+          target: { id: createdTargetId },
+        },
+      ],
+    });
+    await session.request({
+      targetId: createdTargetId,
+      type: "inventory.refresh",
+      version: 1,
+    });
+    await expect(
+      session.request({
+        intent: { names: ["tdd"], scope: "project", type: "remove" },
+        targetId: createdTargetId,
+        type: "mutation.prepare",
+        version: 1,
+      }),
+    ).resolves.toMatchObject({
+      error: { code: "reconciliation_required" },
+      ok: false,
+    });
+  });
+
+  it("reattaches retained legacy recovery on retarget without replacing current evidence", async () => {
+    const legacyTargetId = "local-codex-abcdef0123456789abcdef01";
+    const legacyWorkspace = "/work/legacy-retarget";
+    const currentObservedAt = "2026-08-21T11:00:00.000Z";
+    const records = createMemoryRecoveryRecords(
+      [
+        {
+          cliVersion: "1.5.23",
+          entries: [],
+          generation: target.generation,
+          observedAt: currentObservedAt,
+          targetId: target.id,
+        },
+        {
+          cliVersion: "1.5.23",
+          entries: [],
+          generation: 1,
+          observedAt: "2026-08-20T11:00:00.000Z",
+          targetId: legacyTargetId,
+        },
+      ],
+      [
+        {
+          deadline: "2026-08-20T11:10:00.000Z",
+          effects: "possible",
+          generation: 1,
+          operationId: "retained-retarget-guard",
+          phase: "reconciliation-required",
+          targetId: legacyTargetId,
+        },
+      ],
+      [
+        {
+          connectionReference: null,
+          generation: target.generation,
+          harness: target.harness,
+          id: target.id,
+          kind: target.kind,
+          label: target.label,
+          workspace: target.workspace,
+        },
+      ],
+    );
+    const capabilities = createDesktopCapabilities({
+      id: () => "same-session-retarget-operation",
+      recoveryRecords: records,
+      skillsTargets: createSkillsTargetsCatalog({
+        id: () => "unused-target-id",
+        initialTarget: target,
+        legacyIdFor(definition) {
+          return definition.workspace === legacyWorkspace
+            ? legacyTargetId
+            : undefined;
+        },
+        processFor: () => ({
+          ...mutationNotExercised,
+          async observeInventory() {
+            return { ok: true as const, value: freshInventory };
+          },
+        }),
+      }),
+    });
+    await capabilities.initialize();
+    const session = capabilities.attach(
+      {
+        endpointId: "workspace-retained-retarget",
+        role: "workspace",
+        sessionEpoch: "epoch-retained-retarget",
+      },
+      () => undefined,
+    );
+
+    await expect(
+      session.request({
+        definition: {
+          connectionReference: null,
+          harness: target.harness,
+          kind: target.kind,
+          label: "Retargeted workspace",
+          workspace: legacyWorkspace,
+        },
+        targetId: target.id,
+        type: "target.update",
+        version: 1,
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      value: { operationId: target.id },
+    });
+    await expect(records.restore()).resolves.toMatchObject({
+      inventorySnapshots: [
+        { observedAt: currentObservedAt, targetId: target.id },
+      ],
+      mutationGuards: [{ targetId: target.id }],
+    });
+    await expect(session.snapshot()).resolves.toMatchObject({
+      inventory: {
+        freshness: "stale",
+        observedAt: currentObservedAt,
+      },
+      mutation: { phase: "reconciliation-required" },
+      target: { generation: target.generation + 1, id: target.id },
+      targets: [{ deletionBlocked: true, target: { id: target.id } }],
+    });
+  });
+
+  it("does not open a fallback Target when durable Target authority is unreadable", async () => {
+    let openCalls = 0;
+    const capabilities = createDesktopCapabilities({
+      id: () => "unused-id",
+      recoveryRecords: {
+        async commit() {
+          throw new Error("Target store must remain blocked.");
+        },
+        async restore() {
+          return {
+            failures: [
+              {
+                code: "corrupt_store" as const,
+                store: "targetDefinitions" as const,
+              },
+            ],
+            inventorySnapshots: [],
+            mutationGuards: [],
+            targetDefinitions: [],
+          };
+        },
+      },
+      skillsTargets: createSkillsTargetsCatalog({
+        id: () => "00000000-0000-4000-8000-000000000012",
+        initialTarget: target,
+        processFor() {
+          openCalls += 1;
+          return {
+            ...mutationNotExercised,
+            async observeInventory() {
+              return { ok: true as const, value: freshInventory };
+            },
+          };
+        },
+      }),
+    });
+    await capabilities.initialize();
+    const session = capabilities.attach(
+      {
+        endpointId: "workspace-unreadable-targets",
+        role: "workspace",
+        sessionEpoch: "epoch-unreadable-targets",
+      },
+      () => undefined,
+    );
+
+    await expect(
+      session.request({
+        targetId: target.id,
+        type: "inventory.refresh",
+        version: 1,
+      }),
+    ).resolves.toMatchObject({
+      error: { code: "target_unavailable", phase: "restore" },
+      ok: false,
+    });
+    expect(openCalls).toBe(0);
+  });
+
+  it("compares selected Fresh or Stale inventories without opening a Target", async () => {
+    const otherTarget: TargetDefinition = {
+      ...target,
+      harness: "Claude",
+      id: "00000000-0000-4000-8000-000000000006",
+      label: "Comparison right",
+      workspace: "/work/right",
+      workspaceLabel: "right",
+    };
+    const evidence = (value: string) => ({
+      authority: "npx-skills",
+      kind: "git-commit",
+      status: "known" as const,
+      value,
+    });
+    const entry = (
+      name: string,
+      source: string | null,
+      revision: ReturnType<typeof evidence> | { readonly status: "unknown" },
+      scope: "global" | "project" = "project",
+    ) => ({
+      agents: ["Codex"],
+      contentFingerprint:
+        revision.status === "known"
+          ? {
+              ...revision,
+              kind: "sha256",
+              value: `fingerprint-${revision.value}`,
+            }
+          : revision,
+      declaredSource: {
+        source,
+        sourceType: source === null ? null : "github",
+      },
+      name,
+      revision,
+      scope,
+    });
+    const leftEntries = [
+      entry("missing", "example/source", evidence("one")),
+      entry("source", "example/left", evidence("one")),
+      {
+        ...entry("drift", "example/source", evidence("one")),
+        contentFingerprint: {
+          ...evidence("same-content"),
+          kind: "sha256",
+        },
+      },
+      {
+        ...entry("fingerprint", "example/source", evidence("same")),
+        contentFingerprint: {
+          ...evidence("left-content"),
+          kind: "sha256",
+        },
+      },
+      entry("mixed-drift", "example/source", evidence("left")),
+      entry("mixed-drift", null, { status: "unknown" }, "global"),
+      entry("mixed-source", "example/left", evidence("same")),
+      entry("mixed-source", null, { status: "unknown" }, "global"),
+      entry("unequal-drift", "example/source", evidence("left")),
+      entry("unequal-drift", "example/source", { status: "unknown" }, "global"),
+      entry("unequal-source", "example/left", evidence("same")),
+      entry("unequal-source", null, { status: "unknown" }, "global"),
+      entry("unknown", "example/source", { status: "unknown" }),
+      entry("matched", "example/source", evidence("same")),
+      entry("scope-independent", "example/source", evidence("same"), "project"),
+    ];
+    const rightEntries = [
+      entry("source", "example/right", evidence("one")),
+      {
+        ...entry("drift", "example/source", evidence("two")),
+        contentFingerprint: {
+          ...evidence("same-content"),
+          kind: "sha256",
+        },
+      },
+      {
+        ...entry("fingerprint", "example/source", evidence("same")),
+        contentFingerprint: {
+          ...evidence("right-content"),
+          kind: "sha256",
+        },
+      },
+      entry("mixed-drift", "example/source", evidence("right")),
+      entry("mixed-drift", null, { status: "unknown" }, "global"),
+      entry("mixed-source", "example/right", evidence("same")),
+      entry("mixed-source", null, { status: "unknown" }, "global"),
+      entry("unequal-drift", "example/source", evidence("right-b")),
+      entry("unequal-drift", "example/source", evidence("right-c"), "global"),
+      entry("unequal-source", "example/right-b", evidence("same")),
+      entry("unequal-source", "example/right-c", evidence("same"), "global"),
+      entry("unknown", "example/source", { status: "unknown" }),
+      entry("matched", "example/source", evidence("same")),
+      entry("scope-independent", "example/source", evidence("same"), "global"),
+    ];
+    const records = createMemoryRecoveryRecords(
+      [
+        {
+          cliVersion: "1.5.23",
+          entries: leftEntries,
+          generation: 1,
+          observedAt: "2026-08-21T10:00:00.000Z",
+          targetId: target.id,
+        },
+        {
+          cliVersion: "1.5.23",
+          entries: rightEntries,
+          generation: 1,
+          observedAt: "2026-08-21T10:01:00.000Z",
+          targetId: otherTarget.id,
+        },
+      ],
+      [],
+      [target, otherTarget].map((definition) => ({
+        connectionReference: null,
+        generation: definition.generation,
+        harness: definition.harness,
+        id: definition.id,
+        kind: definition.kind,
+        label: definition.label,
+        workspace: definition.workspace,
+      })),
+    );
+    let openCalls = 0;
+    const capabilities = createDesktopCapabilities({
+      id: () => "comparison-1",
+      recoveryRecords: records,
+      skillsTargets: createSkillsTargetsCatalog({
+        id: () => "00000000-0000-4000-8000-000000000013",
+        initialTarget: target,
+        processFor() {
+          openCalls += 1;
+          return {
+            ...mutationNotExercised,
+            async observeInventory() {
+              return { ok: true as const, value: freshInventory };
+            },
+          };
+        },
+      }),
+    });
+    await capabilities.initialize();
+    const session = capabilities.attach(
+      {
+        endpointId: "workspace-comparison",
+        role: "workspace",
+        sessionEpoch: "epoch-comparison",
+      },
+      () => undefined,
+    );
+
+    await expect(
+      session.request({
+        leftTargetId: target.id,
+        rightTargetId: otherTarget.id,
+        type: "comparison.open",
+        version: 1,
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      value: { operationId: "comparison-1" },
+    });
+    expect(openCalls).toBe(0);
+    await expect(session.snapshot()).resolves.toMatchObject({
+      comparison: {
+        leftFreshness: "stale",
+        leftTargetId: target.id,
+        rightFreshness: "stale",
+        rightTargetId: otherTarget.id,
+        rows: [
+          {
+            dimensions: {
+              contentFingerprint: "matched",
+              revision: "drift",
+            },
+            key: "drift",
+            summary: "version-drift",
+          },
+          {
+            dimensions: {
+              contentFingerprint: "drift",
+              declaredSource: "matched",
+              presence: "both",
+              revision: "matched",
+            },
+            key: "fingerprint",
+            summary: "version-drift",
+          },
+          { key: "matched", summary: "matched" },
+          {
+            dimensions: { presence: "left-only" },
+            key: "missing",
+            summary: "missing",
+          },
+          {
+            dimensions: { revision: "drift" },
+            key: "mixed-drift",
+            summary: "version-drift",
+          },
+          {
+            dimensions: { declaredSource: "mismatch" },
+            key: "mixed-source",
+            summary: "source-mismatch",
+          },
+          {
+            dimensions: {
+              contentFingerprint: "matched",
+              declaredSource: "matched",
+              presence: "both",
+              revision: "matched",
+            },
+            key: "scope-independent",
+            left: { freshness: "stale", harnessAvailability: "available" },
+            right: {
+              freshness: "stale",
+              harnessAvailability: "unavailable",
+            },
+            summary: "matched",
+          },
+          {
+            dimensions: { declaredSource: "mismatch" },
+            key: "source",
+            summary: "source-mismatch",
+          },
+          {
+            dimensions: { revision: "drift" },
+            key: "unequal-drift",
+            summary: "version-drift",
+          },
+          {
+            dimensions: { declaredSource: "mismatch" },
+            key: "unequal-source",
+            summary: "source-mismatch",
+          },
+          {
+            dimensions: {
+              contentFingerprint: "unknown",
+              revision: "unknown",
+            },
+            key: "unknown",
+            summary: "unknown-evidence",
+          },
+        ],
+      },
+    });
+    await expect(
+      session.request({
+        comparisonId: "comparison-1",
+        destinationTargetId: otherTarget.id,
+        rowKey: "missing",
+        type: "comparison.prepare",
+        version: 1,
+      }),
+    ).resolves.toMatchObject({
+      error: { code: "stale_inventory" },
+      ok: false,
+    });
+    expect(openCalls).toBe(0);
+  });
+
+  it("prepares an exact eligible destination intent from Fresh comparison evidence", async () => {
+    let releasePreparation!: () => void;
+    let preparationStarted!: () => void;
+    const preparationBlocked = new Promise<void>((resolve) => {
+      releasePreparation = resolve;
+    });
+    const started = new Promise<void>((resolve) => {
+      preparationStarted = resolve;
+    });
+    let releaseShutdownPreparation!: () => void;
+    let shutdownPreparationStarted!: () => void;
+    const shutdownPreparationBlocked = new Promise<void>((resolve) => {
+      releaseShutdownPreparation = resolve;
+    });
+    const shutdownStarted = new Promise<void>((resolve) => {
+      shutdownPreparationStarted = resolve;
+    });
+    const destination: TargetDefinition = {
+      ...target,
+      id: "00000000-0000-4000-8000-000000000007",
+      label: "Destination",
+      workspace: "/work/destination",
+      workspaceLabel: "destination",
+    };
+    const definitions = [target, destination];
+    const sourceInventory: Inventory = {
+      ...freshInventory,
+      entries: [{ ...freshInventory.entries[0]!, name: "copy-me" }],
+    };
+    const destinationInventory: Inventory = {
+      ...freshInventory,
+      entries: [],
+    };
+    const preparedInputs: unknown[] = [];
+    let preparationCalls = 0;
+    const skillsTargets = createSkillsTargetsCatalog({
+      id: () => "00000000-0000-4000-8000-000000000014",
+      initialTarget: target,
+      processFor(binding) {
+        const selected = definitions.find(({ id }) => id === binding.targetId)!;
+        return {
+          ...mutationNotExercised,
+          async observeInventory() {
+            return {
+              ok: true as const,
+              value:
+                selected.id === destination.id
+                  ? destinationInventory
+                  : sourceInventory,
+            };
+          },
+          async prepareMutation(input) {
+            preparedInputs.push(input);
+            preparationCalls += 1;
+            if (preparationCalls === 1) {
+              preparationStarted();
+              await preparationBlocked;
+            } else {
+              shutdownPreparationStarted();
+              await shutdownPreparationBlocked;
+            }
+            return {
+              ok: true as const,
+              value: {
+                commandPlan: {
+                  harness: selected.harness,
+                  names:
+                    preparationCalls === 1
+                      ? ["copy-me"]
+                      : ["must-not-publish"],
+                  operation: "add" as const,
+                  preview: "review-only preview",
+                  schemaVersion: 1 as const,
+                  scope: "project" as const,
+                  source: {
+                    source: "example/skills",
+                    sourceType: "github" as const,
+                  },
+                  targetId: selected.id,
+                  timeoutMs: 30_000,
+                },
+                digest: "a".repeat(64),
+                expiresAt: "2099-01-01T00:10:00.000Z",
+                id:
+                  preparationCalls === 1
+                    ? "prepared-from-comparison"
+                    : "discarded-during-shutdown",
+                inventoryId: input.inventoryId,
+                targetGeneration: selected.generation,
+                targetId: selected.id,
+              },
+            };
+          },
+        };
+      },
+    });
+    const records = createMemoryRecoveryRecords(
+      [],
+      [],
+      definitions.map((definition) => ({
+        connectionReference: null,
+        generation: definition.generation,
+        harness: definition.harness,
+        id: definition.id,
+        kind: definition.kind,
+        label: definition.label,
+        workspace: definition.workspace,
+      })),
+    );
+    let nextId = 0;
+    const capabilities = createDesktopCapabilities({
+      id: () => `comparison-operation-${++nextId}`,
+      recoveryRecords: records,
+      skillsTargets,
+    });
+    await capabilities.initialize();
+    const session = capabilities.attach(
+      {
+        endpointId: "workspace-comparison-prepare",
+        role: "workspace",
+        sessionEpoch: "epoch-comparison-prepare",
+      },
+      () => undefined,
+    );
+    await session.request({
+      targetId: target.id,
+      type: "inventory.refresh",
+      version: 1,
+    });
+    await session.request({
+      targetId: destination.id,
+      type: "inventory.refresh",
+      version: 1,
+    });
+    const openedComparison = await session.request({
+      leftTargetId: target.id,
+      rightTargetId: destination.id,
+      type: "comparison.open",
+      version: 1,
+    });
+    expect(openedComparison.ok).toBe(true);
+    const comparisonId = openedComparison.ok
+      ? openedComparison.value.operationId
+      : "unavailable";
+    await expect(session.snapshot()).resolves.toMatchObject({
+      comparison: {
+        leftFreshness: "fresh",
+        rightFreshness: "fresh",
+        rows: [
+          {
+            dimensions: { presence: "left-only" },
+            key: "copy-me",
+            summary: "missing",
+          },
+        ],
+      },
+    });
+
+    const preparation = session.request({
+      comparisonId,
+      destinationTargetId: destination.id,
+      rowKey: "copy-me",
+      type: "comparison.prepare",
+      version: 1,
+    });
+    await started;
+    await expect(
+      session.request({
+        definition: {
+          connectionReference: null,
+          harness: target.harness,
+          kind: target.kind,
+          label: target.label,
+          workspace: "/work/source-changed-during-comparison-preparation",
+        },
+        targetId: target.id,
+        type: "target.update",
+        version: 1,
+      }),
+    ).resolves.toMatchObject({
+      error: { code: "mutation_conflict", phase: "coordinate" },
+      ok: false,
+    });
+    await expect(
+      session.request({
+        targetId: target.id,
+        type: "target.delete",
+        version: 1,
+      }),
+    ).resolves.toMatchObject({
+      error: { code: "mutation_conflict", phase: "coordinate" },
+      ok: false,
+    });
+    await expect(
+      session.request({
+        targetId: target.id,
+        type: "inventory.refresh",
+        version: 1,
+      }),
+    ).resolves.toMatchObject({
+      error: { code: "mutation_conflict", phase: "coordinate" },
+      ok: false,
+    });
+    await expect(
+      session.request({
+        definition: {
+          connectionReference: null,
+          harness: destination.harness,
+          kind: destination.kind,
+          label: destination.label,
+          workspace: "/work/changed-during-comparison-preparation",
+        },
+        targetId: destination.id,
+        type: "target.update",
+        version: 1,
+      }),
+    ).resolves.toMatchObject({
+      error: { code: "mutation_conflict", phase: "coordinate" },
+      ok: false,
+    });
+    await expect(
+      session.request({
+        targetId: destination.id,
+        type: "target.delete",
+        version: 1,
+      }),
+    ).resolves.toMatchObject({
+      error: { code: "mutation_conflict", phase: "coordinate" },
+      ok: false,
+    });
+    releasePreparation();
+    await expect(preparation).resolves.toEqual({
+      ok: true,
+      value: { operationId: "prepared-from-comparison" },
+    });
+    expect(preparedInputs).toMatchObject([
+      {
+        freshness: "fresh",
+        intent: {
+          names: ["copy-me"],
+          scope: "project",
+          source: { source: "example/skills", sourceType: "github" },
+          type: "add",
+        },
+      },
+    ]);
+    await expect(session.snapshot()).resolves.toMatchObject({
+      targets: [
+        { target: { id: target.id } },
+        {
+          mutation: {
+            commandPlan: { names: ["copy-me"], operation: "add" },
+            phase: "planned",
+          },
+          target: { id: destination.id },
+        },
+      ],
+    });
+
+    const openedReview = await session.request({
+      preparedMutationId: "prepared-from-comparison",
+      type: "review.request",
+      version: 1,
+    });
+    expect(openedReview).toEqual({
+      ok: true,
+      value: { operationId: expect.any(String) },
+    });
+    const reviewId = openedReview.ok
+      ? openedReview.value.operationId
+      : "unavailable";
+    const review = capabilities.attach(
+      {
+        endpointId: "review-comparison-dependency",
+        reviewId,
+        role: "review",
+        sessionEpoch: "epoch-comparison-dependency",
+      },
+      () => undefined,
+    );
+    await expect(review.snapshot()).resolves.toMatchObject({
+      status: "pending",
+    });
+    await expect(
+      session.request({
+        definition: {
+          connectionReference: null,
+          harness: target.harness,
+          kind: target.kind,
+          label: target.label,
+          workspace: "/work/source-changed-after-comparison-preparation",
+        },
+        targetId: target.id,
+        type: "target.update",
+        version: 1,
+      }),
+    ).resolves.toMatchObject({ ok: true });
+    await expect(review.snapshot()).resolves.toEqual({
+      decision: "reject",
+      schemaVersion: 1,
+      status: "settled",
+    });
+    await expect(session.snapshot()).resolves.toMatchObject({
+      comparison: { leftFreshness: "stale" },
+      mutation: { commandPlan: null, phase: "idle" },
+      target: { id: destination.id },
+    });
+    await session.request({
+      targetId: target.id,
+      type: "inventory.refresh",
+      version: 1,
+    });
+
+    const discardedPreparation = session.request({
+      comparisonId,
+      destinationTargetId: destination.id,
+      rowKey: "copy-me",
+      type: "comparison.prepare",
+      version: 1,
+    });
+    await shutdownStarted;
+    let shutdownSettled = false;
+    const shutdown = capabilities.shutdown().then(() => {
+      shutdownSettled = true;
+    });
+    await Promise.resolve();
+    expect(shutdownSettled).toBe(false);
+
+    releaseShutdownPreparation();
+    await expect(discardedPreparation).resolves.toMatchObject({
+      error: { code: "cancelled", phase: "prepare" },
+      ok: false,
+    });
+    await shutdown;
+    await expect(session.snapshot()).resolves.toMatchObject({
+      mutation: {
+        commandPlan: null,
+        phase: "idle",
+      },
+    });
+  });
 });
 
 describe("DesktopCapabilities mutation role-session contract", () => {
+  it("keeps review approval pending while a Target update is reserved", async () => {
+    let releaseCanonicalization!: () => void;
+    let canonicalizationStarted!: () => void;
+    const canonicalizationBlocked = new Promise<void>((resolve) => {
+      releaseCanonicalization = resolve;
+    });
+    const started = new Promise<void>((resolve) => {
+      canonicalizationStarted = resolve;
+    });
+    let executions = 0;
+    let presentedReviewId: string | undefined;
+    const skillsTargets = createSkillsTargetsCatalog({
+      async canonicalizeLocalWorkspace(workspace) {
+        canonicalizationStarted();
+        await canonicalizationBlocked;
+        return workspace;
+      },
+      id: () => "00000000-0000-4000-8000-000000000025",
+      initialTarget: target,
+      processFor: () => ({
+        async executeConfirmed(input) {
+          executions += 1;
+          return mutationNotExercised.executeConfirmed(input);
+        },
+        async observeInventory() {
+          return { ok: true as const, value: freshInventory };
+        },
+        async prepareMutation(input) {
+          return {
+            ok: true as const,
+            value: {
+              commandPlan: {
+                harness: target.harness,
+                names: ["tdd"],
+                operation: "remove" as const,
+                preview: "review-only preview",
+                schemaVersion: 1 as const,
+                scope: "project" as const,
+                source: null,
+                targetId: target.id,
+                timeoutMs: 30_000,
+              },
+              digest: "a".repeat(64),
+              expiresAt: "2099-01-01T00:10:00.000Z",
+              id: "prepared-before-target-change",
+              inventoryId: input.inventoryId,
+              targetGeneration: target.generation,
+              targetId: target.id,
+            },
+          };
+        },
+      }),
+    });
+    const ids = [
+      "refresh-review-race",
+      "inventory-review-race",
+      "review-target-change",
+    ];
+    const capabilities = createDesktopCapabilities({
+      id: () => ids.shift() ?? "unexpected-review-race-id",
+      onReviewRequested(reviewId) {
+        presentedReviewId = reviewId;
+      },
+      recoveryRecords: createMemoryRecoveryRecords([], [], [
+        {
+          connectionReference: null,
+          generation: target.generation,
+          harness: target.harness,
+          id: target.id,
+          kind: target.kind,
+          label: target.label,
+          workspace: target.workspace,
+        },
+      ]),
+      skillsTargets,
+    });
+    await capabilities.initialize();
+    const workspace = capabilities.attach(
+      {
+        endpointId: "workspace-review-target-change",
+        role: "workspace",
+        sessionEpoch: "epoch-review-target-change",
+      },
+      () => undefined,
+    );
+    await workspace.request({
+      targetId: target.id,
+      type: "inventory.refresh",
+      version: 1,
+    });
+    await workspace.request({
+      intent: { names: ["tdd"], scope: "project", type: "remove" },
+      targetId: target.id,
+      type: "mutation.prepare",
+      version: 1,
+    });
+    await workspace.request({
+      preparedMutationId: "prepared-before-target-change",
+      type: "review.request",
+      version: 1,
+    });
+    expect(presentedReviewId).toBe("review-target-change");
+    const review = capabilities.attach(
+      {
+        endpointId: "review-target-change",
+        reviewId: presentedReviewId,
+        role: "review",
+        sessionEpoch: "review-target-change-epoch",
+      },
+      () => undefined,
+    );
+
+    const update = workspace.request({
+      definition: {
+        connectionReference: null,
+        harness: target.harness,
+        kind: target.kind,
+        label: target.label,
+        workspace: "/work/changed-before-approval",
+      },
+      targetId: target.id,
+      type: "target.update",
+      version: 1,
+    });
+    await started;
+    await expect(
+      review.request({
+        decision: "approve",
+        type: "review.decide",
+        version: 1,
+      }),
+    ).resolves.toMatchObject({
+      error: { code: "mutation_conflict", phase: "coordinate" },
+      ok: false,
+    });
+    await expect(review.snapshot()).resolves.toMatchObject({
+      status: "pending",
+    });
+    expect(executions).toBe(0);
+
+    releaseCanonicalization();
+    await expect(update).resolves.toMatchObject({ ok: true });
+    await expect(review.snapshot()).resolves.toEqual({
+      decision: "reject",
+      schemaVersion: 1,
+      status: "settled",
+    });
+    expect(executions).toBe(0);
+  });
+
+  it("keeps Target A review pending while Target B preparation is active", async () => {
+    let releasePreparation!: () => void;
+    let preparationStarted!: () => void;
+    const preparationBlocked = new Promise<void>((resolve) => {
+      releasePreparation = resolve;
+    });
+    const started = new Promise<void>((resolve) => {
+      preparationStarted = resolve;
+    });
+    const otherTarget: TargetDefinition = {
+      ...target,
+      id: "00000000-0000-4000-8000-000000000008",
+      label: "Independent Target",
+      workspace: "/work/independent",
+      workspaceLabel: "independent",
+    };
+    const definitions = [target, otherTarget];
+    const skillsTargets = createSkillsTargetsCatalog({
+      id: () => "00000000-0000-4000-8000-000000000015",
+      initialTarget: target,
+      processFor(binding) {
+        const selected = definitions.find(({ id }) => id === binding.targetId)!;
+        return {
+          ...mutationNotExercised,
+          async observeInventory() {
+            return { ok: true as const, value: freshInventory };
+          },
+          async prepareMutation(input) {
+            if (selected.id === otherTarget.id) {
+              preparationStarted();
+              await preparationBlocked;
+            }
+            return {
+              ok: true as const,
+              value: {
+                commandPlan: {
+                  harness: selected.harness,
+                  names: ["tdd"],
+                  operation: "remove" as const,
+                  preview: "review-only preview",
+                  schemaVersion: 1 as const,
+                  scope: "project" as const,
+                  source: null,
+                  targetId: selected.id,
+                  timeoutMs: 30_000,
+                },
+                digest: "a".repeat(64),
+                expiresAt: "2099-01-01T00:10:00.000Z",
+                id:
+                  selected.id === target.id
+                    ? "prepared-target-a"
+                    : "prepared-target-b",
+                inventoryId: input.inventoryId,
+                targetGeneration: selected.generation,
+                targetId: selected.id,
+              },
+            };
+          },
+        };
+      },
+    });
+    const records = createMemoryRecoveryRecords(
+      [],
+      [],
+      definitions.map((definition) => ({
+        connectionReference: null,
+        generation: definition.generation,
+        harness: definition.harness,
+        id: definition.id,
+        kind: definition.kind,
+        label: definition.label,
+        workspace: definition.workspace,
+      })),
+    );
+    let nextId = 0;
+    let reviewId: string | undefined;
+    const capabilities = createDesktopCapabilities({
+      id: () => `independent-operation-${++nextId}`,
+      onReviewRequested(id) {
+        reviewId = id;
+      },
+      recoveryRecords: records,
+      skillsTargets,
+    });
+    await capabilities.initialize();
+    const workspace = capabilities.attach(
+      {
+        endpointId: "workspace-independent-reviews",
+        role: "workspace",
+        sessionEpoch: "epoch-independent-reviews",
+      },
+      () => undefined,
+    );
+    await workspace.request({
+      targetId: target.id,
+      type: "inventory.refresh",
+      version: 1,
+    });
+    await workspace.request({
+      intent: { names: ["tdd"], scope: "project", type: "remove" },
+      targetId: target.id,
+      type: "mutation.prepare",
+      version: 1,
+    });
+    await workspace.request({
+      preparedMutationId: "prepared-target-a",
+      type: "review.request",
+      version: 1,
+    });
+    expect(reviewId).toBeDefined();
+
+    await workspace.request({
+      targetId: otherTarget.id,
+      type: "inventory.refresh",
+      version: 1,
+    });
+    const review = capabilities.attach(
+      {
+        endpointId: "review-independent-target-a",
+        reviewId,
+        role: "review",
+        sessionEpoch: "review-independent-target-a",
+      },
+      () => undefined,
+    );
+    await expect(review.snapshot()).resolves.toMatchObject({
+      projection: {
+        commandPlan: { targetId: target.id },
+        reviewId,
+      },
+      status: "pending",
+    });
+    const targetBPreparation = workspace.request({
+      intent: { names: ["tdd"], scope: "project", type: "remove" },
+      targetId: otherTarget.id,
+      type: "mutation.prepare",
+      version: 1,
+    });
+    await started;
+    await expect(
+      review.request({
+        decision: "approve",
+        type: "review.decide",
+        version: 1,
+      }),
+    ).resolves.toMatchObject({
+      error: { code: "mutation_conflict", phase: "coordinate" },
+      ok: false,
+    });
+    await expect(review.snapshot()).resolves.toMatchObject({ status: "pending" });
+    await expect(workspace.snapshot()).resolves.toMatchObject({
+      mutation: { phase: "idle" },
+      target: { id: otherTarget.id },
+    });
+    review.teardown();
+    await expect(review.snapshot()).resolves.toEqual({
+      decision: "reject",
+      schemaVersion: 1,
+      status: "settled",
+    });
+    await expect(workspace.snapshot()).resolves.toMatchObject({
+      mutation: { phase: "idle" },
+      target: { id: otherTarget.id },
+    });
+
+    releasePreparation();
+    await expect(targetBPreparation).resolves.toEqual({
+      ok: true,
+      value: { operationId: "prepared-target-b" },
+    });
+    await expect(workspace.snapshot()).resolves.toMatchObject({
+      mutation: {
+        commandPlan: { targetId: otherTarget.id },
+        phase: "planned",
+      },
+      target: { id: otherTarget.id },
+    });
+    await expect(review.snapshot()).resolves.toMatchObject({
+      decision: "reject",
+      status: "settled",
+    });
+  });
+
   it("requires a role-bound Trusted Review and durable Guard before execution", async () => {
-    const records = createMemoryRecoveryRecords();
+    const records = createMemoryRecoveryRecords(
+      [],
+      [],
+      [
+        {
+          connectionReference: null,
+          generation: target.generation,
+          harness: target.harness,
+          id: target.id,
+          kind: target.kind,
+          label: target.label,
+          workspace: target.workspace,
+        },
+      ],
+    );
     const lifecycle: string[] = [];
     const guardedRecords = {
-      async commit(
-        change: Parameters<typeof records.commit>[0],
-      ) {
+      async commit(change: Parameters<typeof records.commit>[0]) {
         lifecycle.push(change.type);
         return records.commit(change);
       },
@@ -764,7 +2773,11 @@ describe("DesktopCapabilities mutation role-session contract", () => {
     expect(presented).toEqual(["review-1"]);
 
     expect(
-      await workspace.request({ decision: "approve", type: "review.decide", version: 1 }),
+      await workspace.request({
+        decision: "approve",
+        type: "review.decide",
+        version: 1,
+      }),
     ).toMatchObject({ error: { code: "invalid_request" }, ok: false });
     expect(lifecycle).not.toContain("executeConfirmed");
 
@@ -821,9 +2834,9 @@ describe("DesktopCapabilities mutation role-session contract", () => {
         version: 1,
       }),
     ).toMatchObject({ error: { code: "unauthorized" }, ok: false });
-    expect(lifecycle.filter((entry) => entry === "executeConfirmed")).toHaveLength(
-      1,
-    );
+    expect(
+      lifecycle.filter((entry) => entry === "executeConfirmed"),
+    ).toHaveLength(1);
   });
 
   it("rejects expired and newer-Inventory reviews without execution", async () => {
@@ -1189,7 +3202,26 @@ describe("DesktopCapabilities mutation role-session contract", () => {
   });
 
   it("retains the original deadline and Guard when termination is uncertain", async () => {
-    const records = createMemoryRecoveryRecords();
+    const otherTarget: TargetDefinition = {
+      ...target,
+      id: "00000000-0000-4000-8000-000000000009",
+      label: "Other Target",
+      workspace: "/work/uncertain-other",
+      workspaceLabel: "uncertain-other",
+    };
+    const records = createMemoryRecoveryRecords(
+      [],
+      [],
+      [target, otherTarget].map((definition) => ({
+        connectionReference: definition.connectionReference ?? null,
+        generation: definition.generation,
+        harness: definition.harness,
+        id: definition.id,
+        kind: definition.kind,
+        label: definition.label,
+        workspace: definition.workspace,
+      })),
+    );
     const process: SkillsProcess = {
       async executeConfirmed() {
         return {
@@ -1235,8 +3267,9 @@ describe("DesktopCapabilities mutation role-session contract", () => {
       },
     };
     const ids = ["refresh", "inventory", "review", "mutation"];
+    let now = new Date("2026-08-21T10:00:00.000Z");
     const capabilities = createDesktopCapabilities({
-      clock: () => new Date("2026-08-21T10:00:00.000Z"),
+      clock: () => now,
       id: () => ids.shift() ?? "unexpected",
       recoveryRecords: records,
       skillsTargets: targetsWith(process),
@@ -1302,6 +3335,62 @@ describe("DesktopCapabilities mutation role-session contract", () => {
         phase: "reconciliation-required",
         reconciliationDeadline: "2026-08-21T10:02:00.000Z",
       },
+      targets: [
+        { deletionBlocked: true, target: { id: target.id } },
+        { target: { id: otherTarget.id } },
+      ],
+    });
+
+    const changedDefinition = {
+      connectionReference: null,
+      harness: target.harness,
+      kind: target.kind,
+      label: "Changed after uncertainty",
+      workspace: target.workspace,
+    } as const;
+    await expect(
+      workspace.request({
+        definition: changedDefinition,
+        targetId: target.id,
+        type: "target.update",
+        version: 1,
+      }),
+    ).resolves.toMatchObject({
+      error: { code: "reconciliation_required" },
+      ok: false,
+    });
+    await expect(
+      workspace.request({
+        targetId: target.id,
+        type: "target.delete",
+        version: 1,
+      }),
+    ).resolves.toMatchObject({
+      error: { code: "reconciliation_required" },
+      ok: false,
+    });
+
+    now = new Date("2026-08-21T10:02:00.000Z");
+    await expect(
+      workspace.request({
+        targetId: target.id,
+        type: "mutation.reconcile",
+        version: 1,
+      }),
+    ).resolves.toMatchObject({ ok: true });
+    await expect(
+      workspace.request({
+        definition: changedDefinition,
+        targetId: target.id,
+        type: "target.update",
+        version: 1,
+      }),
+    ).resolves.toMatchObject({ ok: true });
+    await expect(workspace.snapshot()).resolves.toMatchObject({
+      targets: [
+        { deletionBlocked: false, target: { label: changedDefinition.label } },
+        { target: { id: otherTarget.id } },
+      ],
     });
   });
 

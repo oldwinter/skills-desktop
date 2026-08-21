@@ -2,7 +2,13 @@
 
 import "@testing-library/jest-dom/vitest";
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ReviewBridge } from "../contracts/review.js";
@@ -35,7 +41,7 @@ describe("Trusted Review surface", () => {
                 schemaVersion: 1,
                 scope: "project",
                 source: null,
-                targetId: "local-target",
+                targetId: "00000000-0000-4000-8000-000000000001",
                 timeoutMs: 120_000,
               },
               expiresAt: "2026-08-21T10:10:00.000Z",
@@ -44,7 +50,7 @@ describe("Trusted Review surface", () => {
               target: {
                 generation: 1,
                 harness: "Codex",
-                id: "local-target",
+                id: "00000000-0000-4000-8000-000000000001",
                 kind: "local",
                 label: "This device",
                 workspaceLabel: "skills-desktop",

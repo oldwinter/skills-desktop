@@ -1,5 +1,13 @@
 import { spawn } from "node:child_process";
-import { chmod, mkdir, mkdtemp, readFile, rm, watch, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  watch,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,6 +21,7 @@ const temporaryRoot = await mkdtemp(join(tmpdir(), "skills-desktop-packaged-"));
 const binDirectory = join(temporaryRoot, "bin");
 const homeDirectory = join(temporaryRoot, "home");
 const workspace = join(temporaryRoot, "workspace");
+const secondWorkspace = join(temporaryRoot, "workspace-second");
 const npxPath = join(binDirectory, "npx");
 const invocationLog = join(homeDirectory, "invocations.log");
 const projectInventoryState = join(homeDirectory, "project-inventory.json");
@@ -30,16 +39,24 @@ class CdpPage {
         const pending = this.pending.get(message.id);
         if (pending === undefined) return;
         this.pending.delete(message.id);
-        if (message.error !== undefined) pending.reject(new Error(message.error.message));
+        if (message.error !== undefined)
+          pending.reject(new Error(message.error.message));
         else pending.resolve(message.result);
         return;
       }
       if (message.method === "Runtime.exceptionThrown") {
         this.errors.push(message.params.exceptionDetails.text);
       }
-      if (message.method === "Runtime.consoleAPICalled" && message.params.type === "error") {
+      if (
+        message.method === "Runtime.consoleAPICalled" &&
+        message.params.type === "error"
+      ) {
         this.errors.push(
-          message.params.args.map((argument) => argument.value ?? argument.description ?? "Error").join(" "),
+          message.params.args
+            .map(
+              (argument) => argument.value ?? argument.description ?? "Error",
+            )
+            .join(" "),
         );
       }
     });
@@ -47,7 +64,9 @@ class CdpPage {
 
   static async connect(port, expectedUrl) {
     const listTargets = () =>
-      fetch(`http://127.0.0.1:${port}/json/list`).then((response) => response.json());
+      fetch(`http://127.0.0.1:${port}/json/list`).then((response) =>
+        response.json(),
+      );
     const deadline = Date.now() + 30_000;
     let target;
     while (target === undefined && Date.now() < deadline) {
@@ -60,13 +79,18 @@ class CdpPage {
         await new Promise((resolveRetry) => setTimeout(resolveRetry, 50));
       }
     }
-    if (target === undefined) throw new Error("Packaged Electron page target is missing.");
+    if (target === undefined)
+      throw new Error("Packaged Electron page target is missing.");
     const socket = new WebSocket(target.webSocketDebuggerUrl);
     await new Promise((resolveOpen, rejectOpen) => {
       socket.addEventListener("open", resolveOpen, { once: true });
-      socket.addEventListener("error", () => rejectOpen(new Error("CDP connection failed.")), {
-        once: true,
-      });
+      socket.addEventListener(
+        "error",
+        () => rejectOpen(new Error("CDP connection failed.")),
+        {
+          once: true,
+        },
+      );
     });
     const page = new CdpPage(socket);
     await Promise.all([page.send("Runtime.enable"), page.send("Page.enable")]);
@@ -84,7 +108,10 @@ class CdpPage {
       returnByValue: true,
     });
     if (response.exceptionDetails !== undefined) {
-      throw new Error(response.exceptionDetails.exception?.description ?? response.exceptionDetails.text);
+      throw new Error(
+        response.exceptionDetails.exception?.description ??
+          response.exceptionDetails.text,
+      );
     }
     return response.result.value;
   }
@@ -149,6 +176,7 @@ await Promise.all([
   mkdir(binDirectory, { recursive: true }),
   mkdir(homeDirectory, { recursive: true }),
   mkdir(workspace, { recursive: true }),
+  mkdir(secondWorkspace, { recursive: true }),
 ]);
 await writeFile(projectInventoryState, JSON.stringify([projectEntry]), "utf8");
 
@@ -226,15 +254,21 @@ async function launch() {
       const next = await Promise.race([
         changeIterator.next(),
         childExit.then(({ code, signal }) => {
-          throw new Error(`Packaged Electron exited before CDP was ready (${code ?? signal}).`);
+          throw new Error(
+            `Packaged Electron exited before CDP was ready (${code ?? signal}).`,
+          );
         }),
       ]);
-      if (next.done) throw new Error("DevTools port watcher ended before launch.");
+      if (next.done)
+        throw new Error("DevTools port watcher ended before launch.");
     }
   } finally {
     await changeIterator.return?.();
   }
-  const page = await CdpPage.connect(port, "skills-desktop://workspace/index.html");
+  const page = await CdpPage.connect(
+    port,
+    "skills-desktop://workspace/index.html",
+  );
   const connectPage = (expectedUrl) => CdpPage.connect(port, expectedUrl);
   return {
     connectPage,
@@ -242,7 +276,8 @@ async function launch() {
     page,
     async close() {
       page.close();
-      if (child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
+      if (child.exitCode === null && child.signalCode === null)
+        child.kill("SIGTERM");
       let forceTimer;
       const exited = await Promise.race([
         childExit.then(() => true),
@@ -289,25 +324,41 @@ try {
     JSON.stringify(rendererBoundary.bridgeKeys) !==
     JSON.stringify([
       "cancelInventory",
+      "compareTargets",
+      "createTarget",
+      "deleteTarget",
       "getSnapshot",
+      "prepareComparison",
       "prepareMutation",
       "reconcileMutation",
       "refreshInventory",
       "requestCancellationReview",
       "requestReview",
       "subscribe",
+      "updateTarget",
     ])
   ) {
-    throw new Error(`Unexpected preload surface: ${rendererBoundary.bridgeKeys.join(", ")}`);
+    throw new Error(
+      `Unexpected preload surface: ${rendererBoundary.bridgeKeys.join(", ")}`,
+    );
   }
-  if (/SECRET_PROJECT_PATH|SECRET_HOME_PATH|SECRET_TOKEN|SECRET_RAW_STDERR/.test(rendererBoundary.text)) {
+  if (
+    /SECRET_PROJECT_PATH|SECRET_HOME_PATH|SECRET_TOKEN|SECRET_RAW_STDERR/.test(
+      rendererBoundary.text,
+    )
+  ) {
     throw new Error("Sensitive process evidence reached the renderer.");
   }
   const maliciousPayload = await first.page.evaluate(
     `window.skillsDesktop.refreshInventory({ executable: "sh" })`,
   );
-  if (maliciousPayload.ok || maliciousPayload.error?.code !== "invalid_request") {
-    throw new Error(`Malicious preload payload was not rejected: ${JSON.stringify(maliciousPayload)}`);
+  if (
+    maliciousPayload.ok ||
+    maliciousPayload.error?.code !== "invalid_request"
+  ) {
+    throw new Error(
+      `Malicious preload payload was not rejected: ${JSON.stringify(maliciousPayload)}`,
+    );
   }
   const subframeBoundary = await first.page.evaluate(`(() => {
     const frame = document.createElement("iframe");
@@ -318,9 +369,127 @@ try {
     return bridgeType;
   })()`);
   if (subframeBoundary !== "undefined") {
-    throw new Error("A renderer subframe received the workspace preload capability.");
+    throw new Error(
+      "A renderer subframe received the workspace preload capability.",
+    );
   }
   console.log("packaged smoke: hostile payload and subframe rejected");
+
+  await first.page.evaluate(`(() => {
+    const targets = [...document.querySelectorAll("button")].find(
+      (candidate) => candidate.getAttribute("aria-label") === "Targets",
+    );
+    if (!(targets instanceof HTMLButtonElement)) throw new Error("Targets navigation is unavailable.");
+    targets.click();
+  })()`);
+  await first.page.waitFor(
+    `document.querySelector(".targets-workspace") !== null`,
+    "Targets workspace",
+  );
+  await first.page.evaluate(`(() => {
+    const button = [...document.querySelectorAll("button")].find(
+      (candidate) => candidate.textContent?.includes("New Target"),
+    );
+    if (!(button instanceof HTMLButtonElement)) throw new Error("New Target is unavailable.");
+    button.click();
+    const inputFor = (label) => {
+      const field = [...document.querySelectorAll("label")].find(
+        (candidate) => candidate.textContent?.includes(label),
+      )?.querySelector("input");
+      if (!(field instanceof HTMLInputElement)) throw new Error(label + " input is unavailable.");
+      return field;
+    };
+    const setInput = (input, value) => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+      setter?.call(input, value);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    };
+    setInput(inputFor("Display label"), "Second local");
+    setInput(inputFor("Canonical workspace"), ${JSON.stringify(secondWorkspace)});
+  })()`);
+  await first.page.waitFor(
+    `document.querySelector(".target-editor h2")?.textContent?.includes("Second local") === true`,
+    "second Local Target draft",
+  );
+  await first.page.evaluate(`(() => {
+    const save = [...document.querySelectorAll("button")].find(
+      (candidate) => candidate.textContent?.includes("Save Target"),
+    );
+    if (!(save instanceof HTMLButtonElement)) throw new Error("Save Target is unavailable.");
+    save.click();
+  })()`);
+  await first.page.waitFor(
+    `[...document.querySelectorAll(".target-item h2")].some(
+      (heading) => heading.textContent?.includes("Second local"),
+    )`,
+    "created second Local Target",
+  );
+  await first.page.evaluate(`(() => {
+    const target = [...document.querySelectorAll(".target-row")].find(
+      (candidate) => candidate.textContent?.includes("Second local"),
+    );
+    if (!(target instanceof HTMLButtonElement)) throw new Error("Second Local Target is unavailable.");
+    target.click();
+  })()`);
+  await first.page.waitFor(
+    `document.querySelector(".header-target")?.textContent?.includes("Second local") === true`,
+    "second Local Target selection",
+  );
+  await first.page.evaluate(`(() => {
+    const refresh = document.querySelector('button[aria-label="Refresh inventory"]');
+    if (!(refresh instanceof HTMLButtonElement)) throw new Error("Second Target refresh is unavailable.");
+    refresh.click();
+  })()`);
+  await first.page.waitFor(
+    `document.querySelector(".header-target")?.textContent?.includes("Second local") === true &&
+      document.querySelector(".header-status")?.textContent?.includes("Fresh evidence") === true`,
+    "second Local Target Fresh Inventory",
+  );
+  const invocationsBeforeComparison = (await readFile(invocationLog, "utf8"))
+    .trim()
+    .split("\n").length;
+  await first.page.evaluate(`(() => {
+    const comparison = [...document.querySelectorAll("button")].find(
+      (candidate) => candidate.getAttribute("aria-label") === "Comparison",
+    );
+    if (!(comparison instanceof HTMLButtonElement)) throw new Error("Comparison navigation is unavailable.");
+    comparison.click();
+  })()`);
+  await first.page.waitFor(
+    `document.querySelector(".comparison-workspace") !== null`,
+    "Comparison workspace",
+  );
+  await first.page.evaluate(`(() => {
+    const compare = [...document.querySelectorAll("button")].find(
+      (candidate) => candidate.textContent?.trim() === "Compare",
+    );
+    if (!(compare instanceof HTMLButtonElement)) throw new Error("Compare is unavailable.");
+    compare.click();
+  })()`);
+  await first.page.waitFor(
+    `document.querySelector(".comparison-table")?.textContent?.includes("packaged-project-skill") === true &&
+      document.querySelector(".comparison-table")?.textContent?.includes("Unknown evidence") === true`,
+    "packaged paired Target comparison",
+  );
+  const invocationsAfterComparison = (await readFile(invocationLog, "utf8"))
+    .trim()
+    .split("\n").length;
+  if (invocationsAfterComparison !== invocationsBeforeComparison) {
+    throw new Error("Opening Comparison connected to a Target implicitly.");
+  }
+  await first.page.evaluate(`(() => {
+    const target = [...document.querySelectorAll(".target-row")].find(
+      (candidate) => candidate.textContent?.includes("This device"),
+    );
+    if (!(target instanceof HTMLButtonElement)) throw new Error("Primary Local Target is unavailable.");
+    target.click();
+  })()`);
+  await first.page.waitFor(
+    `document.querySelector(".inventory-table")?.textContent?.includes("packaged-project-skill") === true`,
+    "primary Local Target inventory",
+  );
+  console.log("packaged smoke: durable Targets and comparison verified");
 
   await first.page.setViewportSize(760, 820);
   const narrowLayout = await first.page.evaluate(`({
@@ -339,10 +508,17 @@ try {
   ) {
     throw new Error(`Narrow layout failed: ${JSON.stringify(narrowLayout)}`);
   }
-  if ((await first.page.evaluate(`document.querySelectorAll('nav[aria-label="Primary"]').length`)) !== 1) {
+  if (
+    (await first.page.evaluate(
+      `document.querySelectorAll('nav[aria-label="Primary"]').length`,
+    )) !== 1
+  ) {
     throw new Error("Primary navigation semantics are missing.");
   }
-  if ((await first.page.evaluate(`document.querySelectorAll("table").length`)) !== 1) {
+  if (
+    (await first.page.evaluate(`document.querySelectorAll("table").length`)) !==
+    1
+  ) {
     throw new Error("Inventory table semantics are missing.");
   }
   await first.page.setViewportSize(420, 820);
@@ -355,7 +531,9 @@ try {
       JSON.stringify(["Inventory", "Comparison", "Collections", "Targets"]) ||
     !compactNavigation.targetSummary.includes("Codex")
   ) {
-    throw new Error(`Compact accessibility contract failed: ${JSON.stringify(compactNavigation)}`);
+    throw new Error(
+      `Compact accessibility contract failed: ${JSON.stringify(compactNavigation)}`,
+    );
   }
 
   await first.page.evaluate(`(() => {
@@ -377,7 +555,9 @@ try {
     if (!(button instanceof HTMLButtonElement)) throw new Error("Trusted Review is unavailable.");
     button.click();
   })()`);
-  const reviewPage = await first.connectPage("skills-desktop://review/index.html");
+  const reviewPage = await first.connectPage(
+    "skills-desktop://review/index.html",
+  );
   await reviewPage.waitFor(
     `document.body?.textContent?.includes("Review removal") &&
       document.body?.textContent?.includes("packaged-project-skill")`,
@@ -397,9 +577,15 @@ try {
     JSON.stringify(reviewBoundary.bridgeKeys) !==
       JSON.stringify(["approve", "getReview", "reject"])
   ) {
-    throw new Error(`Unexpected review boundary: ${JSON.stringify(reviewBoundary)}`);
+    throw new Error(
+      `Unexpected review boundary: ${JSON.stringify(reviewBoundary)}`,
+    );
   }
-  if (/SECRET_PROJECT_PATH|SECRET_HOME_PATH|SECRET_TOKEN|SECRET_RAW_STDERR/.test(reviewBoundary.text)) {
+  if (
+    /SECRET_PROJECT_PATH|SECRET_HOME_PATH|SECRET_TOKEN|SECRET_RAW_STDERR/.test(
+      reviewBoundary.text,
+    )
+  ) {
     throw new Error("Sensitive process evidence reached Trusted Review.");
   }
   await reviewPage.evaluate(`(() => {
@@ -424,12 +610,20 @@ try {
   reviewPage.close();
   const guardDocument = JSON.parse(
     await readFile(
-      join(temporaryRoot, "config", "Skills Desktop", "recovery", "mutation-guards.json"),
+      join(
+        temporaryRoot,
+        "config",
+        "Skills Desktop",
+        "recovery",
+        "mutation-guards.json",
+      ),
       "utf8",
     ),
   );
   if (guardDocument.guards.length !== 0) {
-    throw new Error("Successful postflight did not durably clear the Mutation Guard.");
+    throw new Error(
+      "Successful postflight did not durably clear the Mutation Guard.",
+    );
   }
   console.log("packaged smoke: reviewed mutation and postflight verified");
   await first.close();
@@ -447,16 +641,42 @@ try {
   );
   const restoredText = await second.page.evaluate("document.body.innerText");
   if (restoredText.includes("SECRET_RAW_STDERR")) {
-    throw new Error("Raw refresh failure reached the restored Inventory shell.");
+    throw new Error(
+      "Raw refresh failure reached the restored Inventory shell.",
+    );
   }
   await second.close();
   console.log("packaged smoke: stale restart verified");
   if (second.errors.length > 0) throw new Error(second.errors.join("\n"));
 
-  const invocations = (await readFile(invocationLog, "utf8")).trim().split("\n");
-  const versionChecks = invocations.filter((line) => line === "--yes skills@1.5.23 --version");
-  if (versionChecks.length !== 2) {
-    throw new Error(`Expected one version check per Adapter lifetime, got ${versionChecks.length}.`);
+  const invocations = (await readFile(invocationLog, "utf8"))
+    .trim()
+    .split("\n");
+  const versionChecks = invocations.filter(
+    (line) => line === "--yes skills@1.5.23 --version",
+  );
+  if (versionChecks.length !== 3) {
+    throw new Error(
+      `Expected one version check per opened Target Adapter, got ${versionChecks.length}.`,
+    );
+  }
+  const targetDocument = JSON.parse(
+    await readFile(
+      join(
+        temporaryRoot,
+        "config",
+        "Skills Desktop",
+        "recovery",
+        "target-definitions.json",
+      ),
+      "utf8",
+    ),
+  );
+  if (
+    targetDocument.schemaVersion !== 2 ||
+    targetDocument.targets.length !== 2
+  ) {
+    throw new Error("Packaged Target Definitions were not durably restored.");
   }
   if (!invocations.includes("--yes skills@1.5.23 list --json")) {
     throw new Error("Project Inventory invocation is missing.");

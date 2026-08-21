@@ -25,10 +25,17 @@ const KNOWN_FIELDS = new Set([
 export type InventoryScope = "global" | "project";
 
 export type UnknownEvidence = { readonly status: "unknown" };
+export interface KnownEvidence {
+  readonly authority: string;
+  readonly kind: string;
+  readonly status: "known";
+  readonly value: string;
+}
+export type InventoryEvidence = KnownEvidence | UnknownEvidence;
 
 export interface NormalizedSkill {
   readonly agents: readonly string[];
-  readonly contentFingerprint: UnknownEvidence;
+  readonly contentFingerprint: InventoryEvidence;
   readonly declaredSource: {
     readonly source: string | null;
     readonly sourceType: string | null;
@@ -36,7 +43,7 @@ export interface NormalizedSkill {
   readonly extensions: Readonly<Record<string, unknown>>;
   readonly name: string;
   readonly path: string;
-  readonly revision: UnknownEvidence;
+  readonly revision: InventoryEvidence;
   readonly scope: InventoryScope;
   readonly sourceUrl: string | null;
 }
@@ -90,7 +97,14 @@ function utf8ByteLength(value: string): number {
   let bytes = 0;
   for (const character of value) {
     const codePoint = character.codePointAt(0) ?? 0;
-    bytes += codePoint <= 0x7f ? 1 : codePoint <= 0x7ff ? 2 : codePoint <= 0xffff ? 3 : 4;
+    bytes +=
+      codePoint <= 0x7f
+        ? 1
+        : codePoint <= 0x7ff
+          ? 2
+          : codePoint <= 0xffff
+            ? 3
+            : 4;
   }
   return bytes;
 }
@@ -103,27 +117,39 @@ function extensionEnvelope(
   );
 
   if (Object.keys(extensions).length > MAX_EXTENSION_FIELDS) {
-    return failure("unsupported_schema", "Inventory contains too many additive fields.");
+    return failure(
+      "unsupported_schema",
+      "Inventory contains too many additive fields.",
+    );
   }
 
   if (utf8ByteLength(JSON.stringify(extensions)) > MAX_EXTENSION_BYTES) {
-    return failure("inventory_too_large", "Inventory additive evidence exceeds its limit.");
+    return failure(
+      "inventory_too_large",
+      "Inventory additive evidence exceeds its limit.",
+    );
   }
 
   let nodes = 0;
   const withinStructuralLimits = (value: unknown, depth: number): boolean => {
     nodes += 1;
-    if (nodes > MAX_EXTENSION_NODES || depth > MAX_EXTENSION_DEPTH) return false;
+    if (nodes > MAX_EXTENSION_NODES || depth > MAX_EXTENSION_DEPTH)
+      return false;
     if (Array.isArray(value)) {
       return value.every((item) => withinStructuralLimits(item, depth + 1));
     }
     if (typeof value === "object" && value !== null) {
-      return Object.values(value).every((item) => withinStructuralLimits(item, depth + 1));
+      return Object.values(value).every((item) =>
+        withinStructuralLimits(item, depth + 1),
+      );
     }
     return true;
   };
   if (!withinStructuralLimits(extensions, 0)) {
-    return failure("unsupported_schema", "Inventory additive evidence is too deeply structured.");
+    return failure(
+      "unsupported_schema",
+      "Inventory additive evidence is too deeply structured.",
+    );
   }
 
   return { ok: true, value: extensions };
@@ -134,7 +160,10 @@ export function parseCliInventory(
   expectedScope: InventoryScope,
 ): Result<readonly NormalizedSkill[], InventoryParseError> {
   if (utf8ByteLength(output) > MAX_CLI_OUTPUT_BYTES) {
-    return failure("inventory_too_large", "Inventory output exceeds the supported limit.");
+    return failure(
+      "inventory_too_large",
+      "Inventory output exceeds the supported limit.",
+    );
   }
 
   let decoded: unknown;
@@ -145,7 +174,10 @@ export function parseCliInventory(
   }
 
   if (!Array.isArray(decoded) || decoded.length > MAX_ENTRIES) {
-    return failure("invalid_inventory", "Inventory output is not a supported list.");
+    return failure(
+      "invalid_inventory",
+      "Inventory output is not a supported list.",
+    );
   }
 
   const normalized: NormalizedSkill[] = [];
@@ -153,7 +185,10 @@ export function parseCliInventory(
   for (const candidate of decoded) {
     const parsed = cliSkillSchema.safeParse(candidate);
     if (!parsed.success || parsed.data.scope !== expectedScope) {
-      return failure("invalid_inventory", "Inventory entry does not match the supported schema.");
+      return failure(
+        "invalid_inventory",
+        "Inventory entry does not match the supported schema.",
+      );
     }
 
     const extensions = extensionEnvelope(parsed.data);
@@ -164,7 +199,10 @@ export function parseCliInventory(
     const priorIdentity = identitiesByReportedName.get(reportedName);
     if (priorIdentity !== undefined) {
       return priorIdentity === identity
-        ? failure("duplicate_inventory_entry", "Inventory contains a duplicate Skill Identity.")
+        ? failure(
+            "duplicate_inventory_entry",
+            "Inventory contains a duplicate Skill Identity.",
+          )
         : failure(
             "conflicting_inventory_entry",
             "Inventory contains conflicting provenance for one skill.",

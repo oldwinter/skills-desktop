@@ -25,6 +25,8 @@ export async function createCompositionRoot(options?: {
     platform: process.platform,
   });
   const skillsTargets = createLocalSkillsTargets({
+    canonicalizeLocalWorkspace: realpath,
+    id: randomUUID,
     processFor(binding) {
       return createLocalSkillsProcess({
         binding: {

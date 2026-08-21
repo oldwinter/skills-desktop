@@ -28,9 +28,12 @@ import type {
   WorkspaceBridge,
   WorkspaceSnapshot,
 } from "../../../contracts/workspace.js";
+import { ComparisonView } from "../comparison/ComparisonView.js";
+import { TargetsView } from "../targets/TargetsView.js";
 
 type ScopeFilter = "all" | "global" | "project";
 type SelectedIdentity = Pick<PublicInventoryEntry, "name" | "scope">;
+type WorkspaceView = "comparison" | "inventory" | "targets";
 
 function freshnessLabel(
   freshness: WorkspaceSnapshot["inventory"]["freshness"],
@@ -113,7 +116,8 @@ function InventoryStatus({
       <div className="state-banner state-banner--warning" role="status">
         <Clock3 aria-hidden="true" size={16} />
         <span>
-          Showing stale evidence restored from the last complete observation
+          {inventory.lastError?.message ??
+            "Showing stale evidence restored from the last complete observation"}
         </span>
       </div>
     );
@@ -175,7 +179,7 @@ function MissingInventoryEvidence({
 }
 
 export function InventoryApp({ client }: { readonly client: WorkspaceBridge }) {
-  const [snapshot, setSnapshot] = useState<WorkspaceSnapshot>();
+  const [baseSnapshot, setBaseSnapshot] = useState<WorkspaceSnapshot>();
   const [bootstrapError, setBootstrapError] = useState<RendererError>();
   const [bootstrapAttempt, setBootstrapAttempt] = useState(0);
   const [query, setQuery] = useState("");
@@ -186,6 +190,32 @@ export function InventoryApp({ client }: { readonly client: WorkspaceBridge }) {
   const [addName, setAddName] = useState("");
   const [addSource, setAddSource] = useState("");
   const [addScope, setAddScope] = useState<"global" | "project">("project");
+  const [view, setView] = useState<WorkspaceView>("inventory");
+  const [selectedTargetId, setSelectedTargetId] = useState<string>();
+  const targetStates =
+    baseSnapshot?.targets ??
+    (baseSnapshot === undefined
+      ? []
+      : [
+          {
+            deletionBlocked: true,
+            inventory: baseSnapshot.inventory,
+            mutation: baseSnapshot.mutation,
+            target: baseSnapshot.target,
+          },
+        ]);
+  const selectedTargetState =
+    targetStates.find(({ target }) => target.id === selectedTargetId) ??
+    targetStates[0];
+  const snapshot =
+    baseSnapshot === undefined || selectedTargetState === undefined
+      ? baseSnapshot
+      : {
+          ...baseSnapshot,
+          inventory: selectedTargetState.inventory,
+          mutation: selectedTargetState.mutation,
+          target: selectedTargetState.target,
+        };
 
   useEffect(() => {
     let active = true;
@@ -198,7 +228,7 @@ export function InventoryApp({ client }: { readonly client: WorkspaceBridge }) {
       const next = result.value;
       if (active) setBootstrapError(undefined);
       if (active)
-        setSnapshot((current) =>
+        setBaseSnapshot((current) =>
           current && current.stateRevision > next.stateRevision
             ? current
             : next,
@@ -211,7 +241,7 @@ export function InventoryApp({ client }: { readonly client: WorkspaceBridge }) {
         void resynchronize();
         return;
       }
-      setSnapshot((current) => {
+      setBaseSnapshot((current) => {
         if (
           current !== undefined &&
           current.sessionEpoch === event.sessionEpoch &&
@@ -225,13 +255,20 @@ export function InventoryApp({ client }: { readonly client: WorkspaceBridge }) {
     };
     const unsubscribe = client.subscribe(receive);
     void resynchronize().then((initial) => {
+      const initialTarget = initial?.targets?.[0]?.target ?? initial?.target;
+      if (active && initialTarget !== undefined) {
+        setSelectedTargetId((current) => current ?? initialTarget.id);
+      }
       if (
         active &&
         initial !== undefined &&
-        initial.inventory.phase !== "loading" &&
-        initial.inventory.freshness !== "fresh"
+        initialTarget?.kind === "local" &&
+        (initial.targets?.[0]?.inventory.phase ?? initial.inventory.phase) !==
+          "loading" &&
+        (initial.targets?.[0]?.inventory.freshness ??
+          initial.inventory.freshness) !== "fresh"
       ) {
-        void client.refreshInventory(initial.target.id);
+        void client.refreshInventory(initialTarget.id);
       }
     });
     return () => {
@@ -391,9 +428,10 @@ export function InventoryApp({ client }: { readonly client: WorkspaceBridge }) {
         <aside className="scope-rail" aria-label="Workspace navigation">
           <nav className="primary-nav" aria-label="Primary">
             <button
-              aria-current="page"
+              aria-current={view === "inventory" ? "page" : undefined}
               aria-label="Inventory"
-              className="nav-item nav-item--active"
+              className={`nav-item${view === "inventory" ? " nav-item--active" : ""}`}
+              onClick={() => setView("inventory")}
               title="Inventory"
               type="button"
             >
@@ -401,9 +439,10 @@ export function InventoryApp({ client }: { readonly client: WorkspaceBridge }) {
               <span>Inventory</span>
             </button>
             <button
+              aria-current={view === "comparison" ? "page" : undefined}
               aria-label="Comparison"
-              className="nav-item"
-              disabled
+              className={`nav-item${view === "comparison" ? " nav-item--active" : ""}`}
+              onClick={() => setView("comparison")}
               title="Comparison"
               type="button"
             >
@@ -421,9 +460,10 @@ export function InventoryApp({ client }: { readonly client: WorkspaceBridge }) {
               <span>Collections</span>
             </button>
             <button
+              aria-current={view === "targets" ? "page" : undefined}
               aria-label="Targets"
-              className="nav-item"
-              disabled
+              className={`nav-item${view === "targets" ? " nav-item--active" : ""}`}
+              onClick={() => setView("targets")}
               title="Targets"
               type="button"
             >
@@ -433,14 +473,28 @@ export function InventoryApp({ client }: { readonly client: WorkspaceBridge }) {
           </nav>
 
           <section className="target-section" aria-labelledby="target-heading">
-            <h2 id="target-heading">Local Target</h2>
-            <div className="target-row target-row--active">
-              <HardDrive aria-hidden="true" size={16} />
-              <span>
-                <strong>{snapshot.target.label}</strong>
-                <small>{snapshot.target.workspaceLabel}</small>
-              </span>
-            </div>
+            <h2 id="target-heading">Targets</h2>
+            {targetStates.map((state) => (
+              <button
+                className={`target-row${state.target.id === snapshot.target.id ? " target-row--active" : ""}`}
+                key={state.target.id}
+                onClick={() => {
+                  setSelectedTargetId(state.target.id);
+                  setView("inventory");
+                }}
+                type="button"
+              >
+                {state.target.kind === "local" ? (
+                  <HardDrive aria-hidden="true" size={16} />
+                ) : (
+                  <Server aria-hidden="true" size={16} />
+                )}
+                <span>
+                  <strong>{state.target.label}</strong>
+                  <small>{state.target.workspaceLabel}</small>
+                </span>
+              </button>
+            ))}
             <dl className="target-facts">
               <div>
                 <dt>Harness</dt>
@@ -462,374 +516,438 @@ export function InventoryApp({ client }: { readonly client: WorkspaceBridge }) {
           </div>
         </aside>
 
-        <main
-          className="inventory-workspace"
-          aria-busy={snapshot.inventory.phase === "loading"}
-        >
-          <section className="page-heading">
-            <div>
-              <h1>Inventory</h1>
-              <p>
-                {snapshot.inventory.entries.length} skills across project and
-                global scopes
-              </p>
-              <p aria-label="Target summary" className="mobile-target-summary">
-                <HardDrive aria-hidden="true" size={14} />
-                {snapshot.target.label} / {snapshot.target.workspaceLabel} /{" "}
-                {snapshot.target.harness}
-              </p>
-            </div>
-            {snapshot.inventory.phase === "loading" &&
-            activeOperationId !== null ? (
-              <button
-                aria-label="Cancel refresh"
-                className="icon-button"
-                onClick={() => void client.cancelInventory(activeOperationId)}
-                title="Cancel refresh"
-                type="button"
-              >
-                <Square aria-hidden="true" size={16} />
-              </button>
-            ) : (
-              <button
-                aria-label="Refresh inventory"
-                className="icon-button"
-                onClick={() => void client.refreshInventory(snapshot.target.id)}
-                title="Refresh inventory"
-                type="button"
-              >
-                <RefreshCw aria-hidden="true" size={17} />
-              </button>
-            )}
-          </section>
-
-          <InventoryStatus snapshot={snapshot} />
-          {snapshot.mutation.phase === "reconciliation-required" ? (
-            <div className="state-banner state-banner--danger" role="alert">
-              <AlertCircle aria-hidden="true" size={16} />
-              <span>
-                {snapshot.mutation.lastError?.message ??
-                  "This Target requires reconciliation."}
-              </span>
-              <button
-                className="text-button"
-                onClick={() => void reconcileMutation()}
-                type="button"
-              >
-                <RefreshCw aria-hidden="true" size={15} />
-                Reconcile
-              </button>
-            </div>
-          ) : snapshot.mutation.phase === "running" ? (
-            <div className="state-banner state-banner--loading" role="status">
-              <RefreshCw aria-hidden="true" className="spin" size={16} />
-              <span>Applying confirmed mutation</span>
-              {snapshot.mutation.activeOperationId !== null ? (
-                <button
-                  className="text-button"
-                  onClick={() =>
-                    void requestCancellationReview(
-                      snapshot.mutation.activeOperationId!,
-                    )
-                  }
-                  type="button"
-                >
-                  <ShieldCheck aria-hidden="true" size={15} />
-                  Review cancellation
-                </button>
-              ) : null}
-            </div>
-          ) : snapshot.mutation.lastError !== null ? (
-            <div className="state-banner state-banner--danger" role="alert">
-              <AlertCircle aria-hidden="true" size={16} />
-              <span>{snapshot.mutation.lastError.message}</span>
-            </div>
-          ) : null}
-          {actionError !== undefined ? (
-            <div className="state-banner state-banner--danger" role="alert">
-              <AlertCircle aria-hidden="true" size={16} />
-              <span>{actionError.message}</span>
-            </div>
-          ) : null}
-
-          <div className="inventory-toolbar">
-            <label className="search-control">
-              <Search aria-hidden="true" size={16} />
-              <span className="sr-only">Search inventory</span>
-              <input
-                onChange={(event) => setQuery(event.currentTarget.value)}
-                placeholder="Search skills or sources"
-                type="search"
-                value={query}
-              />
-            </label>
-            <div className="segmented-control" aria-label="Inventory scope">
-              {(["all", "project", "global"] as const).map((value) => (
-                <button
-                  aria-pressed={scope === value}
-                  key={value}
-                  onClick={() => setScope(value)}
-                  type="button"
-                >
-                  {value === "all"
-                    ? "All scopes"
-                    : `${scopeLabel(value)} scope`}
-                </button>
-              ))}
-            </div>
-            <button
-              className="text-button"
-              disabled={scope === "all" || mutationBlocked}
-              onClick={() => void prepareUpdateAll()}
-              type="button"
+        {view === "inventory" ? (
+          <>
+            <main
+              className="inventory-workspace"
+              aria-busy={snapshot.inventory.phase === "loading"}
             >
-              <RefreshCw aria-hidden="true" size={15} />
-              Update scope
-            </button>
-          </div>
+              <section className="page-heading">
+                <div>
+                  <h1>Inventory</h1>
+                  <p>
+                    {snapshot.inventory.entries.length} skills across project
+                    and global scopes
+                  </p>
+                  <p
+                    aria-label="Target summary"
+                    className="mobile-target-summary"
+                  >
+                    <HardDrive aria-hidden="true" size={14} />
+                    {snapshot.target.label} / {snapshot.target.workspaceLabel} /{" "}
+                    {snapshot.target.harness}
+                  </p>
+                </div>
+                {snapshot.inventory.phase === "loading" &&
+                activeOperationId !== null ? (
+                  <button
+                    aria-label="Cancel refresh"
+                    className="icon-button"
+                    onClick={() =>
+                      void client.cancelInventory(activeOperationId)
+                    }
+                    title="Cancel refresh"
+                    type="button"
+                  >
+                    <Square aria-hidden="true" size={16} />
+                  </button>
+                ) : (
+                  <button
+                    aria-label="Refresh inventory"
+                    className="icon-button"
+                    onClick={() =>
+                      void client.refreshInventory(snapshot.target.id)
+                    }
+                    title="Refresh inventory"
+                    type="button"
+                  >
+                    <RefreshCw aria-hidden="true" size={17} />
+                  </button>
+                )}
+              </section>
 
-          <div className="inventory-table-wrap">
-            {filteredEntries.length === 0 ? (
-              snapshot.inventory.freshness === "none" ? (
-                <MissingInventoryEvidence phase={snapshot.inventory.phase} />
-              ) : (
-                <EmptyInventory filtered={isFiltered} />
-              )
-            ) : (
-              <table className="inventory-table">
-                <caption className="sr-only">
-                  Skills observed on the selected Local Target
-                </caption>
-                <thead>
-                  <tr>
-                    <th>Skill</th>
-                    <th>Scope</th>
-                    <th>Harness</th>
-                    <th>Declared source</th>
-                    <th>Evidence</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredEntries.map((entry) => {
-                    const selectedRow =
-                      selected?.name === entry.name &&
-                      selected.scope === entry.scope;
-                    return (
-                      <tr
-                        className={selectedRow ? "is-selected" : undefined}
-                        key={`${entry.scope}:${entry.name}`}
-                      >
-                        <td data-label="Skill">
-                          <button
-                            className="skill-button"
-                            onClick={() =>
-                              setSelectedIdentity({
-                                name: entry.name,
-                                scope: entry.scope,
-                              })
-                            }
-                            type="button"
-                          >
-                            <FolderGit2 aria-hidden="true" size={16} />
-                            <span>{entry.name}</span>
-                          </button>
-                        </td>
-                        <td data-label="Scope">
-                          <span className="scope-badge">
-                            {scopeLabel(entry.scope)}
-                          </span>
-                        </td>
-                        <td data-label="Harness">
-                          {entry.agents.includes(snapshot.target.harness)
-                            ? snapshot.target.harness
-                            : "Not linked"}
-                        </td>
-                        <td data-label="Declared source">
-                          <code className="wrapping-value">
-                            {sourceLabel(entry)}
-                          </code>
-                        </td>
-                        <td data-label="Evidence">
-                          <span className="unknown-label">
-                            <CircleHelp aria-hidden="true" size={14} />
-                            Unknown revision
-                          </span>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            )}
-          </div>
-        </main>
+              <InventoryStatus snapshot={snapshot} />
+              {snapshot.mutation.phase === "reconciliation-required" ? (
+                <div className="state-banner state-banner--danger" role="alert">
+                  <AlertCircle aria-hidden="true" size={16} />
+                  <span>
+                    {snapshot.mutation.lastError?.message ??
+                      "This Target requires reconciliation."}
+                  </span>
+                  <button
+                    className="text-button"
+                    onClick={() => void reconcileMutation()}
+                    type="button"
+                  >
+                    <RefreshCw aria-hidden="true" size={15} />
+                    Reconcile
+                  </button>
+                </div>
+              ) : snapshot.mutation.phase === "running" ? (
+                <div
+                  className="state-banner state-banner--loading"
+                  role="status"
+                >
+                  <RefreshCw aria-hidden="true" className="spin" size={16} />
+                  <span>Applying confirmed mutation</span>
+                  {snapshot.mutation.activeOperationId !== null ? (
+                    <button
+                      className="text-button"
+                      onClick={() =>
+                        void requestCancellationReview(
+                          snapshot.mutation.activeOperationId!,
+                        )
+                      }
+                      type="button"
+                    >
+                      <ShieldCheck aria-hidden="true" size={15} />
+                      Review cancellation
+                    </button>
+                  ) : null}
+                </div>
+              ) : snapshot.mutation.lastError !== null ? (
+                <div className="state-banner state-banner--danger" role="alert">
+                  <AlertCircle aria-hidden="true" size={16} />
+                  <span>{snapshot.mutation.lastError.message}</span>
+                </div>
+              ) : null}
+              {actionError !== undefined ? (
+                <div className="state-banner state-banner--danger" role="alert">
+                  <AlertCircle aria-hidden="true" size={16} />
+                  <span>{actionError.message}</span>
+                </div>
+              ) : null}
 
-        <aside className="inspector" aria-label="Selected skill evidence">
-          {selected === undefined ? (
-            <div className="inspector-empty">
-              <CircleHelp aria-hidden="true" size={22} />
-              <h2>No skill selected</h2>
-            </div>
-          ) : (
-            <>
-              <header className="inspector-heading">
-                <FolderGit2 aria-hidden="true" size={18} />
-                <div>
-                  <p>Skill evidence</p>
-                  <h2>{selected.name}</h2>
+              <div className="inventory-toolbar">
+                <label className="search-control">
+                  <Search aria-hidden="true" size={16} />
+                  <span className="sr-only">Search inventory</span>
+                  <input
+                    onChange={(event) => setQuery(event.currentTarget.value)}
+                    placeholder="Search skills or sources"
+                    type="search"
+                    value={query}
+                  />
+                </label>
+                <div className="segmented-control" aria-label="Inventory scope">
+                  {(["all", "project", "global"] as const).map((value) => (
+                    <button
+                      aria-pressed={scope === value}
+                      key={value}
+                      onClick={() => setScope(value)}
+                      type="button"
+                    >
+                      {value === "all"
+                        ? "All scopes"
+                        : `${scopeLabel(value)} scope`}
+                    </button>
+                  ))}
                 </div>
-              </header>
-              <dl className="evidence-list">
-                <div>
-                  <dt>Scope</dt>
-                  <dd>{scopeLabel(selected.scope)}</dd>
-                </div>
-                <div>
-                  <dt>Harness</dt>
-                  <dd>{selected.agents.join(", ") || "None reported"}</dd>
-                </div>
-                <div>
-                  <dt>Source type</dt>
-                  <dd>{selected.declaredSource.sourceType ?? "Unknown"}</dd>
-                </div>
-                <div>
-                  <dt>Declared source</dt>
-                  <dd>
-                    <code className="wrapping-value">
-                      {sourceLabel(selected)}
-                    </code>
-                  </dd>
-                </div>
-                <div>
-                  <dt>Revision</dt>
-                  <dd>
-                    <span className="unknown-label">
-                      <CircleHelp aria-hidden="true" size={14} />
-                      Revision unknown
-                    </span>
-                  </dd>
-                </div>
-                <div>
-                  <dt>Content fingerprint</dt>
-                  <dd>
-                    <span className="unknown-label">
-                      <CircleHelp aria-hidden="true" size={14} />
-                      Unknown
-                    </span>
-                  </dd>
-                </div>
-              </dl>
-              <div className="inspector-actions">
                 <button
                   className="text-button"
-                  disabled={mutationBlocked}
-                  onClick={() => void prepareSelected("update")}
+                  disabled={scope === "all" || mutationBlocked}
+                  onClick={() => void prepareUpdateAll()}
                   type="button"
                 >
                   <RefreshCw aria-hidden="true" size={15} />
-                  Prepare update
-                </button>
-                <button
-                  className="text-button text-button--danger"
-                  disabled={mutationBlocked}
-                  onClick={() => void prepareSelected("remove")}
-                  type="button"
-                >
-                  <Trash2 aria-hidden="true" size={15} />
-                  Prepare removal
+                  Update scope
                 </button>
               </div>
-            </>
-          )}
 
-          <form
-            className="add-skill-form"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void prepareAdd();
-            }}
-          >
-            <h2>Add Skill</h2>
-            <label>
-              <span>GitHub source</span>
-              <input
-                onChange={(event) => setAddSource(event.currentTarget.value)}
-                placeholder="owner/repository"
-                required
-                value={addSource}
-              />
-            </label>
-            <label>
-              <span>Exact skill name</span>
-              <input
-                onChange={(event) => setAddName(event.currentTarget.value)}
-                required
-                value={addName}
-              />
-            </label>
-            <div className="segmented-control segmented-control--compact" aria-label="Add scope">
-              {(["project", "global"] as const).map((value) => (
-                <button
-                  aria-pressed={addScope === value}
-                  key={value}
-                  onClick={() => setAddScope(value)}
-                  type="button"
-                >
-                  {scopeLabel(value)} scope
-                </button>
-              ))}
-            </div>
-            <button className="text-button" disabled={mutationBlocked} type="submit">
-              <PackagePlus aria-hidden="true" size={15} />
-              Prepare add
-            </button>
-          </form>
+              <div className="inventory-table-wrap">
+                {filteredEntries.length === 0 ? (
+                  snapshot.inventory.freshness === "none" ? (
+                    <MissingInventoryEvidence
+                      phase={snapshot.inventory.phase}
+                    />
+                  ) : (
+                    <EmptyInventory filtered={isFiltered} />
+                  )
+                ) : (
+                  <table className="inventory-table">
+                    <caption className="sr-only">
+                      Skills observed on the selected Local Target
+                    </caption>
+                    <thead>
+                      <tr>
+                        <th>Skill</th>
+                        <th>Scope</th>
+                        <th>Harness</th>
+                        <th>Declared source</th>
+                        <th>Evidence</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredEntries.map((entry) => {
+                        const selectedRow =
+                          selected?.name === entry.name &&
+                          selected.scope === entry.scope;
+                        return (
+                          <tr
+                            className={selectedRow ? "is-selected" : undefined}
+                            key={`${entry.scope}:${entry.name}`}
+                          >
+                            <td data-label="Skill">
+                              <button
+                                className="skill-button"
+                                onClick={() =>
+                                  setSelectedIdentity({
+                                    name: entry.name,
+                                    scope: entry.scope,
+                                  })
+                                }
+                                type="button"
+                              >
+                                <FolderGit2 aria-hidden="true" size={16} />
+                                <span>{entry.name}</span>
+                              </button>
+                            </td>
+                            <td data-label="Scope">
+                              <span className="scope-badge">
+                                {scopeLabel(entry.scope)}
+                              </span>
+                            </td>
+                            <td data-label="Harness">
+                              {entry.agents.includes(snapshot.target.harness)
+                                ? snapshot.target.harness
+                                : "Not linked"}
+                            </td>
+                            <td data-label="Declared source">
+                              <code className="wrapping-value">
+                                {sourceLabel(entry)}
+                              </code>
+                            </td>
+                            <td data-label="Evidence">
+                              {entry.revision.status === "known" ? (
+                                <code className="wrapping-value">
+                                  {entry.revision.value}
+                                </code>
+                              ) : (
+                                <span className="unknown-label">
+                                  <CircleHelp aria-hidden="true" size={14} />
+                                  Unknown revision
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </main>
 
-          {snapshot.mutation.commandPlan !== null ? (
-            <section className="command-plan" aria-labelledby="command-plan-heading">
-              <header>
-                <ShieldCheck aria-hidden="true" size={17} />
-                <h2 id="command-plan-heading">Command Plan</h2>
-              </header>
-              <dl>
-                <div>
-                  <dt>Operation</dt>
-                  <dd>{snapshot.mutation.commandPlan.operation}</dd>
+            <aside className="inspector" aria-label="Selected skill evidence">
+              {selected === undefined ? (
+                <div className="inspector-empty">
+                  <CircleHelp aria-hidden="true" size={22} />
+                  <h2>No skill selected</h2>
                 </div>
-                <div>
-                  <dt>Scope</dt>
-                  <dd>{scopeLabel(snapshot.mutation.commandPlan.scope)}</dd>
-                </div>
-                <div>
-                  <dt>Skills</dt>
-                  <dd>{snapshot.mutation.commandPlan.names.join(", ")}</dd>
-                </div>
-              </dl>
-              <code className="command-preview wrapping-value">
-                {snapshot.mutation.commandPlan.preview}
-              </code>
-              {snapshot.mutation.outcome === null ? (
-                <button
-                  className="text-button text-button--primary"
-                  disabled={
-                    preparedMutationId === undefined ||
-                    snapshot.mutation.phase !== "planned"
-                  }
-                  onClick={() => void requestReview()}
-                  type="button"
-                >
-                  <ShieldCheck aria-hidden="true" size={15} />
-                  Open Trusted Review
-                </button>
               ) : (
-                <p className="mutation-outcome" role="status">
-                  {snapshot.mutation.outcome.process.disposition} /{" "}
-                  {snapshot.mutation.outcome.effects.status}
-                </p>
+                <>
+                  <header className="inspector-heading">
+                    <FolderGit2 aria-hidden="true" size={18} />
+                    <div>
+                      <p>Skill evidence</p>
+                      <h2>{selected.name}</h2>
+                    </div>
+                  </header>
+                  <dl className="evidence-list">
+                    <div>
+                      <dt>Scope</dt>
+                      <dd>{scopeLabel(selected.scope)}</dd>
+                    </div>
+                    <div>
+                      <dt>Harness</dt>
+                      <dd>{selected.agents.join(", ") || "None reported"}</dd>
+                    </div>
+                    <div>
+                      <dt>Source type</dt>
+                      <dd>{selected.declaredSource.sourceType ?? "Unknown"}</dd>
+                    </div>
+                    <div>
+                      <dt>Declared source</dt>
+                      <dd>
+                        <code className="wrapping-value">
+                          {sourceLabel(selected)}
+                        </code>
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Revision</dt>
+                      <dd>
+                        {selected.revision.status === "known" ? (
+                          <code className="wrapping-value">
+                            {selected.revision.kind} / {selected.revision.value}
+                          </code>
+                        ) : (
+                          <span className="unknown-label">
+                            <CircleHelp aria-hidden="true" size={14} />
+                            Revision unknown
+                          </span>
+                        )}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Content fingerprint</dt>
+                      <dd>
+                        {selected.contentFingerprint.status === "known" ? (
+                          <code className="wrapping-value">
+                            {selected.contentFingerprint.kind} /{" "}
+                            {selected.contentFingerprint.value}
+                          </code>
+                        ) : (
+                          <span className="unknown-label">
+                            <CircleHelp aria-hidden="true" size={14} />
+                            Unknown
+                          </span>
+                        )}
+                      </dd>
+                    </div>
+                  </dl>
+                  <div className="inspector-actions">
+                    <button
+                      className="text-button"
+                      disabled={mutationBlocked}
+                      onClick={() => void prepareSelected("update")}
+                      type="button"
+                    >
+                      <RefreshCw aria-hidden="true" size={15} />
+                      Prepare update
+                    </button>
+                    <button
+                      className="text-button text-button--danger"
+                      disabled={mutationBlocked}
+                      onClick={() => void prepareSelected("remove")}
+                      type="button"
+                    >
+                      <Trash2 aria-hidden="true" size={15} />
+                      Prepare removal
+                    </button>
+                  </div>
+                </>
               )}
-            </section>
-          ) : null}
-        </aside>
+
+              <form
+                className="add-skill-form"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void prepareAdd();
+                }}
+              >
+                <h2>Add Skill</h2>
+                <label>
+                  <span>GitHub source</span>
+                  <input
+                    onChange={(event) =>
+                      setAddSource(event.currentTarget.value)
+                    }
+                    placeholder="owner/repository"
+                    required
+                    value={addSource}
+                  />
+                </label>
+                <label>
+                  <span>Exact skill name</span>
+                  <input
+                    onChange={(event) => setAddName(event.currentTarget.value)}
+                    required
+                    value={addName}
+                  />
+                </label>
+                <div
+                  className="segmented-control segmented-control--compact"
+                  aria-label="Add scope"
+                >
+                  {(["project", "global"] as const).map((value) => (
+                    <button
+                      aria-pressed={addScope === value}
+                      key={value}
+                      onClick={() => setAddScope(value)}
+                      type="button"
+                    >
+                      {scopeLabel(value)} scope
+                    </button>
+                  ))}
+                </div>
+                <button
+                  className="text-button"
+                  disabled={mutationBlocked}
+                  type="submit"
+                >
+                  <PackagePlus aria-hidden="true" size={15} />
+                  Prepare add
+                </button>
+              </form>
+
+              {snapshot.mutation.commandPlan !== null ? (
+                <section
+                  className="command-plan"
+                  aria-labelledby="command-plan-heading"
+                >
+                  <header>
+                    <ShieldCheck aria-hidden="true" size={17} />
+                    <h2 id="command-plan-heading">Command Plan</h2>
+                  </header>
+                  <dl>
+                    <div>
+                      <dt>Operation</dt>
+                      <dd>{snapshot.mutation.commandPlan.operation}</dd>
+                    </div>
+                    <div>
+                      <dt>Scope</dt>
+                      <dd>{scopeLabel(snapshot.mutation.commandPlan.scope)}</dd>
+                    </div>
+                    <div>
+                      <dt>Skills</dt>
+                      <dd>{snapshot.mutation.commandPlan.names.join(", ")}</dd>
+                    </div>
+                  </dl>
+                  <code className="command-preview wrapping-value">
+                    {snapshot.mutation.commandPlan.preview}
+                  </code>
+                  {snapshot.mutation.outcome === null ? (
+                    <button
+                      className="text-button text-button--primary"
+                      disabled={
+                        preparedMutationId === undefined ||
+                        snapshot.mutation.phase !== "planned"
+                      }
+                      onClick={() => void requestReview()}
+                      type="button"
+                    >
+                      <ShieldCheck aria-hidden="true" size={15} />
+                      Open Trusted Review
+                    </button>
+                  ) : (
+                    <p className="mutation-outcome" role="status">
+                      {snapshot.mutation.outcome.process.disposition} /{" "}
+                      {snapshot.mutation.outcome.effects.status}
+                    </p>
+                  )}
+                </section>
+              ) : null}
+            </aside>
+          </>
+        ) : view === "comparison" ? (
+          <ComparisonView
+            client={client}
+            onPrepared={(preparedId, destinationTargetId) => {
+              setPreparedMutationId(preparedId);
+              setSelectedTargetId(destinationTargetId);
+              setView("inventory");
+            }}
+            snapshot={snapshot}
+            targets={targetStates}
+          />
+        ) : (
+          <TargetsView
+            client={client}
+            onSelected={setSelectedTargetId}
+            targets={targetStates}
+          />
+        )}
       </div>
     </div>
   );

@@ -1,3 +1,5 @@
+import { basename, posix } from "node:path";
+
 import type { Result } from "@skills-desktop/skills-runtime";
 
 import {
@@ -16,14 +18,19 @@ import {
   type ReviewSnapshot,
 } from "../../contracts/review.js";
 
+import type { PreparedMutation } from "../adapters/local-skills-process.js";
 import type {
-  PreparedMutation,
-  SkillsProcess,
-} from "../adapters/local-skills-process.js";
-import type {
+  DurableTargetDefinition,
   InventorySnapshot,
+  MutationGuard,
   RecoveryRecords,
 } from "../persistence/recovery-records.js";
+import type {
+  SkillsTargets,
+  TargetDefinition,
+  TargetSession,
+} from "../targets/skills-targets.js";
+import { compareTargetInventories } from "./comparison.js";
 
 const MAX_RETAINED_REVIEWS = 128;
 
@@ -34,38 +41,13 @@ export type {
   WorkspaceSnapshot,
 } from "../../contracts/workspace.js";
 
-export type TargetOpenError = Omit<RendererError, "code"> & {
-  readonly code: "target_not_found" | "target_unavailable";
-};
-
-export interface TargetDefinition {
-  readonly generation: number;
-  readonly harness: string;
-  readonly id: string;
-  readonly kind: "local" | "ssh";
-  readonly label: string;
-  readonly workspace: string;
-  readonly workspaceLabel: string;
-}
-
-export interface EffectiveTargetBinding {
-  readonly generation: number;
-  readonly harness: string;
-  readonly kind: TargetDefinition["kind"];
-  readonly targetId: string;
-  readonly workspace: string;
-}
-
-export interface TargetSession {
-  readonly binding: EffectiveTargetBinding;
-  readonly process: SkillsProcess;
-  readonly target: TargetDefinition;
-}
-
-export interface SkillsTargets {
-  readonly primaryTarget: TargetDefinition;
-  open(targetId: string): Promise<Result<TargetSession, TargetOpenError>>;
-}
+export type {
+  EffectiveTargetBinding,
+  SkillsTargets,
+  TargetDefinition,
+  TargetOpenError,
+  TargetSession,
+} from "../targets/skills-targets.js";
 
 export interface DesktopEndpoint {
   readonly endpointId: string;
@@ -115,6 +97,7 @@ interface ActiveObservation {
   readonly id: string;
   readonly ownerEndpointId: string;
   readonly promise: Promise<Result<RequestValue, RequestError>>;
+  readonly targetId: string;
 }
 
 interface FreshTargetSession extends TargetSession {
@@ -136,6 +119,14 @@ interface ActiveMutation {
   readonly promise: Promise<Result<RequestValue, RequestError>>;
 }
 
+interface ActivePreparation {
+  readonly dependentTargetIds: readonly string[];
+  invalidated: boolean;
+  readonly ownerEndpointId: string;
+  promise: Promise<Result<RequestValue, RequestError>> | undefined;
+  readonly session: FreshTargetSession;
+}
+
 function publicError<Code extends RequestError["code"]>(
   code: Code,
   message: string,
@@ -151,8 +142,10 @@ function requestFailure(error: RequestError): Result<never, RequestError> {
 
 interface ProjectableInventoryEntry {
   readonly agents: readonly string[];
+  readonly contentFingerprint: PublicInventoryEntry["contentFingerprint"];
   readonly declaredSource: PublicInventoryEntry["declaredSource"];
   readonly name: string;
+  readonly revision: PublicInventoryEntry["revision"];
   readonly scope: PublicInventoryEntry["scope"];
 }
 
@@ -161,26 +154,102 @@ function projectEntries(
 ): PublicInventoryEntry[] {
   return entries.map((entry) => ({
     agents: [...entry.agents],
-    contentFingerprint: { status: "unknown" },
+    contentFingerprint: { ...entry.contentFingerprint },
     declaredSource: { ...entry.declaredSource },
     name: entry.name,
-    revision: { status: "unknown" },
+    revision: { ...entry.revision },
     scope: entry.scope,
   }));
+}
+
+function remapRecoveredTargetId<
+  Value extends { readonly targetId: string },
+>(
+  values: readonly Value[],
+  fromTargetId: string,
+  toTargetId: string,
+): Value[] {
+  const byTarget = new Map<string, Value>();
+  for (const value of values) {
+    if (value.targetId === fromTargetId) {
+      byTarget.set(toTargetId, { ...value, targetId: toTargetId });
+    }
+  }
+  for (const value of values) {
+    if (value.targetId !== fromTargetId) byTarget.set(value.targetId, value);
+  }
+  return [...byTarget.values()];
 }
 
 function staleAfterFailure(freshness: PublicInventoryState["freshness"]) {
   return freshness === "none" ? "none" : "stale";
 }
 
+function targetGenerationStaleError() {
+  return publicError(
+    "stale_inventory",
+    "Target Definition changed; refresh before preparing a mutation.",
+    "target",
+    true,
+  );
+}
+
 function projectTarget(target: TargetDefinition): PublicTargetDefinition {
   return {
+    connectionReference: target.connectionReference ?? null,
     generation: target.generation,
     harness: target.harness,
     id: target.id,
     kind: target.kind,
     label: target.label,
+    workspace: target.workspace,
     workspaceLabel: target.workspaceLabel,
+  };
+}
+
+function durableTarget(target: TargetDefinition): DurableTargetDefinition {
+  return {
+    connectionReference: target.connectionReference ?? null,
+    generation: target.generation,
+    harness: target.harness,
+    id: target.id,
+    kind: target.kind,
+    label: target.label,
+    workspace: target.workspace,
+  };
+}
+
+function targetFromDurable(target: DurableTargetDefinition): TargetDefinition {
+  return {
+    ...target,
+    workspaceLabel:
+      target.kind === "ssh"
+        ? posix.basename(target.workspace) || target.workspace
+        : basename(target.workspace),
+  };
+}
+
+function emptyInventoryState(): PublicInventoryState {
+  return {
+    activeOperationId: null,
+    cliVersion: null,
+    entries: [],
+    freshness: "none",
+    lastError: null,
+    observedAt: null,
+    persistenceWarning: null,
+    phase: "ready",
+  };
+}
+
+function emptyMutationState(): PublicMutationState {
+  return {
+    activeOperationId: null,
+    commandPlan: null,
+    lastError: null,
+    outcome: null,
+    phase: "idle",
+    reconciliationDeadline: null,
   };
 }
 
@@ -199,34 +268,127 @@ export function createDesktopCapabilities(
   const scheduleEventDelivery = options.scheduleEventDelivery ?? queueMicrotask;
   const clock = options.clock ?? (() => new Date());
   const shutdownTimeoutMs = options.shutdownTimeoutMs ?? 3_000;
-  const target = options.skillsTargets.primaryTarget;
-  const publicTarget = projectTarget(target);
+  let target = options.skillsTargets.primaryTarget;
+  const targetDefinitions = () => options.skillsTargets.definitions;
+  const guardedTargetIds = new Set<string>();
   let initialized = false;
+  let targetAuthorityUnavailable = false;
+  let targetDefinitionsChanging = false;
   let shuttingDown = false;
   let shutdownPromise: Promise<void> | undefined;
   let stateRevision = 0;
   let activeObservation: ActiveObservation | undefined;
   let activeMutation: ActiveMutation | undefined;
+  let activePreparation: ActivePreparation | undefined;
   let freshTargetSession: FreshTargetSession | undefined;
   const preparedMutations = new Map<string, PreparedMutation>();
+  const preparedDependencies = new Map<string, readonly string[]>();
   const reviews = new Map<string, TrustedReview>();
-  let inventoryState: PublicInventoryState = {
-    activeOperationId: null,
-    cliVersion: null,
-    entries: [],
-    freshness: "none",
-    lastError: null,
-    observedAt: null,
-    persistenceWarning: null,
-    phase: "ready",
+  let inventoryState: PublicInventoryState = emptyInventoryState();
+  let mutationState: PublicMutationState = emptyMutationState();
+  const inventoryStates = new Map<string, PublicInventoryState>();
+  const mutationStates = new Map<string, PublicMutationState>();
+  const freshTargetSessions = new Map<string, FreshTargetSession>();
+  const recoverableSnapshots = new Map<string, InventorySnapshot>();
+  const recoverableGuards = new Map<string, MutationGuard>();
+  let comparisonSelection:
+    | {
+        readonly id: string;
+        readonly leftTargetId: string;
+        readonly rightTargetId: string;
+      }
+    | undefined;
+
+  const stateFromRecoveredRecords = (
+    definition: TargetDefinition,
+    snapshot: InventorySnapshot | undefined,
+    guard: MutationGuard | undefined,
+    currentInventory = emptyInventoryState(),
+    currentMutation = emptyMutationState(),
+  ) => {
+    let inventory = currentInventory;
+    if (snapshot !== undefined) {
+      inventory = {
+        activeOperationId: null,
+        cliVersion: snapshot.cliVersion,
+        entries: projectEntries(snapshot.entries),
+        freshness: "stale",
+        lastError:
+          snapshot.generation === definition.generation
+            ? null
+            : targetGenerationStaleError(),
+        observedAt: snapshot.observedAt,
+        persistenceWarning: null,
+        phase: "ready",
+      };
+    }
+    let mutation = currentMutation;
+    if (guard !== undefined) {
+      inventory = {
+        ...inventory,
+        freshness: staleAfterFailure(inventory.freshness),
+      };
+      mutation = {
+        activeOperationId: null,
+        commandPlan: null,
+        lastError: {
+          ...publicError(
+            "reconciliation_required",
+            "A prior mutation requires explicit reconciliation.",
+            "restore",
+            false,
+          ),
+          effects: "possible",
+        },
+        outcome: null,
+        phase: "reconciliation-required",
+        reconciliationDeadline: guard.deadline,
+      };
+    }
+    return { inventory, mutation };
   };
-  let mutationState: PublicMutationState = {
-    activeOperationId: null,
-    commandPlan: null,
-    lastError: null,
-    outcome: null,
-    phase: "idle",
-    reconciliationDeadline: null,
+
+  const storeActiveTargetState = () => {
+    inventoryStates.set(target.id, structuredClone(inventoryState));
+    mutationStates.set(target.id, structuredClone(mutationState));
+    if (freshTargetSession === undefined) freshTargetSessions.delete(target.id);
+    else freshTargetSessions.set(target.id, freshTargetSession);
+  };
+
+  const activateTarget = (definition: TargetDefinition) => {
+    storeActiveTargetState();
+    target = definition;
+    inventoryState = structuredClone(
+      inventoryStates.get(definition.id) ?? emptyInventoryState(),
+    );
+    mutationState = structuredClone(
+      mutationStates.get(definition.id) ?? emptyMutationState(),
+    );
+    freshTargetSession = freshTargetSessions.get(definition.id);
+  };
+
+  const inventoryForTarget = (targetId: string) =>
+    targetId === target.id
+      ? inventoryState
+      : (inventoryStates.get(targetId) ?? emptyInventoryState());
+
+  const currentComparison = () => {
+    const selection = comparisonSelection;
+    if (selection === undefined) return null;
+    const leftTarget = targetDefinitions().find(
+      ({ id }) => id === selection.leftTargetId,
+    );
+    const rightTarget = targetDefinitions().find(
+      ({ id }) => id === selection.rightTargetId,
+    );
+    if (leftTarget === undefined || rightTarget === undefined) return null;
+    return compareTargetInventories({
+      id: selection.id,
+      leftInventory: inventoryForTarget(leftTarget.id),
+      leftTarget: projectTarget(leftTarget),
+      rightInventory: inventoryForTarget(rightTarget.id),
+      rightTarget: projectTarget(rightTarget),
+    });
   };
 
   const pruneReviews = () => {
@@ -249,17 +411,87 @@ export function createDesktopCapabilities(
     pruneReviews();
   };
 
+  const invalidatePreparedForTarget = (targetId: string) => {
+    const invalidatedDestinationIds = new Set<string>();
+    const invalidatedPreparedIds = new Set<string>();
+    for (const [preparedId, prepared] of preparedMutations) {
+      const dependencies = preparedDependencies.get(preparedId) ?? [
+        prepared.targetId,
+      ];
+      if (!dependencies.includes(targetId)) continue;
+      preparedMutations.delete(preparedId);
+      preparedDependencies.delete(preparedId);
+      invalidatedDestinationIds.add(prepared.targetId);
+      invalidatedPreparedIds.add(preparedId);
+    }
+    for (const destinationTargetId of invalidatedDestinationIds) {
+      if (destinationTargetId === target.id) {
+        mutationState = emptyMutationState();
+      } else {
+        mutationStates.set(destinationTargetId, emptyMutationState());
+      }
+    }
+    rejectPendingReviews((review) =>
+      invalidatedPreparedIds.has(review.prepared.id) ||
+      (preparedDependencies.get(review.prepared.id) ?? [
+        review.prepared.targetId,
+      ]).includes(targetId),
+    );
+  };
+
+  const targetChangeConflict = () =>
+    requestFailure(
+      publicError(
+        "mutation_conflict",
+        "Target Definitions are changing.",
+        "coordinate",
+        true,
+      ),
+    );
+
+  const reserveTargetDefinitions = async (
+    change: () => Promise<Result<RequestValue, RequestError>>,
+  ) => {
+    if (targetDefinitionsChanging) return targetChangeConflict();
+    targetDefinitionsChanging = true;
+    try {
+      return await change();
+    } finally {
+      targetDefinitionsChanging = false;
+    }
+  };
+
   const snapshotFor = (
     endpoint: EndpointState,
     eventSequence = endpoint.sequence,
   ): WorkspaceSnapshot => ({
+    comparison: structuredClone(currentComparison()),
     eventSequence,
     inventory: structuredClone(inventoryState),
     mutation: structuredClone(mutationState),
     schemaVersion: 1,
     sessionEpoch: endpoint.sessionEpoch,
     stateRevision,
-    target: publicTarget,
+    target: projectTarget(target),
+    targets: targetDefinitions().map((definition) => {
+      const isActive = definition.id === target.id;
+      return {
+        deletionBlocked:
+          guardedTargetIds.has(definition.id) ||
+          targetDefinitions().length === 1,
+        inventory: isActive
+          ? structuredClone(inventoryState)
+          : structuredClone(
+              inventoryStates.get(definition.id) ?? emptyInventoryState(),
+            ),
+        mutation: isActive
+          ? structuredClone(mutationState)
+          : structuredClone(
+              mutationStates.get(definition.id) ?? emptyMutationState(),
+            ),
+        target: projectTarget(definition),
+      };
+    }),
   });
 
   const enqueue = (endpoint: EndpointState, event: DesktopEvent) => {
@@ -287,6 +519,7 @@ export function createDesktopCapabilities(
 
   const publish = (next: PublicInventoryState) => {
     inventoryState = next;
+    storeActiveTargetState();
     stateRevision += 1;
     for (const endpoint of endpoints.values()) {
       if (endpoint.closed || endpoint.role !== "workspace") continue;
@@ -303,6 +536,7 @@ export function createDesktopCapabilities(
 
   const publishMutation = (next: PublicMutationState) => {
     mutationState = next;
+    storeActiveTargetState();
     stateRevision += 1;
     for (const endpoint of endpoints.values()) {
       if (endpoint.closed || endpoint.role !== "workspace") continue;
@@ -315,6 +549,96 @@ export function createDesktopCapabilities(
         type: "snapshot.changed",
       });
     }
+  };
+
+  const publishMutationForTarget = (
+    targetId: string,
+    next: PublicMutationState,
+  ) => {
+    if (targetId === target.id) {
+      publishMutation(next);
+      return;
+    }
+    mutationStates.set(targetId, structuredClone(next));
+    publish({ ...inventoryState });
+  };
+
+  const rejectReviewState = (review: TrustedReview) => {
+    const reviewedTargetId = review.prepared.targetId;
+    const reviewedMutation =
+      reviewedTargetId === target.id
+        ? mutationState
+        : (mutationStates.get(reviewedTargetId) ?? emptyMutationState());
+    publishMutationForTarget(reviewedTargetId, {
+      ...reviewedMutation,
+      activeOperationId: null,
+      phase: "planned",
+    });
+  };
+
+  const runPreparation = (
+    endpoint: EndpointState,
+    session: FreshTargetSession,
+    intent: import("@skills-desktop/skills-runtime").MutationIntent,
+    dependentTargetIds: readonly string[] = [session.binding.targetId],
+  ) => {
+    const preparation: ActivePreparation = {
+      dependentTargetIds: [...new Set(dependentTargetIds)],
+      invalidated: false,
+      ownerEndpointId: endpoint.endpointId,
+      promise: undefined,
+      session,
+    };
+    activePreparation = preparation;
+    const promise = (async (): Promise<
+      Result<RequestValue, RequestError>
+    > => {
+      try {
+        const prepared = await preparation.session.process.prepareMutation({
+          freshness: "fresh",
+          intent,
+          inventory: preparation.session.inventory,
+          inventoryId: preparation.session.inventoryId,
+        });
+        if (preparation.invalidated) {
+          return requestFailure(
+            publicError(
+              "cancelled",
+              "Mutation preparation was invalidated before completion.",
+              "prepare",
+              true,
+            ),
+          );
+        }
+        if (!prepared.ok)
+          return requestFailure(prepared.error as RequestError);
+        const preparedTargetId = preparation.session.binding.targetId;
+        invalidatePreparedForTarget(preparedTargetId);
+        preparedMutations.set(prepared.value.id, prepared.value);
+        preparedDependencies.set(
+          prepared.value.id,
+          preparation.dependentTargetIds,
+        );
+        publishMutation({
+          activeOperationId: null,
+          commandPlan: projectCommandPlan(prepared.value.commandPlan),
+          lastError: null,
+          outcome: null,
+          phase: "planned",
+          reconciliationDeadline: null,
+        });
+        return {
+          ok: true,
+          value: { operationId: prepared.value.id },
+        };
+      } finally {
+        if (activePreparation === preparation) {
+          activePreparation = undefined;
+        }
+      }
+    })();
+    preparation.promise = promise;
+    return promise;
   };
 
   const finishWithError = (error: RequestError) => {
@@ -347,8 +671,6 @@ export function createDesktopCapabilities(
       inventory: observed.value,
       inventoryId,
     };
-    preparedMutations.clear();
-    rejectPendingReviews();
     if (mutationState.phase !== "reconciliation-required") {
       mutationState = {
         activeOperationId: null,
@@ -387,7 +709,8 @@ export function createDesktopCapabilities(
       endpoint.reviewId === undefined
         ? undefined
         : reviews.get(endpoint.reviewId);
-    if (review === undefined) return { schemaVersion: 1, status: "unavailable" };
+    if (review === undefined)
+      return { schemaVersion: 1, status: "unavailable" };
     if (review.decision !== undefined) {
       return {
         decision: review.decision,
@@ -401,7 +724,11 @@ export function createDesktopCapabilities(
         expiresAt: review.prepared.expiresAt,
         purpose: review.purpose,
         reviewId: review.id,
-        target: publicTarget,
+        target: projectTarget(
+          targetDefinitions().find(
+            ({ id }) => id === review.prepared.targetId,
+          ) ?? target,
+        ),
       },
       schemaVersion: 1,
       status: "pending",
@@ -423,6 +750,7 @@ export function createDesktopCapabilities(
       targetId: prepared.targetId,
       type: "guard.put",
     });
+    guardedTargetIds.add(prepared.targetId);
     freshTargetSession = undefined;
     inventoryState = {
       ...inventoryState,
@@ -470,6 +798,7 @@ export function createDesktopCapabilities(
       });
       return requestFailure(error);
     }
+    guardedTargetIds.add(prepared.targetId);
 
     publishMutation({
       activeOperationId: operationId,
@@ -505,6 +834,7 @@ export function createDesktopCapabilities(
         );
         return requestFailure(cleared.error as RequestError);
       }
+      guardedTargetIds.delete(prepared.targetId);
       const error = executed.error as RequestError;
       publishMutation({
         activeOperationId: null,
@@ -557,6 +887,7 @@ export function createDesktopCapabilities(
       );
       return requestFailure(guardCleared.error as RequestError);
     }
+    guardedTargetIds.delete(prepared.targetId);
 
     freshTargetSession = {
       ...session,
@@ -641,6 +972,7 @@ export function createDesktopCapabilities(
       });
       return requestFailure(guardCleared.error);
     }
+    guardedTargetIds.delete(opened.value.binding.targetId);
 
     freshTargetSession = {
       ...opened.value,
@@ -657,7 +989,7 @@ export function createDesktopCapabilities(
       persistenceWarning: null,
       phase: "ready",
     };
-    preparedMutations.clear();
+    invalidatePreparedForTarget(opened.value.binding.targetId);
     publishMutation({
       activeOperationId: null,
       commandPlan: null,
@@ -725,15 +1057,32 @@ export function createDesktopCapabilities(
               );
             }
 
+            if (
+              targetDefinitionsChanging &&
+              review.purpose === "execute"
+            ) {
+              return targetChangeConflict();
+            }
+            if (
+              (activePreparation !== undefined ||
+                activeMutation !== undefined ||
+                activeObservation !== undefined) &&
+              review.purpose === "execute"
+            ) {
+              return requestFailure(
+                publicError(
+                  "mutation_conflict",
+                  "Another operation is active for a Target.",
+                  "coordinate",
+                  true,
+                ),
+              );
+            }
+
             review.decision = parsedDecision.data.decision;
             if (parsedDecision.data.decision === "reject") {
               if (review.purpose === "execute") {
-                publishMutation({
-                  ...mutationState,
-                  activeOperationId: null,
-                  lastError: null,
-                  phase: "planned",
-                });
+                rejectReviewState(review);
               }
               return { ok: true, value: { operationId: review.id } };
             }
@@ -759,8 +1108,19 @@ export function createDesktopCapabilities(
               };
             }
 
+            const reviewedTarget = targetDefinitions().find(
+              ({ id }) => id === review.prepared.targetId,
+            );
+            if (
+              reviewedTarget !== undefined &&
+              reviewedTarget.id !== target.id
+            ) {
+              activateTarget(reviewedTarget);
+            }
+
             const prepared = preparedMutations.get(review.prepared.id);
             preparedMutations.delete(review.prepared.id);
+            preparedDependencies.delete(review.prepared.id);
             const session = freshTargetSession;
             if (
               prepared === undefined ||
@@ -799,7 +1159,11 @@ export function createDesktopCapabilities(
               });
               return requestFailure(error);
             }
-            if (activeMutation !== undefined || activeObservation !== undefined) {
+            if (
+              activeMutation !== undefined ||
+              activeObservation !== undefined ||
+              activePreparation !== undefined
+            ) {
               return requestFailure(
                 publicError(
                   "mutation_conflict",
@@ -818,7 +1182,8 @@ export function createDesktopCapabilities(
               session,
               controller,
             ).finally(() => {
-              if (activeMutation?.id === operationId) activeMutation = undefined;
+              if (activeMutation?.id === operationId)
+                activeMutation = undefined;
             });
             activeMutation = {
               controller,
@@ -839,6 +1204,479 @@ export function createDesktopCapabilities(
                 false,
               ),
             );
+          }
+
+          if (targetAuthorityUnavailable) {
+            return requestFailure(
+              publicError(
+                "target_unavailable",
+                "Saved Target or recovery authority is unavailable.",
+                "restore",
+                false,
+              ),
+            );
+          }
+          if (targetDefinitionsChanging) return targetChangeConflict();
+
+          if (
+            parsed.data.type === "target.create" ||
+            parsed.data.type === "target.update"
+          ) {
+            const targetChangeRequest = parsed.data;
+            const updatedTargetId =
+              targetChangeRequest.type === "target.update"
+                ? targetChangeRequest.targetId
+                : undefined;
+            const existing =
+              updatedTargetId !== undefined
+                ? targetDefinitions().find(({ id }) => id === updatedTargetId)
+                : undefined;
+            if (
+              existing !== undefined &&
+              activePreparation?.dependentTargetIds.includes(existing.id)
+            ) {
+              return requestFailure(
+                publicError(
+                  "mutation_conflict",
+                  "A mutation preparation is active for this Target.",
+                  "coordinate",
+                  true,
+                ),
+              );
+            }
+            if (
+              targetChangeRequest.type === "target.update" &&
+              existing === undefined
+            ) {
+              return requestFailure(
+                publicError(
+                  "target_not_found",
+                  "Target was not found.",
+                  "target",
+                  false,
+                ),
+              );
+            }
+            if (
+              existing !== undefined &&
+              activeObservation?.targetId === existing.id
+            ) {
+              return requestFailure(
+                publicError(
+                  "mutation_conflict",
+                  "This Target has an active Inventory observation.",
+                  "coordinate",
+                  true,
+                ),
+              );
+            }
+            if (
+              existing !== undefined &&
+              (guardedTargetIds.has(existing.id) ||
+                activeMutation?.prepared?.targetId === existing.id)
+            ) {
+              return requestFailure(
+                publicError(
+                  "reconciliation_required",
+                  "This Target cannot change while recovery is required.",
+                  "target",
+                  false,
+                ),
+              );
+            }
+
+            return reserveTargetDefinitions(async () => {
+              const proposed =
+                targetChangeRequest.type === "target.create"
+                  ? await options.skillsTargets.proposeCreate(
+                      targetChangeRequest.definition,
+                    )
+                  : await options.skillsTargets.proposeUpdate(
+                      targetChangeRequest.targetId,
+                      targetChangeRequest.definition,
+                    );
+              if (!proposed.ok) return requestFailure(proposed.error);
+              const {
+                definitions: nextDefinitions,
+                executionChanged,
+                target: replacement,
+              } = proposed.value;
+              const committed = await options.recoveryRecords.commit({
+                targets: nextDefinitions.map(durableTarget),
+                type: "targets.replace",
+              });
+              if (!committed.ok) return requestFailure(committed.error);
+
+              const legacyTargetId =
+                options.skillsTargets.legacyIdFor(replacement);
+              const legacySnapshot =
+                legacyTargetId === undefined
+                  ? undefined
+                  : recoverableSnapshots.get(legacyTargetId);
+              const legacyGuard =
+                legacyTargetId === undefined
+                  ? undefined
+                  : recoverableGuards.get(legacyTargetId);
+              if (
+                legacyTargetId !== undefined &&
+                (legacySnapshot !== undefined || legacyGuard !== undefined)
+              ) {
+                const remapped = await options.recoveryRecords.commit({
+                  fromTargetId: legacyTargetId,
+                  toTargetId: replacement.id,
+                  type: "target.remap",
+                });
+                if (!remapped.ok) {
+                  targetAuthorityUnavailable = true;
+                  return requestFailure(remapped.error);
+                }
+                if (
+                  legacySnapshot !== undefined &&
+                  !recoverableSnapshots.has(replacement.id)
+                ) {
+                  recoverableSnapshots.set(replacement.id, {
+                    ...legacySnapshot,
+                    targetId: replacement.id,
+                  });
+                }
+                if (
+                  legacyGuard !== undefined &&
+                  !recoverableGuards.has(replacement.id)
+                ) {
+                  recoverableGuards.set(replacement.id, {
+                    ...legacyGuard,
+                    targetId: replacement.id,
+                  });
+                }
+                recoverableSnapshots.delete(legacyTargetId);
+                recoverableGuards.delete(legacyTargetId);
+                guardedTargetIds.delete(legacyTargetId);
+              }
+
+              const currentInventory =
+                existing === undefined
+                  ? undefined
+                  : target.id === replacement.id
+                    ? inventoryState
+                    : inventoryStates.get(replacement.id);
+              const recoveredSnapshot =
+                currentInventory?.observedAt !== null &&
+                currentInventory?.observedAt !== undefined
+                  ? undefined
+                  : legacySnapshot;
+              const recoveredGuard = legacyGuard;
+
+              options.skillsTargets.replaceDefinitions(nextDefinitions);
+              if (existing === undefined) {
+                inventoryStates.set(replacement.id, emptyInventoryState());
+                mutationStates.set(replacement.id, emptyMutationState());
+              } else if (executionChanged && target.id !== replacement.id) {
+                const priorInventory = inventoryStates.get(replacement.id);
+                inventoryStates.set(replacement.id, {
+                  ...(priorInventory ?? emptyInventoryState()),
+                  freshness: staleAfterFailure(
+                    priorInventory?.freshness ?? "none",
+                  ),
+                  lastError: targetGenerationStaleError(),
+                });
+                mutationStates.set(replacement.id, emptyMutationState());
+                freshTargetSessions.delete(replacement.id);
+                invalidatePreparedForTarget(replacement.id);
+              }
+              if (target.id === replacement.id) {
+                target = replacement;
+                if (executionChanged) {
+                  freshTargetSession = undefined;
+                  inventoryState = {
+                    ...inventoryState,
+                    freshness: staleAfterFailure(inventoryState.freshness),
+                    lastError: targetGenerationStaleError(),
+                  };
+                  invalidatePreparedForTarget(replacement.id);
+                  mutationState = emptyMutationState();
+                }
+              }
+              if (
+                recoveredSnapshot !== undefined ||
+                recoveredGuard !== undefined
+              ) {
+                const recovered = stateFromRecoveredRecords(
+                  replacement,
+                  recoveredSnapshot,
+                  recoveredGuard,
+                  target.id === replacement.id
+                    ? inventoryState
+                    : inventoryStates.get(replacement.id),
+                  target.id === replacement.id
+                    ? mutationState
+                    : mutationStates.get(replacement.id),
+                );
+                inventoryStates.set(replacement.id, recovered.inventory);
+                mutationStates.set(replacement.id, recovered.mutation);
+                freshTargetSessions.delete(replacement.id);
+                invalidatePreparedForTarget(replacement.id);
+                if (recoveredGuard !== undefined) {
+                  guardedTargetIds.add(replacement.id);
+                }
+                if (target.id === replacement.id) {
+                  inventoryState = structuredClone(recovered.inventory);
+                  mutationState = structuredClone(recovered.mutation);
+                  freshTargetSession = undefined;
+                }
+              }
+              publish({ ...inventoryState });
+              return { ok: true, value: { operationId: replacement.id } };
+            });
+          }
+
+          if (parsed.data.type === "target.delete") {
+            const deletedTargetId = parsed.data.targetId;
+            const existing = targetDefinitions().find(
+              ({ id }) => id === deletedTargetId,
+            );
+            if (
+              existing !== undefined &&
+              activePreparation?.dependentTargetIds.includes(existing.id)
+            ) {
+              return requestFailure(
+                publicError(
+                  "mutation_conflict",
+                  "A mutation preparation is active for this Target.",
+                  "coordinate",
+                  true,
+                ),
+              );
+            }
+            if (existing === undefined) {
+              return requestFailure(
+                publicError(
+                  "target_not_found",
+                  "Target was not found.",
+                  "target",
+                  false,
+                ),
+              );
+            }
+            if (activeObservation?.targetId === existing.id) {
+              return requestFailure(
+                publicError(
+                  "mutation_conflict",
+                  "This Target has an active Inventory observation.",
+                  "coordinate",
+                  true,
+                ),
+              );
+            }
+            if (
+              targetDefinitions().length === 1 ||
+              guardedTargetIds.has(existing.id) ||
+              activeMutation?.prepared?.targetId === existing.id
+            ) {
+              return requestFailure(
+                publicError(
+                  "reconciliation_required",
+                  "This Target cannot be deleted in its current state.",
+                  "target",
+                  false,
+                ),
+              );
+            }
+            return reserveTargetDefinitions(async () => {
+              const proposed = options.skillsTargets.proposeDelete(existing.id);
+              if (!proposed.ok) return requestFailure(proposed.error);
+              const nextDefinitions = proposed.value.definitions;
+              const committed = await options.recoveryRecords.commit({
+                targets: nextDefinitions.map(durableTarget),
+                type: "targets.replace",
+              });
+              if (!committed.ok) return requestFailure(committed.error);
+              options.skillsTargets.replaceDefinitions(nextDefinitions);
+              if (
+                comparisonSelection?.leftTargetId === existing.id ||
+                comparisonSelection?.rightTargetId === existing.id
+              ) {
+                comparisonSelection = undefined;
+              }
+              inventoryStates.delete(existing.id);
+              mutationStates.delete(existing.id);
+              freshTargetSessions.delete(existing.id);
+              invalidatePreparedForTarget(existing.id);
+              if (target.id === existing.id) {
+                target = targetDefinitions()[0]!;
+                freshTargetSession = freshTargetSessions.get(target.id);
+                inventoryState = structuredClone(
+                  inventoryStates.get(target.id) ?? emptyInventoryState(),
+                );
+                mutationState = structuredClone(
+                  mutationStates.get(target.id) ?? emptyMutationState(),
+                );
+              }
+              publish({ ...inventoryState });
+              return { ok: true, value: { operationId: existing.id } };
+            });
+          }
+
+          if (parsed.data.type === "comparison.open") {
+            const leftTargetId = parsed.data.leftTargetId;
+            const rightTargetId = parsed.data.rightTargetId;
+            const leftTarget = targetDefinitions().find(
+              ({ id }) => id === leftTargetId,
+            );
+            const rightTarget = targetDefinitions().find(
+              ({ id }) => id === rightTargetId,
+            );
+            if (leftTarget === undefined || rightTarget === undefined) {
+              return requestFailure(
+                publicError(
+                  "target_not_found",
+                  "A selected comparison Target was not found.",
+                  "compare",
+                  false,
+                ),
+              );
+            }
+            const comparisonId = options.id();
+            comparisonSelection = {
+              id: comparisonId,
+              leftTargetId: leftTarget.id,
+              rightTargetId: rightTarget.id,
+            };
+            publish({ ...inventoryState });
+            return { ok: true, value: { operationId: comparisonId } };
+          }
+
+          if (parsed.data.type === "comparison.prepare") {
+            const comparisonId = parsed.data.comparisonId;
+            const destinationTargetId = parsed.data.destinationTargetId;
+            const rowKey = parsed.data.rowKey;
+            const comparison = currentComparison();
+            const destinationTarget = targetDefinitions().find(
+              ({ id }) => id === destinationTargetId,
+            );
+            const row = comparison?.rows.find(({ key }) => key === rowKey);
+            if (
+              comparison === null ||
+              comparison.id !== comparisonId ||
+              destinationTarget === undefined ||
+              (destinationTarget.id !== comparison.leftTargetId &&
+                destinationTarget.id !== comparison.rightTargetId) ||
+              row === undefined
+            ) {
+              return requestFailure(
+                publicError(
+                  "mutation_ineligible",
+                  "The selected comparison difference is unavailable.",
+                  "prepare",
+                  false,
+                ),
+              );
+            }
+            if (
+              comparison.leftFreshness !== "fresh" ||
+              comparison.rightFreshness !== "fresh"
+            ) {
+              return requestFailure(
+                publicError(
+                  "stale_inventory",
+                  "Fresh Inventory is required on both comparison Targets.",
+                  "prepare",
+                  true,
+                ),
+              );
+            }
+            if (
+              activeMutation !== undefined ||
+              activeObservation !== undefined ||
+              activePreparation !== undefined
+            ) {
+              return requestFailure(
+                publicError(
+                  "mutation_conflict",
+                  "Another operation is active for a Target.",
+                  "coordinate",
+                  true,
+                ),
+              );
+            }
+
+            const destinationIsLeft =
+              destinationTarget.id === comparison.leftTargetId;
+            const destinationEntries = destinationIsLeft
+              ? row.left.entries
+              : row.right.entries;
+            const sourceEntries = destinationIsLeft
+              ? row.right.entries
+              : row.left.entries;
+            let intent:
+              | import("@skills-desktop/skills-runtime").MutationIntent
+              | undefined;
+            if (
+              row.summary === "missing" &&
+              destinationEntries.length === 0 &&
+              sourceEntries.length === 1
+            ) {
+              const sourceEntry = sourceEntries[0]!;
+              if (
+                sourceEntry.declaredSource.sourceType === "github" &&
+                sourceEntry.declaredSource.source !== null
+              ) {
+                intent = {
+                  names: [row.key],
+                  scope: sourceEntry.scope,
+                  source: {
+                    source: sourceEntry.declaredSource.source,
+                    sourceType: "github",
+                  },
+                  type: "add",
+                };
+              }
+            } else if (
+              row.summary === "version-drift" &&
+              row.dimensions.declaredSource === "matched" &&
+              destinationEntries.length === 1 &&
+              sourceEntries.length === 1 &&
+              destinationEntries[0]!.scope === sourceEntries[0]!.scope
+            ) {
+              intent = {
+                names: [row.key],
+                scope: destinationEntries[0]!.scope,
+                type: "update",
+              };
+            }
+            if (intent === undefined) {
+              return requestFailure(
+                publicError(
+                  "mutation_ineligible",
+                  "This comparison difference cannot produce a safe destination mutation.",
+                  "prepare",
+                  false,
+                ),
+              );
+            }
+
+            if (destinationTarget.id !== target.id) {
+              activateTarget(destinationTarget);
+            }
+            if (
+              mutationState.phase === "reconciliation-required" ||
+              freshTargetSession === undefined ||
+              inventoryState.freshness !== "fresh"
+            ) {
+              return requestFailure(
+                publicError(
+                  mutationState.phase === "reconciliation-required"
+                    ? "reconciliation_required"
+                    : "stale_inventory",
+                  "The destination Target cannot prepare this mutation.",
+                  "prepare",
+                  false,
+                ),
+              );
+            }
+            return runPreparation(endpointState, freshTargetSession, intent, [
+              comparison.leftTargetId,
+              comparison.rightTargetId,
+            ]);
           }
 
           if (parsed.data.type === "inventory.cancel") {
@@ -925,7 +1763,12 @@ export function createDesktopCapabilities(
             return { ok: true, value: { operationId: reviewId } };
           }
 
-          if (parsed.data.targetId !== target.id) {
+          const requestedTargetId =
+            "targetId" in parsed.data ? parsed.data.targetId : undefined;
+          const requestedTarget = targetDefinitions().find(
+            ({ id }) => id === requestedTargetId,
+          );
+          if (requestedTarget === undefined) {
             return requestFailure(
               publicError(
                 "target_not_found",
@@ -934,6 +1777,23 @@ export function createDesktopCapabilities(
                 false,
               ),
             );
+          }
+          if (requestedTarget.id !== target.id) {
+            if (
+              activeMutation !== undefined ||
+              activeObservation !== undefined ||
+              activePreparation !== undefined
+            ) {
+              return requestFailure(
+                publicError(
+                  "mutation_conflict",
+                  "Another operation is active for a Target.",
+                  "coordinate",
+                  true,
+                ),
+              );
+            }
+            activateTarget(requestedTarget);
           }
 
           if (parsed.data.type === "mutation.prepare") {
@@ -960,7 +1820,11 @@ export function createDesktopCapabilities(
                 ),
               );
             }
-            if (activeMutation !== undefined || activeObservation !== undefined) {
+            if (
+              activeMutation !== undefined ||
+              activeObservation !== undefined ||
+              activePreparation !== undefined
+            ) {
               return requestFailure(
                 publicError(
                   "mutation_conflict",
@@ -970,28 +1834,11 @@ export function createDesktopCapabilities(
                 ),
               );
             }
-            const prepared = await freshTargetSession.process.prepareMutation({
-              freshness: "fresh",
-              intent: parsed.data.intent,
-              inventory: freshTargetSession.inventory,
-              inventoryId: freshTargetSession.inventoryId,
-            });
-            if (!prepared.ok) return requestFailure(prepared.error as RequestError);
-            rejectPendingReviews();
-            preparedMutations.clear();
-            preparedMutations.set(prepared.value.id, prepared.value);
-            publishMutation({
-              activeOperationId: null,
-              commandPlan: projectCommandPlan(prepared.value.commandPlan),
-              lastError: null,
-              outcome: null,
-              phase: "planned",
-              reconciliationDeadline: null,
-            });
-            return {
-              ok: true,
-              value: { operationId: prepared.value.id },
-            };
+            return runPreparation(
+              endpointState,
+              freshTargetSession,
+              parsed.data.intent,
+            );
           }
 
           if (parsed.data.type === "mutation.reconcile") {
@@ -1019,7 +1866,11 @@ export function createDesktopCapabilities(
                 ),
               );
             }
-            if (activeMutation !== undefined || activeObservation !== undefined) {
+            if (
+              activeMutation !== undefined ||
+              activeObservation !== undefined ||
+              activePreparation !== undefined
+            ) {
               return requestFailure(
                 publicError(
                   "mutation_conflict",
@@ -1036,7 +1887,8 @@ export function createDesktopCapabilities(
               lastError: null,
             });
             const promise = runReconciliation(operationId).finally(() => {
-              if (activeMutation?.id === operationId) activeMutation = undefined;
+              if (activeMutation?.id === operationId)
+                activeMutation = undefined;
             });
             activeMutation = {
               controller: new AbortController(),
@@ -1046,7 +1898,10 @@ export function createDesktopCapabilities(
             return promise;
           }
 
-          if (activeMutation !== undefined) {
+          if (
+            activeMutation !== undefined ||
+            activePreparation !== undefined
+          ) {
             return requestFailure(
               publicError(
                 "mutation_conflict",
@@ -1061,6 +1916,7 @@ export function createDesktopCapabilities(
 
           const operationId = options.id();
           const controller = new AbortController();
+          invalidatePreparedForTarget(target.id);
           publish({
             ...inventoryState,
             activeOperationId: operationId,
@@ -1077,6 +1933,7 @@ export function createDesktopCapabilities(
             id: operationId,
             ownerEndpointId: endpoint.endpointId,
             promise,
+            targetId: target.id,
           };
           return promise;
         },
@@ -1094,6 +1951,11 @@ export function createDesktopCapabilities(
             activeObservation.controller.abort();
           }
           if (
+            activePreparation?.ownerEndpointId === endpointState.endpointId
+          ) {
+            activePreparation.invalidated = true;
+          }
+          if (
             endpointState.role === "review" &&
             endpointState.reviewId !== undefined
           ) {
@@ -1101,11 +1963,7 @@ export function createDesktopCapabilities(
             if (review !== undefined && review.decision === undefined) {
               review.decision = "reject";
               if (review.purpose === "execute") {
-                publishMutation({
-                  ...mutationState,
-                  activeOperationId: null,
-                  phase: "planned",
-                });
+                rejectReviewState(review);
               }
             }
           }
@@ -1116,74 +1974,219 @@ export function createDesktopCapabilities(
       if (initialized) return;
       initialized = true;
       const restored = await options.recoveryRecords.restore();
-      const prior = restored.inventorySnapshots.find(
-        (snapshot) =>
-          snapshot.targetId === target.id &&
-          snapshot.generation === target.generation,
+      let restoredSnapshots = [...restored.inventorySnapshots];
+      let restoredGuards = [...restored.mutationGuards];
+      for (const snapshot of restoredSnapshots) {
+        recoverableSnapshots.set(snapshot.targetId, snapshot);
+      }
+      for (const guard of restoredGuards) {
+        recoverableGuards.set(guard.targetId, guard);
+      }
+      const targetStoreFailed = restored.failures.some(
+        (failure) => failure.store === "targetDefinitions",
       );
-      if (prior !== undefined) {
-        inventoryState = {
-          activeOperationId: null,
-          cliVersion: prior.cliVersion,
-          entries: projectEntries(prior.entries),
-          freshness: "stale",
-          lastError: null,
-          observedAt: prior.observedAt,
-          persistenceWarning: null,
-          phase: "ready",
-        };
-      } else if (restored.failures.length > 0) {
+      targetAuthorityUnavailable = targetStoreFailed;
+      if (restored.targetDefinitions.length > 0) {
+        options.skillsTargets.replaceDefinitions(
+          restored.targetDefinitions.map(targetFromDurable),
+        );
+        target =
+          targetDefinitions().find(({ id }) => id === target.id) ??
+          targetDefinitions()[0]!;
+      } else if (!targetStoreFailed) {
+        const committed = await options.recoveryRecords.commit({
+          targets: [durableTarget(target)],
+          type: "targets.replace",
+        });
+        if (!committed.ok) {
+          targetAuthorityUnavailable = true;
+          inventoryState = {
+            ...inventoryState,
+            lastError: committed.error,
+            phase: "error",
+          };
+        }
+      } else {
         inventoryState = {
           ...inventoryState,
           lastError: publicError(
             "process_failed",
-            "Saved Inventory evidence could not be restored.",
+            "Saved Target Definitions could not be restored.",
             "restore",
-            true,
+            false,
           ),
           phase: "error",
         };
       }
-      const restoredGuard = restored.mutationGuards.find(
-        (guard) => guard.targetId === target.id,
+      if (!targetAuthorityUnavailable) {
+        for (const definition of targetDefinitions()) {
+          const legacyTargetId = options.skillsTargets.legacyIdFor(definition);
+          if (
+            legacyTargetId === undefined ||
+            legacyTargetId === definition.id ||
+            (!restoredSnapshots.some(
+              ({ targetId }) => targetId === legacyTargetId,
+            ) &&
+              !restoredGuards.some(
+                ({ targetId }) => targetId === legacyTargetId,
+              ))
+          ) {
+            continue;
+          }
+          const remapped = await options.recoveryRecords.commit({
+            fromTargetId: legacyTargetId,
+            toTargetId: definition.id,
+            type: "target.remap",
+          });
+          if (!remapped.ok) {
+            targetAuthorityUnavailable = true;
+            inventoryState = {
+              ...inventoryState,
+              lastError: remapped.error,
+              phase: "error",
+            };
+            break;
+          }
+          restoredSnapshots = remapRecoveredTargetId(
+            restoredSnapshots,
+            legacyTargetId,
+            definition.id,
+          );
+          restoredGuards = remapRecoveredTargetId(
+            restoredGuards,
+            legacyTargetId,
+            definition.id,
+          );
+          recoverableSnapshots.delete(legacyTargetId);
+          recoverableGuards.delete(legacyTargetId);
+          const remappedSnapshot = restoredSnapshots.find(
+            ({ targetId }) => targetId === definition.id,
+          );
+          const remappedGuard = restoredGuards.find(
+            ({ targetId }) => targetId === definition.id,
+          );
+          if (remappedSnapshot !== undefined) {
+            recoverableSnapshots.set(definition.id, remappedSnapshot);
+          }
+          if (remappedGuard !== undefined) {
+            recoverableGuards.set(definition.id, remappedGuard);
+          }
+        }
+      }
+      for (const guard of restoredGuards) {
+        guardedTargetIds.add(guard.targetId);
+      }
+      const inventoryStoreFailed = restored.failures.some(
+        (failure) => failure.store === "inventorySnapshots",
       );
       const guardStoreFailed = restored.failures.some(
         (failure) => failure.store === "mutationGuards",
       );
-      if (restoredGuard !== undefined || guardStoreFailed) {
+      if (guardStoreFailed) {
+        for (const definition of targetDefinitions()) {
+          guardedTargetIds.add(definition.id);
+        }
+      }
+      for (const definition of targetDefinitions()) {
+        const prior = restoredSnapshots.find(
+          (snapshot) => snapshot.targetId === definition.id,
+        );
+        let restoredInventory = emptyInventoryState();
+        if (prior !== undefined) {
+          restoredInventory = {
+            activeOperationId: null,
+            cliVersion: prior.cliVersion,
+            entries: projectEntries(prior.entries),
+            freshness: "stale",
+            lastError:
+              prior.generation === definition.generation
+                ? null
+                : targetGenerationStaleError(),
+            observedAt: prior.observedAt,
+            persistenceWarning: null,
+            phase: "ready",
+          };
+        } else if (inventoryStoreFailed) {
+          restoredInventory = {
+            ...restoredInventory,
+            lastError: publicError(
+              "process_failed",
+              "Saved Inventory evidence could not be restored.",
+              "restore",
+              true,
+            ),
+            phase: "error",
+          };
+        }
+
+        const restoredGuard = restoredGuards.find(
+          (guard) => guard.targetId === definition.id,
+        );
+        let restoredMutation = emptyMutationState();
+        if (restoredGuard !== undefined || guardStoreFailed) {
+          restoredInventory = {
+            ...restoredInventory,
+            freshness: staleAfterFailure(restoredInventory.freshness),
+          };
+          restoredMutation = {
+            activeOperationId: null,
+            commandPlan: null,
+            lastError: {
+              ...publicError(
+                "reconciliation_required",
+                "A prior mutation requires explicit reconciliation.",
+                "restore",
+                false,
+              ),
+              effects: "possible",
+            },
+            outcome: null,
+            phase: "reconciliation-required",
+            reconciliationDeadline:
+              restoredGuard?.deadline ?? clock().toISOString(),
+          };
+        }
+        inventoryStates.set(definition.id, restoredInventory);
+        mutationStates.set(definition.id, restoredMutation);
+      }
+      inventoryState = structuredClone(
+        inventoryStates.get(target.id) ?? emptyInventoryState(),
+      );
+      mutationState = structuredClone(
+        mutationStates.get(target.id) ?? emptyMutationState(),
+      );
+      if (targetAuthorityUnavailable) {
         inventoryState = {
           ...inventoryState,
-          freshness: staleAfterFailure(inventoryState.freshness),
-        };
-        mutationState = {
-          activeOperationId: null,
-          commandPlan: null,
-          lastError: {
-            ...publicError(
-              "reconciliation_required",
-              "A prior mutation requires explicit reconciliation.",
-              "restore",
-              false,
-            ),
-            effects: "possible",
-          },
-          outcome: null,
-          phase: "reconciliation-required",
-          reconciliationDeadline:
-            restoredGuard?.deadline ?? clock().toISOString(),
+          lastError: publicError(
+            "process_failed",
+            "Saved Target or recovery authority could not be restored.",
+            "restore",
+            false,
+          ),
+          phase: "error",
         };
       }
+      storeActiveTargetState();
     },
     shutdown() {
       if (shutdownPromise !== undefined) return shutdownPromise;
       shuttingDown = true;
       const observation = activeObservation;
       const mutation = activeMutation;
+      const preparation = activePreparation;
       observation?.controller.abort();
+      if (preparation !== undefined) preparation.invalidated = true;
       rejectPendingReviews();
       shutdownPromise = (async () => {
-        const operations = [observation?.promise, mutation?.promise].filter(
-          (operation): operation is Promise<Result<RequestValue, RequestError>> =>
+        const operations = [
+          observation?.promise,
+          mutation?.promise,
+          preparation?.promise,
+        ].filter(
+          (
+            operation,
+          ): operation is Promise<Result<RequestValue, RequestError>> =>
             operation !== undefined,
         );
         if (operations.length > 0) {

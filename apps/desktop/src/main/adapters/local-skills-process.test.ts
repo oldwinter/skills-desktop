@@ -583,7 +583,7 @@ describe("Local SkillsProcess mutation contract", () => {
       binding: {
         generation: 3,
         harness: "Codex",
-        targetId: "local-target",
+        targetId: "00000000-0000-4000-8000-000000000001",
       },
       clock: () => new Date("2026-08-21T10:00:00.000Z"),
       id: () => "prepared-1",
@@ -610,18 +610,17 @@ describe("Local SkillsProcess mutation contract", () => {
           harness: "Codex",
           names: ["global-skill"],
           operation: "update",
-          preview:
-            "npx skills@1.5.23 update global-skill --global --yes",
+          preview: "npx skills@1.5.23 update global-skill --global --yes",
           schemaVersion: 1,
           scope: "global",
-          targetId: "local-target",
+          targetId: "00000000-0000-4000-8000-000000000001",
           timeoutMs: 600_000,
         },
         expiresAt: "2026-08-21T10:10:00.000Z",
         id: "prepared-1",
         inventoryId: "inventory-7",
         targetGeneration: 3,
-        targetId: "local-target",
+        targetId: "00000000-0000-4000-8000-000000000001",
       },
     });
     expect(prepared.ok && prepared.value.digest).toMatch(/^[a-f0-9]{64}$/);
@@ -639,10 +638,7 @@ describe("Local SkillsProcess mutation contract", () => {
         if (operation === "--version") {
           return { exitCode: 0, stderr: "", stdout: "1.5.23\n" };
         }
-        if (
-          operation ===
-          "remove project-skill --agent codex --yes"
-        ) {
+        if (operation === "remove project-skill --agent codex --yes") {
           removed = true;
           return { exitCode: 0, stderr: "", stdout: "removed" };
         }
@@ -663,7 +659,7 @@ describe("Local SkillsProcess mutation contract", () => {
       binding: {
         generation: 3,
         harness: "Codex",
-        targetId: "local-target",
+        targetId: "00000000-0000-4000-8000-000000000001",
       },
       clock: () => new Date("2026-08-21T10:00:00.000Z"),
       id: () => "prepared-remove",
@@ -777,7 +773,7 @@ describe("Local SkillsProcess mutation contract", () => {
       binding: {
         generation: 3,
         harness: "Codex",
-        targetId: "local-target",
+        targetId: "00000000-0000-4000-8000-000000000001",
       },
       clock: () => new Date("2026-08-21T10:00:00.000Z"),
       id: () => "prepared-cancelled",
@@ -823,9 +819,9 @@ describe("Local SkillsProcess mutation contract", () => {
         },
       },
     });
-    expect(
-      runner.invocations.some(({ args }) => args.includes("remove")),
-    ).toBe(false);
+    expect(runner.invocations.some(({ args }) => args.includes("remove"))).toBe(
+      false,
+    );
   });
 
   it("runs postflight after known timeout but not after uncertain termination", async () => {
@@ -861,7 +857,7 @@ describe("Local SkillsProcess mutation contract", () => {
         binding: {
           generation: 3,
           harness: "Codex",
-          targetId: "local-target",
+          targetId: "00000000-0000-4000-8000-000000000001",
         },
         clock: () => new Date("2026-08-21T10:00:00.000Z"),
         id: () => `prepared-${termination}`,
@@ -931,8 +927,7 @@ describe("Local SkillsProcess mutation contract", () => {
         return {
           exitCode: 0,
           stderr: "",
-          stdout:
-            operation === "list --global --json" ? globalOutput : "[]",
+          stdout: operation === "list --global --json" ? globalOutput : "[]",
         };
       },
     };
@@ -941,7 +936,7 @@ describe("Local SkillsProcess mutation contract", () => {
       binding: {
         generation: 3,
         harness: "Codex",
-        targetId: "local-target",
+        targetId: "00000000-0000-4000-8000-000000000001",
       },
       clock: () => new Date("2026-08-21T10:00:00.000Z"),
       id: () => `prepared-${++nextId}`,
@@ -1005,7 +1000,7 @@ describe("Local SkillsProcess mutation contract", () => {
       binding: {
         generation: 3,
         harness: "Codex",
-        targetId: "local-target",
+        targetId: "00000000-0000-4000-8000-000000000001",
       },
       clock: () => new Date("2026-08-21T10:00:00.000Z"),
       id: () => `prepared-${++nextId}`,
@@ -1041,9 +1036,9 @@ describe("Local SkillsProcess mutation contract", () => {
         signal: new AbortController().signal,
       }),
     ).toMatchObject({ error: { code: "confirmation_invalid" }, ok: false });
-    expect(
-      runner.invocations.some(({ args }) => args.includes("remove")),
-    ).toBe(false);
+    expect(runner.invocations.some(({ args }) => args.includes("remove"))).toBe(
+      false,
+    );
   });
 
   it.each([
@@ -1091,7 +1086,7 @@ describe("Local SkillsProcess mutation contract", () => {
         binding: {
           generation: 3,
           harness: "Codex",
-          targetId: "local-target",
+          targetId: "00000000-0000-4000-8000-000000000001",
         },
         clock: () => new Date("2026-08-21T10:00:00.000Z"),
         id: () => `prepared-${intent.type}`,
