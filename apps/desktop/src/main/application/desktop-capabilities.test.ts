@@ -2497,7 +2497,7 @@ describe("DesktopCapabilities SSH host-trust role-session contract", () => {
                 user: "deploy",
                 wireDialect: {
                   bootstrapDigest: "b".repeat(64),
-                  protocolVersion: 1,
+                  protocolVersion: 2,
                 },
               },
               bindingDigest: "a".repeat(64),

@@ -4,7 +4,7 @@ import type {
   RendererError,
   TargetDraft,
 } from "../../contracts/workspace.js";
-import type { SkillsProcess } from "../adapters/local-skills-process.js";
+import type { SkillsProcess } from "../adapters/skills-process.js";
 import type {
   HostTrustChallenge,
   OpenSshAccessError,

@@ -18,7 +18,7 @@ import {
   type ReviewSnapshot,
 } from "../../contracts/review.js";
 
-import type { PreparedMutation } from "../adapters/local-skills-process.js";
+import type { PreparedMutation } from "../adapters/skills-process.js";
 import type {
   DurableTargetDefinition,
   InventorySnapshot,

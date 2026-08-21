@@ -2,7 +2,7 @@ import { z } from "zod";
 
 import type { PublicError, Result } from "./result.js";
 
-export const WIRE_PROTOCOL_VERSION = 1 as const;
+export const WIRE_PROTOCOL_VERSION = 2 as const;
 export const MAX_WIRE_FRAME_BYTES = 16 * 1024 * 1024 + 64 * 1024;
 export const MAX_WIRE_INVENTORY_JSON_BYTES = 8 * 1024 * 1024;
 export const MAX_WIRE_REQUEST_BYTES = 64 * 1024;
@@ -18,6 +18,42 @@ export interface WireObservationRequest {
   readonly type: "request";
   readonly workspace: string;
 }
+
+export type WireMutation =
+  | {
+      readonly names: readonly string[];
+      readonly scope: "global" | "project";
+      readonly source: {
+        readonly source: string;
+        readonly sourceType: "github";
+      };
+      readonly type: "add";
+    }
+  | {
+      readonly names: readonly string[];
+      readonly scope: "global" | "project";
+      readonly type: "remove" | "update";
+    };
+
+export interface WireMutationRequest {
+  readonly harness: string;
+  readonly mutation: WireMutation;
+  readonly operation: "mutate";
+  readonly protocolVersion: typeof WIRE_PROTOCOL_VERSION;
+  readonly requestId: string;
+  readonly type: "request";
+  readonly workspace: string;
+}
+
+export interface WireCancellationRequest {
+  readonly operation: "cancel";
+  readonly protocolVersion: typeof WIRE_PROTOCOL_VERSION;
+  readonly requestId: string;
+  readonly type: "request";
+}
+
+export type WireRequest =
+  WireCancellationRequest | WireMutationRequest | WireObservationRequest;
 
 export function validateWireObservationRequest(
   value: unknown,
@@ -82,6 +118,163 @@ export function isWireObservationRequest(
   );
 }
 
+export function validateWireRequest(
+  value: unknown,
+  protocolVersion: number,
+  maxHarnessLength: number,
+  maxRequestIdLength: number,
+  maxWorkspaceLength: number,
+): boolean {
+  const isRecord = (candidate: unknown): candidate is Record<string, unknown> =>
+    candidate !== null &&
+    typeof candidate === "object" &&
+    !Array.isArray(candidate);
+  const exactKeys = (
+    candidate: Record<string, unknown>,
+    expected: string[],
+  ) => {
+    const keys = Object.keys(candidate).sort();
+    const sortedExpected = [...expected].sort();
+    return (
+      keys.length === sortedExpected.length &&
+      keys.every((key, index) => key === sortedExpected[index])
+    );
+  };
+  const boundedIdentifier = (candidate: unknown) =>
+    typeof candidate === "string" &&
+    candidate.length > 0 &&
+    candidate.length <= maxRequestIdLength;
+  const canonicalWorkspace = (candidate: unknown) => {
+    if (
+      typeof candidate !== "string" ||
+      candidate.length === 0 ||
+      candidate.length > maxWorkspaceLength ||
+      candidate.includes("\0") ||
+      !candidate.startsWith("/")
+    ) {
+      return false;
+    }
+    if (candidate === "/") return true;
+    const segments = candidate.slice(1).split("/");
+    return !segments.some(
+      (segment, index) =>
+        segment === "." ||
+        segment === ".." ||
+        (segment === "" && index !== segments.length - 1),
+    );
+  };
+  const skillName = (candidate: unknown) =>
+    typeof candidate === "string" &&
+    candidate.length > 0 &&
+    candidate.length <= 256 &&
+    /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(candidate);
+  const names = (candidate: unknown) =>
+    Array.isArray(candidate) &&
+    candidate.length > 0 &&
+    candidate.length <= 128 &&
+    candidate.every(skillName) &&
+    new Set(candidate).size === candidate.length &&
+    candidate.reduce(
+      (size, name) => size + (typeof name === "string" ? name.length : 0),
+      0,
+    ) <= 8_192;
+  const githubSource = (candidate: unknown) => {
+    if (
+      !isRecord(candidate) ||
+      !exactKeys(candidate, ["source", "sourceType"])
+    ) {
+      return false;
+    }
+    return (
+      candidate.sourceType === "github" &&
+      typeof candidate.source === "string" &&
+      candidate.source.length >= 3 &&
+      candidate.source.length <= 256 &&
+      /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\/[A-Za-z0-9._-]+$/.test(
+        candidate.source,
+      )
+    );
+  };
+  const mutation = (candidate: unknown) => {
+    if (!isRecord(candidate)) return false;
+    if (
+      candidate.type !== "add" &&
+      candidate.type !== "remove" &&
+      candidate.type !== "update"
+    ) {
+      return false;
+    }
+    const expectedKeys =
+      candidate.type === "add"
+        ? ["names", "scope", "source", "type"]
+        : ["names", "scope", "type"];
+    return (
+      exactKeys(candidate, expectedKeys) &&
+      names(candidate.names) &&
+      (candidate.scope === "global" || candidate.scope === "project") &&
+      (candidate.type !== "add" || githubSource(candidate.source))
+    );
+  };
+
+  if (!isRecord(value) || value.type !== "request") return false;
+  if (
+    value.protocolVersion !== protocolVersion ||
+    !boundedIdentifier(value.requestId)
+  ) {
+    return false;
+  }
+  if (value.operation === "cancel") {
+    return exactKeys(value, [
+      "operation",
+      "protocolVersion",
+      "requestId",
+      "type",
+    ]);
+  }
+  const commonRequestValid =
+    typeof value.harness === "string" &&
+    value.harness.length > 0 &&
+    value.harness.length <= maxHarnessLength &&
+    canonicalWorkspace(value.workspace);
+  if (value.operation === "observe") {
+    return (
+      commonRequestValid &&
+      exactKeys(value, [
+        "harness",
+        "operation",
+        "protocolVersion",
+        "requestId",
+        "type",
+        "workspace",
+      ])
+    );
+  }
+  return (
+    value.operation === "mutate" &&
+    commonRequestValid &&
+    mutation(value.mutation) &&
+    exactKeys(value, [
+      "harness",
+      "mutation",
+      "operation",
+      "protocolVersion",
+      "requestId",
+      "type",
+      "workspace",
+    ])
+  );
+}
+
+export function isWireRequest(value: unknown): value is WireRequest {
+  return validateWireRequest(
+    value,
+    WIRE_PROTOCOL_VERSION,
+    MAX_WIRE_HARNESS_LENGTH,
+    MAX_WIRE_REQUEST_ID_LENGTH,
+    MAX_WIRE_WORKSPACE_LENGTH,
+  );
+}
+
 export function encodeWireFramePayload(
   value: unknown,
   maxFrameBytes: number,
@@ -134,6 +327,7 @@ export function decodeSingleWireFramePayload(
 
 export const WIRE_OBSERVATION_REQUEST_VALIDATOR_SOURCE =
   validateWireObservationRequest.toString();
+export const WIRE_REQUEST_VALIDATOR_SOURCE = validateWireRequest.toString();
 export const WIRE_FRAME_ENCODER_SOURCE = encodeWireFramePayload.toString();
 export const WIRE_SINGLE_FRAME_DECODER_SOURCE =
   decodeSingleWireFramePayload.toString();
@@ -151,7 +345,7 @@ export const wireFrameSchema = z.union([
       type: z.literal("hello"),
     })
     .strict(),
-  z.custom<WireObservationRequest>(isWireObservationRequest),
+  z.custom<WireRequest>(isWireRequest),
   z
     .object({
       cliVersion: z.literal("1.5.23"),
@@ -164,6 +358,28 @@ export const wireFrameSchema = z.union([
     .strict(),
   z
     .object({
+      cliVersion: z.literal("1.5.23"),
+      globalJson: z.string().max(MAX_WIRE_INVENTORY_JSON_BYTES),
+      process: z
+        .object({
+          cleanup: z.literal("confirmed"),
+          disposition: z.enum([
+            "cancelled",
+            "completed",
+            "failed",
+            "timed-out",
+          ]),
+          exitCode: z.number().int().nullable(),
+        })
+        .strict(),
+      ...baseFrame,
+      projectJson: z.string().max(MAX_WIRE_INVENTORY_JSON_BYTES),
+      requestId: boundedIdentifier,
+      type: z.literal("mutation-result"),
+    })
+    .strict(),
+  z
+    .object({
       code: z.enum([
         "output_limit_exceeded",
         "remote_operation_failed",
@@ -172,6 +388,7 @@ export const wireFrameSchema = z.union([
       ]),
       message: z.string().min(1).max(512),
       ...baseFrame,
+      phase: z.enum(["mutation", "observe", "postflight", "version", "wire"]),
       requestId: boundedIdentifier.nullable(),
       type: z.literal("failure"),
     })

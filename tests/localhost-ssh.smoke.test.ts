@@ -129,6 +129,7 @@ describe("disposable localhost OpenSSH integration", () => {
       const npx = join(bin, "npx");
       const pauseFile = join(root, "pause-observation");
       const observationStartedFile = join(root, "observation-started");
+      const removedFile = join(root, "remote-project-removed");
       await writeFile(
         npx,
         `#!/usr/bin/env node
@@ -139,7 +140,8 @@ if (operation === "list --json" && existsSync(${JSON.stringify(pauseFile)})) {
   setTimeout(() => process.stdout.write(JSON.stringify([{ name: "late-project", path: "/private/late", scope: "project", agents: ["Codex"], source: null, sourceType: null, sourceUrl: null }])), 30_000);
 }
 else if (operation === "--version") process.stdout.write("1.5.23\\n");
-else if (operation === "list --json") process.stdout.write(JSON.stringify([{ name: "remote-project", path: "/private/project", scope: "project", agents: ["Codex"], source: null, sourceType: null, sourceUrl: null }]));
+else if (operation === "remove remote-project --agent codex --yes") writeFileSync(${JSON.stringify(removedFile)}, "removed");
+else if (operation === "list --json") process.stdout.write(existsSync(${JSON.stringify(removedFile)}) ? "[]" : JSON.stringify([{ name: "remote-project", path: "/private/project", scope: "project", agents: ["Codex"], source: null, sourceType: null, sourceUrl: null }]));
 else if (operation === "list --global --json") process.stdout.write(JSON.stringify([{ name: "remote-global", path: "/private/global", scope: "global", agents: ["Codex"], source: null, sourceType: null, sourceUrl: null }]));
 else process.exitCode = 2;
 `,
@@ -287,6 +289,7 @@ exec /bin/sh -c "$SSH_ORIGINAL_COMMAND"
           throw new Error("Expected a trusted binding.");
         }
 
+        let nextRequestId = 0;
         const processAdapter = createSshSkillsProcess({
           binding: {
             generation: 2,
@@ -297,7 +300,7 @@ exec /bin/sh -c "$SSH_ORIGINAL_COMMAND"
             workspace,
           },
           clock: () => new Date("2026-08-22T10:00:00.000Z"),
-          id: () => "localhost-observe",
+          id: () => `localhost-request-${++nextRequestId}`,
           runner: createSshTransportRunner({
             environment,
             platform: process.platform,
@@ -318,6 +321,40 @@ exec /bin/sh -c "$SSH_ORIGINAL_COMMAND"
         expect(JSON.stringify(observed)).not.toMatch(
           /client_ed25519|authorized_keys|known_hosts|localhost-challenge/,
         );
+        if (!observed.ok) throw new Error("Expected remote Inventory.");
+        const prepared = await processAdapter.prepareMutation({
+          freshness: "fresh",
+          intent: {
+            names: ["remote-project"],
+            scope: "project",
+            type: "remove",
+          },
+          inventory: observed.value,
+          inventoryId: "localhost-inventory",
+        });
+        expect(prepared).toMatchObject({
+          ok: true,
+          value: { commandPlan: { operation: "remove" } },
+        });
+        if (!prepared.ok) throw new Error("Expected remote mutation plan.");
+        await expect(
+          processAdapter.executeConfirmed({
+            confirmation: {
+              digest: prepared.value.digest,
+              preparedMutationId: prepared.value.id,
+            },
+            signal: new AbortController().signal,
+          }),
+        ).resolves.toMatchObject({
+          ok: true,
+          value: {
+            effects: { status: "verified" },
+            inventory: {
+              entries: [{ name: "remote-global", scope: "global" }],
+            },
+            process: { disposition: "completed", termination: "known" },
+          },
+        });
 
         await writeFile(pauseFile, "pause", "utf8");
         const controller = new AbortController();

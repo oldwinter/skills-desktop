@@ -2,7 +2,7 @@ import {
   CLI_PACKAGE,
   CLI_VERSION,
   WIRE_FRAME_ENCODER_SOURCE,
-  WIRE_OBSERVATION_REQUEST_VALIDATOR_SOURCE,
+  WIRE_REQUEST_VALIDATOR_SOURCE,
   WIRE_SINGLE_FRAME_DECODER_SOURCE,
   MAX_WIRE_FRAME_BYTES,
   MAX_WIRE_HARNESS_LENGTH,
@@ -13,7 +13,7 @@ import {
   WIRE_PROTOCOL_VERSION,
 } from "@skills-desktop/skills-runtime";
 
-export const REMOTE_BOOTSTRAP_PROTOCOL_VERSION = 1 as const;
+export const REMOTE_BOOTSTRAP_PROTOCOL_VERSION = WIRE_PROTOCOL_VERSION;
 
 export const REMOTE_BOOTSTRAP_PROGRAM = String.raw`
 "use strict";
@@ -24,8 +24,8 @@ const MAX_WIRE_WORKSPACE_LENGTH = ${MAX_WIRE_WORKSPACE_LENGTH};
 const WIRE_PROTOCOL_VERSION = ${WIRE_PROTOCOL_VERSION};
 const encodeWireFramePayload = ${WIRE_FRAME_ENCODER_SOURCE};
 const decodeSingleWireFramePayload = ${WIRE_SINGLE_FRAME_DECODER_SOURCE};
-const validateWireObservationRequest = ${WIRE_OBSERVATION_REQUEST_VALIDATOR_SOURCE};
-const isWireObservationRequest = (value) => validateWireObservationRequest(
+const validateWireRequest = ${WIRE_REQUEST_VALIDATOR_SOURCE};
+const isWireRequest = (value) => validateWireRequest(
   value,
   WIRE_PROTOCOL_VERSION,
   MAX_WIRE_HARNESS_LENGTH,
@@ -40,16 +40,24 @@ const isWireObservationRequest = (value) => validateWireObservationRequest(
   const CLI_PACKAGE = ${JSON.stringify(CLI_PACKAGE)};
   const CLI_VERSION = ${JSON.stringify(CLI_VERSION)};
   const children = new Set();
+  const mutationGroups = new Set();
+  let requestMutationCleanup;
+  let transportLost = false;
 
   const writeFrame = (value) => {
     process.stdout.write(Buffer.from(encodeWireFramePayload(value, MAX_WIRE_FRAME_BYTES)));
   };
-  const failure = (code, message, requestId = null) => {
-    writeFrame({ code, message, protocolVersion: WIRE_PROTOCOL_VERSION, requestId, type: "failure" });
+  const failure = (code, message, phase, requestId = null) => {
+    writeFrame({ code, message, phase, protocolVersion: WIRE_PROTOCOL_VERSION, requestId, type: "failure" });
   };
   writeFrame({ bootstrapDigest: BUILD_DIGEST, protocolVersion: WIRE_PROTOCOL_VERSION, type: "hello" });
 
   const terminateChildren = () => {
+    transportLost = true;
+    if (requestMutationCleanup !== undefined) requestMutationCleanup();
+    for (const pid of mutationGroups) {
+      try { process.kill(-pid, "SIGTERM"); } catch {}
+    }
     for (const child of children) {
       try { child.kill("SIGTERM"); } catch {}
     }
@@ -58,40 +66,123 @@ const isWireObservationRequest = (value) => validateWireObservationRequest(
   process.once("SIGINT", terminateChildren);
   process.once("SIGTERM", terminateChildren);
 
-  const inputChunks = [];
-  let inputBytes = 0;
-  for await (const chunk of process.stdin) {
-    inputBytes += chunk.length;
-    if (inputBytes > MAX_REQUEST_BYTES + 4) {
-      failure("remote_protocol_violation", "The Wire request exceeds its byte limit.");
+  const requestQueue = [];
+  let bufferedInput = Buffer.alloc(0);
+  let inputEnded = false;
+  let inputFailure;
+  let frameCount = 0;
+  let requestWaiter;
+  const settleRequestWaiter = () => {
+    if (requestWaiter === undefined) return;
+    if (inputFailure !== undefined) {
+      const waiter = requestWaiter;
+      requestWaiter = undefined;
+      waiter.reject(inputFailure);
       return;
     }
-    inputChunks.push(chunk);
-  }
-  const input = Buffer.concat(inputChunks);
-  const requestPayload = decodeSingleWireFramePayload(input, MAX_REQUEST_BYTES);
-  if (requestPayload === undefined) {
-    failure("remote_protocol_violation", "The Wire request framing is invalid.");
-    return;
-  }
+    if (requestQueue.length > 0) {
+      const waiter = requestWaiter;
+      requestWaiter = undefined;
+      waiter.resolve(requestQueue.shift());
+      return;
+    }
+    if (inputEnded) {
+      const waiter = requestWaiter;
+      requestWaiter = undefined;
+      waiter.resolve(undefined);
+    }
+  };
+  const failInput = () => {
+    inputFailure = { code: "remote_protocol_violation" };
+    settleRequestWaiter();
+  };
+  const parseInput = () => {
+    while (bufferedInput.length >= 4) {
+      const length = bufferedInput.readUInt32BE(0);
+      if (length > MAX_REQUEST_BYTES) {
+        failInput();
+        return;
+      }
+      if (bufferedInput.length < length + 4) return;
+      const framed = bufferedInput.subarray(0, length + 4);
+      bufferedInput = bufferedInput.subarray(length + 4);
+      const payload = decodeSingleWireFramePayload(framed, MAX_REQUEST_BYTES);
+      let parsed;
+      try {
+        parsed = payload === undefined
+          ? undefined
+          : JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(payload));
+      } catch {
+        parsed = undefined;
+      }
+      frameCount += 1;
+      if (parsed === undefined || !isWireRequest(parsed) || frameCount > 2) {
+        failInput();
+        return;
+      }
+      requestQueue.push(parsed);
+      settleRequestWaiter();
+    }
+  };
+  process.stdin.on("data", (chunk) => {
+    if (inputFailure !== undefined) return;
+    bufferedInput = Buffer.concat([bufferedInput, chunk]);
+    if (bufferedInput.length > 2 * (MAX_REQUEST_BYTES + 4)) {
+      failInput();
+      return;
+    }
+    parseInput();
+  });
+  process.stdin.once("end", () => {
+    inputEnded = true;
+    if (bufferedInput.length !== 0) failInput();
+    else settleRequestWaiter();
+  });
+  process.stdin.once("error", failInput);
+  const nextRequest = () => new Promise((resolve, reject) => {
+    requestWaiter = { reject, resolve };
+    settleRequestWaiter();
+  });
+  const stopReading = () => {
+    process.stdin.pause();
+    process.stdin.removeAllListeners();
+    if (typeof process.stdin.unref === "function") process.stdin.unref();
+  };
 
   let request;
   try {
-    request = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(requestPayload));
+    request = await nextRequest();
   } catch {
-    failure("remote_protocol_violation", "The Wire request is not valid JSON.");
+    failure("remote_protocol_violation", "The Wire request framing is invalid.", "wire");
+    stopReading();
     return;
   }
-  if (!isWireObservationRequest(request)) {
-    failure("remote_protocol_violation", "The Wire request is not a supported operation.");
+  if (!isWireRequest(request) || request.operation === "cancel") {
+    failure("remote_protocol_violation", "The Wire request is not a supported operation.", "wire");
+    stopReading();
     return;
+  }
+  if (request.operation === "observe") {
+    let extraRequest;
+    try {
+      extraRequest = await nextRequest();
+    } catch {
+      failure("remote_protocol_violation", "The observation request framing is invalid.", "wire", request.requestId);
+      stopReading();
+      return;
+    }
+    if (extraRequest !== undefined) {
+      failure("remote_protocol_violation", "Observation accepts exactly one Wire request.", "wire", request.requestId);
+      stopReading();
+      return;
+    }
   }
 
   const environment = {};
   for (const name of ["HOME", "LANG", "LC_ALL", "NPM_CONFIG_CACHE", "PATH", "TEMP", "TMP"]) {
     if (typeof process.env[name] === "string") environment[name] = process.env[name];
   }
-  const invoke = (args) => new Promise((resolve, reject) => {
+  const invoke = (args, timeoutMs = 60_000) => new Promise((resolve, reject) => {
     const child = childProcess.spawn("npx", ["--yes", CLI_PACKAGE, ...args], {
       cwd: request.workspace,
       env: environment,
@@ -106,7 +197,7 @@ const isWireObservationRequest = (value) => validateWireObservationRequest(
     const timeout = setTimeout(() => {
       child.kill("SIGTERM");
       reject({ code: "remote_operation_failed" });
-    }, 60_000);
+    }, timeoutMs);
     child.stdout.on("data", (chunk) => {
       stdoutBytes += chunk.length;
       if (stdoutBytes > MAX_OUTPUT_BYTES) {
@@ -133,30 +224,239 @@ const isWireObservationRequest = (value) => validateWireObservationRequest(
       children.delete(child);
       if (outputExceeded) reject({ code: "output_limit_exceeded" });
       else if (exitCode !== 0) reject({ code: "remote_operation_failed" });
-      else resolve(Buffer.concat(stdout).toString("utf8"));
+      else resolve({ exitCode: exitCode === null ? 1 : exitCode, stdout: Buffer.concat(stdout).toString("utf8") });
+    });
+  });
+
+  const mutationGroupExists = (pid) => {
+    try {
+      process.kill(-pid, 0);
+      return true;
+    } catch (error) {
+      return !(error && error.code === "ESRCH");
+    }
+  };
+  const waitForMutationGroupExit = (pid, timeoutMs) => new Promise((resolve) => {
+    const deadline = Date.now() + timeoutMs;
+    const inspect = () => {
+      if (!mutationGroupExists(pid)) {
+        resolve(true);
+        return;
+      }
+      if (Date.now() >= deadline) {
+        resolve(false);
+        return;
+      }
+      setTimeout(inspect, 25);
+    };
+    inspect();
+  });
+  const invokeMutation = (args, timeoutMs, requestId) => new Promise((resolve, reject) => {
+    const child = childProcess.spawn("npx", ["--yes", CLI_PACKAGE, ...args], {
+      cwd: request.workspace,
+      detached: true,
+      env: environment,
+      shell: false,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    children.add(child);
+    const mutationPid = child.pid;
+    if (mutationPid !== undefined) mutationGroups.add(mutationPid);
+    let stdoutBytes = 0;
+    let stderrBytes = 0;
+    let requestedDisposition;
+    let processError = false;
+    let settled = false;
+    let cleanupDeadline;
+    let cleanupProofTimer;
+    let forceTimer;
+    const signalMutationTree = (signal) => {
+      if (mutationPid === undefined) {
+        try { child.kill(signal); } catch {}
+        return;
+      }
+      try { process.kill(-mutationPid, signal); } catch {}
+    };
+    const requestCleanup = (disposition) => {
+      if (requestedDisposition !== undefined) return;
+      requestedDisposition = disposition;
+      cleanupDeadline = Date.now() + 1_900;
+      signalMutationTree("SIGTERM");
+      forceTimer = setTimeout(() => {
+        signalMutationTree("SIGKILL");
+      }, 1_000);
+      cleanupProofTimer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        if (forceTimer !== undefined) clearTimeout(forceTimer);
+        reject({ code: "remote_operation_failed" });
+      }, 1_900);
+    };
+    requestMutationCleanup = () => requestCleanup("failed");
+    const timeout = setTimeout(() => requestCleanup("timed-out"), timeoutMs);
+    void nextRequest().then(
+      (cancellation) => {
+        if (cancellation === undefined) {
+          transportLost = true;
+          requestCleanup("failed");
+          return;
+        }
+        if (
+          cancellation.operation === "cancel" &&
+          cancellation.requestId === requestId
+        ) {
+          requestCleanup("cancelled");
+          return;
+        }
+        requestCleanup("failed");
+      },
+      () => {
+        requestCleanup("failed");
+      },
+    );
+    child.stdout.on("data", (chunk) => {
+      stdoutBytes += chunk.length;
+      if (stdoutBytes > MAX_OUTPUT_BYTES) {
+        requestCleanup("failed");
+      }
+    });
+    child.stderr.on("data", (chunk) => {
+      stderrBytes += chunk.length;
+      if (stderrBytes > MAX_OUTPUT_BYTES) {
+        requestCleanup("failed");
+      }
+    });
+    child.once("error", () => {
+      if (settled) return;
+      processError = true;
+      if (mutationPid !== undefined) return;
+      settled = true;
+      clearTimeout(timeout);
+      if (cleanupProofTimer !== undefined) clearTimeout(cleanupProofTimer);
+      children.delete(child);
+      requestMutationCleanup = undefined;
+      resolve({ disposition: requestedDisposition || "failed", exitCode: null });
+    });
+    child.once("close", (exitCode) => {
+      if (settled) {
+        clearTimeout(timeout);
+        if (cleanupProofTimer !== undefined) clearTimeout(cleanupProofTimer);
+        if (forceTimer !== undefined) clearTimeout(forceTimer);
+        children.delete(child);
+        if (mutationPid !== undefined) mutationGroups.delete(mutationPid);
+        requestMutationCleanup = undefined;
+        return;
+      }
+      void (async () => {
+        if (
+          mutationPid !== undefined &&
+          mutationGroupExists(mutationPid) &&
+          requestedDisposition === undefined
+        ) {
+          requestCleanup("failed");
+        }
+        const cleanupConfirmed =
+          mutationPid === undefined ||
+          await waitForMutationGroupExit(
+            mutationPid,
+            Math.max(0, (cleanupDeadline || Date.now()) - Date.now()),
+          );
+        if (settled) {
+          children.delete(child);
+          if (mutationPid !== undefined) mutationGroups.delete(mutationPid);
+          requestMutationCleanup = undefined;
+          return;
+        }
+        settled = true;
+        clearTimeout(timeout);
+        if (cleanupProofTimer !== undefined) clearTimeout(cleanupProofTimer);
+        if (forceTimer !== undefined) clearTimeout(forceTimer);
+        children.delete(child);
+        if (mutationPid !== undefined) mutationGroups.delete(mutationPid);
+        requestMutationCleanup = undefined;
+        if (!cleanupConfirmed) {
+          reject({ code: "remote_operation_failed" });
+          return;
+        }
+        resolve({
+          disposition: requestedDisposition || (processError || exitCode !== 0 ? "failed" : "completed"),
+          exitCode: requestedDisposition === undefined ? (exitCode === null ? 1 : exitCode) : null,
+        });
+      })();
     });
   });
 
   let version;
   let projectJson;
   let globalJson;
+  let phase = "version";
   try {
     version = await invoke(["--version"]);
-    if (version.trim() !== CLI_VERSION) {
-      failure("remote_runtime_unavailable", "The remote Skills CLI dialect is not supported.", request.requestId);
+    if (version.stdout.trim() !== CLI_VERSION) {
+      failure("remote_runtime_unavailable", "The remote Skills CLI dialect is not supported.", phase, request.requestId);
+      stopReading();
       return;
     }
-    projectJson = await invoke(["list", "--json"]);
-    globalJson = await invoke(["list", "--global", "--json"]);
+    if (request.operation === "mutate") {
+      phase = "mutation";
+      if (transportLost) throw { code: "remote_operation_failed" };
+      const mutation = request.mutation;
+      const scopeFlag = mutation.scope === "global"
+        ? ["--global"]
+        : mutation.type === "update"
+          ? ["--project"]
+          : [];
+      const args = mutation.type === "add"
+        ? ["add", mutation.source.source, "--skill", ...mutation.names, "--agent", request.harness.toLowerCase(), ...scopeFlag, "--yes"]
+        : mutation.type === "remove"
+          ? ["remove", ...mutation.names, "--agent", request.harness.toLowerCase(), ...scopeFlag, "--yes"]
+          : ["update", ...mutation.names, ...scopeFlag, "--yes"];
+      const mutationOutcome = await invokeMutation(
+        args,
+        mutation.type === "remove" ? 120_000 : 600_000,
+        request.requestId,
+      );
+      if (transportLost) throw { code: "remote_operation_failed" };
+      phase = "postflight";
+      projectJson = (await invoke(["list", "--json"])).stdout;
+      globalJson = (await invoke(["list", "--global", "--json"])).stdout;
+      writeFrame({
+        cliVersion: CLI_VERSION,
+        globalJson,
+        process: {
+          cleanup: "confirmed",
+          disposition: mutationOutcome.disposition,
+          exitCode: mutationOutcome.exitCode,
+        },
+        projectJson,
+        protocolVersion: WIRE_PROTOCOL_VERSION,
+        requestId: request.requestId,
+        type: "mutation-result",
+      });
+      stopReading();
+      return;
+    }
+    phase = "observe";
+    projectJson = (await invoke(["list", "--json"])).stdout;
+    globalJson = (await invoke(["list", "--global", "--json"])).stdout;
   } catch (error) {
     const code = error && typeof error === "object" && typeof error.code === "string"
       ? error.code
       : "remote_operation_failed";
+    const phaseLabel = phase === "postflight"
+      ? "mutation postflight"
+      : phase === "mutation"
+        ? "mutation"
+        : phase === "version"
+          ? "runtime verification"
+          : "Inventory observation";
     failure(code, code === "output_limit_exceeded"
-      ? "Remote Inventory output exceeds its byte limit."
+      ? "Remote " + phaseLabel + " output exceeds its byte limit."
       : code === "remote_runtime_unavailable"
         ? "The remote runtime is unavailable."
-        : "Remote Inventory observation failed.", request.requestId);
+        : "Remote " + phaseLabel + " failed.", phase, request.requestId);
+    stopReading();
     return;
   }
   try {
@@ -168,18 +468,22 @@ const isWireObservationRequest = (value) => validateWireObservationRequest(
       requestId: request.requestId,
       type: "inventory",
     });
+    stopReading();
   } catch {
     failure(
       "output_limit_exceeded",
       "Remote Inventory output exceeds its Wire frame limit.",
+      "observe",
       request.requestId,
     );
+    stopReading();
   }
 })().catch(() => {
   try {
     const payload = encodeWireFramePayload({
       code: "remote_operation_failed",
-      message: "Remote Inventory observation failed.",
+      message: "Remote Bootstrap execution failed.",
+      phase: "wire",
       protocolVersion: WIRE_PROTOCOL_VERSION,
       requestId: null,
       type: "failure",

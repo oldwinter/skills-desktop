@@ -6,7 +6,7 @@ import { z } from "zod";
 import type { Result } from "@skills-desktop/skills-runtime";
 
 import type { RendererError, TargetDraft } from "../../contracts/workspace.js";
-import type { SkillsProcess } from "../adapters/local-skills-process.js";
+import type { SkillsProcess } from "../adapters/skills-process.js";
 import type { OpenSshTargetAccess } from "../ssh/openssh-target.js";
 import type {
   EffectiveTargetBinding,

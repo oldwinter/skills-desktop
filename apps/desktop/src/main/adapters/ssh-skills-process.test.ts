@@ -206,6 +206,365 @@ describe("SSH SkillsProcess observation contract", () => {
     expect(JSON.stringify(first)).not.toMatch(/resolved\.internal|deploy/);
   });
 
+  it("prepares the same exact reviewed mutation locally without opening SSH", async () => {
+    const runner = scriptedTransport();
+    let nextId = 0;
+    const skillsProcess = createSshSkillsProcess({
+      binding,
+      clock: () => new Date("2026-08-22T10:00:00.000Z"),
+      id: () => `request-${++nextId}`,
+      runner,
+    });
+    const observed = await skillsProcess.observeInventory({
+      signal: new AbortController().signal,
+    });
+    if (!observed.ok) throw new Error("fixture observation failed");
+
+    const prepared = await skillsProcess.prepareMutation({
+      freshness: "fresh",
+      intent: {
+        names: ["project-skill"],
+        scope: "project",
+        type: "remove",
+      },
+      inventory: observed.value,
+      inventoryId: "inventory-ssh-1",
+    });
+
+    expect(prepared).toMatchObject({
+      ok: true,
+      value: {
+        commandPlan: {
+          harness: "Codex",
+          names: ["project-skill"],
+          operation: "remove",
+          preview: "npx skills@1.5.23 remove project-skill --agent codex --yes",
+          schemaVersion: 1,
+          scope: "project",
+          source: null,
+          targetId: binding.targetId,
+          timeoutMs: 120_000,
+        },
+        expiresAt: "2026-08-22T10:10:00.000Z",
+        id: "request-2",
+        inventoryId: "inventory-ssh-1",
+        targetGeneration: 3,
+        targetId: binding.targetId,
+      },
+    });
+    expect(prepared.ok && prepared.value.digest).toMatch(/^[a-f0-9]{64}$/);
+    expect(runner.invocations).toHaveLength(1);
+  });
+
+  it("executes one confirmed normalized mutation and verifies its atomic postflight", async () => {
+    const runner = scriptedTransport((request) => {
+      if (request.type !== "request") throw new Error("unexpected Wire frame");
+      return concat(
+        encodeWireFrame({
+          bootstrapDigest: REMOTE_BOOTSTRAP_DIGEST,
+          protocolVersion: WIRE_PROTOCOL_VERSION,
+          type: "hello",
+        }),
+        request.operation === "observe"
+          ? encodeWireFrame({
+              cliVersion: "1.5.23",
+              globalJson,
+              projectJson,
+              protocolVersion: WIRE_PROTOCOL_VERSION,
+              requestId: request.requestId,
+              type: "inventory",
+            })
+          : encodeWireFrame({
+              cliVersion: "1.5.23",
+              globalJson,
+              process: {
+                cleanup: "confirmed",
+                disposition: "completed",
+                exitCode: 0,
+              },
+              projectJson: "[]",
+              protocolVersion: WIRE_PROTOCOL_VERSION,
+              requestId: request.requestId,
+              type: "mutation-result",
+            }),
+      );
+    });
+    let nextId = 0;
+    const skillsProcess = createSshSkillsProcess({
+      binding,
+      clock: () => new Date("2026-08-22T10:00:00.000Z"),
+      id: () => `request-${++nextId}`,
+      runner,
+    });
+    const observed = await skillsProcess.observeInventory({
+      signal: new AbortController().signal,
+    });
+    if (!observed.ok) throw new Error("fixture observation failed");
+    const prepared = await skillsProcess.prepareMutation({
+      freshness: "fresh",
+      intent: {
+        names: ["project-skill"],
+        scope: "project",
+        type: "remove",
+      },
+      inventory: observed.value,
+      inventoryId: "inventory-ssh-1",
+    });
+    if (!prepared.ok) throw new Error("fixture preparation failed");
+
+    const executed = await skillsProcess.executeConfirmed({
+      confirmation: {
+        digest: prepared.value.digest,
+        preparedMutationId: prepared.value.id,
+      },
+      signal: new AbortController().signal,
+    });
+
+    expect(executed).toMatchObject({
+      ok: true,
+      value: {
+        effects: { status: "verified" },
+        inventory: {
+          entries: [{ name: "global-skill", scope: "global" }],
+          observedAt: "2026-08-22T10:00:00.000Z",
+        },
+        preparedMutationId: "request-2",
+        process: {
+          disposition: "completed",
+          exitCode: 0,
+          termination: "known",
+        },
+      },
+    });
+    expect(runner.invocations).toHaveLength(2);
+    expect(decodeWireFrames(runner.invocations[1]!.input)).toEqual({
+      ok: true,
+      value: [
+        {
+          harness: "Codex",
+          mutation: {
+            names: ["project-skill"],
+            scope: "project",
+            type: "remove",
+          },
+          operation: "mutate",
+          protocolVersion: WIRE_PROTOCOL_VERSION,
+          requestId: "request-3",
+          type: "request",
+          workspace: binding.workspace,
+        },
+      ],
+    });
+    expect(JSON.stringify(runner.invocations[1])).not.toMatch(
+      /args.*project-skill|preview|generic/i,
+    );
+  });
+
+  it("uses a separate cancellation frame and accepts only cleanup-proven cancellation", async () => {
+    let markMutationStarted!: () => void;
+    const mutationStarted = new Promise<void>((resolve) => {
+      markMutationStarted = resolve;
+    });
+    const runner: SshTransportRunner = {
+      async run(invocation) {
+        const decoded = decodeWireFrames(invocation.input);
+        if (!decoded.ok || decoded.value[0]?.type !== "request") {
+          throw new Error("invalid fixture request");
+        }
+        const request = decoded.value[0];
+        if (request.operation === "observe") {
+          return {
+            exitCode: 0,
+            stderrBytes: 0,
+            stdout: concat(
+              encodeWireFrame({
+                bootstrapDigest: REMOTE_BOOTSTRAP_DIGEST,
+                protocolVersion: WIRE_PROTOCOL_VERSION,
+                type: "hello",
+              }),
+              encodeWireFrame({
+                cliVersion: "1.5.23",
+                globalJson,
+                projectJson,
+                protocolVersion: WIRE_PROTOCOL_VERSION,
+                requestId: request.requestId,
+                type: "inventory",
+              }),
+            ),
+          };
+        }
+        markMutationStarted();
+        await new Promise<void>((resolve) =>
+          invocation.signal.addEventListener("abort", () => resolve(), {
+            once: true,
+          }),
+        );
+        expect(decodeWireFrames(invocation.cancellationInput!)).toEqual({
+          ok: true,
+          value: [
+            {
+              operation: "cancel",
+              protocolVersion: WIRE_PROTOCOL_VERSION,
+              requestId: request.requestId,
+              type: "request",
+            },
+          ],
+        });
+        return {
+          exitCode: 0,
+          interruption: "cancelled",
+          stderrBytes: 0,
+          stdout: concat(
+            encodeWireFrame({
+              bootstrapDigest: REMOTE_BOOTSTRAP_DIGEST,
+              protocolVersion: WIRE_PROTOCOL_VERSION,
+              type: "hello",
+            }),
+            encodeWireFrame({
+              cliVersion: "1.5.23",
+              globalJson,
+              process: {
+                cleanup: "confirmed",
+                disposition: "cancelled",
+                exitCode: null,
+              },
+              projectJson,
+              protocolVersion: WIRE_PROTOCOL_VERSION,
+              requestId: request.requestId,
+              type: "mutation-result",
+            }),
+          ),
+        };
+      },
+    };
+    let nextId = 0;
+    const skillsProcess = createSshSkillsProcess({
+      binding,
+      clock: () => new Date("2026-08-22T10:00:00.000Z"),
+      id: () => `request-${++nextId}`,
+      runner,
+    });
+    const observed = await skillsProcess.observeInventory({
+      signal: new AbortController().signal,
+    });
+    if (!observed.ok) throw new Error("fixture observation failed");
+    const prepared = await skillsProcess.prepareMutation({
+      freshness: "fresh",
+      intent: {
+        names: ["project-skill"],
+        scope: "project",
+        type: "remove",
+      },
+      inventory: observed.value,
+      inventoryId: "inventory-ssh-cancel",
+    });
+    if (!prepared.ok) throw new Error("fixture preparation failed");
+    const controller = new AbortController();
+    const executing = skillsProcess.executeConfirmed({
+      confirmation: {
+        digest: prepared.value.digest,
+        preparedMutationId: prepared.value.id,
+      },
+      signal: controller.signal,
+    });
+    await mutationStarted;
+
+    controller.abort();
+
+    await expect(executing).resolves.toMatchObject({
+      ok: true,
+      value: {
+        effects: { status: "not-observed" },
+        inventory: { entries: expect.any(Array) },
+        process: {
+          disposition: "cancelled",
+          exitCode: null,
+          termination: "known",
+        },
+      },
+    });
+  });
+
+  it("returns an uncertain outcome without postflight or retry when cleanup is unproven", async () => {
+    let mutationInvocations = 0;
+    let markMutationStarted!: () => void;
+    const mutationStarted = new Promise<void>((resolve) => {
+      markMutationStarted = resolve;
+    });
+    const observedTransport = scriptedTransport();
+    const runner: SshTransportRunner = {
+      async run(invocation) {
+        const decoded = decodeWireFrames(invocation.input);
+        if (
+          decoded.ok &&
+          decoded.value[0]?.type === "request" &&
+          decoded.value[0].operation === "mutate"
+        ) {
+          mutationInvocations += 1;
+          markMutationStarted();
+          await new Promise<void>((resolve) =>
+            invocation.signal.addEventListener("abort", () => resolve(), {
+              once: true,
+            }),
+          );
+          throw new SshTransportBoundaryError(
+            "SECRET_HOST raw transport cleanup failure",
+            "cancelled",
+          );
+        }
+        return observedTransport.run(invocation);
+      },
+    };
+    let nextId = 0;
+    const skillsProcess = createSshSkillsProcess({
+      binding,
+      clock: () => new Date("2026-08-22T10:00:00.000Z"),
+      id: () => `request-${++nextId}`,
+      runner,
+    });
+    const observed = await skillsProcess.observeInventory({
+      signal: new AbortController().signal,
+    });
+    if (!observed.ok) throw new Error("fixture observation failed");
+    const prepared = await skillsProcess.prepareMutation({
+      freshness: "fresh",
+      intent: {
+        names: ["project-skill"],
+        scope: "project",
+        type: "remove",
+      },
+      inventory: observed.value,
+      inventoryId: "inventory-ssh-uncertain",
+    });
+    if (!prepared.ok) throw new Error("fixture preparation failed");
+    const controller = new AbortController();
+    const execution = skillsProcess.executeConfirmed({
+      confirmation: {
+        digest: prepared.value.digest,
+        preparedMutationId: prepared.value.id,
+      },
+      signal: controller.signal,
+    });
+    await mutationStarted;
+    controller.abort();
+    const executed = await execution;
+
+    expect(executed).toMatchObject({
+      ok: true,
+      value: {
+        effects: { status: "possible" },
+        inventory: null,
+        process: {
+          disposition: "cancelled",
+          exitCode: null,
+          termination: "unknown",
+        },
+      },
+    });
+    expect(mutationInvocations).toBe(1);
+    expect(JSON.stringify(executed)).not.toContain("SECRET_HOST");
+  });
+
   it.each([
     {
       name: "wrong bootstrap digest",
@@ -254,12 +613,60 @@ describe("SSH SkillsProcess observation contract", () => {
           encodeWireFrame({
             code: "remote_runtime_unavailable",
             message: "The remote runtime is unavailable.",
+            phase: "version",
             protocolVersion: WIRE_PROTOCOL_VERSION,
             requestId: "request-1",
             type: "failure",
           }),
         ),
       code: "remote_runtime_unavailable",
+      expectedPhase: "version",
+    },
+    {
+      name: "failed remote version check",
+      response: () =>
+        concat(
+          encodeWireFrame({
+            bootstrapDigest: REMOTE_BOOTSTRAP_DIGEST,
+            protocolVersion: WIRE_PROTOCOL_VERSION,
+            type: "hello",
+          }),
+          encodeWireFrame({
+            code: "remote_operation_failed",
+            message: "Remote runtime verification failed.",
+            phase: "version",
+            protocolVersion: WIRE_PROTOCOL_VERSION,
+            requestId: "request-1",
+            type: "failure",
+          }),
+        ),
+      code: "process_failed",
+      expectedMessage: "Remote runtime verification failed.",
+      expectedPhase: "version",
+    },
+    {
+      name: "oversized remote version output",
+      response: () =>
+        concat(
+          encodeWireFrame({
+            bootstrapDigest: REMOTE_BOOTSTRAP_DIGEST,
+            protocolVersion: WIRE_PROTOCOL_VERSION,
+            type: "hello",
+          }),
+          encodeWireFrame({
+            code: "output_limit_exceeded",
+            message:
+              "Remote runtime verification output exceeds its byte limit.",
+            phase: "version",
+            protocolVersion: WIRE_PROTOCOL_VERSION,
+            requestId: "request-1",
+            type: "failure",
+          }),
+        ),
+      code: "process_failed",
+      expectedMessage:
+        "Remote runtime verification output exceeded its byte limit.",
+      expectedPhase: "version",
     },
     {
       name: "bounded remote output",
@@ -273,6 +680,7 @@ describe("SSH SkillsProcess observation contract", () => {
           encodeWireFrame({
             code: "output_limit_exceeded",
             message: "Remote Inventory output exceeds its byte limit.",
+            phase: "observe",
             protocolVersion: WIRE_PROTOCOL_VERSION,
             requestId: "request-1",
             type: "failure",
@@ -292,6 +700,7 @@ describe("SSH SkillsProcess observation contract", () => {
           encodeWireFrame({
             code: "remote_operation_failed",
             message: "Remote Inventory observation failed.",
+            phase: "observe",
             protocolVersion: WIRE_PROTOCOL_VERSION,
             requestId: "prior-request",
             type: "failure",
@@ -299,18 +708,33 @@ describe("SSH SkillsProcess observation contract", () => {
         ),
       code: "remote_protocol_violation",
     },
-  ])("fails atomically on $name", async ({ response, code }) => {
-    const process = createSshSkillsProcess({
-      binding,
-      clock: () => new Date(),
-      id: () => "request-1",
-      runner: scriptedTransport(response),
-    });
+  ])(
+    "fails atomically on $name",
+    async ({ response, code, expectedMessage, expectedPhase }) => {
+      const process = createSshSkillsProcess({
+        binding,
+        clock: () => new Date(),
+        id: () => "request-1",
+        runner: scriptedTransport(response),
+      });
 
-    expect(
-      await process.observeInventory({ signal: new AbortController().signal }),
-    ).toMatchObject({ error: { code, effects: "none" }, ok: false });
-  });
+      expect(
+        await process.observeInventory({
+          signal: new AbortController().signal,
+        }),
+      ).toMatchObject({
+        error: {
+          code,
+          effects: "none",
+          ...(expectedMessage === undefined
+            ? {}
+            : { message: expectedMessage }),
+          phase: expectedPhase ?? "observe",
+        },
+        ok: false,
+      });
+    },
+  );
 
   it("does not manufacture a precise cause from OpenSSH exit 255 or raw stderr", async () => {
     const runner: SshTransportRunner = {

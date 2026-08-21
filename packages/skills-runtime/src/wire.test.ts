@@ -39,6 +39,97 @@ describe("Remote Bootstrap Wire Protocol", () => {
     });
   });
 
+  it("round-trips one closed normalized mutation without generic arguments", () => {
+    const request = {
+      harness: "Codex",
+      mutation: {
+        names: ["project-skill"],
+        scope: "project" as const,
+        type: "remove" as const,
+      },
+      operation: "mutate" as const,
+      protocolVersion: WIRE_PROTOCOL_VERSION,
+      requestId: "mutation-1",
+      type: "request" as const,
+      workspace: "/srv/workspace; printf unsafe",
+    };
+
+    expect(decodeWireFrames(encodeWireFrame(request))).toEqual({
+      ok: true,
+      value: [request],
+    });
+  });
+
+  it("round-trips a request-id-bound cancellation", () => {
+    const request = {
+      operation: "cancel" as const,
+      protocolVersion: WIRE_PROTOCOL_VERSION,
+      requestId: "mutation-1",
+      type: "request" as const,
+    };
+
+    expect(decodeWireFrames(encodeWireFrame(request))).toEqual({
+      ok: true,
+      value: [request],
+    });
+  });
+
+  it("round-trips a terminal mutation result with cleanup proof and atomic postflight", () => {
+    const result = {
+      cliVersion: "1.5.23" as const,
+      globalJson: "[]",
+      process: {
+        cleanup: "confirmed" as const,
+        disposition: "cancelled" as const,
+        exitCode: null,
+      },
+      projectJson: "[]",
+      protocolVersion: WIRE_PROTOCOL_VERSION,
+      requestId: "mutation-1",
+      type: "mutation-result" as const,
+    };
+
+    expect(decodeWireFrames(encodeWireFrame(result))).toEqual({
+      ok: true,
+      value: [result],
+    });
+  });
+
+  it.each([
+    {
+      harness: "Codex",
+      mutation: { scope: "project", type: "update-all" },
+      operation: "mutate",
+      protocolVersion: WIRE_PROTOCOL_VERSION,
+      requestId: "mutation-1",
+      type: "request",
+      workspace: "/srv/workspace",
+    },
+    {
+      args: ["remove", "project-skill", "--yes"],
+      harness: "Codex",
+      mutation: {
+        names: ["project-skill"],
+        scope: "project",
+        type: "remove",
+      },
+      operation: "mutate",
+      protocolVersion: WIRE_PROTOCOL_VERSION,
+      requestId: "mutation-1",
+      type: "request",
+      workspace: "/srv/workspace",
+    },
+    {
+      operation: "cancel",
+      payload: "renderer-data",
+      protocolVersion: WIRE_PROTOCOL_VERSION,
+      requestId: "mutation-1",
+      type: "request",
+    },
+  ])("rejects unsupported mutation authority %#", (request) => {
+    expect(() => encodeWireFrame(request as never)).toThrow();
+  });
+
   it.each([
     {
       bytes: new Uint8Array([0, 0, 0, 10, 123]),
@@ -104,6 +195,7 @@ describe("Remote Bootstrap Wire Protocol", () => {
       encodeWireFrame({
         code: "remote_operation_failed",
         message: "x".repeat(513),
+        phase: "observe",
         protocolVersion: WIRE_PROTOCOL_VERSION,
         requestId: "observe-1",
         type: "failure",

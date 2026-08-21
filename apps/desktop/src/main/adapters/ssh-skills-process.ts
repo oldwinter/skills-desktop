@@ -16,12 +16,18 @@ import {
 } from "@skills-desktop/skills-runtime";
 import { REMOTE_BOOTSTRAP_COMMAND } from "@skills-desktop/remote-bootstrap";
 
-import type {
-  MutationExecutionError,
-  MutationPreparationError,
-  ObservationError,
-  SkillsProcess,
-} from "./local-skills-process.js";
+import {
+  mutationExecutionFailure,
+  observedMutationEffects,
+  prepareMutationPlan,
+  type NormalizedMutation,
+  type MutationExecutionError,
+  type MutationOutcome,
+  type ObservationError,
+  type PreparedMutation,
+  type SkillsProcess,
+} from "./skills-process.js";
+import { createWindowsProcessTreeKiller } from "./windows-process-tree.js";
 import {
   quoteOpenSshConfigValue,
   type OpenSshEffectiveBinding,
@@ -33,6 +39,8 @@ const MAX_SSH_STDERR_BYTES = 64 * 1024;
 
 export interface SshTransportInvocation {
   readonly args: readonly string[];
+  readonly cancellationGraceMs?: number;
+  readonly cancellationInput?: Uint8Array;
   readonly configuration: string;
   readonly executable: "ssh";
   readonly input: Uint8Array;
@@ -44,6 +52,7 @@ export interface SshTransportInvocation {
 
 export interface SshTransportOutcome {
   readonly exitCode: number;
+  readonly interruption?: "cancelled" | "timed-out";
   readonly stderrBytes: number;
   readonly stdout: Uint8Array;
 }
@@ -56,6 +65,7 @@ export class SshTransportBoundaryError extends Error {
   constructor(
     message: string,
     readonly disposition: "cancelled" | "failed" | "timed-out",
+    readonly termination: "known" | "unknown" = "unknown",
   ) {
     super(message);
     this.name = "SshTransportBoundaryError";
@@ -65,10 +75,47 @@ export class SshTransportBoundaryError extends Error {
 export function createSshTransportRunner(options?: {
   readonly cancellationGraceMs?: number;
   readonly environment?: NodeJS.ProcessEnv;
+  readonly killWindowsTree?: (pid: number) => Promise<void>;
   readonly platform?: NodeJS.Platform;
+  readonly windowsTreeTerminationTimeoutMs?: number;
 }): SshTransportRunner {
   const platform = options?.platform ?? process.platform;
   const cancellationGraceMs = options?.cancellationGraceMs ?? 2_000;
+  const windowsTreeTerminationTimeoutMs =
+    options?.windowsTreeTerminationTimeoutMs ?? 2_000;
+  const killWindowsTree =
+    options?.killWindowsTree ??
+    createWindowsProcessTreeKiller(windowsTreeTerminationTimeoutMs);
+  const boundedWindowsTreeKill = (pid: number) =>
+    new Promise<Error | undefined>((resolve) => {
+      let settled = false;
+      const finish = (error: Error | undefined) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(error);
+      };
+      const timer = setTimeout(
+        () =>
+          finish(
+            new SshTransportBoundaryError(
+              "SSH process tree termination could not be confirmed.",
+              "failed",
+            ),
+          ),
+        windowsTreeTerminationTimeoutMs,
+      );
+      void killWindowsTree(pid).then(
+        () => finish(undefined),
+        () =>
+          finish(
+            new SshTransportBoundaryError(
+              "SSH process tree termination could not be confirmed.",
+              "failed",
+            ),
+          ),
+      );
+    });
   return {
     async run(invocation) {
       if (invocation.signal.aborted) {
@@ -107,7 +154,11 @@ export function createSshTransportRunner(options?: {
           let stderrBytes = 0;
           let settled = false;
           let boundaryError: SshTransportBoundaryError | undefined;
+          let closeTimer: NodeJS.Timeout | undefined;
           let forceTimer: NodeJS.Timeout | undefined;
+          let remoteCleanupTimer: NodeJS.Timeout | undefined;
+          let interruption: SshTransportOutcome["interruption"];
+          let windowsTreeTermination: Promise<Error | undefined> | undefined;
 
           const signalProcess = (signal: NodeJS.Signals) => {
             if (child.pid === undefined) return;
@@ -125,32 +176,102 @@ export function createSshTransportRunner(options?: {
           };
           const terminate = (error: SshTransportBoundaryError) => {
             boundaryError ??= error;
+            if (platform === "win32" && child.pid !== undefined) {
+              windowsTreeTermination ??= boundedWindowsTreeKill(child.pid);
+              void windowsTreeTermination.then((terminationFailure) => {
+                if (terminationFailure !== undefined) {
+                  try {
+                    child.kill("SIGKILL");
+                  } catch {
+                    // The SSH wrapper may already have exited.
+                  }
+                  rejectOnce(
+                    new SshTransportBoundaryError(
+                      terminationFailure.message,
+                      error.disposition,
+                    ),
+                  );
+                  return;
+                }
+                closeTimer ??= setTimeout(
+                  () =>
+                    rejectOnce(
+                      new SshTransportBoundaryError(
+                        "SSH process tree termination could not be confirmed.",
+                        error.disposition,
+                      ),
+                    ),
+                  windowsTreeTerminationTimeoutMs,
+                );
+              });
+              return;
+            }
             signalProcess("SIGTERM");
             forceTimer ??= setTimeout(
               () => signalProcess("SIGKILL"),
               cancellationGraceMs,
             );
           };
-          const onAbort = () =>
-            terminate(
-              new SshTransportBoundaryError(
-                "SSH transport was cancelled.",
-                "cancelled",
-              ),
-            );
-          const timeout = setTimeout(
-            () =>
+          const requestRemoteCleanup = (
+            disposition: "cancelled" | "timed-out",
+          ) => {
+            if (invocation.cancellationInput === undefined) {
               terminate(
                 new SshTransportBoundaryError(
-                  "SSH transport timed out.",
-                  "timed-out",
+                  disposition === "cancelled"
+                    ? "SSH transport was cancelled."
+                    : "SSH transport timed out.",
+                  disposition,
                 ),
-              ),
+              );
+              return;
+            }
+            if (interruption !== undefined) return;
+            interruption = disposition;
+            try {
+              child.stdin.write(
+                Buffer.from(invocation.cancellationInput),
+                (error) => {
+                  if (error === null || error === undefined) return;
+                  terminate(
+                    new SshTransportBoundaryError(
+                      "SSH transport ended without remote cleanup proof.",
+                      disposition,
+                    ),
+                  );
+                },
+              );
+            } catch {
+              terminate(
+                new SshTransportBoundaryError(
+                  "SSH transport ended without remote cleanup proof.",
+                  disposition,
+                ),
+              );
+              return;
+            }
+            remoteCleanupTimer ??= setTimeout(
+              () =>
+                terminate(
+                  new SshTransportBoundaryError(
+                    "SSH transport ended without remote cleanup proof.",
+                    disposition,
+                  ),
+                ),
+              invocation.cancellationGraceMs ?? cancellationGraceMs,
+            );
+          };
+          const onAbort = () => requestRemoteCleanup("cancelled");
+          const timeout = setTimeout(
+            () => requestRemoteCleanup("timed-out"),
             invocation.timeoutMs,
           );
           const cleanup = () => {
             clearTimeout(timeout);
+            if (closeTimer !== undefined) clearTimeout(closeTimer);
             if (forceTimer !== undefined) clearTimeout(forceTimer);
+            if (remoteCleanupTimer !== undefined)
+              clearTimeout(remoteCleanupTimer);
             invocation.signal.removeEventListener("abort", onAbort);
           };
           const rejectOnce = (error: Error) => {
@@ -192,22 +313,34 @@ export function createSshTransportRunner(options?: {
             );
           });
           child.once("close", (exitCode) => {
-            if (settled) return;
-            if (boundaryError !== undefined) {
-              rejectOnce(boundaryError);
-              return;
-            }
-            settled = true;
-            cleanup();
-            resolve({
-              exitCode: exitCode ?? 1,
-              stderrBytes,
-              stdout: new Uint8Array(Buffer.concat(stdout)),
-            });
+            void (async () => {
+              if (settled) return;
+              const terminationFailure = await windowsTreeTermination;
+              if (terminationFailure !== undefined) {
+                rejectOnce(terminationFailure);
+                return;
+              }
+              if (boundaryError !== undefined) {
+                rejectOnce(boundaryError);
+                return;
+              }
+              settled = true;
+              cleanup();
+              resolve({
+                exitCode: exitCode ?? 1,
+                interruption,
+                stderrBytes,
+                stdout: new Uint8Array(Buffer.concat(stdout)),
+              });
+            })();
           });
           invocation.signal.addEventListener("abort", onAbort, { once: true });
           child.stdin.once("error", () => undefined);
-          child.stdin.end(Buffer.from(invocation.input));
+          if (invocation.cancellationInput === undefined) {
+            child.stdin.end(Buffer.from(invocation.input));
+          } else {
+            child.stdin.write(Buffer.from(invocation.input));
+          }
         });
       } finally {
         await rm(directory, { force: true, recursive: true });
@@ -234,9 +367,10 @@ function observationFailure(
   code: SshObservationCode,
   message: string,
   retryable: boolean,
+  phase: "observe" | "version" | "wire" = "observe",
 ): Result<never, ObservationError> {
   return {
-    error: { code, effects: "none", message, phase: "observe", retryable },
+    error: { code, effects: "none", message, phase, retryable },
     ok: false,
   };
 }
@@ -297,19 +431,161 @@ export function createSshSkillsProcess(options: {
   readonly runner: SshTransportRunner;
 }): SkillsProcess {
   let observing = false;
+  let mutating = false;
+  const privatePlans = new Map<
+    string,
+    {
+      readonly mutation: NormalizedMutation;
+      readonly prepared: PreparedMutation;
+    }
+  >();
   return {
-    async executeConfirmed() {
-      const error: MutationExecutionError = {
-        code: "confirmation_invalid",
-        effects: "none",
-        message: "SSH mutation is not available in this build.",
-        phase: "execute",
-        retryable: false,
-      };
-      return { error, ok: false };
+    async executeConfirmed({ confirmation, signal }) {
+      const privatePlan = privatePlans.get(confirmation.preparedMutationId);
+      if (privatePlan === undefined) {
+        return mutationExecutionFailure(
+          "confirmation_invalid",
+          "The Prepared Mutation is unavailable or has already been used.",
+        );
+      }
+      privatePlans.delete(confirmation.preparedMutationId);
+      if (privatePlan.prepared.digest !== confirmation.digest) {
+        return mutationExecutionFailure(
+          "confirmation_invalid",
+          "The mutation confirmation does not match the Prepared Mutation.",
+        );
+      }
+      if (
+        options.clock().getTime() >= Date.parse(privatePlan.prepared.expiresAt)
+      ) {
+        return mutationExecutionFailure(
+          "confirmation_expired",
+          "The Prepared Mutation has expired.",
+        );
+      }
+      if (observing || mutating) {
+        return mutationExecutionFailure(
+          "mutation_conflict",
+          "Another operation is active for this Target.",
+        );
+      }
+      mutating = true;
+      const requestId = options.id();
+      const uncertainOutcome = (
+        disposition: MutationOutcome["process"]["disposition"],
+      ): Result<MutationOutcome, MutationExecutionError> => ({
+        ok: true,
+        value: {
+          effects: { status: "possible" },
+          inventory: null,
+          preparedMutationId: privatePlan.prepared.id,
+          process: { disposition, exitCode: null, termination: "unknown" },
+        },
+      });
+      try {
+        let transport: SshTransportOutcome;
+        try {
+          transport = await options.runner.run({
+            args: sshArguments(options.binding),
+            cancellationGraceMs: 2_000,
+            cancellationInput: encodeWireFrame({
+              operation: "cancel",
+              protocolVersion: options.binding.ssh.wireDialect.protocolVersion,
+              requestId,
+              type: "request",
+            }),
+            configuration: options.binding.ssh.connectionConfig,
+            executable: "ssh",
+            input: encodeWireFrame({
+              harness: options.binding.harness,
+              mutation: privatePlan.mutation,
+              operation: "mutate",
+              protocolVersion: options.binding.ssh.wireDialect.protocolVersion,
+              requestId,
+              type: "request",
+              workspace: options.binding.workspace,
+            }),
+            maxStderrBytes: MAX_SSH_STDERR_BYTES,
+            maxStdoutBytes: MAX_SSH_STDOUT_BYTES,
+            signal,
+            timeoutMs:
+              privatePlan.prepared.commandPlan.timeoutMs + 3 * SSH_TIMEOUT_MS,
+          });
+        } catch (error) {
+          return uncertainOutcome(
+            signal.aborted ||
+              (error instanceof SshTransportBoundaryError &&
+                error.disposition === "cancelled")
+              ? "cancelled"
+              : error instanceof SshTransportBoundaryError &&
+                  error.disposition === "timed-out"
+                ? "timed-out"
+                : "failed",
+          );
+        }
+        const decoded = decodeWireFrames(transport.stdout);
+        if (!decoded.ok || decoded.value.length !== 2) {
+          return uncertainOutcome(signal.aborted ? "cancelled" : "failed");
+        }
+        const [hello, response] = decoded.value;
+        if (
+          hello?.type !== "hello" ||
+          hello.bootstrapDigest !==
+            options.binding.ssh.wireDialect.bootstrapDigest ||
+          response?.type !== "mutation-result" ||
+          response.requestId !== requestId ||
+          response.cliVersion !== CLI_VERSION ||
+          response.process.cleanup !== "confirmed" ||
+          transport.exitCode !== 0
+        ) {
+          return uncertainOutcome(signal.aborted ? "cancelled" : "failed");
+        }
+        const project = parseCliInventory(response.projectJson, "project");
+        const global = parseCliInventory(response.globalJson, "global");
+        if (!project.ok || !global.ok) {
+          return {
+            ok: true,
+            value: {
+              effects: { status: "possible" },
+              inventory: null,
+              preparedMutationId: privatePlan.prepared.id,
+              process: {
+                disposition: response.process.disposition,
+                exitCode: response.process.exitCode,
+                termination: "known",
+              },
+            },
+          };
+        }
+        const inventory: Inventory = {
+          cliVersion: CLI_VERSION,
+          entries: [...project.value, ...global.value],
+          observedAt: options.clock().toISOString(),
+          schemaVersion: INVENTORY_SCHEMA_VERSION,
+        };
+        return {
+          ok: true,
+          value: {
+            effects: observedMutationEffects(
+              privatePlan.mutation,
+              inventory,
+              options.binding.harness,
+            ),
+            inventory,
+            preparedMutationId: privatePlan.prepared.id,
+            process: {
+              disposition: response.process.disposition,
+              exitCode: response.process.exitCode,
+              termination: "known",
+            },
+          },
+        };
+      } finally {
+        mutating = false;
+      }
     },
     async observeInventory({ signal }) {
-      if (observing) {
+      if (observing || mutating) {
         return observationFailure(
           "mutation_conflict",
           "Another operation is active for this Target.",
@@ -406,7 +682,10 @@ export function createSshSkillsProcess(options: {
           );
         }
         if (response?.type === "failure") {
-          if (response.requestId !== requestId) {
+          if (
+            response.requestId !== requestId ||
+            (response.phase !== "observe" && response.phase !== "version")
+          ) {
             return observationFailure(
               "remote_protocol_violation",
               "The remote failure did not match the active observation.",
@@ -419,16 +698,23 @@ export function createSshSkillsProcess(options: {
               : response.code === "remote_protocol_violation"
                 ? "remote_protocol_violation"
                 : response.code === "output_limit_exceeded"
-                  ? "inventory_too_large"
+                  ? response.phase === "version"
+                    ? "process_failed"
+                    : "inventory_too_large"
                   : "process_failed",
             response.code === "remote_runtime_unavailable"
               ? "The remote runtime is unavailable."
               : response.code === "remote_protocol_violation"
                 ? "The Remote Bootstrap rejected the Wire request."
                 : response.code === "output_limit_exceeded"
-                  ? "Remote Inventory output exceeded its byte limit."
-                  : "Remote Inventory observation failed.",
+                  ? response.phase === "version"
+                    ? "Remote runtime verification output exceeded its byte limit."
+                    : "Remote Inventory output exceeded its byte limit."
+                  : response.phase === "version"
+                    ? "Remote runtime verification failed."
+                    : "Remote Inventory observation failed.",
             response.code === "remote_operation_failed",
+            response.phase,
           );
         }
         if (
@@ -464,15 +750,21 @@ export function createSshSkillsProcess(options: {
         observing = false;
       }
     },
-    async prepareMutation() {
-      const error: MutationPreparationError = {
-        code: "mutation_ineligible",
-        effects: "none",
-        message: "SSH mutation is not available in this build.",
-        phase: "prepare",
-        retryable: false,
-      };
-      return { error, ok: false };
+    async prepareMutation(input) {
+      const planned = prepareMutationPlan({
+        binding: options.binding,
+        clock: options.clock,
+        id: options.id,
+        input,
+      });
+      if (!planned.ok) return planned;
+
+      privatePlans.clear();
+      privatePlans.set(planned.value.prepared.id, {
+        mutation: planned.value.mutation,
+        prepared: planned.value.prepared,
+      });
+      return { ok: true, value: structuredClone(planned.value.prepared) };
     },
   };
 }

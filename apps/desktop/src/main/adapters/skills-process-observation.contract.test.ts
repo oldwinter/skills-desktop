@@ -43,6 +43,7 @@ const globalJson = JSON.stringify([
 ]);
 
 function localProcess(): SkillsProcess {
+  let removed = false;
   const runner: ProcessRunner = {
     async run(invocation) {
       const packageIndex = invocation.args.indexOf(CLI_PACKAGE);
@@ -51,16 +52,30 @@ function localProcess(): SkillsProcess {
         return { exitCode: 0, stderr: "", stdout: "1.5.23" };
       }
       if (operation === "list --json") {
-        return { exitCode: 0, stderr: "", stdout: projectJson };
+        return {
+          exitCode: 0,
+          stderr: "",
+          stdout: removed ? "[]" : projectJson,
+        };
       }
       if (operation === "list --global --json") {
         return { exitCode: 0, stderr: "", stdout: globalJson };
+      }
+      if (operation === "remove project-skill --agent codex --yes") {
+        removed = true;
+        return { exitCode: 0, stderr: "", stdout: "removed" };
       }
       throw new Error("Unexpected operation.");
     },
   };
   return createLocalSkillsProcess({
+    binding: {
+      generation: 2,
+      harness: "Codex",
+      targetId: "00000000-0000-4000-8000-000000000018",
+    },
     clock: () => new Date("2026-08-22T10:00:00.000Z"),
+    id: () => "prepared-local",
     platform: "linux",
     runner,
     workspace: "/workspace",
@@ -68,6 +83,7 @@ function localProcess(): SkillsProcess {
 }
 
 function sshProcess(): SkillsProcess {
+  let removed = false;
   const runner: SshTransportRunner = {
     async run(invocation) {
       const decoded = decodeWireFrames(invocation.input);
@@ -82,15 +98,30 @@ function sshProcess(): SkillsProcess {
           protocolVersion: WIRE_PROTOCOL_VERSION,
           type: "hello",
         }),
-        encodeWireFrame({
-          cliVersion: "1.5.23",
-          globalJson,
-          projectJson,
-          protocolVersion: WIRE_PROTOCOL_VERSION,
-          requestId: request.requestId,
-          type: "inventory",
-        }),
+        request.operation === "mutate"
+          ? encodeWireFrame({
+              cliVersion: "1.5.23",
+              globalJson,
+              process: {
+                cleanup: "confirmed",
+                disposition: "completed",
+                exitCode: 0,
+              },
+              projectJson: "[]",
+              protocolVersion: WIRE_PROTOCOL_VERSION,
+              requestId: request.requestId,
+              type: "mutation-result",
+            })
+          : encodeWireFrame({
+              cliVersion: "1.5.23",
+              globalJson,
+              projectJson: removed ? "[]" : projectJson,
+              protocolVersion: WIRE_PROTOCOL_VERSION,
+              requestId: request.requestId,
+              type: "inventory",
+            }),
       ];
+      if (request.operation === "mutate") removed = true;
       const stdout = new Uint8Array(
         frames.reduce((length, frame) => length + frame.length, 0),
       );
@@ -99,6 +130,7 @@ function sshProcess(): SkillsProcess {
       return { exitCode: 0, stderrBytes: 0, stdout };
     },
   };
+  let nextId = 0;
   return createSshSkillsProcess({
     binding: {
       generation: 2,
@@ -123,7 +155,7 @@ function sshProcess(): SkillsProcess {
       workspace: "/workspace",
     },
     clock: () => new Date("2026-08-22T10:00:00.000Z"),
-    id: () => "observe-1",
+    id: () => `ssh-contract-${++nextId}`,
     runner,
   });
 }
@@ -161,5 +193,136 @@ describe.each([
         ok: false,
       });
     });
+
+    it("prepares, executes, verifies, and consumes one exact mutation", async () => {
+      const process = createProcess();
+      const observed = await process.observeInventory({
+        signal: new AbortController().signal,
+      });
+      if (!observed.ok) throw new Error("fixture observation failed");
+      const prepared = await process.prepareMutation({
+        freshness: "fresh",
+        intent: {
+          names: ["project-skill"],
+          scope: "project",
+          type: "remove",
+        },
+        inventory: observed.value,
+        inventoryId: "contract-inventory",
+      });
+      if (!prepared.ok) throw new Error("fixture preparation failed");
+
+      expect(prepared.value.commandPlan).toMatchObject({
+        harness: "Codex",
+        names: ["project-skill"],
+        operation: "remove",
+        scope: "project",
+        targetId: "00000000-0000-4000-8000-000000000018",
+      });
+      await expect(
+        process.executeConfirmed({
+          confirmation: {
+            digest: prepared.value.digest,
+            preparedMutationId: prepared.value.id,
+          },
+          signal: new AbortController().signal,
+        }),
+      ).resolves.toMatchObject({
+        ok: true,
+        value: {
+          effects: { status: "verified" },
+          inventory: {
+            entries: [{ name: "global-skill", scope: "global" }],
+          },
+          process: { disposition: "completed", termination: "known" },
+        },
+      });
+      await expect(
+        process.executeConfirmed({
+          confirmation: {
+            digest: prepared.value.digest,
+            preparedMutationId: prepared.value.id,
+          },
+          signal: new AbortController().signal,
+        }),
+      ).resolves.toMatchObject({
+        error: { code: "confirmation_invalid", effects: "none" },
+        ok: false,
+      });
+    });
+
+    it.each([
+      {
+        intent: {
+          names: ["new-global-skill"],
+          scope: "global" as const,
+          source: {
+            source: "example/skills",
+            sourceType: "github" as const,
+          },
+          type: "add" as const,
+        },
+        plan: {
+          names: ["new-global-skill"],
+          operation: "add",
+          scope: "global",
+          source: { source: "example/skills", sourceType: "github" },
+          timeoutMs: 600_000,
+        },
+      },
+      {
+        intent: {
+          names: ["project-skill"],
+          scope: "project" as const,
+          type: "update" as const,
+        },
+        plan: {
+          names: ["project-skill"],
+          operation: "update",
+          scope: "project",
+          source: null,
+          timeoutMs: 600_000,
+        },
+      },
+      {
+        intent: {
+          scope: "project" as const,
+          type: "update-all" as const,
+        },
+        plan: {
+          names: ["project-skill"],
+          operation: "update",
+          scope: "project",
+          source: null,
+          timeoutMs: 600_000,
+        },
+      },
+    ])(
+      "prepares one exact $intent.type plan from Fresh Inventory",
+      async ({ intent, plan }) => {
+        const process = createProcess();
+        const observed = await process.observeInventory({
+          signal: new AbortController().signal,
+        });
+        if (!observed.ok) throw new Error("fixture observation failed");
+
+        await expect(
+          process.prepareMutation({
+            freshness: "fresh",
+            intent,
+            inventory: observed.value,
+            inventoryId: `contract-${intent.type}`,
+          }),
+        ).resolves.toMatchObject({
+          ok: true,
+          value: {
+            commandPlan: plan,
+            expiresAt: "2026-08-22T10:10:00.000Z",
+            inventoryId: `contract-${intent.type}`,
+            targetGeneration: 2,
+          },
+        });
+      },
+    );
   },
 );
