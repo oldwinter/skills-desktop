@@ -15,6 +15,7 @@ const homeDirectory = join(temporaryRoot, "home");
 const workspace = join(temporaryRoot, "workspace");
 const npxPath = join(binDirectory, "npx");
 const invocationLog = join(homeDirectory, "invocations.log");
+const projectInventoryState = join(homeDirectory, "project-inventory.json");
 const activeChildren = new Set();
 
 class CdpPage {
@@ -44,45 +45,20 @@ class CdpPage {
     });
   }
 
-  static async connect(port) {
+  static async connect(port, expectedUrl) {
     const listTargets = () =>
       fetch(`http://127.0.0.1:${port}/json/list`).then((response) => response.json());
-    let targets = await listTargets();
-    let target = targets.find(({ type }) => type === "page");
-    if (target === undefined) {
-      const browserDetails = await fetch(`http://127.0.0.1:${port}/json/version`).then((response) =>
-        response.json(),
+    const deadline = Date.now() + 30_000;
+    let target;
+    while (target === undefined && Date.now() < deadline) {
+      const targets = await listTargets();
+      target = targets.find(
+        ({ type, url }) =>
+          type === "page" && (expectedUrl === undefined || url === expectedUrl),
       );
-      const discoverySocket = new WebSocket(browserDetails.webSocketDebuggerUrl);
-      await new Promise((resolveTarget, rejectTarget) => {
-        discoverySocket.addEventListener(
-          "open",
-          () => {
-            discoverySocket.send(
-              JSON.stringify({
-                id: 1,
-                method: "Target.setDiscoverTargets",
-                params: { discover: true },
-              }),
-            );
-          },
-          { once: true },
-        );
-        discoverySocket.addEventListener("message", (event) => {
-          const message = JSON.parse(event.data);
-          if (message.method === "Target.targetCreated" && message.params.targetInfo.type === "page") {
-            resolveTarget();
-          }
-        });
-        discoverySocket.addEventListener(
-          "error",
-          () => rejectTarget(new Error("CDP target discovery failed.")),
-          { once: true },
-        );
-      });
-      discoverySocket.close();
-      targets = await listTargets();
-      target = targets.find(({ type }) => type === "page");
+      if (target === undefined) {
+        await new Promise((resolveRetry) => setTimeout(resolveRetry, 50));
+      }
     }
     if (target === undefined) throw new Error("Packaged Electron page target is missing.");
     const socket = new WebSocket(target.webSocketDebuggerUrl);
@@ -174,12 +150,13 @@ await Promise.all([
   mkdir(homeDirectory, { recursive: true }),
   mkdir(workspace, { recursive: true }),
 ]);
+await writeFile(projectInventoryState, JSON.stringify([projectEntry]), "utf8");
 
 async function writeScript(mode) {
   await writeFile(
     npxPath,
     `#!/usr/bin/env node
-const { appendFileSync } = require("node:fs");
+const { appendFileSync, readFileSync, writeFileSync } = require("node:fs");
 const { join } = require("node:path");
 const args = process.argv.slice(2);
 appendFileSync(join(process.env.HOME, "invocations.log"), args.join(" ") + "\\n");
@@ -188,8 +165,15 @@ if (args.at(-1) === "--version") {
 } else if (${JSON.stringify(mode)} === "failure") {
   process.stderr.write("SECRET_RAW_STDERR");
   process.exitCode = 2;
+} else if (args.includes("remove")) {
+  const statePath = join(process.env.HOME, "project-inventory.json");
+  const current = JSON.parse(readFileSync(statePath, "utf8"));
+  const removeIndex = args.indexOf("remove");
+  const agentIndex = args.indexOf("--agent");
+  const names = args.slice(removeIndex + 1, agentIndex);
+  writeFileSync(statePath, JSON.stringify(current.filter(({ name }) => !names.includes(name))));
 } else if (args.join(" ").endsWith("list --json")) {
-  process.stdout.write(${JSON.stringify(JSON.stringify([projectEntry]))});
+  process.stdout.write(readFileSync(join(process.env.HOME, "project-inventory.json"), "utf8"));
 } else if (args.join(" ").endsWith("list --global --json")) {
   process.stdout.write(${JSON.stringify(JSON.stringify([globalEntry]))});
 } else {
@@ -250,8 +234,10 @@ async function launch() {
   } finally {
     await changeIterator.return?.();
   }
-  const page = await CdpPage.connect(port);
+  const page = await CdpPage.connect(port, "skills-desktop://workspace/index.html");
+  const connectPage = (expectedUrl) => CdpPage.connect(port, expectedUrl);
   return {
+    connectPage,
     errors: page.errors,
     page,
     async close() {
@@ -301,7 +287,16 @@ try {
   }
   if (
     JSON.stringify(rendererBoundary.bridgeKeys) !==
-    JSON.stringify(["cancelInventory", "getSnapshot", "refreshInventory", "subscribe"])
+    JSON.stringify([
+      "cancelInventory",
+      "getSnapshot",
+      "prepareMutation",
+      "reconcileMutation",
+      "refreshInventory",
+      "requestCancellationReview",
+      "requestReview",
+      "subscribe",
+    ])
   ) {
     throw new Error(`Unexpected preload surface: ${rendererBoundary.bridgeKeys.join(", ")}`);
   }
@@ -362,6 +357,81 @@ try {
   ) {
     throw new Error(`Compact accessibility contract failed: ${JSON.stringify(compactNavigation)}`);
   }
+
+  await first.page.evaluate(`(() => {
+    const button = [...document.querySelectorAll("button")].find(
+      (candidate) => candidate.textContent?.includes("Prepare removal"),
+    );
+    if (!(button instanceof HTMLButtonElement)) throw new Error("Prepare removal is unavailable.");
+    button.click();
+  })()`);
+  await first.page.waitFor(
+    `document.body?.textContent?.includes("Command Plan") &&
+      document.body?.textContent?.includes("remove packaged-project-skill --agent codex --yes")`,
+    "prepared removal Command Plan",
+  );
+  await first.page.evaluate(`(() => {
+    const button = [...document.querySelectorAll("button")].find(
+      (candidate) => candidate.textContent?.includes("Open Trusted Review"),
+    );
+    if (!(button instanceof HTMLButtonElement)) throw new Error("Trusted Review is unavailable.");
+    button.click();
+  })()`);
+  const reviewPage = await first.connectPage("skills-desktop://review/index.html");
+  await reviewPage.waitFor(
+    `document.body?.textContent?.includes("Review removal") &&
+      document.body?.textContent?.includes("packaged-project-skill")`,
+    "Trusted Review projection",
+  );
+  const reviewBoundary = await reviewPage.evaluate(`({
+    bridgeKeys: Object.keys(window.skillsReview).sort(),
+    hasNodeProcess: typeof window.process !== "undefined",
+    hasRequire: typeof window.require !== "undefined",
+    text: document.body.textContent ?? "",
+    url: window.location.href,
+  })`);
+  if (
+    reviewBoundary.hasNodeProcess ||
+    reviewBoundary.hasRequire ||
+    reviewBoundary.url !== "skills-desktop://review/index.html" ||
+    JSON.stringify(reviewBoundary.bridgeKeys) !==
+      JSON.stringify(["approve", "getReview", "reject"])
+  ) {
+    throw new Error(`Unexpected review boundary: ${JSON.stringify(reviewBoundary)}`);
+  }
+  if (/SECRET_PROJECT_PATH|SECRET_HOME_PATH|SECRET_TOKEN|SECRET_RAW_STDERR/.test(reviewBoundary.text)) {
+    throw new Error("Sensitive process evidence reached Trusted Review.");
+  }
+  await reviewPage.evaluate(`(() => {
+    const button = document.querySelector('button[aria-label="Approve mutation"]');
+    if (!(button instanceof HTMLButtonElement)) throw new Error("Approval is unavailable.");
+    button.click();
+  })()`);
+  await reviewPage.waitFor(
+    `document.body?.textContent?.includes("Mutation started")`,
+    "confirmed mutation completion",
+  );
+  await first.page.waitFor(
+    `![...document.querySelectorAll(".inventory-table tbody tr")].some(
+        (row) => row.textContent?.includes("packaged-project-skill"),
+      ) &&
+      [...document.querySelectorAll(".inventory-table tbody tr")].some(
+        (row) => row.textContent?.includes("packaged-global-skill"),
+      ) &&
+      document.body?.textContent?.includes("completed / verified")`,
+    "verified mutation postflight",
+  );
+  reviewPage.close();
+  const guardDocument = JSON.parse(
+    await readFile(
+      join(temporaryRoot, "config", "Skills Desktop", "recovery", "mutation-guards.json"),
+      "utf8",
+    ),
+  );
+  if (guardDocument.guards.length !== 0) {
+    throw new Error("Successful postflight did not durably clear the Mutation Guard.");
+  }
+  console.log("packaged smoke: reviewed mutation and postflight verified");
   await first.close();
   console.log("packaged smoke: first launch closed");
   if (first.errors.length > 0) throw new Error(first.errors.join("\n"));
@@ -370,7 +440,8 @@ try {
   const second = await launch();
   console.log("packaged smoke: restart opened");
   await second.page.waitFor(
-    `document.body?.textContent?.includes("packaged-project-skill") &&
+    `!document.body?.textContent?.includes("packaged-project-skill") &&
+      document.body?.textContent?.includes("packaged-global-skill") &&
       document.body?.textContent?.includes("Stale after error")`,
     "stale restored Inventory evidence",
   );
@@ -392,6 +463,13 @@ try {
   }
   if (!invocations.includes("--yes skills@1.5.23 list --global --json")) {
     throw new Error("Global Inventory invocation is missing.");
+  }
+  if (
+    !invocations.includes(
+      "--yes skills@1.5.23 remove packaged-project-skill --agent codex --yes",
+    )
+  ) {
+    throw new Error("Exact reviewed removal invocation is missing.");
   }
 } finally {
   for (const child of activeChildren) child.kill("SIGKILL");

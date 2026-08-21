@@ -107,7 +107,7 @@ function faultingFileSystem(
     rename(source, destination) {
       if (
         fault === "replace" &&
-        destination.endsWith("inventory-snapshots.json")
+        destination.endsWith(".json")
       ) {
         return Promise.reject(new Error("replacement fault"));
       }
@@ -404,6 +404,189 @@ describe("RecoveryRecords Inventory Snapshot contract", () => {
       },
       ok: false,
     });
+    expect(
+      (await import("node:fs/promises"))
+        .stat(path)
+        .then((details) => details.isDirectory()),
+    ).resolves.toBe(true);
+  });
+});
+
+describe("RecoveryRecords Mutation Guard contract", () => {
+  it("restores and explicitly clears one minimal Guard per Target in memory", async () => {
+    const records = createMemoryRecoveryRecords();
+
+    expect(
+      await records.commit({
+        deadline: "2026-08-21T10:10:00.000Z",
+        effects: "none",
+        generation: 3,
+        operationId: "mutation-1",
+        phase: "executing",
+        targetId: "local-target",
+        type: "guard.put",
+      }),
+    ).toEqual({ ok: true, value: undefined });
+    expect((await records.restore()).mutationGuards).toEqual([
+      {
+        deadline: "2026-08-21T10:10:00.000Z",
+        effects: "none",
+        generation: 3,
+        operationId: "mutation-1",
+        phase: "executing",
+        targetId: "local-target",
+      },
+    ]);
+
+    expect(
+      await records.commit({ targetId: "local-target", type: "guard.clear" }),
+    ).toEqual({ ok: true, value: undefined });
+    expect((await records.restore()).mutationGuards).toEqual([]);
+  });
+
+  it("durably allowlists Guard recovery authority in an independent JSON document", async () => {
+    const directory = await temporaryDirectory();
+    const records = createJsonRecoveryRecords({
+      directory,
+      id: () => "guard-write",
+    });
+
+    expect(
+      await records.commit({
+        deadline: "2026-08-21T10:10:00.000Z",
+        effects: "possible",
+        generation: 3,
+        operationId: "mutation-1",
+        phase: "reconciliation-required",
+        targetId: "local-target",
+        type: "guard.put",
+      }),
+    ).toEqual({ ok: true, value: undefined });
+
+    const persisted = await readFile(
+      join(directory, "mutation-guards.json"),
+      "utf8",
+    );
+    expect(JSON.parse(persisted)).toEqual({
+      guards: [
+        {
+          deadline: "2026-08-21T10:10:00.000Z",
+          effects: "possible",
+          generation: 3,
+          operationId: "mutation-1",
+          phase: "reconciliation-required",
+          targetId: "local-target",
+        },
+      ],
+      kind: "mutation-guards",
+      schemaVersion: 1,
+    });
+    expect(persisted).not.toContain("skill");
+    expect(persisted).not.toContain("preview");
+    expect(persisted).not.toContain("args");
+
+    const restarted = createJsonRecoveryRecords({
+      directory,
+      id: () => "guard-restart",
+    });
+    expect((await restarted.restore()).mutationGuards).toEqual(
+      JSON.parse(persisted).guards,
+    );
+  });
+
+  it.each(["temporary-sync", "replace", "directory-sync"] as const)(
+    "fails closed when a Guard %s fault prevents confirmed durability",
+    async (fault) => {
+      const directory = await temporaryDirectory();
+      const initial = createJsonRecoveryRecords({
+        directory,
+        id: () => "initial-guard",
+      });
+      expect(
+        await initial.commit({
+          deadline: "2026-08-21T10:10:00.000Z",
+          effects: "none",
+          generation: 1,
+          operationId: "mutation-1",
+          phase: "executing",
+          targetId: "local-target",
+          type: "guard.put",
+        }),
+      ).toEqual({ ok: true, value: undefined });
+      const path = join(directory, "mutation-guards.json");
+      const beforeFault = await readFile(path, "utf8");
+      const records = createJsonRecoveryRecords({
+        directory,
+        fileSystem: faultingFileSystem(fault),
+        id: () => `guard-${fault}`,
+        platform: "linux",
+      });
+      await records.restore();
+
+      expect(
+        await records.commit({
+          deadline: "2026-08-21T10:20:00.000Z",
+          effects: "possible",
+          generation: 1,
+          operationId: "mutation-2",
+          phase: "reconciliation-required",
+          targetId: "local-target",
+          type: "guard.put",
+        }),
+      ).toMatchObject({ error: { code: "persist_failed" }, ok: false });
+      const afterFault = await readFile(path, "utf8");
+      expect(() => JSON.parse(afterFault)).not.toThrow();
+      if (fault === "directory-sync") {
+        expect(JSON.parse(afterFault)).toMatchObject({
+          guards: [{ operationId: "mutation-2" }],
+        });
+      } else expect(afterFault).toBe(beforeFault);
+      expect(
+        (await readdir(directory)).some((name) => name.endsWith(".tmp")),
+      ).toBe(false);
+    },
+  );
+
+  it("refuses to overwrite a newer Guard schema", async () => {
+    const directory = await temporaryDirectory();
+    const path = join(directory, "mutation-guards.json");
+    const document = JSON.stringify({
+      guards: [],
+      kind: "mutation-guards",
+      schemaVersion: 99,
+    });
+    await writeFile(path, document);
+    const records = createJsonRecoveryRecords({
+      directory,
+      id: () => "newer-guard",
+    });
+
+    expect((await records.restore()).failures).toContainEqual({
+      code: "unsupported_schema",
+      store: "mutationGuards",
+    });
+    expect(
+      await records.commit({ targetId: "local-target", type: "guard.clear" }),
+    ).toMatchObject({ error: { code: "unsupported_schema" }, ok: false });
+    expect(await readFile(path, "utf8")).toBe(document);
+  });
+
+  it("fails closed for unreadable initialized Guard state", async () => {
+    const directory = await temporaryDirectory();
+    const path = join(directory, "mutation-guards.json");
+    await mkdir(path);
+    const records = createJsonRecoveryRecords({
+      directory,
+      id: () => "unreadable-guard",
+    });
+
+    expect((await records.restore()).failures).toContainEqual({
+      code: "corrupt_store",
+      store: "mutationGuards",
+    });
+    expect(
+      await records.commit({ targetId: "local-target", type: "guard.clear" }),
+    ).toMatchObject({ error: { code: "persist_failed" }, ok: false });
     expect(
       (await import("node:fs/promises"))
         .stat(path)

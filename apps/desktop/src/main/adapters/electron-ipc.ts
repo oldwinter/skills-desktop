@@ -9,6 +9,7 @@ import {
   type WorkspaceRequestResult,
 } from "../../contracts/workspace.js";
 import {
+  reviewDecisionResultSchema,
   reviewSnapshotResultSchema,
   reviewSnapshotSchema,
 } from "../../contracts/review.js";
@@ -21,6 +22,12 @@ const CHANNELS = {
   cancel: "workspace:inventory:cancel",
   event: "workspace:event",
   refresh: "workspace:inventory:refresh",
+  mutationPrepare: "workspace:mutation:prepare",
+  mutationReconcile: "workspace:mutation:reconcile",
+  requestReview: "workspace:review:request",
+  requestCancellationReview: "workspace:review:cancel-request",
+  reviewApprove: "review:decision:approve",
+  reviewReject: "review:decision:reject",
   reviewSnapshot: "review:snapshot:get",
   snapshot: "workspace:snapshot:get",
 } as const;
@@ -141,19 +148,113 @@ export function registerDesktopIpc(input: {
       return internalFailure();
     }
   });
-  input.ipcMain.handle(CHANNELS.reviewSnapshot, (event) => {
-    if (authorized(event, "review") === undefined) {
+  input.ipcMain.handle(
+    CHANNELS.mutationPrepare,
+    async (event, targetId: unknown, intent: unknown) => {
+      const endpoint = authorized(event, "workspace");
+      if (endpoint === undefined) return authorizationFailure();
+      try {
+        return workspaceRequestResultSchema.parse(
+          await endpoint.session.request({
+            intent,
+            targetId,
+            type: "mutation.prepare",
+            version: 1,
+          }),
+        );
+      } catch {
+        return internalFailure();
+      }
+    },
+  );
+  input.ipcMain.handle(
+    CHANNELS.mutationReconcile,
+    async (event, targetId: unknown) => {
+      const endpoint = authorized(event, "workspace");
+      if (endpoint === undefined) return authorizationFailure();
+      try {
+        return workspaceRequestResultSchema.parse(
+          await endpoint.session.request({
+            targetId,
+            type: "mutation.reconcile",
+            version: 1,
+          }),
+        );
+      } catch {
+        return internalFailure();
+      }
+    },
+  );
+  input.ipcMain.handle(
+    CHANNELS.requestReview,
+    async (event, preparedMutationId: unknown) => {
+      const endpoint = authorized(event, "workspace");
+      if (endpoint === undefined) return authorizationFailure();
+      try {
+        return workspaceRequestResultSchema.parse(
+          await endpoint.session.request({
+            preparedMutationId,
+            type: "review.request",
+            version: 1,
+          }),
+        );
+      } catch {
+        return internalFailure();
+      }
+    },
+  );
+  input.ipcMain.handle(
+    CHANNELS.requestCancellationReview,
+    async (event, operationId: unknown) => {
+      const endpoint = authorized(event, "workspace");
+      if (endpoint === undefined) return authorizationFailure();
+      try {
+        return workspaceRequestResultSchema.parse(
+          await endpoint.session.request({
+            operationId,
+            type: "review.cancel-request",
+            version: 1,
+          }),
+        );
+      } catch {
+        return internalFailure();
+      }
+    },
+  );
+  input.ipcMain.handle(CHANNELS.reviewSnapshot, async (event) => {
+    const endpoint = authorized(event, "review");
+    if (endpoint === undefined) {
       return reviewSnapshotResultSchema.parse(authorizationFailure());
     }
     try {
       return reviewSnapshotResultSchema.parse({
         ok: true,
-        value: reviewSnapshotSchema.parse({ schemaVersion: 1, status: "unavailable" }),
+        value: reviewSnapshotSchema.parse(await endpoint.session.snapshot()),
       });
     } catch {
       return reviewSnapshotResultSchema.parse(internalFailure());
     }
   });
+  const decideReview =
+    (decision: "approve" | "reject") => async (event: IpcMainInvokeEvent) => {
+      const endpoint = authorized(event, "review");
+      if (endpoint === undefined) {
+        return reviewDecisionResultSchema.parse(authorizationFailure());
+      }
+      try {
+        return reviewDecisionResultSchema.parse(
+          await endpoint.session.request({
+            decision,
+            type: "review.decide",
+            version: 1,
+          }),
+        );
+      } catch {
+        return reviewDecisionResultSchema.parse(internalFailure());
+      }
+    };
+  input.ipcMain.handle(CHANNELS.reviewApprove, decideReview("approve"));
+  input.ipcMain.handle(CHANNELS.reviewReject, decideReview("reject"));
 
   const detach = (webContentsId: number) => {
     const prior = endpoints.get(webContentsId);
@@ -166,11 +267,13 @@ export function registerDesktopIpc(input: {
     webContents: WebContents,
     role: RegisteredEndpoint["role"],
     expectedUrl: string,
+    reviewId?: string,
   ) => {
     detach(webContents.id);
     const session = input.capabilities.attach(
       {
         endpointId: String(webContents.id),
+        reviewId,
         role,
         sessionEpoch: input.newEpoch(),
       },
@@ -192,6 +295,12 @@ export function registerDesktopIpc(input: {
       input.ipcMain.removeHandler(CHANNELS.refresh);
       input.ipcMain.removeHandler(CHANNELS.cancel);
       input.ipcMain.removeHandler(CHANNELS.reviewSnapshot);
+      input.ipcMain.removeHandler(CHANNELS.mutationPrepare);
+      input.ipcMain.removeHandler(CHANNELS.mutationReconcile);
+      input.ipcMain.removeHandler(CHANNELS.requestReview);
+      input.ipcMain.removeHandler(CHANNELS.requestCancellationReview);
+      input.ipcMain.removeHandler(CHANNELS.reviewApprove);
+      input.ipcMain.removeHandler(CHANNELS.reviewReject);
     },
   };
 }

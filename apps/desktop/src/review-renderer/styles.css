@@ -1,7 +1,43 @@
-:root { color: #202124; background: #f5f6f7; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; letter-spacing: 0; }
+:root {
+  color: #202124;
+  background: #f5f6f7;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  letter-spacing: 0;
+  --line: rgb(32 33 36 / 14%);
+  --muted: #5f6368;
+  --focus: #0a72ef;
+}
 * { box-sizing: border-box; }
-html, body, #root { width: 100%; height: 100%; margin: 0; }
-body { display: grid; place-items: center; }
-main { width: min(100% - 32px, 420px); padding: 20px; background: #fff; border: 1px solid rgb(32 33 36 / 14%); border-radius: 8px; }
-h1 { margin: 0; font-size: 18px; }
-p { margin: 8px 0 0; color: #5f6368; font-size: 13px; }
+html, body, #root { width: 100%; min-width: 320px; height: 100%; margin: 0; }
+body { overflow: auto; }
+button { color: inherit; font: inherit; letter-spacing: 0; }
+button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+h1, h2, p, dl, dd { margin: 0; }
+.review-surface { display: grid; width: min(100%, 520px); min-height: 100%; margin: 0 auto; padding: 22px; align-content: start; gap: 18px; background: #fff; }
+.review-heading { display: flex; align-items: center; gap: 11px; padding-bottom: 16px; border-bottom: 1px solid var(--line); }
+.review-heading p { color: var(--muted); font-size: 11px; }
+.review-heading h1 { margin-top: 2px; font-size: 18px; line-height: 1.35; }
+.review-mark { display: grid; width: 38px; height: 38px; flex: 0 0 auto; place-items: center; color: white; background: #202124; border-radius: 6px; }
+.review-facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 18px; }
+.review-facts > div { display: grid; gap: 3px; min-width: 0; }
+.review-facts__wide { grid-column: 1 / -1; }
+.review-facts dt { color: var(--muted); font-size: 11px; }
+.review-facts dd { font-size: 13px; overflow-wrap: anywhere; }
+.review-plan { display: grid; gap: 8px; padding-top: 16px; border-top: 1px solid var(--line); }
+.review-plan h2 { font-size: 13px; }
+.review-plan code { display: block; padding: 11px; overflow-wrap: anywhere; color: #202124; background: #f0f2f4; border-radius: 6px; font-family: "SFMono-Regular", Consolas, monospace; font-size: 12px; }
+.review-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: auto; padding-top: 10px; }
+.review-button { display: flex; min-height: 42px; align-items: center; justify-content: center; gap: 7px; background: #fff; border: 1px solid rgb(32 33 36 / 24%); border-radius: 6px; font-size: 13px; font-weight: 600; }
+.review-button--primary { color: white; background: #1267c4; border-color: #1267c4; }
+.review-button:disabled { opacity: 0.55; }
+.review-loading, .review-alert, .review-settled { display: flex; min-height: 240px; align-items: center; justify-content: center; gap: 8px; color: var(--muted); font-size: 13px; text-align: center; }
+.review-alert { color: #b93832; }
+.review-settled { color: #176b4b; }
+@media (max-width: 420px) {
+  .review-surface { padding: 16px; }
+  .review-facts, .review-actions { grid-template-columns: 1fr; }
+  .review-facts__wide { grid-column: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}

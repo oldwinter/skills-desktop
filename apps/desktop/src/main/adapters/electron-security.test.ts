@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { workspaceWindowOptions } from "./electron-security.js";
+import {
+  reviewWindowOptions,
+  workspaceWindowOptions,
+} from "./electron-security.js";
 
 describe("workspace BrowserWindow security contract", () => {
   it("enables isolation and sandboxing while denying Node and webviews", () => {
@@ -19,5 +22,27 @@ describe("workspace BrowserWindow security contract", () => {
     expect(workspaceWindowOptions("/app/preload/workspace.cjs", false).webPreferences?.devTools).toBe(
       true,
     );
+  });
+
+  it("gives Trusted Review an isolated, modal, purpose-built window", () => {
+    const parent = { id: "workspace-window" } as never;
+
+    expect(
+      reviewWindowOptions("/app/preload/review.cjs", true, parent),
+    ).toMatchObject({
+      minWidth: 360,
+      modal: true,
+      parent,
+      title: "Trusted Review",
+      webPreferences: {
+        contextIsolation: true,
+        devTools: false,
+        nodeIntegration: false,
+        preload: "/app/preload/review.cjs",
+        sandbox: true,
+        webSecurity: true,
+        webviewTag: false,
+      },
+    });
   });
 });

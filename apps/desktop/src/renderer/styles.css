@@ -42,7 +42,7 @@ code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; fo
 .boot-state--error { color: var(--danger); }
 .app-shell { display: grid; grid-template-rows: 44px minmax(0, 1fr); min-height: 100dvh; max-height: 100dvh; background: var(--canvas); }
 .app-header { position: relative; z-index: 2; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; min-width: 0; padding: 0 12px; background: var(--surface); box-shadow: 0 0 0 1px var(--line); }
-.brand-lockup, .header-target, .header-status, .status-pill, .nav-item, .target-row, .rail-version, .page-heading, .inventory-toolbar, .search-control, .state-banner, .skill-button, .unknown-label, .inspector-heading { display: flex; align-items: center; }
+.brand-lockup, .header-target, .header-status, .status-pill, .nav-item, .target-row, .rail-version, .page-heading, .inventory-toolbar, .search-control, .state-banner, .skill-button, .unknown-label, .inspector-heading, .text-button, .command-plan > header { display: flex; align-items: center; }
 .brand-lockup { min-width: 0; gap: 8px; font-size: 15px; font-weight: 600; }
 .brand-mark { display: inline-grid; width: 28px; height: 28px; place-items: center; color: white; background: #202124; border-radius: var(--radius-control); }
 .header-target { min-width: 0; gap: 6px; color: var(--text-secondary); font-size: 12px; }
@@ -83,6 +83,7 @@ code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; fo
 .icon-button:hover { color: var(--text); border-color: var(--line-strong); }
 .state-banner { min-height: 40px; gap: 8px; margin: 0 20px 10px; padding: 8px 10px; border-radius: var(--radius-control); font-size: 12px; }
 .state-banner strong { margin-left: auto; font-weight: 600; }
+.state-banner .text-button { margin-left: auto; }
 .state-banner--loading { color: #075fa9; background: #e8f2fb; }
 .state-banner--warning { color: var(--warning); background: var(--warning-soft); }
 .state-banner--danger { color: var(--danger); background: var(--danger-soft); }
@@ -93,6 +94,12 @@ code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; fo
 .segmented-control { display: inline-grid; grid-template-columns: repeat(3, minmax(78px, auto)); min-height: 40px; padding: 3px; background: var(--surface-muted); border-radius: var(--radius-control); }
 .segmented-control button { min-height: 34px; padding: 0 10px; color: var(--text-secondary); background: transparent; border: 0; border-radius: 4px; font-size: 12px; }
 .segmented-control button[aria-pressed="true"] { color: var(--text); background: var(--surface); box-shadow: 0 0 0 1px var(--line); font-weight: 500; }
+.segmented-control--compact { width: 100%; grid-template-columns: repeat(2, 1fr); }
+.text-button { min-height: 40px; justify-content: center; gap: 7px; padding: 0 12px; color: var(--text); background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--radius-control); font-size: 12px; font-weight: 600; }
+.text-button:hover:not(:disabled) { border-color: var(--focus); }
+.text-button:disabled { opacity: 0.5; }
+.text-button--primary { color: white; background: #1267c4; border-color: #1267c4; }
+.text-button--danger { color: var(--danger); }
 .inventory-table-wrap { min-width: 0; min-height: 0; overflow: auto; padding: 0 20px 20px; }
 .inventory-table { width: 100%; border-spacing: 0; background: var(--surface); box-shadow: 0 0 0 1px var(--line); border-radius: var(--radius-panel); overflow: hidden; table-layout: fixed; }
 .inventory-table th { height: 36px; padding: 0 10px; color: var(--text-tertiary); background: #fafbfc; border-bottom: 1px solid var(--line); font-size: 11px; font-weight: 600; text-align: left; }
@@ -123,6 +130,19 @@ code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; fo
 .evidence-list > div { display: grid; gap: 4px; padding: 13px 0; border-bottom: 1px solid var(--line); }
 .evidence-list dt { color: var(--text-tertiary); font-size: 11px; }
 .evidence-list dd { min-width: 0; font-size: 12px; overflow-wrap: anywhere; }
+.inspector-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding-top: 14px; }
+.add-skill-form, .command-plan { display: grid; gap: 10px; margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line); }
+.add-skill-form h2 { font-size: 14px; }
+.add-skill-form label { display: grid; gap: 5px; color: var(--text-tertiary); font-size: 11px; }
+.add-skill-form input { min-width: 0; width: 100%; height: 40px; padding: 0 9px; color: var(--text); background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--radius-control); }
+.command-plan > header { gap: 7px; }
+.command-plan > header h2 { font-size: 14px; }
+.command-plan dl { display: grid; gap: 7px; }
+.command-plan dl > div { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 8px; font-size: 12px; }
+.command-plan dt { color: var(--text-tertiary); }
+.command-plan dd { min-width: 0; overflow-wrap: anywhere; }
+.command-preview { display: block; padding: 9px; color: var(--text); background: var(--surface-muted); border-radius: var(--radius-control); }
+.mutation-outcome { color: var(--text-secondary); font-size: 12px; }
 
 .spin { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
@@ -165,6 +185,7 @@ code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; fo
   .inventory-table td:first-child::before { display: none; }
   .inspector { max-height: none; padding: 16px 14px 24px; border-top: 1px solid var(--line); }
   .evidence-list { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 16px; }
+  .inspector-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (max-width: 480px) {
@@ -174,6 +195,7 @@ code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; fo
   .nav-item { justify-content: center; width: 44px; padding: 0; }
   .inventory-table tr, .evidence-list { grid-template-columns: 1fr; }
   .inventory-table td:first-child { grid-column: 1; }
+  .inspector-actions { grid-template-columns: 1fr; }
 }
 
 @media (prefers-reduced-motion: reduce) {

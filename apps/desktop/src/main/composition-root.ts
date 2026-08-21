@@ -12,7 +12,9 @@ import {
 import { createJsonRecoveryRecords } from "./persistence/recovery-records.js";
 import { createLocalSkillsTargets } from "./targets/local-skills-targets.js";
 
-export async function createCompositionRoot() {
+export async function createCompositionRoot(options?: {
+  readonly onReviewRequested?: (reviewId: string) => void;
+}) {
   const requestedWorkspace =
     process.env.SKILLS_DESKTOP_WORKSPACE ?? process.cwd();
   const workspace = await realpath(resolve(requestedWorkspace));
@@ -25,7 +27,13 @@ export async function createCompositionRoot() {
   const skillsTargets = createLocalSkillsTargets({
     processFor(binding) {
       return createLocalSkillsProcess({
+        binding: {
+          generation: binding.generation,
+          harness: binding.harness,
+          targetId: binding.targetId,
+        },
         clock: () => new Date(),
+        id: randomUUID,
         platform: process.platform,
         runner,
         workspace: binding.workspace,
@@ -35,7 +43,9 @@ export async function createCompositionRoot() {
     workspaceLabel: basename(workspace),
   });
   const capabilities = createDesktopCapabilities({
+    clock: () => new Date(),
     id: randomUUID,
+    onReviewRequested: options?.onReviewRequested,
     recoveryRecords,
     skillsTargets,
   });

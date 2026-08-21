@@ -1,4 +1,5 @@
 import { execFile, spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { access } from "node:fs/promises";
 import { win32 } from "node:path";
 
@@ -7,14 +8,19 @@ import {
   CLI_VERSION,
   INVENTORY_SCHEMA_VERSION,
   MAX_CLI_OUTPUT_BYTES,
+  mutationIntentSchema,
   parseCliInventory,
   type Inventory,
   type InventoryParseError,
+  type MutationIntent,
   type PublicError,
   type Result,
 } from "@skills-desktop/skills-runtime";
 
 const OBSERVATION_TIMEOUT_MS = 60_000;
+const PREPARED_MUTATION_TTL_MS = 10 * 60_000;
+const REMOVE_TIMEOUT_MS = 2 * 60_000;
+const WRITE_TIMEOUT_MS = 10 * 60_000;
 
 export interface ProcessInvocation {
   readonly args: readonly string[];
@@ -38,19 +44,105 @@ export interface ProcessRunner {
   run(invocation: ProcessInvocation): Promise<ProcessResult>;
 }
 
+export class ProcessBoundaryError extends Error {
+  constructor(
+    message: string,
+    readonly disposition: "cancelled" | "failed" | "timed-out" = "failed",
+    readonly started = false,
+    readonly termination: "known" | "unknown" = "known",
+  ) {
+    super(message);
+    this.name = "ProcessBoundaryError";
+  }
+}
+
 export type ObservationError =
   | InventoryParseError
-  | PublicError<"cancelled" | "cli_incompatible" | "process_failed">;
+  | PublicError<
+      "cancelled" | "cli_incompatible" | "mutation_conflict" | "process_failed"
+    >;
+
+export interface CommandPlan {
+  readonly harness: string;
+  readonly names: readonly string[];
+  readonly operation: "add" | "remove" | "update";
+  readonly preview: string;
+  readonly schemaVersion: 1;
+  readonly scope: "global" | "project";
+  readonly source: { readonly source: string; readonly sourceType: "github" } | null;
+  readonly targetId: string;
+  readonly timeoutMs: number;
+}
+
+export interface PreparedMutation {
+  readonly commandPlan: CommandPlan;
+  readonly digest: string;
+  readonly expiresAt: string;
+  readonly id: string;
+  readonly inventoryId: string;
+  readonly targetGeneration: number;
+  readonly targetId: string;
+}
+
+export type MutationPreparationError = PublicError<
+  "invalid_intent" | "mutation_ineligible" | "stale_inventory"
+>;
+
+export interface PrepareMutationInput {
+  readonly freshness: "fresh";
+  readonly intent: MutationIntent;
+  readonly inventory: Inventory;
+  readonly inventoryId: string;
+}
+
+export interface ConfirmedMutation {
+  readonly digest: string;
+  readonly preparedMutationId: string;
+}
+
+export interface MutationOutcome {
+  readonly effects: {
+    readonly status:
+      | "content-unverified"
+      | "not-observed"
+      | "possible"
+      | "verified";
+  };
+  readonly inventory: Inventory | null;
+  readonly preparedMutationId: string;
+  readonly process: {
+    readonly disposition: "cancelled" | "completed" | "failed" | "timed-out";
+    readonly exitCode: number | null;
+    readonly termination: "known" | "unknown";
+  };
+}
+
+export type MutationExecutionError = PublicError<
+  "confirmation_expired" | "confirmation_invalid" | "mutation_conflict"
+>;
 
 export interface SkillsProcess {
+  executeConfirmed(input: {
+    readonly confirmation: ConfirmedMutation;
+    readonly signal: AbortSignal;
+  }): Promise<Result<MutationOutcome, MutationExecutionError>>;
   observeInventory(input: {
     readonly signal: AbortSignal;
   }): Promise<Result<Inventory, ObservationError>>;
+  prepareMutation(
+    input: PrepareMutationInput,
+  ): Promise<Result<PreparedMutation, MutationPreparationError>>;
 }
 
 export interface LocalSkillsProcessOptions {
+  readonly binding?: {
+    readonly generation: number;
+    readonly harness: string;
+    readonly targetId: string;
+  };
   readonly clock: () => Date;
   readonly environment?: Readonly<Record<string, string | undefined>>;
+  readonly id?: () => string;
   readonly platform: NodeJS.Platform;
   readonly runner: ProcessRunner;
   readonly windowsNpxCommand?: WindowsNpxCommand;
@@ -69,10 +161,18 @@ export interface WindowsNpxCommand {
   readonly npxCliPath: string;
 }
 
-function processBoundaryError(message: string) {
-  const error = new Error(message);
-  error.name = "ProcessBoundaryError";
-  return error;
+function processBoundaryError(
+  message: string,
+  disposition: ProcessBoundaryError["disposition"] = "failed",
+  started = false,
+  termination: ProcessBoundaryError["termination"] = "known",
+) {
+  return new ProcessBoundaryError(
+    message,
+    disposition,
+    started,
+    termination,
+  );
 }
 
 export async function resolveWindowsNpxCommand(
@@ -139,9 +239,9 @@ export function createSpawnProcessRunner(
       });
     });
   const boundedWindowsTreeKill = (pid: number) =>
-    new Promise<Error | undefined>((resolve) => {
+    new Promise<ProcessBoundaryError | undefined>((resolve) => {
       let finished = false;
-      const finish = (error: Error | undefined) => {
+      const finish = (error: ProcessBoundaryError | undefined) => {
         if (finished) return;
         finished = true;
         clearTimeout(timer);
@@ -152,6 +252,9 @@ export function createSpawnProcessRunner(
           finish(
             processBoundaryError(
               "Process tree termination could not be confirmed.",
+              "failed",
+              true,
+              "unknown",
             ),
           ),
         windowsTreeTerminationTimeoutMs,
@@ -162,6 +265,9 @@ export function createSpawnProcessRunner(
           finish(
             processBoundaryError(
               "Process tree termination could not be confirmed.",
+              "failed",
+              true,
+              "unknown",
             ),
           ),
       );
@@ -173,6 +279,7 @@ export function createSpawnProcessRunner(
         return Promise.reject(
           processBoundaryError(
             "Process invocation was cancelled before spawn.",
+            "cancelled",
           ),
         );
       }
@@ -191,7 +298,7 @@ export function createSpawnProcessRunner(
         const stderr: Buffer[] = [];
         let stdoutBytes = 0;
         let stderrBytes = 0;
-        let boundaryFailure: Error | undefined;
+        let boundaryFailure: ProcessBoundaryError | undefined;
         let closeTimer: NodeJS.Timeout | undefined;
         let forceTimer: NodeJS.Timeout | undefined;
         let settled = false;
@@ -229,6 +336,11 @@ export function createSpawnProcessRunner(
               rejectOnce(
                 processBoundaryError(
                   "Process did not close after termination was requested.",
+                  invocation.signal.aborted
+                    ? "cancelled"
+                    : (boundaryFailure?.disposition ?? "failed"),
+                  true,
+                  "unknown",
                 ),
               ),
             milliseconds,
@@ -244,7 +356,16 @@ export function createSpawnProcessRunner(
               process.kill(-child.pid, signal);
             }
           } catch (error) {
-            if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+            if ((error as NodeJS.ErrnoException).code !== "ESRCH") {
+              return processBoundaryError(
+                "Process tree termination could not be confirmed.",
+                invocation.signal.aborted
+                  ? "cancelled"
+                  : (boundaryFailure?.disposition ?? "failed"),
+                true,
+                "unknown",
+              );
+            }
           }
         };
 
@@ -265,7 +386,11 @@ export function createSpawnProcessRunner(
               rejectOnce(terminationFailure);
             });
           } else {
-            signalTree("SIGKILL");
+            const terminationFailure = signalTree("SIGKILL");
+            if (terminationFailure !== undefined) {
+              rejectOnce(terminationFailure);
+              return;
+            }
             expectCloseWithin(cancellationGraceMs);
           }
         };
@@ -274,7 +399,11 @@ export function createSpawnProcessRunner(
           if (options.platform === "win32") {
             forceTree();
           } else {
-            signalTree("SIGTERM");
+            const terminationFailure = signalTree("SIGTERM");
+            if (terminationFailure !== undefined) {
+              forceTree();
+              return;
+            }
             forceTimer ??= setTimeout(forceTree, cancellationGraceMs);
             forceTimer.unref();
           }
@@ -286,6 +415,8 @@ export function createSpawnProcessRunner(
         timeout = setTimeout(() => {
           boundaryFailure = processBoundaryError(
             "Process invocation exceeded its time limit.",
+            "timed-out",
+            true,
           );
           terminateTree();
         }, invocation.timeoutMs);
@@ -304,6 +435,8 @@ export function createSpawnProcessRunner(
           ) {
             boundaryFailure = processBoundaryError(
               "Process output exceeded its byte limit.",
+              "failed",
+              true,
             );
             terminateTree();
             return;
@@ -322,6 +455,8 @@ export function createSpawnProcessRunner(
             (error as NodeJS.ErrnoException).code === "ENOENT"
               ? "Process executable is unavailable."
               : "Process invocation could not start.",
+            "failed",
+            false,
           );
         });
         child.once("close", (exitCode) => {
@@ -344,7 +479,11 @@ export function createSpawnProcessRunner(
 }
 
 function observationFailure(
-  code: "cancelled" | "cli_incompatible" | "process_failed",
+  code:
+    | "cancelled"
+    | "cli_incompatible"
+    | "mutation_conflict"
+    | "process_failed",
   message: string,
   phase: "observe" | "version",
   retryable: boolean,
@@ -353,6 +492,129 @@ function observationFailure(
     error: { code, effects: "none", message, phase, retryable },
     ok: false,
   };
+}
+
+function preparationFailure(
+  code: MutationPreparationError["code"],
+  message: string,
+): Result<never, MutationPreparationError> {
+  return {
+    error: {
+      code,
+      effects: "none",
+      message,
+      phase: "prepare",
+      retryable: code === "stale_inventory",
+    },
+    ok: false,
+  };
+}
+
+function executionFailure(
+  code: MutationExecutionError["code"],
+  message: string,
+): Result<never, MutationExecutionError> {
+  return {
+    error: {
+      code,
+      effects: "none",
+      message,
+      phase: "execute",
+      retryable: code === "mutation_conflict",
+    },
+    ok: false,
+  };
+}
+
+function operationFor(intent: MutationIntent): CommandPlan["operation"] {
+  return intent.type === "update-all" ? "update" : intent.type;
+}
+
+function scopeFlag(
+  scope: MutationIntent["scope"],
+  operation: CommandPlan["operation"],
+) {
+  if (scope === "global") return "--global";
+  return operation === "update" ? "--project" : undefined;
+}
+
+function executableArguments(
+  intent: Exclude<MutationIntent, { readonly type: "update-all" }>,
+  harness: string,
+): readonly string[] {
+  const flag = scopeFlag(intent.scope, intent.type);
+  if (intent.type === "add") {
+    return [
+      "add",
+      intent.source.source,
+      "--skill",
+      ...intent.names,
+      "--agent",
+      harness.toLowerCase(),
+      ...(flag === undefined ? [] : [flag]),
+      "--yes",
+    ];
+  }
+  if (intent.type === "remove") {
+    return [
+      "remove",
+      ...intent.names,
+      "--agent",
+      harness.toLowerCase(),
+      ...(flag === undefined ? [] : [flag]),
+      "--yes",
+    ];
+  }
+  return [
+    "update",
+    ...intent.names,
+    ...(flag === undefined ? [] : [flag]),
+    "--yes",
+  ];
+}
+
+function explanatoryPreview(args: readonly string[]) {
+  return [`npx skills@${CLI_VERSION}`, ...args].join(" ");
+}
+
+function observedEffects(
+  intent: Exclude<MutationIntent, { readonly type: "update-all" }>,
+  inventory: Inventory,
+  harness: string,
+): MutationOutcome["effects"] {
+  const matches = (name: string) =>
+    inventory.entries.find(
+      (entry) => entry.name === name && entry.scope === intent.scope,
+    );
+  if (intent.type === "remove") {
+    return {
+      status: intent.names.every(
+        (name) => !matches(name)?.agents.includes(harness),
+      )
+        ? "verified"
+        : "not-observed",
+    };
+  }
+  if (intent.type === "add") {
+    return {
+      status: intent.names.every((name) => {
+        const entry = matches(name);
+        return (
+          entry?.agents.includes(harness) === true &&
+          entry.declaredSource.sourceType === intent.source.sourceType &&
+          entry.declaredSource.source === intent.source.source
+        );
+      })
+        ? "verified"
+        : "not-observed",
+    };
+  }
+  if (
+    intent.names.some((name) => !matches(name)?.agents.includes(harness))
+  ) {
+    return { status: "not-observed" };
+  }
+  return { status: "content-unverified" };
 }
 
 function allowedEnvironment(
@@ -401,8 +663,21 @@ export function createLocalSkillsProcess(
         )
       : Promise.resolve({ executable: "npx", npxCliPath: undefined });
   let dialectVerification: Promise<Result<void, ObservationError>> | undefined;
+  const privatePlans = new Map<
+    string,
+    {
+      readonly args: readonly string[];
+      readonly intent: Exclude<MutationIntent, { readonly type: "update-all" }>;
+      readonly prepared: PreparedMutation;
+    }
+  >();
+  let activeOperation: "mutation" | "observation" | undefined;
 
-  const invoke = async (args: readonly string[], signal: AbortSignal) => {
+  const invoke = async (
+    args: readonly string[],
+    signal: AbortSignal,
+    timeoutMs = OBSERVATION_TIMEOUT_MS,
+  ) => {
     const resolved = await command;
     return options.runner.run({
       args: [
@@ -417,7 +692,7 @@ export function createLocalSkillsProcess(
       maxOutputBytes: MAX_CLI_OUTPUT_BYTES,
       shell: false,
       signal,
-      timeoutMs: OBSERVATION_TIMEOUT_MS,
+      timeoutMs,
       windowsHide: true,
     });
   };
@@ -490,8 +765,22 @@ export function createLocalSkillsProcess(
     return result;
   };
 
-  return {
-    async observeInventory({ signal }) {
+  const observeInventory = async (
+    { signal }: { readonly signal: AbortSignal },
+    ownsCriticalSection = false,
+  ): Promise<Result<Inventory, ObservationError>> => {
+    if (!ownsCriticalSection) {
+      if (activeOperation !== undefined) {
+        return observationFailure(
+          "mutation_conflict",
+          "Another operation is active for this Target.",
+          "observe",
+          true,
+        );
+      }
+      activeOperation = "observation";
+    }
+    try {
       if (signal.aborted) {
         return observationFailure(
           "cancelled",
@@ -556,6 +845,234 @@ export function createLocalSkillsProcess(
               true,
             );
       }
+    } finally {
+      if (!ownsCriticalSection && activeOperation === "observation") {
+        activeOperation = undefined;
+      }
+    }
+  };
+
+  return {
+    async executeConfirmed({ confirmation, signal }) {
+      const privatePlan = privatePlans.get(confirmation.preparedMutationId);
+      if (privatePlan === undefined) {
+        return executionFailure(
+          "confirmation_invalid",
+          "The Prepared Mutation is unavailable or has already been used.",
+        );
+      }
+      privatePlans.delete(confirmation.preparedMutationId);
+      if (privatePlan.prepared.digest !== confirmation.digest) {
+        return executionFailure(
+          "confirmation_invalid",
+          "The mutation confirmation does not match the Prepared Mutation.",
+        );
+      }
+      if (options.clock().getTime() >= Date.parse(privatePlan.prepared.expiresAt)) {
+        return executionFailure(
+          "confirmation_expired",
+          "The Prepared Mutation has expired.",
+        );
+      }
+      if (activeOperation !== undefined) {
+        return executionFailure(
+          "mutation_conflict",
+          "Another operation is active for this Target.",
+        );
+      }
+      activeOperation = "mutation";
+
+      try {
+        let processOutcome: MutationOutcome["process"];
+        if (signal.aborted) {
+          processOutcome = {
+            disposition: "cancelled",
+            exitCode: null,
+            termination: "known",
+          };
+        } else {
+          try {
+            const outcome = await invoke(
+              privatePlan.args,
+              signal,
+              privatePlan.prepared.commandPlan.timeoutMs,
+            );
+            processOutcome = {
+              disposition: signal.aborted
+                ? "cancelled"
+                : outcome.exitCode === 0
+                  ? "completed"
+                  : "failed",
+              exitCode: outcome.exitCode,
+              termination: "known",
+            };
+          } catch (error) {
+            const boundary =
+              error instanceof ProcessBoundaryError ? error : undefined;
+            processOutcome = {
+              disposition:
+                signal.aborted
+                  ? "cancelled"
+                  : (boundary?.disposition ?? "failed"),
+              exitCode: null,
+              termination: boundary?.termination ?? "unknown",
+            };
+            if (processOutcome.termination === "unknown") {
+              return {
+                ok: true,
+                value: {
+                  effects: {
+                    status:
+                      boundary?.started === false ? "not-observed" : "possible",
+                  },
+                  inventory: null,
+                  preparedMutationId: privatePlan.prepared.id,
+                  process: processOutcome,
+                },
+              };
+            }
+          }
+        }
+
+        const postflight = await observeInventory(
+          { signal: new AbortController().signal },
+          true,
+        );
+        if (!postflight.ok) {
+          return {
+            ok: true,
+            value: {
+              effects: { status: "possible" },
+              inventory: null,
+              preparedMutationId: privatePlan.prepared.id,
+              process: processOutcome,
+            },
+          };
+        }
+        return {
+          ok: true,
+          value: {
+            effects: observedEffects(
+              privatePlan.intent,
+              postflight.value,
+              options.binding?.harness ?? "",
+            ),
+            inventory: postflight.value,
+            preparedMutationId: privatePlan.prepared.id,
+            process: processOutcome,
+          },
+        };
+      } finally {
+        if (activeOperation === "mutation") activeOperation = undefined;
+      }
+    },
+    observeInventory,
+    async prepareMutation(input) {
+      if (options.binding === undefined) {
+        return preparationFailure(
+          "mutation_ineligible",
+          "This Skills Process is not bound to a Target.",
+        );
+      }
+      if (
+        input.freshness !== "fresh" ||
+        typeof input.inventoryId !== "string" ||
+        input.inventoryId.length === 0 ||
+        input.inventoryId.length > 256
+      ) {
+        return preparationFailure(
+          "stale_inventory",
+          "A Fresh Inventory is required to prepare a mutation.",
+        );
+      }
+      const parsedIntent = mutationIntentSchema.safeParse(input.intent);
+      if (!parsedIntent.success) {
+        return preparationFailure(
+          "invalid_intent",
+          "The mutation intent is not supported.",
+        );
+      }
+
+      const matchingEntries = input.inventory.entries.filter(
+        (entry) =>
+          entry.scope === parsedIntent.data.scope &&
+          entry.agents.includes(options.binding!.harness),
+      );
+      const expandedIntent: Exclude<
+        MutationIntent,
+        { readonly type: "update-all" }
+      > =
+        parsedIntent.data.type === "update-all"
+          ? {
+              names: matchingEntries.map(({ name }) => name),
+              scope: parsedIntent.data.scope,
+              type: "update",
+            }
+          : parsedIntent.data;
+      if (expandedIntent.names.length === 0) {
+        return preparationFailure(
+          "mutation_ineligible",
+          "No matching Skills are eligible for this mutation.",
+        );
+      }
+      if (
+        expandedIntent.type !== "add" &&
+        expandedIntent.names.some(
+          (name) => !matchingEntries.some((entry) => entry.name === name),
+        )
+      ) {
+        return preparationFailure(
+          "mutation_ineligible",
+          "The selected Skills are not present in the Fresh Inventory.",
+        );
+      }
+
+      const args = executableArguments(expandedIntent, options.binding.harness);
+      const operation = operationFor(expandedIntent);
+      const commandPlan: CommandPlan = {
+        harness: options.binding.harness,
+        names: [...expandedIntent.names],
+        operation,
+        preview: explanatoryPreview(args),
+        schemaVersion: 1,
+        scope: expandedIntent.scope,
+        source:
+          expandedIntent.type === "add"
+            ? { ...expandedIntent.source }
+            : null,
+        targetId: options.binding.targetId,
+        timeoutMs: operation === "remove" ? REMOVE_TIMEOUT_MS : WRITE_TIMEOUT_MS,
+      };
+      const id = options.id?.() ?? createHash("sha256")
+        .update(`${options.clock().toISOString()}\0${input.inventoryId}\0${commandPlan.preview}`)
+        .digest("hex");
+      const expiresAt = new Date(
+        options.clock().getTime() + PREPARED_MUTATION_TTL_MS,
+      ).toISOString();
+      const digest = createHash("sha256")
+        .update(
+          JSON.stringify({
+            commandPlan,
+            expiresAt,
+            id,
+            inventoryId: input.inventoryId,
+            targetGeneration: options.binding.generation,
+            targetId: options.binding.targetId,
+          }),
+        )
+        .digest("hex");
+      const prepared: PreparedMutation = {
+        commandPlan,
+        digest,
+        expiresAt,
+        id,
+        inventoryId: input.inventoryId,
+        targetGeneration: options.binding.generation,
+        targetId: options.binding.targetId,
+      };
+      privatePlans.clear();
+      privatePlans.set(id, { args, intent: expandedIntent, prepared });
+      return { ok: true, value: structuredClone(prepared) };
     },
   };
 }

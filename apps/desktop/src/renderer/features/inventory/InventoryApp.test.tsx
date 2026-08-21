@@ -41,6 +41,14 @@ const snapshot: WorkspaceSnapshot = {
     persistenceWarning: null,
     phase: "ready",
   },
+  mutation: {
+    activeOperationId: null,
+    commandPlan: null,
+    lastError: null,
+    outcome: null,
+    phase: "idle",
+    reconciliationDeadline: null,
+  },
   schemaVersion: 1,
   sessionEpoch: "epoch-1",
   stateRevision: 1,
@@ -62,8 +70,20 @@ function clientFor(value: WorkspaceSnapshot): WorkspaceBridge {
     async getSnapshot() {
       return { ok: true, value };
     },
+    async prepareMutation() {
+      return { ok: true, value: { operationId: "prepared-1" } };
+    },
+    async reconcileMutation() {
+      return { ok: true, value: { operationId: "reconcile-1" } };
+    },
     async refreshInventory() {
       return { ok: true, value: { operationId: "refresh-1" } };
+    },
+    async requestCancellationReview() {
+      return { ok: true, value: { operationId: "cancel-review-1" } };
+    },
+    async requestReview() {
+      return { ok: true, value: { operationId: "review-1" } };
     },
     subscribe() {
       return () => undefined;
@@ -360,5 +380,99 @@ describe("Local Target Inventory shell", () => {
     });
     expect(within(inspector).getByText("Global")).toBeInTheDocument();
     expect(within(inspector).getByText("global/source")).toBeInTheDocument();
+  });
+
+  it("prepares exact selected-skill intents and requests review of the main-owned plan", async () => {
+    const prepareMutation = vi.fn(async () => ({
+      ok: true as const,
+      value: { operationId: "prepared-1" },
+    }));
+    const requestReview = vi.fn(async () => ({
+      ok: true as const,
+      value: { operationId: "review-1" },
+    }));
+    const client: WorkspaceBridge = {
+      ...clientFor({
+        ...snapshot,
+        mutation: {
+          activeOperationId: null,
+          commandPlan: {
+            harness: "Codex",
+            names: ["Case-Sensitive-Skill"],
+            operation: "update",
+            preview:
+              "npx skills@1.5.23 update Case-Sensitive-Skill --project --yes",
+            schemaVersion: 1,
+            scope: "project",
+            source: null,
+            targetId: "local-target",
+            timeoutMs: 600_000,
+          },
+          lastError: null,
+          outcome: null,
+          phase: "planned",
+          reconciliationDeadline: null,
+        },
+      }),
+      prepareMutation,
+      requestReview,
+    };
+    render(<InventoryApp client={client} />);
+
+    fireEvent.click(
+      (await screen.findAllByRole("button", {
+        name: "Case-Sensitive-Skill",
+      }))[0]!,
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Prepare update" }),
+    );
+    await waitFor(() =>
+      expect(prepareMutation).toHaveBeenCalledWith("local-target", {
+        names: ["Case-Sensitive-Skill"],
+        scope: "project",
+        type: "update",
+      }),
+    );
+
+    expect(screen.getByRole("heading", { name: "Command Plan" })).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "npx skills@1.5.23 update Case-Sensitive-Skill --project --yes",
+      ),
+    ).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open Trusted Review" }),
+    );
+    await waitFor(() =>
+      expect(requestReview).toHaveBeenCalledWith("prepared-1"),
+    );
+  });
+
+  it("shows bounded mutation request errors at the action surface", async () => {
+    const client: WorkspaceBridge = {
+      ...clientFor(snapshot),
+      async prepareMutation() {
+        return {
+          error: {
+            code: "invalid_intent",
+            effects: "none",
+            message: "The exact Skill intent is not supported.",
+            phase: "prepare",
+            retryable: false,
+          },
+          ok: false,
+        };
+      },
+    };
+    render(<InventoryApp client={client} />);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Prepare removal" }),
+    );
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "The exact Skill intent is not supported.",
+    );
   });
 });

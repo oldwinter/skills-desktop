@@ -10,11 +10,14 @@ import {
   LibraryBig,
   ListFilter,
   MonitorCog,
+  PackagePlus,
   RefreshCw,
   Search,
   Server,
   Settings2,
+  ShieldCheck,
   Square,
+  Trash2,
 } from "lucide-react";
 
 import type {
@@ -178,6 +181,11 @@ export function InventoryApp({ client }: { readonly client: WorkspaceBridge }) {
   const [query, setQuery] = useState("");
   const [scope, setScope] = useState<ScopeFilter>("all");
   const [selectedIdentity, setSelectedIdentity] = useState<SelectedIdentity>();
+  const [preparedMutationId, setPreparedMutationId] = useState<string>();
+  const [actionError, setActionError] = useState<RendererError>();
+  const [addName, setAddName] = useState("");
+  const [addSource, setAddSource] = useState("");
+  const [addScope, setAddScope] = useState<"global" | "project">("project");
 
   useEffect(() => {
     let active = true;
@@ -296,6 +304,61 @@ export function InventoryApp({ client }: { readonly client: WorkspaceBridge }) {
   const globalCount = snapshot.inventory.entries.length - projectCount;
   const isFiltered = query.trim() !== "" || scope !== "all";
   const activeOperationId = snapshot.inventory.activeOperationId;
+  const mutationBlocked =
+    snapshot.inventory.freshness !== "fresh" ||
+    snapshot.mutation.phase === "reconciliation-required" ||
+    snapshot.mutation.phase === "running";
+  const prepareSelected = async (type: "remove" | "update") => {
+    if (selected === undefined) return;
+    const result = await client.prepareMutation(snapshot.target.id, {
+      names: [selected.name],
+      scope: selected.scope,
+      type,
+    });
+    if (result.ok) {
+      setActionError(undefined);
+      setPreparedMutationId(result.value.operationId);
+    } else setActionError(result.error);
+  };
+  const prepareUpdateAll = async () => {
+    if (scope === "all") return;
+    const result = await client.prepareMutation(snapshot.target.id, {
+      scope,
+      type: "update-all",
+    });
+    if (result.ok) {
+      setActionError(undefined);
+      setPreparedMutationId(result.value.operationId);
+    } else setActionError(result.error);
+  };
+  const prepareAdd = async () => {
+    const result = await client.prepareMutation(snapshot.target.id, {
+      names: [addName],
+      scope: addScope,
+      source: { source: addSource, sourceType: "github" },
+      type: "add",
+    });
+    if (result.ok) {
+      setActionError(undefined);
+      setPreparedMutationId(result.value.operationId);
+    } else setActionError(result.error);
+  };
+  const requestReview = async () => {
+    if (preparedMutationId === undefined) return;
+    const result = await client.requestReview(preparedMutationId);
+    if (result.ok) setActionError(undefined);
+    else setActionError(result.error);
+  };
+  const reconcileMutation = async () => {
+    const result = await client.reconcileMutation(snapshot.target.id);
+    if (result.ok) setActionError(undefined);
+    else setActionError(result.error);
+  };
+  const requestCancellationReview = async (operationId: string) => {
+    const result = await client.requestCancellationReview(operationId);
+    if (result.ok) setActionError(undefined);
+    else setActionError(result.error);
+  };
 
   return (
     <div className="app-shell">
@@ -441,6 +504,53 @@ export function InventoryApp({ client }: { readonly client: WorkspaceBridge }) {
           </section>
 
           <InventoryStatus snapshot={snapshot} />
+          {snapshot.mutation.phase === "reconciliation-required" ? (
+            <div className="state-banner state-banner--danger" role="alert">
+              <AlertCircle aria-hidden="true" size={16} />
+              <span>
+                {snapshot.mutation.lastError?.message ??
+                  "This Target requires reconciliation."}
+              </span>
+              <button
+                className="text-button"
+                onClick={() => void reconcileMutation()}
+                type="button"
+              >
+                <RefreshCw aria-hidden="true" size={15} />
+                Reconcile
+              </button>
+            </div>
+          ) : snapshot.mutation.phase === "running" ? (
+            <div className="state-banner state-banner--loading" role="status">
+              <RefreshCw aria-hidden="true" className="spin" size={16} />
+              <span>Applying confirmed mutation</span>
+              {snapshot.mutation.activeOperationId !== null ? (
+                <button
+                  className="text-button"
+                  onClick={() =>
+                    void requestCancellationReview(
+                      snapshot.mutation.activeOperationId!,
+                    )
+                  }
+                  type="button"
+                >
+                  <ShieldCheck aria-hidden="true" size={15} />
+                  Review cancellation
+                </button>
+              ) : null}
+            </div>
+          ) : snapshot.mutation.lastError !== null ? (
+            <div className="state-banner state-banner--danger" role="alert">
+              <AlertCircle aria-hidden="true" size={16} />
+              <span>{snapshot.mutation.lastError.message}</span>
+            </div>
+          ) : null}
+          {actionError !== undefined ? (
+            <div className="state-banner state-banner--danger" role="alert">
+              <AlertCircle aria-hidden="true" size={16} />
+              <span>{actionError.message}</span>
+            </div>
+          ) : null}
 
           <div className="inventory-toolbar">
             <label className="search-control">
@@ -467,6 +577,15 @@ export function InventoryApp({ client }: { readonly client: WorkspaceBridge }) {
                 </button>
               ))}
             </div>
+            <button
+              className="text-button"
+              disabled={scope === "all" || mutationBlocked}
+              onClick={() => void prepareUpdateAll()}
+              type="button"
+            >
+              <RefreshCw aria-hidden="true" size={15} />
+              Update scope
+            </button>
           </div>
 
           <div className="inventory-table-wrap">
@@ -600,8 +719,116 @@ export function InventoryApp({ client }: { readonly client: WorkspaceBridge }) {
                   </dd>
                 </div>
               </dl>
+              <div className="inspector-actions">
+                <button
+                  className="text-button"
+                  disabled={mutationBlocked}
+                  onClick={() => void prepareSelected("update")}
+                  type="button"
+                >
+                  <RefreshCw aria-hidden="true" size={15} />
+                  Prepare update
+                </button>
+                <button
+                  className="text-button text-button--danger"
+                  disabled={mutationBlocked}
+                  onClick={() => void prepareSelected("remove")}
+                  type="button"
+                >
+                  <Trash2 aria-hidden="true" size={15} />
+                  Prepare removal
+                </button>
+              </div>
             </>
           )}
+
+          <form
+            className="add-skill-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void prepareAdd();
+            }}
+          >
+            <h2>Add Skill</h2>
+            <label>
+              <span>GitHub source</span>
+              <input
+                onChange={(event) => setAddSource(event.currentTarget.value)}
+                placeholder="owner/repository"
+                required
+                value={addSource}
+              />
+            </label>
+            <label>
+              <span>Exact skill name</span>
+              <input
+                onChange={(event) => setAddName(event.currentTarget.value)}
+                required
+                value={addName}
+              />
+            </label>
+            <div className="segmented-control segmented-control--compact" aria-label="Add scope">
+              {(["project", "global"] as const).map((value) => (
+                <button
+                  aria-pressed={addScope === value}
+                  key={value}
+                  onClick={() => setAddScope(value)}
+                  type="button"
+                >
+                  {scopeLabel(value)} scope
+                </button>
+              ))}
+            </div>
+            <button className="text-button" disabled={mutationBlocked} type="submit">
+              <PackagePlus aria-hidden="true" size={15} />
+              Prepare add
+            </button>
+          </form>
+
+          {snapshot.mutation.commandPlan !== null ? (
+            <section className="command-plan" aria-labelledby="command-plan-heading">
+              <header>
+                <ShieldCheck aria-hidden="true" size={17} />
+                <h2 id="command-plan-heading">Command Plan</h2>
+              </header>
+              <dl>
+                <div>
+                  <dt>Operation</dt>
+                  <dd>{snapshot.mutation.commandPlan.operation}</dd>
+                </div>
+                <div>
+                  <dt>Scope</dt>
+                  <dd>{scopeLabel(snapshot.mutation.commandPlan.scope)}</dd>
+                </div>
+                <div>
+                  <dt>Skills</dt>
+                  <dd>{snapshot.mutation.commandPlan.names.join(", ")}</dd>
+                </div>
+              </dl>
+              <code className="command-preview wrapping-value">
+                {snapshot.mutation.commandPlan.preview}
+              </code>
+              {snapshot.mutation.outcome === null ? (
+                <button
+                  className="text-button text-button--primary"
+                  disabled={
+                    preparedMutationId === undefined ||
+                    snapshot.mutation.phase !== "planned"
+                  }
+                  onClick={() => void requestReview()}
+                  type="button"
+                >
+                  <ShieldCheck aria-hidden="true" size={15} />
+                  Open Trusted Review
+                </button>
+              ) : (
+                <p className="mutation-outcome" role="status">
+                  {snapshot.mutation.outcome.process.disposition} /{" "}
+                  {snapshot.mutation.outcome.effects.status}
+                </p>
+              )}
+            </section>
+          ) : null}
         </aside>
       </div>
     </div>

@@ -28,6 +28,36 @@ const MIME_TYPES: Readonly<Record<string, string>> = {
 export const WORKSPACE_URL = "skills-desktop://workspace/index.html";
 export const REVIEW_URL = "skills-desktop://review/index.html";
 
+export function reviewWindowOptions(
+  preload: string,
+  isPackaged: boolean,
+  parent?: BrowserWindow,
+): BrowserWindowConstructorOptions {
+  return {
+    autoHideMenuBar: true,
+    backgroundColor: "#f5f6f7",
+    height: 560,
+    minHeight: 480,
+    minWidth: 360,
+    modal: parent !== undefined,
+    parent,
+    resizable: true,
+    show: false,
+    title: "Trusted Review",
+    webPreferences: {
+      contextIsolation: true,
+      devTools: !isPackaged,
+      nodeIntegration: false,
+      preload,
+      sandbox: true,
+      spellcheck: false,
+      webSecurity: true,
+      webviewTag: false,
+    },
+    width: 520,
+  };
+}
+
 export function workspaceWindowOptions(
   preload: string,
   isPackaged: boolean,

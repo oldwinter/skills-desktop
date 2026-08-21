@@ -13,11 +13,12 @@ import { delimiter, join } from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
-import { CLI_PACKAGE } from "@skills-desktop/skills-runtime";
+import { CLI_PACKAGE, CLI_VERSION } from "@skills-desktop/skills-runtime";
 
 import {
   createLocalSkillsProcess,
   createSpawnProcessRunner,
+  ProcessBoundaryError,
   resolveWindowsNpxCommand,
   type ProcessInvocation,
   type ProcessRunner,
@@ -293,9 +294,13 @@ describe("Local SkillsProcess inventory contract", () => {
 
     controller.abort();
 
-    await expect(pending).rejects.toThrow(
-      "Process tree termination could not be confirmed",
-    );
+    const failure = await pending.catch((error: unknown) => error);
+    expect(failure).toMatchObject({
+      disposition: "failed",
+      message: "Process tree termination could not be confirmed.",
+      started: true,
+      termination: "unknown",
+    });
   });
 
   it("returns cancellation without publishing either partial list", async () => {
@@ -567,6 +572,564 @@ setInterval(() => undefined, 1000);
         }
         await rm(directory, { force: true, recursive: true });
       }
+    },
+  );
+});
+
+describe("Local SkillsProcess mutation contract", () => {
+  it("expands update-all from Fresh Inventory into a bound review-only Command Plan", async () => {
+    const runner = scriptedRunner();
+    const skillsProcess = createLocalSkillsProcess({
+      binding: {
+        generation: 3,
+        harness: "Codex",
+        targetId: "local-target",
+      },
+      clock: () => new Date("2026-08-21T10:00:00.000Z"),
+      id: () => "prepared-1",
+      platform: "linux",
+      runner,
+      workspace: "/workspace",
+    });
+    const observed = await skillsProcess.observeInventory({
+      signal: new AbortController().signal,
+    });
+    if (!observed.ok) throw new Error("fixture observation failed");
+
+    const prepared = await skillsProcess.prepareMutation({
+      freshness: "fresh",
+      intent: { scope: "global", type: "update-all" },
+      inventory: observed.value,
+      inventoryId: "inventory-7",
+    });
+
+    expect(prepared).toMatchObject({
+      ok: true,
+      value: {
+        commandPlan: {
+          harness: "Codex",
+          names: ["global-skill"],
+          operation: "update",
+          preview:
+            "npx skills@1.5.23 update global-skill --global --yes",
+          schemaVersion: 1,
+          scope: "global",
+          targetId: "local-target",
+          timeoutMs: 600_000,
+        },
+        expiresAt: "2026-08-21T10:10:00.000Z",
+        id: "prepared-1",
+        inventoryId: "inventory-7",
+        targetGeneration: 3,
+        targetId: "local-target",
+      },
+    });
+    expect(prepared.ok && prepared.value.digest).toMatch(/^[a-f0-9]{64}$/);
+    expect(runner.invocations).toHaveLength(3);
+  });
+
+  it("executes a confirmed private plan once and verifies removal through atomic postflight", async () => {
+    const invocations: ProcessInvocation[] = [];
+    let removed = false;
+    const runner: ProcessRunner = {
+      async run(invocation) {
+        invocations.push(invocation);
+        const packageIndex = invocation.args.indexOf(CLI_PACKAGE);
+        const operation = invocation.args.slice(packageIndex + 1).join(" ");
+        if (operation === "--version") {
+          return { exitCode: 0, stderr: "", stdout: "1.5.23\n" };
+        }
+        if (
+          operation ===
+          "remove project-skill --agent codex --yes"
+        ) {
+          removed = true;
+          return { exitCode: 0, stderr: "", stdout: "removed" };
+        }
+        if (operation === "list --json") {
+          return {
+            exitCode: 0,
+            stderr: "",
+            stdout: removed ? "[]" : projectOutput,
+          };
+        }
+        if (operation === "list --global --json") {
+          return { exitCode: 0, stderr: "", stdout: globalOutput };
+        }
+        throw new Error(`Unexpected scripted invocation: ${operation}`);
+      },
+    };
+    const skillsProcess = createLocalSkillsProcess({
+      binding: {
+        generation: 3,
+        harness: "Codex",
+        targetId: "local-target",
+      },
+      clock: () => new Date("2026-08-21T10:00:00.000Z"),
+      id: () => "prepared-remove",
+      platform: "linux",
+      runner,
+      workspace: "/workspace",
+    });
+    const observed = await skillsProcess.observeInventory({
+      signal: new AbortController().signal,
+    });
+    if (!observed.ok) throw new Error("fixture observation failed");
+    const prepared = await skillsProcess.prepareMutation({
+      freshness: "fresh",
+      intent: {
+        names: ["project-skill"],
+        scope: "project",
+        type: "remove",
+      },
+      inventory: observed.value,
+      inventoryId: "inventory-7",
+    });
+    if (!prepared.ok) throw new Error("fixture preparation failed");
+
+    const executed = await skillsProcess.executeConfirmed({
+      confirmation: {
+        digest: prepared.value.digest,
+        preparedMutationId: prepared.value.id,
+      },
+      signal: new AbortController().signal,
+    });
+
+    expect(executed).toMatchObject({
+      ok: true,
+      value: {
+        effects: { status: "verified" },
+        inventory: {
+          entries: [{ name: "global-skill", scope: "global" }],
+        },
+        preparedMutationId: "prepared-remove",
+        process: {
+          disposition: "completed",
+          exitCode: 0,
+          termination: "known",
+        },
+      },
+    });
+    expect(
+      invocations.map(({ args, shell, timeoutMs }) => ({
+        args,
+        shell,
+        timeoutMs,
+      })),
+    ).toEqual([
+      {
+        args: ["--yes", CLI_PACKAGE, "--version"],
+        shell: false,
+        timeoutMs: 60_000,
+      },
+      {
+        args: ["--yes", CLI_PACKAGE, "list", "--json"],
+        shell: false,
+        timeoutMs: 60_000,
+      },
+      {
+        args: ["--yes", CLI_PACKAGE, "list", "--global", "--json"],
+        shell: false,
+        timeoutMs: 60_000,
+      },
+      {
+        args: [
+          "--yes",
+          CLI_PACKAGE,
+          "remove",
+          "project-skill",
+          "--agent",
+          "codex",
+          "--yes",
+        ],
+        shell: false,
+        timeoutMs: 120_000,
+      },
+      {
+        args: ["--yes", CLI_PACKAGE, "list", "--json"],
+        shell: false,
+        timeoutMs: 60_000,
+      },
+      {
+        args: ["--yes", CLI_PACKAGE, "list", "--global", "--json"],
+        shell: false,
+        timeoutMs: 60_000,
+      },
+    ]);
+    await expect(
+      skillsProcess.executeConfirmed({
+        confirmation: {
+          digest: prepared.value.digest,
+          preparedMutationId: prepared.value.id,
+        },
+        signal: new AbortController().signal,
+      }),
+    ).resolves.toMatchObject({
+      error: { code: "confirmation_invalid" },
+      ok: false,
+    });
+    expect(invocations).toHaveLength(6);
+  });
+
+  it("proves no mutation spawn and still establishes postflight evidence when already cancelled", async () => {
+    const runner = scriptedRunner();
+    const skillsProcess = createLocalSkillsProcess({
+      binding: {
+        generation: 3,
+        harness: "Codex",
+        targetId: "local-target",
+      },
+      clock: () => new Date("2026-08-21T10:00:00.000Z"),
+      id: () => "prepared-cancelled",
+      platform: "linux",
+      runner,
+      workspace: "/workspace",
+    });
+    const observed = await skillsProcess.observeInventory({
+      signal: new AbortController().signal,
+    });
+    if (!observed.ok) throw new Error("fixture observation failed");
+    const prepared = await skillsProcess.prepareMutation({
+      freshness: "fresh",
+      intent: {
+        names: ["project-skill"],
+        scope: "project",
+        type: "remove",
+      },
+      inventory: observed.value,
+      inventoryId: "inventory-7",
+    });
+    if (!prepared.ok) throw new Error("fixture preparation failed");
+    const controller = new AbortController();
+    controller.abort();
+
+    const executed = await skillsProcess.executeConfirmed({
+      confirmation: {
+        digest: prepared.value.digest,
+        preparedMutationId: prepared.value.id,
+      },
+      signal: controller.signal,
+    });
+
+    expect(executed).toMatchObject({
+      ok: true,
+      value: {
+        effects: { status: "not-observed" },
+        inventory: { entries: expect.any(Array) },
+        process: {
+          disposition: "cancelled",
+          exitCode: null,
+          termination: "known",
+        },
+      },
+    });
+    expect(
+      runner.invocations.some(({ args }) => args.includes("remove")),
+    ).toBe(false);
+  });
+
+  it("runs postflight after known timeout but not after uncertain termination", async () => {
+    for (const termination of ["known", "unknown"] as const) {
+      let listInvocations = 0;
+      const runner: ProcessRunner = {
+        async run(invocation) {
+          const packageIndex = invocation.args.indexOf(CLI_PACKAGE);
+          const operation = invocation.args.slice(packageIndex + 1).join(" ");
+          if (operation === "remove project-skill --agent codex --yes") {
+            throw new ProcessBoundaryError(
+              "bounded failure",
+              "timed-out",
+              true,
+              termination,
+            );
+          }
+          if (operation === "--version") {
+            return { exitCode: 0, stderr: "", stdout: "1.5.23\n" };
+          }
+          listInvocations += 1;
+          return {
+            exitCode: 0,
+            stderr: "",
+            stdout:
+              operation === "list --global --json"
+                ? globalOutput
+                : projectOutput,
+          };
+        },
+      };
+      const skillsProcess = createLocalSkillsProcess({
+        binding: {
+          generation: 3,
+          harness: "Codex",
+          targetId: "local-target",
+        },
+        clock: () => new Date("2026-08-21T10:00:00.000Z"),
+        id: () => `prepared-${termination}`,
+        platform: "linux",
+        runner,
+        workspace: "/workspace",
+      });
+      const observed = await skillsProcess.observeInventory({
+        signal: new AbortController().signal,
+      });
+      if (!observed.ok) throw new Error("fixture observation failed");
+      const prepared = await skillsProcess.prepareMutation({
+        freshness: "fresh",
+        intent: {
+          names: ["project-skill"],
+          scope: "project",
+          type: "remove",
+        },
+        inventory: observed.value,
+        inventoryId: "inventory-7",
+      });
+      if (!prepared.ok) throw new Error("fixture preparation failed");
+
+      const executed = await skillsProcess.executeConfirmed({
+        confirmation: {
+          digest: prepared.value.digest,
+          preparedMutationId: prepared.value.id,
+        },
+        signal: new AbortController().signal,
+      });
+
+      expect(executed).toMatchObject({
+        ok: true,
+        value: {
+          inventory:
+            termination === "known" ? { entries: expect.any(Array) } : null,
+          process: { disposition: "timed-out", termination },
+        },
+      });
+      expect(listInvocations).toBe(termination === "known" ? 4 : 2);
+    }
+  });
+
+  it("fails a concurrent operation instead of queueing or spawning it", async () => {
+    let releaseMutation!: () => void;
+    let markStarted!: () => void;
+    const mutationStarted = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    const mutationReleased = new Promise<void>((resolve) => {
+      releaseMutation = resolve;
+    });
+    let mutationInvocations = 0;
+    const runner: ProcessRunner = {
+      async run(invocation) {
+        const packageIndex = invocation.args.indexOf(CLI_PACKAGE);
+        const operation = invocation.args.slice(packageIndex + 1).join(" ");
+        if (operation.startsWith("remove ")) {
+          mutationInvocations += 1;
+          markStarted();
+          await mutationReleased;
+          return { exitCode: 0, stderr: "", stdout: "removed" };
+        }
+        if (operation === "--version") {
+          return { exitCode: 0, stderr: "", stdout: "1.5.23\n" };
+        }
+        return {
+          exitCode: 0,
+          stderr: "",
+          stdout:
+            operation === "list --global --json" ? globalOutput : "[]",
+        };
+      },
+    };
+    let nextId = 0;
+    const skillsProcess = createLocalSkillsProcess({
+      binding: {
+        generation: 3,
+        harness: "Codex",
+        targetId: "local-target",
+      },
+      clock: () => new Date("2026-08-21T10:00:00.000Z"),
+      id: () => `prepared-${++nextId}`,
+      platform: "linux",
+      runner,
+      workspace: "/workspace",
+    });
+    const inventory = {
+      cliVersion: CLI_VERSION,
+      entries: JSON.parse(projectOutput),
+      observedAt: "2026-08-21T10:00:00.000Z",
+      schemaVersion: 1 as const,
+    };
+    const first = await skillsProcess.prepareMutation({
+      freshness: "fresh",
+      intent: { names: ["project-skill"], scope: "project", type: "remove" },
+      inventory,
+      inventoryId: "inventory-7",
+    });
+    if (!first.ok) throw new Error("fixture preparation failed");
+    const pending = skillsProcess.executeConfirmed({
+      confirmation: {
+        digest: first.value.digest,
+        preparedMutationId: first.value.id,
+      },
+      signal: new AbortController().signal,
+    });
+    await mutationStarted;
+    const second = await skillsProcess.prepareMutation({
+      freshness: "fresh",
+      intent: { names: ["project-skill"], scope: "project", type: "remove" },
+      inventory,
+      inventoryId: "inventory-7",
+    });
+    if (!second.ok) throw new Error("fixture preparation failed");
+
+    expect(
+      await skillsProcess.executeConfirmed({
+        confirmation: {
+          digest: second.value.digest,
+          preparedMutationId: second.value.id,
+        },
+        signal: new AbortController().signal,
+      }),
+    ).toMatchObject({ error: { code: "mutation_conflict" }, ok: false });
+    expect(
+      await skillsProcess.observeInventory({
+        signal: new AbortController().signal,
+      }),
+    ).toMatchObject({ error: { code: "mutation_conflict" }, ok: false });
+    expect(mutationInvocations).toBe(1);
+
+    releaseMutation();
+    await pending;
+  });
+
+  it("invalidates a superseded private plan before either can spawn", async () => {
+    const runner = scriptedRunner();
+    let nextId = 0;
+    const skillsProcess = createLocalSkillsProcess({
+      binding: {
+        generation: 3,
+        harness: "Codex",
+        targetId: "local-target",
+      },
+      clock: () => new Date("2026-08-21T10:00:00.000Z"),
+      id: () => `prepared-${++nextId}`,
+      platform: "linux",
+      runner,
+      workspace: "/workspace",
+    });
+    const observed = await skillsProcess.observeInventory({
+      signal: new AbortController().signal,
+    });
+    if (!observed.ok) throw new Error("fixture observation failed");
+    const prepare = () =>
+      skillsProcess.prepareMutation({
+        freshness: "fresh",
+        intent: {
+          names: ["project-skill"],
+          scope: "project",
+          type: "remove",
+        },
+        inventory: observed.value,
+        inventoryId: "inventory-7",
+      });
+    const first = await prepare();
+    const second = await prepare();
+    if (!first.ok || !second.ok) throw new Error("fixture preparation failed");
+
+    expect(
+      await skillsProcess.executeConfirmed({
+        confirmation: {
+          digest: first.value.digest,
+          preparedMutationId: first.value.id,
+        },
+        signal: new AbortController().signal,
+      }),
+    ).toMatchObject({ error: { code: "confirmation_invalid" }, ok: false });
+    expect(
+      runner.invocations.some(({ args }) => args.includes("remove")),
+    ).toBe(false);
+  });
+
+  it.each([
+    {
+      expectedArgs: [
+        "add",
+        "example/skills",
+        "--skill",
+        "new-skill",
+        "--agent",
+        "codex",
+        "--global",
+        "--yes",
+      ],
+      intent: {
+        names: ["new-skill"],
+        scope: "global" as const,
+        source: { source: "example/skills", sourceType: "github" as const },
+        type: "add" as const,
+      },
+    },
+    {
+      expectedArgs: ["update", "project-skill", "--project", "--yes"],
+      intent: {
+        names: ["project-skill"],
+        scope: "project" as const,
+        type: "update" as const,
+      },
+    },
+  ])(
+    "derives the private $intent.type argv from the same normalized intent as its public plan",
+    async ({ expectedArgs, intent }) => {
+      const runner = scriptedRunner();
+      const originalRun = runner.run.bind(runner);
+      runner.run = async (invocation) => {
+        const packageIndex = invocation.args.indexOf(CLI_PACKAGE);
+        const operationArgs = invocation.args.slice(packageIndex + 1);
+        if (operationArgs[0] === intent.type) {
+          runner.invocations.push(invocation);
+          return { exitCode: 0, stderr: "", stdout: "changed" };
+        }
+        return originalRun(invocation);
+      };
+      const skillsProcess = createLocalSkillsProcess({
+        binding: {
+          generation: 3,
+          harness: "Codex",
+          targetId: "local-target",
+        },
+        clock: () => new Date("2026-08-21T10:00:00.000Z"),
+        id: () => `prepared-${intent.type}`,
+        platform: "linux",
+        runner,
+        workspace: "/workspace",
+      });
+      const observed = await skillsProcess.observeInventory({
+        signal: new AbortController().signal,
+      });
+      if (!observed.ok) throw new Error("fixture observation failed");
+      const prepared = await skillsProcess.prepareMutation({
+        freshness: "fresh",
+        intent,
+        inventory: observed.value,
+        inventoryId: "inventory-7",
+      });
+      if (!prepared.ok) throw new Error("fixture preparation failed");
+
+      await skillsProcess.executeConfirmed({
+        confirmation: {
+          digest: prepared.value.digest,
+          preparedMutationId: prepared.value.id,
+        },
+        signal: new AbortController().signal,
+      });
+
+      const mutationInvocation = runner.invocations.find(({ args }) =>
+        args.includes(intent.type),
+      );
+      expect(mutationInvocation).toMatchObject({
+        args: ["--yes", CLI_PACKAGE, ...expectedArgs],
+        shell: false,
+        timeoutMs: 600_000,
+      });
+      expect(prepared.value.commandPlan.preview).toBe(
+        [`npx skills@${CLI_VERSION}`, ...expectedArgs].join(" "),
+      );
     },
   );
 });

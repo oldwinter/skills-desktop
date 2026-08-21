@@ -89,5 +89,42 @@ describe("Electron IPC sender authorization", () => {
       type: "inventory.refresh",
       version: 1,
     });
+
+    const reviewMainFrame = { url: "skills-desktop://review/index.html" };
+    const reviewContents = {
+      id: 18,
+      isDestroyed: () => false,
+      mainFrame: reviewMainFrame,
+      send: vi.fn(),
+    };
+    registration.attach(
+      reviewContents as never,
+      "review",
+      reviewMainFrame.url,
+      "review-1",
+    );
+    const reviewEvent = {
+      sender: reviewContents,
+      senderFrame: reviewMainFrame,
+    };
+
+    await expect(
+      handlers.get("review:decision:approve")!(authorizedEvent as never),
+    ).resolves.toMatchObject({ error: { code: "unauthorized" }, ok: false });
+    await expect(
+      handlers.get("workspace:mutation:prepare")!(
+        reviewEvent as never,
+        "local-target",
+        { names: ["tdd"], scope: "project", type: "remove" },
+      ),
+    ).resolves.toMatchObject({ error: { code: "unauthorized" }, ok: false });
+    await expect(
+      handlers.get("review:decision:reject")!(reviewEvent as never),
+    ).resolves.toMatchObject({ error: { code: "invalid_request" }, ok: false });
+    expect(session.request).toHaveBeenLastCalledWith({
+      decision: "reject",
+      type: "review.decide",
+      version: 1,
+    });
   });
 });

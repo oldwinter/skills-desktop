@@ -18,8 +18,11 @@ import type {
 } from "@skills-desktop/skills-runtime";
 
 const STORE_NAME = "inventorySnapshots" as const;
+const GUARD_STORE_NAME = "mutationGuards" as const;
 const DOCUMENT_NAME = "inventory-snapshots.json";
+const GUARD_DOCUMENT_NAME = "mutation-guards.json";
 const CURRENT_SCHEMA_VERSION = 2 as const;
+const CURRENT_GUARD_SCHEMA_VERSION = 1 as const;
 
 const persistedEntrySchema = z
   .object({
@@ -83,6 +86,25 @@ const legacyDocumentSchema = z
   })
   .strict();
 
+const mutationGuardSchema = z
+  .object({
+    deadline: z.string().datetime({ offset: true }),
+    effects: z.enum(["none", "possible"]),
+    generation: z.number().int().positive(),
+    operationId: z.string().min(1).max(256),
+    phase: z.enum(["executing", "reconciliation-required"]),
+    targetId: z.string().min(1).max(256),
+  })
+  .strict();
+
+const guardDocumentSchema = z
+  .object({
+    guards: z.array(mutationGuardSchema).max(1_000),
+    kind: z.literal("mutation-guards"),
+    schemaVersion: z.literal(CURRENT_GUARD_SCHEMA_VERSION),
+  })
+  .strict();
+
 export type PersistedInventoryEntry = z.infer<typeof persistedEntrySchema>;
 
 export interface InventorySnapshot {
@@ -95,20 +117,36 @@ export interface InventorySnapshot {
 
 export interface RecoveryFailure {
   readonly code: "corrupt_store" | "migration_failed" | "unsupported_schema";
-  readonly store: typeof STORE_NAME;
+  readonly store: typeof GUARD_STORE_NAME | typeof STORE_NAME;
+}
+
+export interface MutationGuard {
+  readonly deadline: string;
+  readonly effects: "none" | "possible";
+  readonly generation: number;
+  readonly operationId: string;
+  readonly phase: "executing" | "reconciliation-required";
+  readonly targetId: string;
 }
 
 export interface RestoredRecoveryRecords {
   readonly failures: readonly RecoveryFailure[];
   readonly inventorySnapshots: readonly InventorySnapshot[];
+  readonly mutationGuards: readonly MutationGuard[];
 }
 
-export type DurableChange = {
-  readonly generation: number;
-  readonly inventory: Inventory;
-  readonly targetId: string;
-  readonly type: "inventory.replace";
-};
+export type DurableChange =
+  | {
+      readonly generation: number;
+      readonly inventory: Inventory;
+      readonly targetId: string;
+      readonly type: "inventory.replace";
+    }
+  | ({ readonly type: "guard.put" } & MutationGuard)
+  | {
+      readonly targetId: string;
+      readonly type: "guard.clear";
+    };
 
 export type RecoveryCommitError = PublicError<
   "persist_failed" | "unsupported_schema"
@@ -186,8 +224,11 @@ export function createNodeRecoveryFileSystem(): RecoveryFileSystem {
 }
 
 type CurrentDocument = z.infer<typeof currentDocumentSchema>;
+type GuardDocument = z.infer<typeof guardDocumentSchema>;
 
-function allowlistSnapshot(change: DurableChange): InventorySnapshot {
+function allowlistSnapshot(
+  change: Extract<DurableChange, { readonly type: "inventory.replace" }>,
+): InventorySnapshot {
   return {
     cliVersion: change.inventory.cliVersion,
     entries: change.inventory.entries.map((entry) => ({
@@ -230,15 +271,39 @@ function replaceSnapshot(
 
 export function createMemoryRecoveryRecords(
   initialSnapshots: readonly InventorySnapshot[] = [],
+  initialGuards: readonly MutationGuard[] = [],
 ): RecoveryRecords {
   let snapshots = [...initialSnapshots];
+  let mutationGuards = [...initialGuards];
   return {
     async commit(change) {
-      snapshots = replaceSnapshot(snapshots, allowlistSnapshot(change));
+      if (change.type === "inventory.replace") {
+        snapshots = replaceSnapshot(snapshots, allowlistSnapshot(change));
+      } else if (change.type === "guard.put") {
+        mutationGuards = [
+          ...mutationGuards.filter(({ targetId }) => targetId !== change.targetId),
+          {
+            deadline: change.deadline,
+            effects: change.effects,
+            generation: change.generation,
+            operationId: change.operationId,
+            phase: change.phase,
+            targetId: change.targetId,
+          },
+        ];
+      } else {
+        mutationGuards = mutationGuards.filter(
+          ({ targetId }) => targetId !== change.targetId,
+        );
+      }
       return { ok: true, value: undefined };
     },
     async restore() {
-      return { failures: [], inventorySnapshots: structuredClone(snapshots) };
+      return {
+        failures: [],
+        inventorySnapshots: structuredClone(snapshots),
+        mutationGuards: structuredClone(mutationGuards),
+      };
     },
   };
 }
@@ -268,6 +333,7 @@ export function createJsonRecoveryRecords(
   options: JsonRecoveryRecordsOptions,
 ): RecoveryRecords {
   const documentPath = join(options.directory, DOCUMENT_NAME);
+  const guardDocumentPath = join(options.directory, GUARD_DOCUMENT_NAME);
   const fileSystem = options.fileSystem ?? createNodeRecoveryFileSystem();
   let document: CurrentDocument = {
     kind: "inventory-snapshots",
@@ -275,6 +341,15 @@ export function createJsonRecoveryRecords(
     snapshots: [],
   };
   let failures: RecoveryFailure[] = [];
+  let guardDocument: GuardDocument = {
+    guards: [],
+    kind: "mutation-guards",
+    schemaVersion: CURRENT_GUARD_SCHEMA_VERSION,
+  };
+  let guardFailures: RecoveryFailure[] = [];
+  let guardsLoaded = false;
+  let guardUnsupportedSchema = false;
+  let guardWriteBlocked = false;
   let loaded = false;
   let unsupportedSchema = false;
   let writeBlocked = false;
@@ -289,11 +364,15 @@ export function createJsonRecoveryRecords(
     return result;
   };
 
-  const writeDocument = async (nextDocument: CurrentDocument) => {
+  const writeDocument = async (
+    nextDocument: CurrentDocument | GuardDocument,
+    name = DOCUMENT_NAME,
+    destinationPath = documentPath,
+  ) => {
     await fileSystem.mkdir(options.directory, { recursive: true, mode: 0o700 });
     const temporaryPath = join(
       options.directory,
-      `.${DOCUMENT_NAME}.${options.id()}.tmp`,
+      `.${name}.${options.id()}.tmp`,
     );
     let ownsTemporary = false;
     try {
@@ -308,7 +387,7 @@ export function createJsonRecoveryRecords(
         await handle.close();
       }
 
-      await fileSystem.rename(temporaryPath, documentPath);
+      await fileSystem.rename(temporaryPath, destinationPath);
       ownsTemporary = false;
       if ((options.platform ?? process.platform) !== "win32") {
         const directoryHandle = await fileSystem.open(options.directory, "r");
@@ -406,9 +485,132 @@ export function createJsonRecoveryRecords(
     }
   };
 
+  const quarantineGuards = async () => {
+    const quarantinePath = join(
+      options.directory,
+      `mutation-guards.quarantine-${options.id()}.json`,
+    );
+    await fileSystem.rename(guardDocumentPath, quarantinePath);
+  };
+
+  const loadGuards = async () => {
+    if (guardsLoaded) return;
+    guardsLoaded = true;
+    guardFailures = [];
+
+    let raw: string;
+    try {
+      raw = await fileSystem.readFile(guardDocumentPath, "utf8");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+      guardWriteBlocked = true;
+      guardFailures = [
+        { code: "corrupt_store", store: GUARD_STORE_NAME },
+      ];
+      return;
+    }
+
+    let decoded: unknown;
+    try {
+      decoded = JSON.parse(raw);
+    } catch {
+      const quarantined = await quarantineGuards().then(
+        () => true,
+        () => false,
+      );
+      guardWriteBlocked = !quarantined;
+      guardFailures = [
+        { code: "corrupt_store", store: GUARD_STORE_NAME },
+      ];
+      return;
+    }
+
+    if (
+      typeof decoded === "object" &&
+      decoded !== null &&
+      "schemaVersion" in decoded &&
+      typeof decoded.schemaVersion === "number" &&
+      decoded.schemaVersion > CURRENT_GUARD_SCHEMA_VERSION
+    ) {
+      guardUnsupportedSchema = true;
+      guardFailures = [
+        { code: "unsupported_schema", store: GUARD_STORE_NAME },
+      ];
+      return;
+    }
+
+    const parsed = guardDocumentSchema.safeParse(decoded);
+    if (!parsed.success) {
+      const quarantined = await quarantineGuards().then(
+        () => true,
+        () => false,
+      );
+      guardWriteBlocked = !quarantined;
+      guardFailures = [
+        { code: "corrupt_store", store: GUARD_STORE_NAME },
+      ];
+      return;
+    }
+    guardDocument = parsed.data;
+  };
+
   return {
     commit(change) {
       return underApplicationLock(async () => {
+        if (change.type !== "inventory.replace") {
+          await loadGuards();
+          if (guardUnsupportedSchema) {
+            return commitFailure(
+              "unsupported_schema",
+              "Mutation Guard data was written by a newer unsupported application version.",
+            );
+          }
+          if (guardWriteBlocked) {
+            return commitFailure(
+              "persist_failed",
+              "Mutation Guard data could not be read safely and will not be overwritten.",
+            );
+          }
+          const guards =
+            change.type === "guard.put"
+              ? [
+                  ...guardDocument.guards.filter(
+                    ({ targetId }) => targetId !== change.targetId,
+                  ),
+                  {
+                    deadline: change.deadline,
+                    effects: change.effects,
+                    generation: change.generation,
+                    operationId: change.operationId,
+                    phase: change.phase,
+                    targetId: change.targetId,
+                  },
+                ]
+              : guardDocument.guards.filter(
+                  ({ targetId }) => targetId !== change.targetId,
+                );
+          const nextGuardDocument: GuardDocument = {
+            guards,
+            kind: "mutation-guards",
+            schemaVersion: CURRENT_GUARD_SCHEMA_VERSION,
+          };
+          try {
+            await writeDocument(
+              nextGuardDocument,
+              GUARD_DOCUMENT_NAME,
+              guardDocumentPath,
+            );
+            guardDocument = nextGuardDocument;
+            guardFailures = [];
+            return { ok: true, value: undefined };
+          } catch {
+            return commitFailure(
+              "persist_failed",
+              "The Mutation Guard could not be saved.",
+            );
+          }
+        }
+
         await load();
         if (unsupportedSchema) {
           return commitFailure(
@@ -447,9 +649,11 @@ export function createJsonRecoveryRecords(
     restore() {
       return underApplicationLock(async () => {
         await load();
+        await loadGuards();
         return {
-          failures: structuredClone(failures),
+          failures: structuredClone([...failures, ...guardFailures]),
           inventorySnapshots: structuredClone(document.snapshots),
+          mutationGuards: structuredClone(guardDocument.guards),
         };
       });
     },

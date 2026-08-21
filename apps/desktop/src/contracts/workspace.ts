@@ -1,16 +1,28 @@
 import { z } from "zod";
 
+import { mutationIntentSchema } from "@skills-desktop/skills-runtime";
+
 export const rendererErrorCodeSchema = z.enum([
   "cancelled",
   "cli_incompatible",
   "conflicting_inventory_entry",
   "duplicate_inventory_entry",
   "internal_error",
+  "confirmation_expired",
+  "confirmation_invalid",
   "invalid_inventory",
+  "invalid_intent",
   "invalid_request",
   "inventory_too_large",
+  "mutation_conflict",
+  "mutation_ineligible",
   "persist_failed",
   "process_failed",
+  "reconciliation_required",
+  "reconciliation_wait",
+  "review_expired",
+  "review_invalid",
+  "stale_inventory",
   "target_not_found",
   "target_unavailable",
   "unauthorized",
@@ -71,10 +83,77 @@ export const publicInventoryStateSchema = z
   })
   .strict();
 
+export const commandPlanSchema = z
+  .object({
+    harness: z.string().min(1).max(128),
+    names: z.array(z.string().min(1).max(256)).min(1).max(128),
+    operation: z.enum(["add", "remove", "update"]),
+    preview: z.string().min(1).max(16_384),
+    schemaVersion: z.literal(1),
+    scope: z.enum(["global", "project"]),
+    source: z
+      .object({
+        source: z.string().min(1).max(256),
+        sourceType: z.literal("github"),
+      })
+      .strict()
+      .nullable(),
+    targetId: z.string().min(1).max(256),
+    timeoutMs: z.number().int().positive().max(600_000),
+  })
+  .strict();
+
+export const publicMutationOutcomeSchema = z
+  .object({
+    effects: z
+      .object({
+        status: z.enum([
+          "content-unverified",
+          "not-observed",
+          "possible",
+          "verified",
+        ]),
+      })
+      .strict(),
+    process: z
+      .object({
+        disposition: z.enum([
+          "cancelled",
+          "completed",
+          "failed",
+          "timed-out",
+        ]),
+        exitCode: z.number().int().nullable(),
+        termination: z.enum(["known", "unknown"]),
+      })
+      .strict(),
+  })
+  .strict();
+
+export const publicMutationStateSchema = z
+  .object({
+    activeOperationId: z.string().min(1).max(256).nullable(),
+    commandPlan: commandPlanSchema.nullable(),
+    lastError: rendererErrorSchema.nullable(),
+    outcome: publicMutationOutcomeSchema.nullable(),
+    phase: z.enum([
+      "failed",
+      "idle",
+      "planned",
+      "reconciliation-required",
+      "reviewing",
+      "running",
+      "succeeded",
+    ]),
+    reconciliationDeadline: z.string().datetime({ offset: true }).nullable(),
+  })
+  .strict();
+
 export const workspaceSnapshotSchema = z
   .object({
     eventSequence: z.number().int().nonnegative(),
     inventory: publicInventoryStateSchema,
+    mutation: publicMutationStateSchema,
     schemaVersion: z.literal(1),
     sessionEpoch: z.string().min(1).max(256),
     stateRevision: z.number().int().nonnegative(),
@@ -128,9 +207,46 @@ export const cancelRequestSchema = z
   })
   .strict();
 
+export const prepareMutationRequestSchema = z
+  .object({
+    intent: mutationIntentSchema,
+    targetId: z.string().min(1).max(256),
+    type: z.literal("mutation.prepare"),
+    version: z.literal(1),
+  })
+  .strict();
+
+export const requestReviewSchema = z
+  .object({
+    preparedMutationId: z.string().min(1).max(256),
+    type: z.literal("review.request"),
+    version: z.literal(1),
+  })
+  .strict();
+
+export const requestCancellationReviewSchema = z
+  .object({
+    operationId: z.string().min(1).max(256),
+    type: z.literal("review.cancel-request"),
+    version: z.literal(1),
+  })
+  .strict();
+
+export const reconcileMutationRequestSchema = z
+  .object({
+    targetId: z.string().min(1).max(256),
+    type: z.literal("mutation.reconcile"),
+    version: z.literal(1),
+  })
+  .strict();
+
 export const workspaceRequestSchema = z.discriminatedUnion("type", [
   refreshRequestSchema,
   cancelRequestSchema,
+  prepareMutationRequestSchema,
+  requestReviewSchema,
+  requestCancellationReviewSchema,
+  reconcileMutationRequestSchema,
 ]);
 
 export const workspaceRequestResultSchema = z.discriminatedUnion("ok", [
@@ -144,8 +260,10 @@ export const workspaceRequestResultSchema = z.discriminatedUnion("ok", [
 ]);
 
 export type DesktopEvent = z.infer<typeof desktopEventSchema>;
+export type MutationIntent = z.infer<typeof mutationIntentSchema>;
 export type PublicInventoryEntry = z.infer<typeof publicInventoryEntrySchema>;
 export type PublicInventoryState = z.infer<typeof publicInventoryStateSchema>;
+export type PublicMutationState = z.infer<typeof publicMutationStateSchema>;
 export type RendererError = z.infer<typeof rendererErrorSchema>;
 export type TargetDefinition = z.infer<typeof targetDefinitionSchema>;
 export type WorkspaceRequest = z.infer<typeof workspaceRequestSchema>;
@@ -160,6 +278,13 @@ export type WorkspaceSnapshotResult = z.infer<
 export interface WorkspaceBridge {
   cancelInventory(operationId: string): Promise<WorkspaceRequestResult>;
   getSnapshot(): Promise<WorkspaceSnapshotResult>;
+  prepareMutation(
+    targetId: string,
+    intent: MutationIntent,
+  ): Promise<WorkspaceRequestResult>;
+  reconcileMutation(targetId: string): Promise<WorkspaceRequestResult>;
   refreshInventory(targetId: string): Promise<WorkspaceRequestResult>;
+  requestCancellationReview(operationId: string): Promise<WorkspaceRequestResult>;
+  requestReview(preparedMutationId: string): Promise<WorkspaceRequestResult>;
   subscribe(listener: (event: DesktopEvent) => void): () => void;
 }

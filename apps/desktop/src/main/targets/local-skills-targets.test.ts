@@ -4,6 +4,30 @@ import type { SkillsProcess } from "../adapters/local-skills-process.js";
 import { createLocalSkillsTargets } from "./local-skills-targets.js";
 
 const process: SkillsProcess = {
+  async executeConfirmed() {
+    return {
+      error: {
+        code: "confirmation_invalid",
+        effects: "none",
+        message: "Not used by this contract.",
+        phase: "execute",
+        retryable: false,
+      },
+      ok: false,
+    };
+  },
+  async prepareMutation() {
+    return {
+      error: {
+        code: "mutation_ineligible",
+        effects: "none",
+        message: "Not used by this contract.",
+        phase: "prepare",
+        retryable: false,
+      },
+      ok: false,
+    };
+  },
   async observeInventory() {
     return {
       error: {

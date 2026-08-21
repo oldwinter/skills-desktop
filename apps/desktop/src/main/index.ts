@@ -6,6 +6,8 @@ import { app, BrowserWindow, ipcMain, protocol } from "electron";
 
 import {
   registerAssetProtocol,
+  reviewWindowOptions,
+  REVIEW_URL,
   secureWindow,
   workspaceWindowOptions,
   WORKSPACE_URL,
@@ -29,11 +31,17 @@ if (!app.requestSingleInstanceLock()) {
 } else {
   const currentDirectory = dirname(fileURLToPath(import.meta.url));
   let workspaceWindow: BrowserWindow | undefined;
+  let reviewWindow: BrowserWindow | undefined;
 
   void app
     .whenReady()
     .then(async () => {
-      const { capabilities } = await createCompositionRoot();
+      let presentReview = (_reviewId: string) => undefined;
+      const { capabilities } = await createCompositionRoot({
+        onReviewRequested(reviewId) {
+          presentReview(reviewId);
+        },
+      });
       registerAssetProtocol(protocol, {
         review: resolve(currentDirectory, "../review-renderer"),
         workspace: resolve(currentDirectory, "../renderer"),
@@ -68,6 +76,38 @@ if (!app.requestSingleInstanceLock()) {
         });
         void window.loadURL(WORKSPACE_URL);
         workspaceWindow = window;
+      };
+
+      presentReview = (reviewId) => {
+        if (reviewWindow !== undefined) reviewWindow.close();
+        const window = new BrowserWindow(
+          reviewWindowOptions(
+            resolve(currentDirectory, "../preload/review.cjs"),
+            app.isPackaged,
+            workspaceWindow,
+          ),
+        );
+        secureWindow(window, REVIEW_URL);
+        window.webContents.on(
+          "did-start-navigation",
+          (_event, _url, _inPlace, isMainFrame) => {
+            if (isMainFrame) {
+              desktopIpc.attach(
+                window.webContents,
+                "review",
+                REVIEW_URL,
+                reviewId,
+              );
+            }
+          },
+        );
+        window.once("ready-to-show", () => window.show());
+        window.once("closed", () => {
+          desktopIpc.detach(window.webContents.id);
+          if (reviewWindow === window) reviewWindow = undefined;
+        });
+        void window.loadURL(REVIEW_URL);
+        reviewWindow = window;
       };
 
       createWorkspaceWindow();
