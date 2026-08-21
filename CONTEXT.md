@@ -15,6 +15,10 @@ installation on an SSH host.
 **Inventory**: The normalized result of a read-only `npx skills list --json`
 invocation for one target. It is a snapshot, not a second source of truth.
 
+**Fresh Inventory**: The latest complete Inventory observed for an unchanged
+Target. It is the only Inventory that may serve as the basis for a Prepared
+Mutation.
+
 **Skill Identity**: A stable, case-sensitive skill name plus its declared
 source. Missing source provenance leaves identity incomplete. A filesystem path
 is evidence, not identity.
@@ -54,8 +58,24 @@ presence, Declared Source, selected-harness availability, Revision, Content
 Fingerprint, and Inventory freshness outcomes rather than collapsing them into
 one status.
 
-**Command Plan**: Structured mutation intent rendered for review before any
-local or remote process is started. Preview strings are not executable input.
+**Mutation Intent**: A structured request to add, remove, or update explicitly
+named skills in an explicit scope. It contains no command text or arbitrary CLI
+options.
+
+**Prepared Mutation**: A validated Mutation Intent bound to one Target and a
+fresh Inventory, paired with a Command Plan for review. It has no execution
+authority.
+
+**Confirmed Mutation**: Single-use authorization for one exact Prepared
+Mutation after its Command Plan is accepted. Any change requires a new
+confirmation.
+
+**Mutation Outcome**: Evidence from attempting a Confirmed Mutation. It keeps
+the process disposition separate from verification of observable effects; a
+zero exit alone is not success.
+
+**Command Plan**: A reviewable description of a Prepared Mutation. Its preview
+strings are explanatory output and never executable input.
 
 **Collection**: Reviewed metadata selecting skills from an existing source for
 one or more targets. It never defines a second installation protocol.
