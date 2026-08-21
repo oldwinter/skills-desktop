@@ -107,8 +107,7 @@ function sshProcess(): SkillsProcess {
       ssh: {
         bindingDigest: "a".repeat(64),
         connectionReference: "build-host",
-        connectionConfig:
-          "Host skills-desktop-frozen-target\n  HostName build.internal\n",
+        connectionConfig: "Host build-host\n  HostName build.internal\n",
         hostKey: { algorithm: "ssh-ed25519", key: "AQIDBA==" },
         hostKeyIdentity: "build.internal",
         hostname: "build.internal",

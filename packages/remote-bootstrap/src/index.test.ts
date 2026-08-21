@@ -8,10 +8,17 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   decodeWireFrames,
   encodeWireFrame,
+  WIRE_FRAME_ENCODER_SOURCE,
+  WIRE_OBSERVATION_REQUEST_VALIDATOR_SOURCE,
+  WIRE_SINGLE_FRAME_DECODER_SOURCE,
   WIRE_PROTOCOL_VERSION,
 } from "@skills-desktop/skills-runtime";
 
-import { describeRemoteBootstrap, REMOTE_BOOTSTRAP_COMMAND } from "./index.js";
+import {
+  describeRemoteBootstrap,
+  REMOTE_BOOTSTRAP_COMMAND,
+  REMOTE_BOOTSTRAP_PROGRAM,
+} from "./index.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -45,6 +52,16 @@ async function runBootstrap(input: Uint8Array, environment: NodeJS.ProcessEnv) {
 }
 
 describe("fixed Remote Bootstrap", () => {
+  it("embeds the shared Wire request validator and frame encoder", () => {
+    expect(REMOTE_BOOTSTRAP_PROGRAM).toContain(
+      WIRE_OBSERVATION_REQUEST_VALIDATOR_SOURCE,
+    );
+    expect(REMOTE_BOOTSTRAP_PROGRAM).toContain(WIRE_FRAME_ENCODER_SOURCE);
+    expect(REMOTE_BOOTSTRAP_PROGRAM).toContain(
+      WIRE_SINGLE_FRAME_DECODER_SOURCE,
+    );
+  });
+
   it.skipIf(process.platform === "win32")(
     "validates one observation and constructs only pinned npx argument arrays",
     async () => {

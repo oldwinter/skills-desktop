@@ -285,7 +285,7 @@ function sshArguments(binding: SshSkillsProcessBinding) {
     "-o",
     `HostKeyAlias=${binding.ssh.hostKeyIdentity}`,
     "--",
-    "skills-desktop-frozen-target",
+    binding.ssh.connectionReference,
     REMOTE_BOOTSTRAP_COMMAND,
   ] as const;
 }

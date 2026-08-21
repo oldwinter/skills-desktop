@@ -10,12 +10,137 @@ export const MAX_WIRE_HARNESS_LENGTH = 128;
 export const MAX_WIRE_REQUEST_ID_LENGTH = 256;
 export const MAX_WIRE_WORKSPACE_LENGTH = 4_096;
 
+export interface WireObservationRequest {
+  readonly harness: string;
+  readonly operation: "observe";
+  readonly protocolVersion: typeof WIRE_PROTOCOL_VERSION;
+  readonly requestId: string;
+  readonly type: "request";
+  readonly workspace: string;
+}
+
+export function validateWireObservationRequest(
+  value: unknown,
+  protocolVersion: number,
+  maxHarnessLength: number,
+  maxRequestIdLength: number,
+  maxWorkspaceLength: number,
+): boolean {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  const keys = Object.keys(value).sort();
+  if (
+    keys.length !== 6 ||
+    keys[0] !== "harness" ||
+    keys[1] !== "operation" ||
+    keys[2] !== "protocolVersion" ||
+    keys[3] !== "requestId" ||
+    keys[4] !== "type" ||
+    keys[5] !== "workspace"
+  ) {
+    return false;
+  }
+  const request = value as Record<string, unknown>;
+  if (
+    request.type !== "request" ||
+    request.operation !== "observe" ||
+    request.protocolVersion !== protocolVersion ||
+    typeof request.harness !== "string" ||
+    request.harness.length === 0 ||
+    request.harness.length > maxHarnessLength ||
+    typeof request.requestId !== "string" ||
+    request.requestId.length === 0 ||
+    request.requestId.length > maxRequestIdLength ||
+    typeof request.workspace !== "string" ||
+    request.workspace.length === 0 ||
+    request.workspace.length > maxWorkspaceLength ||
+    request.workspace.includes("\0") ||
+    !request.workspace.startsWith("/")
+  ) {
+    return false;
+  }
+  if (request.workspace === "/") return true;
+  return !request.workspace
+    .slice(1)
+    .split("/")
+    .some((segment) => segment === "" || segment === "." || segment === "..");
+}
+
+export function isWireObservationRequest(
+  value: unknown,
+): value is WireObservationRequest {
+  return validateWireObservationRequest(
+    value,
+    WIRE_PROTOCOL_VERSION,
+    MAX_WIRE_HARNESS_LENGTH,
+    MAX_WIRE_REQUEST_ID_LENGTH,
+    MAX_WIRE_WORKSPACE_LENGTH,
+  );
+}
+
+export function encodeWireFramePayload(
+  value: unknown,
+  maxFrameBytes: number,
+): Uint8Array {
+  const bytes: number[] = [];
+  for (const character of JSON.stringify(value)) {
+    const codePoint = character.codePointAt(0)!;
+    if (codePoint <= 0x7f) bytes.push(codePoint);
+    else if (codePoint <= 0x7ff) {
+      bytes.push(0xc0 | (codePoint >> 6), 0x80 | (codePoint & 0x3f));
+    } else if (codePoint <= 0xffff) {
+      bytes.push(
+        0xe0 | (codePoint >> 12),
+        0x80 | ((codePoint >> 6) & 0x3f),
+        0x80 | (codePoint & 0x3f),
+      );
+    } else {
+      bytes.push(
+        0xf0 | (codePoint >> 18),
+        0x80 | ((codePoint >> 12) & 0x3f),
+        0x80 | ((codePoint >> 6) & 0x3f),
+        0x80 | (codePoint & 0x3f),
+      );
+    }
+  }
+  const payload = Uint8Array.from(bytes);
+  if (payload.byteLength > maxFrameBytes) {
+    throw new RangeError("Wire frame exceeds its byte limit.");
+  }
+  const framed = new Uint8Array(payload.byteLength + 4);
+  new DataView(framed.buffer).setUint32(0, payload.byteLength, false);
+  framed.set(payload, 4);
+  return framed;
+}
+
+export function decodeSingleWireFramePayload(
+  input: Uint8Array,
+  maxPayloadBytes: number,
+): Uint8Array | undefined {
+  if (input.byteLength < 4) return undefined;
+  const length = new DataView(input.buffer, input.byteOffset, 4).getUint32(
+    0,
+    false,
+  );
+  if (length > maxPayloadBytes || input.byteLength !== length + 4) {
+    return undefined;
+  }
+  return input.subarray(4);
+}
+
+export const WIRE_OBSERVATION_REQUEST_VALIDATOR_SOURCE =
+  validateWireObservationRequest.toString();
+export const WIRE_FRAME_ENCODER_SOURCE = encodeWireFramePayload.toString();
+export const WIRE_SINGLE_FRAME_DECODER_SOURCE =
+  decodeSingleWireFramePayload.toString();
+
 const boundedIdentifier = z.string().min(1).max(MAX_WIRE_REQUEST_ID_LENGTH);
 const baseFrame = {
   protocolVersion: z.literal(WIRE_PROTOCOL_VERSION),
 } as const;
 
-export const wireFrameSchema = z.discriminatedUnion("type", [
+export const wireFrameSchema = z.union([
   z
     .object({
       bootstrapDigest: z.string().regex(/^[a-f0-9]{64}$/),
@@ -23,16 +148,7 @@ export const wireFrameSchema = z.discriminatedUnion("type", [
       type: z.literal("hello"),
     })
     .strict(),
-  z
-    .object({
-      harness: z.string().min(1).max(MAX_WIRE_HARNESS_LENGTH),
-      operation: z.literal("observe"),
-      ...baseFrame,
-      requestId: boundedIdentifier,
-      type: z.literal("request"),
-      workspace: z.string().min(1).max(MAX_WIRE_WORKSPACE_LENGTH),
-    })
-    .strict(),
+  z.custom<WireObservationRequest>(isWireObservationRequest),
   z
     .object({
       cliVersion: z.literal("1.5.23"),
@@ -78,31 +194,6 @@ function wireFailure(
     },
     ok: false,
   };
-}
-
-function encodeUtf8(value: string): Uint8Array {
-  const bytes: number[] = [];
-  for (const character of value) {
-    const codePoint = character.codePointAt(0)!;
-    if (codePoint <= 0x7f) bytes.push(codePoint);
-    else if (codePoint <= 0x7ff) {
-      bytes.push(0xc0 | (codePoint >> 6), 0x80 | (codePoint & 0x3f));
-    } else if (codePoint <= 0xffff) {
-      bytes.push(
-        0xe0 | (codePoint >> 12),
-        0x80 | ((codePoint >> 6) & 0x3f),
-        0x80 | (codePoint & 0x3f),
-      );
-    } else {
-      bytes.push(
-        0xf0 | (codePoint >> 18),
-        0x80 | ((codePoint >> 12) & 0x3f),
-        0x80 | ((codePoint >> 6) & 0x3f),
-        0x80 | (codePoint & 0x3f),
-      );
-    }
-  }
-  return Uint8Array.from(bytes);
 }
 
 function decodeUtf8(input: Uint8Array): string {
@@ -163,14 +254,7 @@ function decodeUtf8(input: Uint8Array): string {
 
 export function encodeWireFrame(frame: WireFrame): Uint8Array {
   const parsed = wireFrameSchema.parse(frame);
-  const payload = encodeUtf8(JSON.stringify(parsed));
-  if (payload.byteLength > MAX_WIRE_FRAME_BYTES) {
-    throw new RangeError("Wire frame exceeds its byte limit.");
-  }
-  const framed = new Uint8Array(payload.byteLength + 4);
-  new DataView(framed.buffer).setUint32(0, payload.byteLength, false);
-  framed.set(payload, 4);
-  return framed;
+  return encodeWireFramePayload(parsed, MAX_WIRE_FRAME_BYTES);
 }
 
 export function decodeWireFrames(

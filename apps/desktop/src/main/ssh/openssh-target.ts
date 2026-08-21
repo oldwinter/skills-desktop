@@ -8,14 +8,15 @@ import { WIRE_PROTOCOL_VERSION } from "@skills-desktop/skills-runtime";
 import { REMOTE_BOOTSTRAP_DIGEST } from "@skills-desktop/remote-bootstrap";
 
 import type { TargetDefinition } from "../targets/skills-targets.js";
+import {
+  type HostPublicKey,
+  parseOpenSshPublicKey,
+} from "./host-public-key.js";
 
 const CONFIG_OUTPUT_LIMIT = 256 * 1024;
 const KEYSCAN_OUTPUT_LIMIT = 1024 * 1024;
 const CHALLENGE_TTL_MS = 5 * 60_000;
-const FROZEN_TARGET_ALIAS = "skills-desktop-frozen-target";
 const MAX_JUMP_HOSTS = 8;
-const openSshKeySchema =
-  /^(?:ssh-(?:ed25519|rsa)|ecdsa-sha2-nistp(?:256|384|521)|rsa-sha2-(?:256|512))$/;
 const quotedConfigurationNames = new Set([
   "certificatefile",
   "identityagent",
@@ -50,10 +51,7 @@ export interface OpenSshToolRunner {
   run(invocation: OpenSshToolInvocation): Promise<OpenSshToolOutcome>;
 }
 
-export interface HostPublicKey {
-  readonly algorithm: string;
-  readonly key: string;
-}
+export type { HostPublicKey } from "./host-public-key.js";
 
 export interface HostTrustStore {
   readonly path: string;
@@ -68,6 +66,7 @@ export interface OpenSshHostKeySource {
     readonly hostKeyIdentity: string;
     readonly hostname: string;
     readonly port: number;
+    readonly user: string;
   }): Promise<OpenSshToolOutcome>;
 }
 
@@ -206,24 +205,7 @@ export function createOpenSshToolRunner(options?: {
 }
 
 function parseKey(value: string): HostPublicKey | undefined {
-  const [algorithm, key, ...extra] = value.trim().split(/\s+/);
-  if (
-    algorithm === undefined ||
-    key === undefined ||
-    extra.length > 0 ||
-    !openSshKeySchema.test(algorithm) ||
-    !/^[A-Za-z0-9+/]+={0,2}$/.test(key)
-  ) {
-    return undefined;
-  }
-  const decoded = Buffer.from(key, "base64");
-  if (
-    decoded.length === 0 ||
-    decoded.toString("base64").replace(/=+$/, "") !== key.replace(/=+$/, "")
-  ) {
-    return undefined;
-  }
-  return { algorithm, key };
+  return parseOpenSshPublicKey(value);
 }
 
 export function createMemoryHostTrustStore(): HostTrustStore {
@@ -252,6 +234,7 @@ export function createOpenSshHostKeyProbe(options: {
       hostKeyIdentity,
       hostname,
       port,
+      user,
     }) {
       await mkdir(options.directory, { recursive: true, mode: 0o700 });
       const capturePath = join(options.directory, `host-key-probe-${id()}`);
@@ -318,6 +301,8 @@ export function createOpenSshHostKeyProbe(options: {
             `HostName=${hostname}`,
             "-o",
             `Port=${port}`,
+            "-o",
+            `User=${user}`,
             "-o",
             `HostKeyAlias=${hostKeyIdentity}`,
             "--",
@@ -466,9 +451,12 @@ export function createOpenSshTargetAccess(options: {
   const challenges = new Map<string, PrivateHostTrustChallenge>();
   const challengeByTarget = new Map<string, string>();
 
-  const freezeConnectionConfig = async (initialOutput: string) => {
+  const freezeConnectionConfig = async (
+    connectionReference: string,
+    initialOutput: string,
+  ) => {
     const blocks = [
-      frozenConfigurationBlock(FROZEN_TARGET_ALIAS, initialOutput, true),
+      frozenConfigurationBlock(connectionReference, initialOutput, true),
     ];
     const pending = [...jumpReferences(initialOutput)];
     const visited = new Set<string>();
@@ -572,7 +560,10 @@ export function createOpenSshTargetAccess(options: {
         : port === 22
           ? resolvedHostname
           : `[${resolvedHostname}]:${port}`;
-    const connectionConfig = await freezeConnectionConfig(configured.stdout);
+    const connectionConfig = await freezeConnectionConfig(
+      connectionReference,
+      configured.stdout,
+    );
     if (connectionConfig === undefined) {
       return accessFailure(
         "ssh_config_invalid",
@@ -594,10 +585,11 @@ export function createOpenSshTargetAccess(options: {
             })
           : await options.hostKeySource.scan({
               connectionConfig,
-              connectionReference: FROZEN_TARGET_ALIAS,
+              connectionReference,
               hostKeyIdentity,
               hostname: resolvedHostname,
               port,
+              user: resolvedUser,
             });
     } catch (error) {
       return accessFailure(

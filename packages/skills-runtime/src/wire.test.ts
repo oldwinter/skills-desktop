@@ -67,6 +67,22 @@ describe("Remote Bootstrap Wire Protocol", () => {
     });
   });
 
+  it.each(["relative/workspace", "/srv/workspace\0suffix"])(
+    "rejects a non-canonical POSIX observation workspace %j",
+    (workspace) => {
+      expect(() =>
+        encodeWireFrame({
+          harness: "Codex",
+          operation: "observe",
+          protocolVersion: WIRE_PROTOCOL_VERSION,
+          requestId: "observe-1",
+          type: "request",
+          workspace,
+        }),
+      ).toThrow();
+    },
+  );
+
   it("refuses to encode an unbounded structured error", () => {
     expect(() =>
       encodeWireFrame({

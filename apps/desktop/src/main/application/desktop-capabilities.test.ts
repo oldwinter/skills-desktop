@@ -1,8 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { Inventory } from "@skills-desktop/skills-runtime";
 
-import { createMemoryRecoveryRecords } from "../persistence/recovery-records.js";
+import {
+  createMemoryRecoveryRecords,
+  type RecoveryRecords,
+} from "../persistence/recovery-records.js";
 import type { SkillsProcess } from "../adapters/local-skills-process.js";
 import { createSkillsTargetsCatalog } from "../targets/local-skills-targets.js";
 import type { OpenSshTargetAccess } from "../ssh/openssh-target.js";
@@ -90,6 +93,164 @@ function targetsWith(
     initialTarget: target,
     processFor: () => process,
   });
+}
+
+const roleSshTarget: TargetDefinition = {
+  connectionReference: "build-host",
+  executionBindingDigest: "a".repeat(64),
+  generation: 2,
+  harness: "Codex",
+  id: "00000000-0000-4000-8000-000000000018",
+  kind: "ssh",
+  label: "Build host",
+  workspace: "/srv/skills",
+  workspaceLabel: "skills",
+};
+
+async function createHostTrustRoleFixture(options?: {
+  readonly commit?: RecoveryRecords["commit"];
+  readonly commitHostTrust?: SkillsTargets["commitHostTrust"];
+}) {
+  let now = new Date("2026-08-22T10:00:00.000Z");
+  let definitions = [roleSshTarget];
+  const challenge = {
+    algorithm: "ssh-ed25519",
+    expiresAt: "2026-08-22T10:05:00.000Z",
+    fingerprint: "SHA256:reviewed-fingerprint",
+    id: "challenge-1",
+    identity: "deploy@resolved.internal:2222",
+    kind: "first-use" as const,
+    targetGeneration: roleSshTarget.generation,
+    targetId: roleSshTarget.id,
+  };
+  const proposedTarget = {
+    ...roleSshTarget,
+    generation: roleSshTarget.generation + 1,
+  };
+  const proposal = {
+    definitions: [proposedTarget],
+    executionChanged: true,
+    target: proposedTarget,
+  };
+  const commitHostTrust = vi.fn(
+    options?.commitHostTrust ??
+      (async () => ({ ok: true as const, value: proposal })),
+  );
+  const replaceDefinitions = vi.fn(
+    (replacement: readonly TargetDefinition[]) => {
+      definitions = [...replacement];
+    },
+  );
+  const skillsTargets: SkillsTargets = {
+    commitHostTrust,
+    get definitions() {
+      return definitions;
+    },
+    legacyIdFor() {
+      return undefined;
+    },
+    async open() {
+      throw new Error("Target opening is not exercised by host-trust review.");
+    },
+    pendingHostTrust(targetId) {
+      return targetId === roleSshTarget.id ? challenge : undefined;
+    },
+    get primaryTarget() {
+      return definitions[0]!;
+    },
+    proposeCreate() {
+      throw new Error("Target creation is not exercised by host-trust review.");
+    },
+    proposeDelete() {
+      throw new Error("Target deletion is not exercised by host-trust review.");
+    },
+    proposeHostTrust(targetId, challengeId) {
+      if (
+        targetId !== roleSshTarget.id ||
+        challengeId !== challenge.id ||
+        definitions[0]?.generation !== challenge.targetGeneration
+      ) {
+        return {
+          error: {
+            code: "host_trust_invalid",
+            effects: "none",
+            message: "The host-trust review no longer matches this Target.",
+            phase: "trust",
+            retryable: false,
+          },
+          ok: false,
+        };
+      }
+      return { ok: true, value: proposal };
+    },
+    proposeUpdate() {
+      throw new Error("Target update is not exercised by host-trust review.");
+    },
+    replaceDefinitions,
+  };
+  const memoryRecords = createMemoryRecoveryRecords();
+  let fixtureReady = false;
+  const commit = vi.fn((change) =>
+    fixtureReady && options?.commit !== undefined
+      ? options.commit(change)
+      : memoryRecords.commit(change),
+  );
+  const capabilities = createDesktopCapabilities({
+    clock: () => now,
+    id: () => "host-trust-review",
+    recoveryRecords: {
+      commit,
+      restore: () => memoryRecords.restore(),
+    },
+    skillsTargets,
+  });
+  await capabilities.initialize();
+  fixtureReady = true;
+  commit.mockClear();
+  commitHostTrust.mockClear();
+  replaceDefinitions.mockClear();
+  const workspace = capabilities.attach(
+    {
+      endpointId: "workspace-host-trust-matrix",
+      role: "workspace",
+      sessionEpoch: "workspace-epoch",
+    },
+    () => undefined,
+  );
+  const requested = await workspace.request({
+    targetId: roleSshTarget.id,
+    type: "host-trust.review",
+    version: 1,
+  });
+  if (!requested.ok) throw new Error("Host-trust review fixture is invalid.");
+  const review = capabilities.attach(
+    {
+      endpointId: "review-host-trust-matrix",
+      reviewId: requested.value.operationId,
+      role: "review",
+      sessionEpoch: "review-epoch",
+    },
+    () => undefined,
+  );
+  const approve = () =>
+    review.request({
+      decision: "approve",
+      type: "review.decide",
+      version: 1,
+    });
+  return {
+    approve,
+    capabilities,
+    challenge,
+    commit,
+    commitHostTrust,
+    replaceDefinitions,
+    review,
+    setNow(value: string) {
+      now = new Date(value);
+    },
+    skillsTargets,
+  };
 }
 
 describe("DesktopCapabilities inventory role-session contract", () => {
@@ -2327,7 +2488,7 @@ describe("DesktopCapabilities SSH host-trust role-session contract", () => {
                 bindingDigest: "a".repeat(64),
                 connectionReference: "build-host",
                 connectionConfig:
-                  "Host skills-desktop-frozen-target\n  HostName resolved.internal\n",
+                  "Host build-host\n  HostName resolved.internal\n",
                 hostKey: { algorithm: "ssh-ed25519", key: "AQIDBA==" },
                 hostKeyIdentity: "[resolved.internal]:2222",
                 hostname: "resolved.internal",
@@ -2490,6 +2651,132 @@ describe("DesktopCapabilities SSH host-trust role-session contract", () => {
         phase: "ready",
       },
     });
+  });
+
+  it("rejects an expired host-trust approval without persistence or trust writes", async () => {
+    const fixture = await createHostTrustRoleFixture();
+    fixture.setNow(fixture.challenge.expiresAt);
+
+    await expect(fixture.approve()).resolves.toMatchObject({
+      error: { code: "host_trust_invalid" },
+      ok: false,
+    });
+    expect(fixture.commit).not.toHaveBeenCalled();
+    expect(fixture.commitHostTrust).not.toHaveBeenCalled();
+    expect(fixture.replaceDefinitions).not.toHaveBeenCalled();
+  });
+
+  it("rejects a drifted Target generation without persistence or trust writes", async () => {
+    const fixture = await createHostTrustRoleFixture();
+    fixture.skillsTargets.replaceDefinitions([
+      { ...roleSshTarget, generation: roleSshTarget.generation + 1 },
+    ]);
+    fixture.replaceDefinitions.mockClear();
+
+    await expect(fixture.approve()).resolves.toMatchObject({
+      error: { code: "host_trust_invalid" },
+      ok: false,
+    });
+    expect(fixture.commit).not.toHaveBeenCalled();
+    expect(fixture.commitHostTrust).not.toHaveBeenCalled();
+    expect(fixture.replaceDefinitions).not.toHaveBeenCalled();
+  });
+
+  it("stops before the trust write and generation transition when persistence fails", async () => {
+    const fixture = await createHostTrustRoleFixture({
+      async commit() {
+        return {
+          error: {
+            code: "persist_failed",
+            effects: "none",
+            message: "Target authority could not be persisted.",
+            phase: "persist",
+            retryable: true,
+          },
+          ok: false,
+        };
+      },
+    });
+
+    await expect(fixture.approve()).resolves.toMatchObject({
+      error: { code: "persist_failed" },
+      ok: false,
+    });
+    expect(fixture.commit).toHaveBeenCalledTimes(1);
+    expect(fixture.commitHostTrust).not.toHaveBeenCalled();
+    expect(fixture.replaceDefinitions).not.toHaveBeenCalled();
+  });
+
+  it("serializes concurrent host-trust approvals", async () => {
+    let releaseCommit!: () => void;
+    let commitStarted!: () => void;
+    const blocked = new Promise<void>((resolve) => {
+      releaseCommit = resolve;
+    });
+    const started = new Promise<void>((resolve) => {
+      commitStarted = resolve;
+    });
+    const fixture = await createHostTrustRoleFixture({
+      async commit() {
+        commitStarted();
+        await blocked;
+        return { ok: true, value: undefined };
+      },
+    });
+    const competingReview = fixture.capabilities.attach(
+      {
+        endpointId: "competing-host-trust-review",
+        reviewId: "host-trust-review",
+        role: "review",
+        sessionEpoch: "competing-review-epoch",
+      },
+      () => undefined,
+    );
+
+    const first = fixture.approve();
+    await started;
+    await expect(
+      competingReview.request({
+        decision: "approve",
+        type: "review.decide",
+        version: 1,
+      }),
+    ).resolves.toMatchObject({
+      error: { code: "mutation_conflict" },
+      ok: false,
+    });
+    expect(fixture.commitHostTrust).not.toHaveBeenCalled();
+
+    releaseCommit();
+    await expect(first).resolves.toMatchObject({ ok: true });
+    expect(fixture.commitHostTrust).toHaveBeenCalledTimes(1);
+    expect(fixture.replaceDefinitions).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects replay after one host-trust approval", async () => {
+    const fixture = await createHostTrustRoleFixture();
+
+    await expect(fixture.approve()).resolves.toMatchObject({ ok: true });
+    await expect(fixture.approve()).resolves.toMatchObject({
+      error: { code: "unauthorized" },
+      ok: false,
+    });
+    expect(fixture.commit).toHaveBeenCalledTimes(1);
+    expect(fixture.commitHostTrust).toHaveBeenCalledTimes(1);
+    expect(fixture.replaceDefinitions).toHaveBeenCalledTimes(1);
+  });
+
+  it("settles a torn-down host-trust review as rejected", async () => {
+    const fixture = await createHostTrustRoleFixture();
+    fixture.review.teardown();
+
+    await expect(fixture.approve()).resolves.toMatchObject({
+      error: { code: "unauthorized" },
+      ok: false,
+    });
+    expect(fixture.commit).not.toHaveBeenCalled();
+    expect(fixture.commitHostTrust).not.toHaveBeenCalled();
+    expect(fixture.replaceDefinitions).not.toHaveBeenCalled();
   });
 });
 

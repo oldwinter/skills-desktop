@@ -16,6 +16,7 @@ import type {
   PublicError,
   Result,
 } from "@skills-desktop/skills-runtime";
+import { hostPublicKeySchema } from "../ssh/host-public-key.js";
 
 const STORE_NAME = "inventorySnapshots" as const;
 const GUARD_STORE_NAME = "mutationGuards" as const;
@@ -31,31 +32,13 @@ const CURRENT_SCHEMA_VERSION = 3 as const;
 const CURRENT_GUARD_SCHEMA_VERSION = 2 as const;
 const CURRENT_TARGET_SCHEMA_VERSION = 3 as const;
 const targetIdSchema = z.string().uuid();
-const hostTrustRecordSchema = z
-  .object({
-    algorithm: z
-      .string()
-      .regex(
-        /^(?:ssh-(?:ed25519|rsa)|ecdsa-sha2-nistp(?:256|384|521)|rsa-sha2-(?:256|512))$/,
-      ),
+const hostTrustRecordSchema = hostPublicKeySchema
+  .extend({
     identity: z
       .string()
       .min(1)
       .max(2_048)
       .refine((value) => !/[\s\0]/.test(value)),
-    key: z
-      .string()
-      .min(1)
-      .max(16_384)
-      .regex(/^[A-Za-z0-9+/]+={0,2}$/)
-      .refine((value) => {
-        const decoded = Buffer.from(value, "base64");
-        return (
-          decoded.length > 0 &&
-          decoded.toString("base64").replace(/=+$/, "") ===
-            value.replace(/=+$/, "")
-        );
-      }),
   })
   .strict();
 

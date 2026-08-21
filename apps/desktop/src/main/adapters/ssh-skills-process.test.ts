@@ -94,7 +94,7 @@ const binding = {
     bindingDigest: "b".repeat(64),
     connectionReference: "build-host",
     connectionConfig: [
-      "Host skills-desktop-frozen-target",
+      "Host build-host",
       "  HostName resolved.internal",
       "  User deploy",
       "  Port 2222",
@@ -191,13 +191,15 @@ describe("SSH SkillsProcess observation contract", () => {
         "-o",
         "HostKeyAlias=[resolved.internal]:2222",
         "--",
-        "skills-desktop-frozen-target",
+        "build-host",
         REMOTE_BOOTSTRAP_COMMAND,
       ],
       configuration: binding.ssh.connectionConfig,
       executable: "ssh",
     });
-    expect(runner.invocations[0]!.args).not.toContain("build-host");
+    expect(runner.invocations[0]!.args).not.toContain(
+      "skills-desktop-frozen-target",
+    );
     expect(REMOTE_BOOTSTRAP_COMMAND).not.toMatch(
       /build-host|srv\/workspace|Codex|project-skill/,
     );

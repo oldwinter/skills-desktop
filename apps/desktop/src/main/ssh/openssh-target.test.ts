@@ -94,12 +94,12 @@ describe("OpenSSH Effective Target Binding and host trust", () => {
 
     await expect(
       probe.scan({
-        connectionConfig:
-          "Host skills-desktop-frozen-target\n  HostName resolved.internal\n",
-        connectionReference: "skills-desktop-frozen-target",
+        connectionConfig: "Host probe-target\n  HostName resolved.internal\n",
+        connectionReference: "probe-target",
         hostKeyIdentity: "[resolved.internal]:2222",
         hostname: "resolved.internal",
         port: 2222,
+        user: "deploy",
       }),
     ).resolves.toEqual({
       exitCode: 0,
@@ -113,7 +113,7 @@ describe("OpenSSH Effective Target Binding and host trust", () => {
         "StrictHostKeyChecking=accept-new",
         "PreferredAuthentications=none",
         `UserKnownHostsFile="${capturePath}"`,
-        "skills-desktop-frozen-target",
+        "probe-target",
       ]),
       executable: "ssh",
     });
@@ -164,6 +164,51 @@ describe("OpenSSH Effective Target Binding and host trust", () => {
         executable: "ssh-keyscan",
       },
     ]);
+  });
+
+  it("preserves original-host and effective-user token semantics in the frozen binding", async () => {
+    const runner = scriptedTools();
+    const scans: unknown[] = [];
+    const access = createOpenSshTargetAccess({
+      clock: () => new Date("2026-08-22T10:00:00.000Z"),
+      hostKeySource: {
+        async scan(input) {
+          scans.push(input);
+          return {
+            exitCode: 0,
+            stderrBytes: 0,
+            stdout: `[resolved.internal]:2222 ${keyA}\n`,
+          };
+        },
+      },
+      id: () => "token-challenge",
+      runner,
+      trustStore: createMemoryHostTrustStore(),
+    });
+
+    const first = await access.inspect(target);
+    if (!first.ok || first.value.status !== "trust-required") throw new Error();
+    await access.confirm(first.value.challenge.id, target);
+    const ready = await access.inspect(target);
+
+    expect(ready).toMatchObject({ ok: true, value: { status: "ready" } });
+    if (!ready.ok || ready.value.status !== "ready") throw new Error();
+    expect(ready.value.binding.connectionConfig).toContain("Host build-host\n");
+    expect(ready.value.binding.connectionConfig).toContain(
+      "proxycommand ssh proxy-SECRET nc %h %p",
+    );
+    expect(ready.value.binding.connectionConfig).not.toContain(
+      "Host skills-desktop-frozen-target",
+    );
+    expect(scans).toHaveLength(3);
+    expect(scans).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          connectionReference: "build-host",
+          user: "deploy",
+        }),
+      ]),
+    );
   });
 
   it("stores only the reviewed OpenSSH key and fails closed on later key drift", async () => {

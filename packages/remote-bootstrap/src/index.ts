@@ -1,6 +1,9 @@
 import {
   CLI_PACKAGE,
   CLI_VERSION,
+  WIRE_FRAME_ENCODER_SOURCE,
+  WIRE_OBSERVATION_REQUEST_VALIDATOR_SOURCE,
+  WIRE_SINGLE_FRAME_DECODER_SOURCE,
   MAX_WIRE_FRAME_BYTES,
   MAX_WIRE_HARNESS_LENGTH,
   MAX_WIRE_INVENTORY_JSON_BYTES,
@@ -13,37 +16,38 @@ import {
 export const REMOTE_BOOTSTRAP_PROTOCOL_VERSION = 1 as const;
 
 export const REMOTE_BOOTSTRAP_PROGRAM = String.raw`
+"use strict";
+const MAX_WIRE_FRAME_BYTES = ${MAX_WIRE_FRAME_BYTES};
+const MAX_WIRE_HARNESS_LENGTH = ${MAX_WIRE_HARNESS_LENGTH};
+const MAX_WIRE_REQUEST_ID_LENGTH = ${MAX_WIRE_REQUEST_ID_LENGTH};
+const MAX_WIRE_WORKSPACE_LENGTH = ${MAX_WIRE_WORKSPACE_LENGTH};
+const WIRE_PROTOCOL_VERSION = ${WIRE_PROTOCOL_VERSION};
+const encodeWireFramePayload = ${WIRE_FRAME_ENCODER_SOURCE};
+const decodeSingleWireFramePayload = ${WIRE_SINGLE_FRAME_DECODER_SOURCE};
+const validateWireObservationRequest = ${WIRE_OBSERVATION_REQUEST_VALIDATOR_SOURCE};
+const isWireObservationRequest = (value) => validateWireObservationRequest(
+  value,
+  WIRE_PROTOCOL_VERSION,
+  MAX_WIRE_HARNESS_LENGTH,
+  MAX_WIRE_REQUEST_ID_LENGTH,
+  MAX_WIRE_WORKSPACE_LENGTH,
+);
+
 (async () => {
-  "use strict";
   const childProcess = process.getBuiltinModule("node:child_process");
-  const path = process.getBuiltinModule("node:path");
-  const MAX_FRAME_BYTES = ${MAX_WIRE_FRAME_BYTES};
   const MAX_OUTPUT_BYTES = ${MAX_WIRE_INVENTORY_JSON_BYTES};
   const MAX_REQUEST_BYTES = ${MAX_WIRE_REQUEST_BYTES};
-  const MAX_HARNESS_LENGTH = ${MAX_WIRE_HARNESS_LENGTH};
-  const MAX_REQUEST_ID_LENGTH = ${MAX_WIRE_REQUEST_ID_LENGTH};
-  const MAX_WORKSPACE_LENGTH = ${MAX_WIRE_WORKSPACE_LENGTH};
-  const PROTOCOL_VERSION = ${WIRE_PROTOCOL_VERSION};
   const CLI_PACKAGE = ${JSON.stringify(CLI_PACKAGE)};
   const CLI_VERSION = ${JSON.stringify(CLI_VERSION)};
   const children = new Set();
 
   const writeFrame = (value) => {
-    const payload = Buffer.from(JSON.stringify(value), "utf8");
-    if (payload.length > MAX_FRAME_BYTES) {
-      throw Object.assign(new Error("Wire frame exceeds its byte limit."), {
-        code: "output_limit_exceeded",
-      });
-    }
-    const header = Buffer.allocUnsafe(4);
-    header.writeUInt32BE(payload.length, 0);
-    process.stdout.write(header);
-    process.stdout.write(payload);
+    process.stdout.write(Buffer.from(encodeWireFramePayload(value, MAX_WIRE_FRAME_BYTES)));
   };
   const failure = (code, message, requestId = null) => {
-    writeFrame({ code, message, protocolVersion: PROTOCOL_VERSION, requestId, type: "failure" });
+    writeFrame({ code, message, protocolVersion: WIRE_PROTOCOL_VERSION, requestId, type: "failure" });
   };
-  writeFrame({ bootstrapDigest: BUILD_DIGEST, protocolVersion: PROTOCOL_VERSION, type: "hello" });
+  writeFrame({ bootstrapDigest: BUILD_DIGEST, protocolVersion: WIRE_PROTOCOL_VERSION, type: "hello" });
 
   const terminateChildren = () => {
     for (const child of children) {
@@ -65,45 +69,20 @@ export const REMOTE_BOOTSTRAP_PROGRAM = String.raw`
     inputChunks.push(chunk);
   }
   const input = Buffer.concat(inputChunks);
-  if (input.length < 4) {
-    failure("remote_protocol_violation", "The Wire request is incomplete.");
-    return;
-  }
-  const declaredLength = input.readUInt32BE(0);
-  if (declaredLength > MAX_REQUEST_BYTES || input.length !== declaredLength + 4) {
+  const requestPayload = decodeSingleWireFramePayload(input, MAX_REQUEST_BYTES);
+  if (requestPayload === undefined) {
     failure("remote_protocol_violation", "The Wire request framing is invalid.");
     return;
   }
 
   let request;
   try {
-    request = JSON.parse(input.subarray(4).toString("utf8"));
+    request = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(requestPayload));
   } catch {
     failure("remote_protocol_violation", "The Wire request is not valid JSON.");
     return;
   }
-  const expectedKeys = ["harness", "operation", "protocolVersion", "requestId", "type", "workspace"];
-  const actualKeys = request !== null && typeof request === "object" && !Array.isArray(request)
-    ? Object.keys(request).sort()
-    : [];
-  const valid =
-    JSON.stringify(actualKeys) === JSON.stringify(expectedKeys) &&
-    request.type === "request" &&
-    request.operation === "observe" &&
-    request.protocolVersion === PROTOCOL_VERSION &&
-    typeof request.harness === "string" &&
-    request.harness.length > 0 &&
-    request.harness.length <= MAX_HARNESS_LENGTH &&
-    typeof request.requestId === "string" &&
-    request.requestId.length > 0 &&
-    request.requestId.length <= MAX_REQUEST_ID_LENGTH &&
-    typeof request.workspace === "string" &&
-    request.workspace.length > 0 &&
-    request.workspace.length <= MAX_WORKSPACE_LENGTH &&
-    !request.workspace.includes("\0") &&
-    path.posix.isAbsolute(request.workspace) &&
-    path.posix.normalize(request.workspace) === request.workspace;
-  if (!valid) {
+  if (!isWireObservationRequest(request)) {
     failure("remote_protocol_violation", "The Wire request is not a supported operation.");
     return;
   }
@@ -185,7 +164,7 @@ export const REMOTE_BOOTSTRAP_PROGRAM = String.raw`
       cliVersion: CLI_VERSION,
       globalJson,
       projectJson,
-      protocolVersion: PROTOCOL_VERSION,
+      protocolVersion: WIRE_PROTOCOL_VERSION,
       requestId: request.requestId,
       type: "inventory",
     });
@@ -198,17 +177,14 @@ export const REMOTE_BOOTSTRAP_PROGRAM = String.raw`
   }
 })().catch(() => {
   try {
-    const payload = Buffer.from(JSON.stringify({
+    const payload = encodeWireFramePayload({
       code: "remote_operation_failed",
       message: "Remote Inventory observation failed.",
-      protocolVersion: 1,
+      protocolVersion: WIRE_PROTOCOL_VERSION,
       requestId: null,
       type: "failure",
-    }), "utf8");
-    const header = Buffer.allocUnsafe(4);
-    header.writeUInt32BE(payload.length, 0);
-    process.stdout.write(header);
-    process.stdout.write(payload);
+    }, MAX_WIRE_FRAME_BYTES);
+    process.stdout.write(Buffer.from(payload));
   } catch {}
 });
 `;
