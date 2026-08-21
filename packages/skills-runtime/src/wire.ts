@@ -61,10 +61,13 @@ export function validateWireObservationRequest(
     return false;
   }
   if (request.workspace === "/") return true;
-  return !request.workspace
-    .slice(1)
-    .split("/")
-    .some((segment) => segment === "" || segment === "." || segment === "..");
+  const segments = request.workspace.slice(1).split("/");
+  return !segments.some(
+    (segment, index) =>
+      segment === "." ||
+      segment === ".." ||
+      (segment === "" && index !== segments.length - 1),
+  );
 }
 
 export function isWireObservationRequest(

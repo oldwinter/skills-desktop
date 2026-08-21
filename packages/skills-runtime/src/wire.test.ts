@@ -23,6 +23,22 @@ describe("Remote Bootstrap Wire Protocol", () => {
     });
   });
 
+  it("accepts a canonical POSIX directory with a trailing separator", () => {
+    const request = {
+      harness: "Codex",
+      operation: "observe" as const,
+      protocolVersion: WIRE_PROTOCOL_VERSION,
+      requestId: "observe-trailing-separator",
+      type: "request" as const,
+      workspace: "/srv/workspace/",
+    };
+
+    expect(decodeWireFrames(encodeWireFrame(request))).toEqual({
+      ok: true,
+      value: [request],
+    });
+  });
+
   it.each([
     {
       bytes: new Uint8Array([0, 0, 0, 10, 123]),

@@ -289,4 +289,30 @@ describe("OpenSSH Effective Target Binding and host trust", () => {
     });
     expect(JSON.stringify(missing)).not.toContain(sentinel);
   });
+
+  it.each(["build*", "build?", "!build"])(
+    "rejects OpenSSH pattern Connection Reference %j before resolution",
+    async (connectionReference) => {
+      let resolutions = 0;
+      const access = createOpenSshTargetAccess({
+        clock: () => new Date(),
+        id: () => "challenge",
+        runner: {
+          async run() {
+            resolutions += 1;
+            return { exitCode: 0, stderrBytes: 0, stdout: "" };
+          },
+        },
+        trustStore: createMemoryHostTrustStore(),
+      });
+
+      await expect(
+        access.inspect({ ...target, connectionReference }),
+      ).resolves.toMatchObject({
+        error: { code: "ssh_config_invalid", phase: "resolve" },
+        ok: false,
+      });
+      expect(resolutions).toBe(0);
+    },
+  );
 });

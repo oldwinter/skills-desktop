@@ -204,10 +204,6 @@ export function createOpenSshToolRunner(options?: {
   };
 }
 
-function parseKey(value: string): HostPublicKey | undefined {
-  return parseOpenSshPublicKey(value);
-}
-
 export function createMemoryHostTrustStore(): HostTrustStore {
   const records = new Map<string, HostPublicKey>();
   return {
@@ -492,7 +488,7 @@ export function createOpenSshTargetAccess(options: {
       connectionReference === null ||
       connectionReference === undefined ||
       connectionReference.startsWith("-") ||
-      /\s|\0/.test(connectionReference)
+      /[\s\0*?!]/.test(connectionReference)
     ) {
       return accessFailure(
         "ssh_config_invalid",
@@ -616,7 +612,7 @@ export function createOpenSshTargetAccess(options: {
       .filter((line) => line.trim() !== "" && !line.startsWith("#"))
       .flatMap((line) => {
         const fields = line.trim().split(/\s+/);
-        const key = parseKey(fields.slice(1).join(" "));
+        const key = parseOpenSshPublicKey(fields.slice(1).join(" "));
         return key === undefined ? [] : [key];
       });
     const preferredAlgorithms = (values.get("hostkeyalgorithms") ?? "")
