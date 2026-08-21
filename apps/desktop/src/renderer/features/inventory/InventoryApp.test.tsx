@@ -789,4 +789,38 @@ describe("Local Target Inventory shell", () => {
       ),
     );
   });
+
+  it("presents SSH transport loss as an accessible offline state", async () => {
+    render(
+      <InventoryApp
+        client={clientFor({
+          ...snapshot,
+          inventory: {
+            ...snapshot.inventory,
+            entries: [],
+            freshness: "stale",
+            lastError: {
+              code: "transport_lost",
+              effects: "none",
+              message:
+                "The SSH transport ended before a complete remote result.",
+              phase: "observe",
+              retryable: true,
+            },
+            phase: "error",
+          },
+          target: {
+            ...snapshot.target,
+            connectionReference: "build-host",
+            kind: "ssh",
+          },
+        })}
+      />,
+    );
+
+    expect(
+      await screen.findByText("Offline - Stale evidence"),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent("Target offline");
+  });
 });

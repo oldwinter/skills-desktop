@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import {
   chmod,
   mkdir,
@@ -11,6 +11,8 @@ import {
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createServer } from "node:net";
+import { promisify } from "node:util";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const executablePath = resolve(
@@ -26,6 +28,7 @@ const npxPath = join(binDirectory, "npx");
 const invocationLog = join(homeDirectory, "invocations.log");
 const projectInventoryState = join(homeDirectory, "project-inventory.json");
 const activeChildren = new Set();
+const execFileAsync = promisify(execFile);
 
 class CdpPage {
   constructor(socket) {
@@ -101,6 +104,25 @@ class CdpPage {
     this.socket.close();
   }
 
+  async disconnect() {
+    if (this.socket.readyState === WebSocket.CLOSED) return;
+    await new Promise((resolveClose, rejectClose) => {
+      const timeout = setTimeout(
+        () => rejectClose(new Error("CDP connection did not close.")),
+        5_000,
+      );
+      this.socket.addEventListener(
+        "close",
+        () => {
+          clearTimeout(timeout);
+          resolveClose();
+        },
+        { once: true },
+      );
+      this.socket.close();
+    });
+  }
+
   async evaluate(expression) {
     const response = await this.send("Runtime.evaluate", {
       awaitPromise: true,
@@ -151,6 +173,157 @@ class CdpPage {
       check();
     }))()`);
   }
+}
+
+async function availablePort() {
+  const server = createServer();
+  await new Promise((resolveListen, rejectListen) => {
+    server.once("error", rejectListen);
+    server.listen(0, "127.0.0.1", resolveListen);
+  });
+  const address = server.address();
+  const port =
+    typeof address === "object" && address !== null ? address.port : 0;
+  await new Promise((resolveClose, rejectClose) =>
+    server.close((error) =>
+      error === undefined ? resolveClose() : rejectClose(error),
+    ),
+  );
+  return port;
+}
+
+async function startDisposableSshd() {
+  const sshDirectory = join(temporaryRoot, "ssh");
+  const userSshDirectory = join(homeDirectory, ".ssh");
+  await Promise.all([
+    mkdir(sshDirectory, { recursive: true }),
+    mkdir(userSshDirectory, { recursive: true }),
+  ]);
+  const hostKey = join(sshDirectory, "host_ed25519");
+  const clientKey = join(sshDirectory, "client_ed25519");
+  await execFileAsync("ssh-keygen", [
+    "-q",
+    "-t",
+    "ed25519",
+    "-N",
+    "",
+    "-f",
+    hostKey,
+  ]);
+  await execFileAsync("ssh-keygen", [
+    "-q",
+    "-t",
+    "ed25519",
+    "-N",
+    "",
+    "-f",
+    clientKey,
+  ]);
+  const authorizedKeys = join(sshDirectory, "authorized_keys");
+  await writeFile(authorizedKeys, await readFile(`${clientKey}.pub`, "utf8"), {
+    mode: 0o600,
+  });
+  const forceCommand = join(binDirectory, "run-packaged-ssh-command");
+  await writeFile(
+    forceCommand,
+    `#!/bin/sh
+export HOME='${homeDirectory}'
+export PATH='${binDirectory}${delimiter}${process.env.PATH ?? "/usr/bin:/bin"}'
+exec /bin/sh -c "$SSH_ORIGINAL_COMMAND"
+`,
+    { mode: 0o700 },
+  );
+  await chmod(forceCommand, 0o700);
+  const port = await availablePort();
+  const pidFile = join(sshDirectory, "sshd.pid");
+  const configuration = join(sshDirectory, "sshd_config");
+  await writeFile(
+    configuration,
+    [
+      `Port ${port}`,
+      "ListenAddress 127.0.0.1",
+      `HostKey ${hostKey}`,
+      `PidFile ${pidFile}`,
+      `AuthorizedKeysFile ${authorizedKeys}`,
+      "PasswordAuthentication no",
+      "KbdInteractiveAuthentication no",
+      "PubkeyAuthentication yes",
+      "StrictModes no",
+      "UsePAM no",
+      "PrintMotd no",
+      "LogLevel ERROR",
+      `ForceCommand ${forceCommand}`,
+    ].join("\n"),
+    "utf8",
+  );
+  await execFileAsync("/usr/sbin/sshd", ["-t", "-f", configuration]);
+  await writeFile(
+    join(userSshDirectory, "config"),
+    [
+      "Host packaged-ssh",
+      "  HostName 127.0.0.1",
+      `  Port ${port}`,
+      `  User ${process.env.USER ?? "cdd"}`,
+      `  IdentityFile ${clientKey}`,
+      "  IdentitiesOnly yes",
+    ].join("\n"),
+    { mode: 0o600 },
+  );
+  await writeFile(
+    join(binDirectory, "ssh"),
+    `#!/bin/sh
+for argument in "$@"; do
+  if [ "$argument" = "-F" ]; then
+    exec /usr/bin/ssh "$@"
+  fi
+done
+exec /usr/bin/ssh -F '${join(userSshDirectory, "config")}' "$@"
+`,
+    { mode: 0o700 },
+  );
+  const daemon = spawn("/usr/sbin/sshd", ["-D", "-e", "-f", configuration], {
+    stdio: ["ignore", "ignore", "pipe"],
+  });
+  activeChildren.add(daemon);
+  const errors = [];
+  daemon.stderr.on("data", (chunk) => errors.push(chunk));
+  await new Promise((resolveReady, rejectReady) => {
+    const deadline = setTimeout(
+      () =>
+        rejectReady(
+          new Error("Packaged disposable sshd did not become ready."),
+        ),
+      10_000,
+    );
+    const inspect = () => {
+      void readFile(pidFile, "utf8").then(
+        () => {
+          clearTimeout(deadline);
+          resolveReady();
+        },
+        () => setImmediate(inspect),
+      );
+    };
+    daemon.once("exit", (code) => {
+      clearTimeout(deadline);
+      rejectReady(
+        new Error(
+          `Packaged disposable sshd exited ${code}: ${Buffer.concat(errors).toString("utf8")}`,
+        ),
+      );
+    });
+    inspect();
+  });
+  return {
+    async close() {
+      if (daemon.exitCode === null && daemon.signalCode === null) {
+        daemon.kill("SIGTERM");
+        await new Promise((resolveClose) => daemon.once("close", resolveClose));
+      }
+      activeChildren.delete(daemon);
+    },
+    port,
+  };
 }
 
 const projectEntry = {
@@ -294,9 +467,11 @@ async function launch() {
   };
 }
 
+let sshServer;
 try {
   await writeScript("success");
-  const first = await launch();
+  sshServer = await startDisposableSshd();
+  let first = await launch();
   console.log("packaged smoke: workspace opened");
   await first.page.waitFor(
     `document.body?.textContent?.includes("packaged-project-skill") &&
@@ -376,6 +551,116 @@ try {
   }
   console.log("packaged smoke: hostile payload and subframe rejected");
 
+  const createdSsh = await first.page
+    .evaluate(`window.skillsDesktop.createTarget({
+    connectionReference: "packaged-ssh",
+    harness: "Codex",
+    kind: "ssh",
+    label: "Packaged SSH",
+    workspace: ${JSON.stringify(workspace)},
+  })`);
+  if (!createdSsh.ok) {
+    throw new Error(
+      `Packaged SSH Target creation failed: ${JSON.stringify(createdSsh)}`,
+    );
+  }
+  const sshTargetId = await first.page.evaluate(
+    `window.skillsDesktop.getSnapshot().then((result) => result.value.targets.find(({ target }) => target.connectionReference === "packaged-ssh")?.target.id)`,
+  );
+  if (typeof sshTargetId !== "string") {
+    throw new Error("Packaged SSH Target identity is unavailable.");
+  }
+  const untrustedRefresh = await first.page.evaluate(
+    `window.skillsDesktop.refreshInventory(${JSON.stringify(sshTargetId)})`,
+  );
+  if (
+    untrustedRefresh.ok ||
+    untrustedRefresh.error?.code !== "host_trust_required"
+  ) {
+    throw new Error(
+      `Packaged first-use trust was not required: ${JSON.stringify(untrustedRefresh)}`,
+    );
+  }
+  const requestedHostReview = await first.page.evaluate(
+    `window.skillsDesktop.requestHostTrustReview(${JSON.stringify(sshTargetId)})`,
+  );
+  if (!requestedHostReview.ok) {
+    throw new Error(
+      `Packaged host review could not open: ${JSON.stringify(requestedHostReview)}`,
+    );
+  }
+  const hostReviewPage = await first.connectPage(
+    "skills-desktop://review/index.html",
+  );
+  await hostReviewPage.waitFor(
+    `document.body?.textContent?.includes("Review host key") &&
+      document.body?.textContent?.includes("SHA-256 fingerprint")`,
+    "packaged host-key Trusted Review",
+  );
+  await hostReviewPage.evaluate(`(() => {
+    const approve = document.querySelector('button[aria-label="Trust host key"]');
+    if (!(approve instanceof HTMLButtonElement)) throw new Error("Host trust approval is unavailable.");
+    approve.click();
+  })()`);
+  await hostReviewPage.waitFor(
+    `document.body?.textContent?.includes("Host trust confirmed")`,
+    "packaged host trust confirmation",
+  );
+  await hostReviewPage.disconnect();
+  await first.page.send("Page.bringToFront");
+  const remoteRefresh = await first.page.evaluate(
+    `window.skillsDesktop.refreshInventory(${JSON.stringify(sshTargetId)})`,
+  );
+  if (!remoteRefresh.ok) {
+    throw new Error(
+      `Packaged SSH refresh failed: ${JSON.stringify(remoteRefresh)}`,
+    );
+  }
+  await first.page.evaluate(`(() => {
+    const targets = document.querySelector('button[aria-label="Targets"]');
+    if (!(targets instanceof HTMLButtonElement)) throw new Error("Targets navigation is unavailable.");
+    targets.click();
+  })()`);
+  await first.page.waitFor(
+    `document.querySelector(".targets-workspace") !== null`,
+    "Targets workspace for packaged SSH",
+  );
+  await first.page.evaluate(`(() => {
+    const target = [...document.querySelectorAll(".target-row")].find(
+      (candidate) => candidate.textContent?.includes("Packaged SSH"),
+    );
+    if (!(target instanceof HTMLButtonElement)) throw new Error("Packaged SSH Target is unavailable.");
+    target.click();
+  })()`);
+  await first.page.waitFor(
+    `document.querySelector(".header-target")?.textContent?.includes("Packaged SSH") === true &&
+      document.body?.textContent?.includes("packaged-project-skill") &&
+      document.body?.textContent?.includes("Fresh evidence")`,
+    "packaged SSH Inventory",
+  );
+  const ordinarySshText = await first.page.evaluate("document.body.innerText");
+  if (
+    ordinarySshText.includes("127.0.0.1") ||
+    ordinarySshText.includes("client_ed25519") ||
+    ordinarySshText.includes(String(sshServer.port))
+  ) {
+    throw new Error(
+      "Effective SSH identity escaped the packaged workspace boundary.",
+    );
+  }
+  console.log("packaged smoke: SSH trust and remote Inventory verified");
+  const sshLaunch = first;
+  await sshLaunch.close();
+  if (sshLaunch.errors.length > 0) throw new Error(sshLaunch.errors.join("\n"));
+  first = await launch();
+  await first.page.waitFor(
+    `document.body?.textContent?.includes("packaged-project-skill") &&
+      document.body?.textContent?.includes("packaged-global-skill") &&
+      document.body?.textContent?.includes("Fresh evidence")`,
+    "fresh Inventory after packaged SSH restart",
+  );
+  console.log("packaged smoke: post-SSH restart opened");
+
   await first.page.evaluate(`(() => {
     const targets = [...document.querySelectorAll("button")].find(
       (candidate) => candidate.getAttribute("aria-label") === "Targets",
@@ -386,6 +671,28 @@ try {
   await first.page.waitFor(
     `document.querySelector(".targets-workspace") !== null`,
     "Targets workspace",
+  );
+  await first.page.evaluate(`(() => {
+    const primary = [...document.querySelectorAll(".target-row")].find(
+      (candidate) => candidate.textContent?.includes("This device"),
+    );
+    if (!(primary instanceof HTMLButtonElement)) throw new Error("Primary Target is unavailable.");
+    primary.click();
+  })()`);
+  await first.page.waitFor(
+    `document.querySelector(".header-target")?.textContent?.includes("This device") === true`,
+    "primary Target restoration after SSH",
+  );
+  await first.page.evaluate(`(() => {
+    const targets = [...document.querySelectorAll("button")].find(
+      (candidate) => candidate.getAttribute("aria-label") === "Targets",
+    );
+    if (!(targets instanceof HTMLButtonElement)) throw new Error("Targets navigation is unavailable.");
+    targets.click();
+  })()`);
+  await first.page.waitFor(
+    `document.querySelector(".targets-workspace") !== null`,
+    "Targets workspace after SSH",
   );
   await first.page.evaluate(`(() => {
     const button = [...document.querySelectorAll("button")].find(
@@ -536,6 +843,7 @@ try {
       `Compact accessibility contract failed: ${JSON.stringify(compactNavigation)}`,
     );
   }
+  console.log("packaged smoke: compact layout inspected");
 
   await first.page.evaluate(`(() => {
     const button = [...document.querySelectorAll("button")].find(
@@ -544,11 +852,13 @@ try {
     if (!(button instanceof HTMLButtonElement)) throw new Error("Prepare removal is unavailable.");
     button.click();
   })()`);
+  console.log("packaged smoke: removal preparation requested");
   await first.page.waitFor(
     `document.body?.textContent?.includes("Command Plan") &&
       document.body?.textContent?.includes("remove packaged-project-skill --agent codex --yes")`,
     "prepared removal Command Plan",
   );
+  console.log("packaged smoke: removal plan prepared");
   await first.page.evaluate(`(() => {
     const button = [...document.querySelectorAll("button")].find(
       (candidate) => candidate.textContent?.includes("Open Trusted Review"),
@@ -556,9 +866,11 @@ try {
     if (!(button instanceof HTMLButtonElement)) throw new Error("Trusted Review is unavailable.");
     button.click();
   })()`);
+  console.log("packaged smoke: mutation review requested");
   const reviewPage = await first.connectPage(
     "skills-desktop://review/index.html",
   );
+  console.log("packaged smoke: mutation review connected");
   await reviewPage.waitFor(
     `document.body?.textContent?.includes("Review removal") &&
       document.body?.textContent?.includes("packaged-project-skill")`,
@@ -656,7 +968,7 @@ try {
   const versionChecks = invocations.filter(
     (line) => line === "--yes skills@1.5.23 --version",
   );
-  if (versionChecks.length !== 3) {
+  if (versionChecks.length !== 5) {
     throw new Error(
       `Expected one version check per opened Target Adapter, got ${versionChecks.length}.`,
     );
@@ -675,9 +987,13 @@ try {
   );
   if (
     targetDocument.schemaVersion !== 3 ||
-    targetDocument.targets.length !== 2 ||
-    targetDocument.targets.some(
-      ({ executionBindingDigest }) => executionBindingDigest !== null,
+    targetDocument.targets.length !== 3 ||
+    targetDocument.targets
+      .filter(({ kind }) => kind === "local")
+      .some(({ executionBindingDigest }) => executionBindingDigest !== null) ||
+    !targetDocument.targets.some(
+      ({ executionBindingDigest, kind }) =>
+        kind === "ssh" && /^[a-f0-9]{64}$/.test(executionBindingDigest),
     )
   ) {
     throw new Error("Packaged Target Definitions were not durably restored.");
@@ -696,6 +1012,7 @@ try {
     throw new Error("Exact reviewed removal invocation is missing.");
   }
 } finally {
+  await sshServer?.close();
   for (const child of activeChildren) child.kill("SIGKILL");
   await rm(temporaryRoot, { force: true, recursive: true });
 }

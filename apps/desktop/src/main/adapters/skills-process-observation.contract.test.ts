@@ -72,7 +72,10 @@ function sshProcess(): SkillsProcess {
     async run(invocation) {
       const decoded = decodeWireFrames(invocation.input);
       if (!decoded.ok) throw new Error();
-      const request = decoded.value[0] as Extract<WireFrame, { type: "request" }>;
+      const request = decoded.value[0] as Extract<
+        WireFrame,
+        { type: "request" }
+      >;
       const frames = [
         encodeWireFrame({
           bootstrapDigest: REMOTE_BOOTSTRAP_DIGEST,
@@ -104,6 +107,8 @@ function sshProcess(): SkillsProcess {
       ssh: {
         bindingDigest: "a".repeat(64),
         connectionReference: "build-host",
+        connectionConfig:
+          "Host skills-desktop-frozen-target\n  HostName build.internal\n",
         hostKey: { algorithm: "ssh-ed25519", key: "AQIDBA==" },
         hostKeyIdentity: "build.internal",
         hostname: "build.internal",
@@ -127,32 +132,35 @@ function sshProcess(): SkillsProcess {
 describe.each([
   ["Local", localProcess],
   ["scripted SSH", sshProcess],
-] as const)("SkillsProcess observation contract: %s", (_name, createProcess) => {
-  it("publishes one complete project-and-global Inventory", async () => {
-    await expect(
-      createProcess().observeInventory({
-        signal: new AbortController().signal,
-      }),
-    ).resolves.toMatchObject({
-      ok: true,
-      value: {
-        entries: [
-          { name: "project-skill", scope: "project" },
-          { name: "global-skill", scope: "global" },
-        ],
-        observedAt: "2026-08-22T10:00:00.000Z",
-      },
+] as const)(
+  "SkillsProcess observation contract: %s",
+  (_name, createProcess) => {
+    it("publishes one complete project-and-global Inventory", async () => {
+      await expect(
+        createProcess().observeInventory({
+          signal: new AbortController().signal,
+        }),
+      ).resolves.toMatchObject({
+        ok: true,
+        value: {
+          entries: [
+            { name: "project-skill", scope: "project" },
+            { name: "global-skill", scope: "global" },
+          ],
+          observedAt: "2026-08-22T10:00:00.000Z",
+        },
+      });
     });
-  });
 
-  it("cancels before work without publishing partial state", async () => {
-    const controller = new AbortController();
-    controller.abort();
-    await expect(
-      createProcess().observeInventory({ signal: controller.signal }),
-    ).resolves.toMatchObject({
-      error: { code: "cancelled", effects: "none" },
-      ok: false,
+    it("cancels before work without publishing partial state", async () => {
+      const controller = new AbortController();
+      controller.abort();
+      await expect(
+        createProcess().observeInventory({ signal: controller.signal }),
+      ).resolves.toMatchObject({
+        error: { code: "cancelled", effects: "none" },
+        ok: false,
+      });
     });
-  });
-});
+  },
+);

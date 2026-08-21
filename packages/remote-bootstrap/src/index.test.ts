@@ -11,18 +11,15 @@ import {
   WIRE_PROTOCOL_VERSION,
 } from "@skills-desktop/skills-runtime";
 
-import {
-  describeRemoteBootstrap,
-  REMOTE_BOOTSTRAP_COMMAND,
-} from "./index.js";
+import { describeRemoteBootstrap, REMOTE_BOOTSTRAP_COMMAND } from "./index.js";
 
 const temporaryDirectories: string[] = [];
 
 afterEach(async () => {
   await Promise.all(
-    temporaryDirectories.splice(0).map((directory) =>
-      rm(directory, { force: true, recursive: true }),
-    ),
+    temporaryDirectories
+      .splice(0)
+      .map((directory) => rm(directory, { force: true, recursive: true })),
   );
 });
 
@@ -121,13 +118,7 @@ else process.exitCode = 2;
           cwd: workspace,
         },
         {
-          args: [
-            "--yes",
-            "skills@1.5.23",
-            "list",
-            "--global",
-            "--json",
-          ],
+          args: ["--yes", "skills@1.5.23", "list", "--global", "--json"],
           cwd: workspace,
         },
       ]);
@@ -161,6 +152,54 @@ else process.exitCode = 2;
         ],
       });
       expect(JSON.stringify(decoded)).not.toContain("Unexpected");
+    },
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "replaces an expanded oversized Inventory frame with one bounded failure",
+    async () => {
+      const directory = await mkdtemp(
+        join(tmpdir(), "skills-bootstrap-limit-"),
+      );
+      temporaryDirectories.push(directory);
+      const executable = join(directory, "npx");
+      await writeFile(
+        executable,
+        `#!/usr/bin/env node
+const operation = process.argv.slice(2).slice(2).join(" ");
+if (operation === "--version") process.stdout.write("1.5.23\\n");
+else process.stdout.write(JSON.stringify([{ filler: "\\\\".repeat(4500000) }]));
+`,
+        "utf8",
+      );
+      await chmod(executable, 0o700);
+
+      const outcome = await runBootstrap(
+        encodeWireFrame({
+          harness: "Codex",
+          operation: "observe",
+          protocolVersion: WIRE_PROTOCOL_VERSION,
+          requestId: "observe-limit",
+          type: "request",
+          workspace: directory,
+        }),
+        {
+          HOME: directory,
+          PATH: `${directory}${delimiter}${process.env.PATH ?? ""}`,
+        },
+      );
+
+      expect(decodeWireFrames(outcome.stdout)).toMatchObject({
+        ok: true,
+        value: [
+          { type: "hello" },
+          {
+            code: "output_limit_exceeded",
+            requestId: "observe-limit",
+            type: "failure",
+          },
+        ],
+      });
     },
   );
 });

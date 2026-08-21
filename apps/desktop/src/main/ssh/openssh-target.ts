@@ -1,13 +1,7 @@
 import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import {
-  mkdir,
-  open,
-  readFile,
-  rename,
-  unlink,
-} from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { mkdir, open, readFile, unlink, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 
 import type { PublicError, Result } from "@skills-desktop/skills-runtime";
 import { WIRE_PROTOCOL_VERSION } from "@skills-desktop/skills-runtime";
@@ -18,7 +12,26 @@ import type { TargetDefinition } from "../targets/skills-targets.js";
 const CONFIG_OUTPUT_LIMIT = 256 * 1024;
 const KEYSCAN_OUTPUT_LIMIT = 1024 * 1024;
 const CHALLENGE_TTL_MS = 5 * 60_000;
-const openSshKeySchema = /^(?:ssh-(?:ed25519|rsa)|ecdsa-sha2-nistp(?:256|384|521)|rsa-sha2-(?:256|512))$/;
+const FROZEN_TARGET_ALIAS = "skills-desktop-frozen-target";
+const MAX_JUMP_HOSTS = 8;
+const openSshKeySchema =
+  /^(?:ssh-(?:ed25519|rsa)|ecdsa-sha2-nistp(?:256|384|521)|rsa-sha2-(?:256|512))$/;
+const quotedConfigurationNames = new Set([
+  "certificatefile",
+  "identityagent",
+  "identityfile",
+  "pkcs11provider",
+  "revokedhostkeys",
+  "securitykeyprovider",
+  "xauthlocation",
+]);
+
+export function quoteOpenSshConfigValue(value: string) {
+  if (/\0|\r|\n/.test(value)) {
+    throw new Error("OpenSSH configuration values cannot contain line breaks.");
+  }
+  return `"${value.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;
+}
 
 export interface OpenSshToolInvocation {
   readonly args: readonly string[];
@@ -50,6 +63,7 @@ export interface HostTrustStore {
 
 export interface OpenSshHostKeySource {
   scan(input: {
+    readonly connectionConfig: string;
     readonly connectionReference: string;
     readonly hostKeyIdentity: string;
     readonly hostname: string;
@@ -77,6 +91,7 @@ interface PrivateHostTrustChallenge extends HostTrustChallenge {
 export interface OpenSshEffectiveBinding {
   readonly bindingDigest: string;
   readonly connectionReference: string;
+  readonly connectionConfig: string;
   readonly hostKey: HostPublicKey;
   readonly hostKeyIdentity: string;
   readonly hostname: string;
@@ -115,7 +130,10 @@ export interface OpenSshTargetAccess {
     target: TargetDefinition,
   ): Promise<
     Result<
-      { readonly bindingDigest: string; readonly kind: HostTrustChallenge["kind"] },
+      {
+        readonly bindingDigest: string;
+        readonly kind: HostTrustChallenge["kind"];
+      },
       OpenSshAccessError
     >
   >;
@@ -148,7 +166,8 @@ export function createOpenSshToolRunner(options?: {
           invocation.executable,
           [
             ...(invocation.executable === "ssh" &&
-            options?.sshConfigPath !== undefined
+            options?.sshConfigPath !== undefined &&
+            !invocation.args.includes("-F")
               ? ["-F", options.sshConfigPath]
               : []),
             ...invocation.args,
@@ -162,7 +181,10 @@ export function createOpenSshToolRunner(options?: {
             windowsHide: true,
           },
           (error, stdout, stderr) => {
-            if (error !== null && (error as NodeJS.ErrnoException).code === "ENOENT") {
+            if (
+              error !== null &&
+              (error as NodeJS.ErrnoException).code === "ENOENT"
+            ) {
               reject(error);
               return;
             }
@@ -195,26 +217,13 @@ function parseKey(value: string): HostPublicKey | undefined {
     return undefined;
   }
   const decoded = Buffer.from(key, "base64");
-  if (decoded.length === 0 || decoded.toString("base64").replace(/=+$/, "") !== key.replace(/=+$/, "")) {
+  if (
+    decoded.length === 0 ||
+    decoded.toString("base64").replace(/=+$/, "") !== key.replace(/=+$/, "")
+  ) {
     return undefined;
   }
   return { algorithm, key };
-}
-
-function parseTrustRecords(raw: string): Map<string, HostPublicKey> {
-  const records = new Map<string, HostPublicKey>();
-  for (const line of raw.split(/\r?\n/)) {
-    if (line.trim() === "" || line.startsWith("#")) continue;
-    const separator = line.indexOf(" ");
-    if (separator <= 0) throw new Error("Invalid host trust store.");
-    const identity = line.slice(0, separator);
-    const key = parseKey(line.slice(separator + 1));
-    if (/\s|\0/.test(identity) || key === undefined || records.has(identity)) {
-      throw new Error("Invalid host trust store.");
-    }
-    records.set(identity, key);
-  }
-  return records;
 }
 
 export function createMemoryHostTrustStore(): HostTrustStore {
@@ -230,61 +239,6 @@ export function createMemoryHostTrustStore(): HostTrustStore {
   };
 }
 
-export function createOpenSshHostTrustStore(options: {
-  readonly id?: () => string;
-  readonly path: string;
-}): HostTrustStore {
-  const id = options.id ?? randomUUID;
-  const load = async () =>
-    readFile(options.path, "utf8").then(parseTrustRecords, (error: unknown) => {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-        return new Map<string, HostPublicKey>();
-      }
-      throw error;
-    });
-  return {
-    path: options.path,
-    async lookup(identity) {
-      return (await load()).get(identity) ?? null;
-    },
-    async replace(identity, key) {
-      if (/\s|\0/.test(identity) || parseKey(`${key.algorithm} ${key.key}`) === undefined) {
-        throw new Error("Invalid host trust record.");
-      }
-      const records = await load();
-      records.set(identity, { ...key });
-      const directory = dirname(options.path);
-      await mkdir(directory, { recursive: true, mode: 0o700 });
-      const temporaryPath = `${options.path}.tmp-${id()}`;
-      const handle = await open(temporaryPath, "wx", 0o600);
-      try {
-        const contents = [...records]
-          .sort(([left], [right]) => left.localeCompare(right))
-          .map(([recordIdentity, recordKey]) =>
-            `${recordIdentity} ${recordKey.algorithm} ${recordKey.key}\n`,
-          )
-          .join("");
-        await handle.writeFile(contents, "utf8");
-        await handle.sync();
-      } finally {
-        await handle.close();
-      }
-      try {
-        await rename(temporaryPath, options.path);
-      } catch (error) {
-        await unlink(temporaryPath).catch(() => undefined);
-        throw error;
-      }
-      const directoryHandle = await open(directory, "r").catch(() => undefined);
-      try {
-        await directoryHandle?.sync();
-      } finally {
-        await directoryHandle?.close();
-      }
-    },
-  };
-}
-
 export function createOpenSshHostKeyProbe(options: {
   readonly directory: string;
   readonly id?: () => string;
@@ -292,14 +246,28 @@ export function createOpenSshHostKeyProbe(options: {
 }): OpenSshHostKeySource {
   const id = options.id ?? randomUUID;
   return {
-    async scan({ connectionReference, hostKeyIdentity, hostname, port }) {
+    async scan({
+      connectionConfig,
+      connectionReference,
+      hostKeyIdentity,
+      hostname,
+      port,
+    }) {
       await mkdir(options.directory, { recursive: true, mode: 0o700 });
       const capturePath = join(options.directory, `host-key-probe-${id()}`);
+      const configurationPath = `${capturePath}.config`;
       const handle = await open(capturePath, "wx", 0o600);
       await handle.close();
+      await writeFile(configurationPath, connectionConfig, {
+        flag: "wx",
+        mode: 0o600,
+      });
       try {
         const outcome = await options.runner.run({
           args: [
+            "-F",
+            configurationPath,
+            "-N",
             "-T",
             "-x",
             "-o",
@@ -319,9 +287,27 @@ export function createOpenSshHostKeyProbe(options: {
             "-o",
             "StrictHostKeyChecking=accept-new",
             "-o",
-            `UserKnownHostsFile=${capturePath}`,
+            "KnownHostsCommand=none",
             "-o",
-            `GlobalKnownHostsFile=${capturePath}`,
+            "VerifyHostKeyDNS=no",
+            "-o",
+            "CanonicalizeHostname=no",
+            "-o",
+            "PreferredAuthentications=none",
+            "-o",
+            "PubkeyAuthentication=no",
+            "-o",
+            "PasswordAuthentication=no",
+            "-o",
+            "KbdInteractiveAuthentication=no",
+            "-o",
+            "GSSAPIAuthentication=no",
+            "-o",
+            "HostbasedAuthentication=no",
+            "-o",
+            `UserKnownHostsFile=${quoteOpenSshConfigValue(capturePath)}`,
+            "-o",
+            `GlobalKnownHostsFile=${quoteOpenSshConfigValue(capturePath)}`,
             "-o",
             "HashKnownHosts=no",
             "-o",
@@ -336,7 +322,6 @@ export function createOpenSshHostKeyProbe(options: {
             `HostKeyAlias=${hostKeyIdentity}`,
             "--",
             connectionReference,
-            "exit",
           ],
           executable: "ssh",
           maxOutputBytes: CONFIG_OUTPUT_LIMIT,
@@ -349,7 +334,10 @@ export function createOpenSshHostKeyProbe(options: {
           stdout: captured,
         };
       } finally {
-        await unlink(capturePath).catch(() => undefined);
+        await Promise.all([
+          unlink(capturePath).catch(() => undefined),
+          unlink(configurationPath).catch(() => undefined),
+        ]);
       }
     },
   };
@@ -358,6 +346,7 @@ export function createOpenSshHostKeyProbe(options: {
 interface ResolvedCandidate {
   readonly bindingDigest: string;
   readonly connectionReference: string;
+  readonly connectionConfig: string;
   readonly hostKey: HostPublicKey;
   readonly hostKeyIdentity: string;
   readonly hostname: string;
@@ -377,7 +366,87 @@ function configValues(output: string) {
 }
 
 function safeConfigValue(value: string | undefined) {
-  return value !== undefined && value.length > 0 && value.length <= 2_048 && !/[\s\0]/.test(value);
+  return (
+    value !== undefined &&
+    value.length > 0 &&
+    value.length <= 2_048 &&
+    !/[\s\0]/.test(value)
+  );
+}
+
+const overriddenConfigurationNames = new Set([
+  "batchmode",
+  "canonicalizehostname",
+  "checkhostip",
+  "clearallforwardings",
+  "controlmaster",
+  "controlpath",
+  "forwardagent",
+  "globalknownhostsfile",
+  "host",
+  "hostkeyalias",
+  "hostname",
+  "knownhostscommand",
+  "localcommand",
+  "permitlocalcommand",
+  "port",
+  "remotecommand",
+  "requesttty",
+  "stricthostkeychecking",
+  "updatehostkeys",
+  "user",
+  "userknownhostsfile",
+  "verifyhostkeydns",
+]);
+
+function frozenConfigurationBlock(
+  alias: string,
+  output: string,
+  targetBlock = false,
+) {
+  const lines = output.split(/\r?\n/).flatMap((line) => {
+    const separator = line.indexOf(" ");
+    if (separator <= 0) return [];
+    const name = line.slice(0, separator).toLowerCase();
+    if (
+      !/^[a-z][a-z0-9]*$/.test(name) ||
+      name === "host" ||
+      (targetBlock && overriddenConfigurationNames.has(name))
+    ) {
+      return [];
+    }
+    const value = line.slice(separator + 1).trim();
+    return [
+      `  ${name} ${
+        quotedConfigurationNames.has(name)
+          ? quoteOpenSshConfigValue(value)
+          : value
+      }`,
+    ];
+  });
+  return [`Host ${alias}`, ...lines].join("\n");
+}
+
+function jumpReferences(output: string) {
+  const proxyJump = configValues(output).get("proxyjump");
+  if (proxyJump === undefined || proxyJump === "none") return [];
+  return proxyJump.split(",").flatMap((raw) => {
+    let reference = raw.trim();
+    const at = reference.lastIndexOf("@");
+    if (at >= 0) reference = reference.slice(at + 1);
+    if (reference.startsWith("[")) {
+      const closing = reference.indexOf("]");
+      if (closing > 1) reference = reference.slice(1, closing);
+    } else {
+      reference = reference.replace(/:\d+$/, "");
+    }
+    return reference.length > 0 &&
+      reference.length <= 256 &&
+      !reference.startsWith("-") &&
+      !/[\s\0*?!]/.test(reference)
+      ? [reference]
+      : [];
+  });
 }
 
 function fingerprint(key: HostPublicKey) {
@@ -396,6 +465,35 @@ export function createOpenSshTargetAccess(options: {
 }): OpenSshTargetAccess {
   const challenges = new Map<string, PrivateHostTrustChallenge>();
   const challengeByTarget = new Map<string, string>();
+
+  const freezeConnectionConfig = async (initialOutput: string) => {
+    const blocks = [
+      frozenConfigurationBlock(FROZEN_TARGET_ALIAS, initialOutput, true),
+    ];
+    const pending = [...jumpReferences(initialOutput)];
+    const visited = new Set<string>();
+    while (pending.length > 0) {
+      const reference = pending.shift()!;
+      if (visited.has(reference)) continue;
+      if (visited.size >= MAX_JUMP_HOSTS) return undefined;
+      visited.add(reference);
+      let configured: OpenSshToolOutcome;
+      try {
+        configured = await options.runner.run({
+          args: ["-G", "--", reference],
+          executable: "ssh",
+          maxOutputBytes: CONFIG_OUTPUT_LIMIT,
+          timeoutMs: 10_000,
+        });
+      } catch {
+        return undefined;
+      }
+      if (configured.exitCode !== 0) return undefined;
+      blocks.push(frozenConfigurationBlock(reference, configured.stdout));
+      pending.push(...jumpReferences(configured.stdout));
+    }
+    return `${blocks.join("\n")}\n`;
+  };
 
   const resolveCandidate = async (
     target: TargetDefinition,
@@ -474,6 +572,15 @@ export function createOpenSshTargetAccess(options: {
         : port === 22
           ? resolvedHostname
           : `[${resolvedHostname}]:${port}`;
+    const connectionConfig = await freezeConnectionConfig(configured.stdout);
+    if (connectionConfig === undefined) {
+      return accessFailure(
+        "ssh_config_invalid",
+        "The resolved OpenSSH configuration could not be frozen.",
+        "resolve",
+        true,
+      );
+    }
 
     let scanned: OpenSshToolOutcome;
     try {
@@ -486,7 +593,8 @@ export function createOpenSshTargetAccess(options: {
               timeoutMs: 10_000,
             })
           : await options.hostKeySource.scan({
-              connectionReference,
+              connectionConfig,
+              connectionReference: FROZEN_TARGET_ALIAS,
               hostKeyIdentity,
               hostname: resolvedHostname,
               port,
@@ -538,18 +646,21 @@ export function createOpenSshTargetAccess(options: {
       ok: true,
       value: {
         bindingDigest: createHash("sha256")
-          .update(JSON.stringify({
-            bootstrapDigest: REMOTE_BOOTSTRAP_DIGEST,
-            effectiveConfigDigest: createHash("sha256")
-              .update(configured.stdout.replace(/\r\n/g, "\n").trimEnd())
-              .digest("hex"),
-            harness: target.harness,
-            hostKeyIdentity,
-            protocolVersion: WIRE_PROTOCOL_VERSION,
-            workspace: target.workspace,
-          }))
+          .update(
+            JSON.stringify({
+              bootstrapDigest: REMOTE_BOOTSTRAP_DIGEST,
+              effectiveConfigDigest: createHash("sha256")
+                .update(connectionConfig)
+                .digest("hex"),
+              harness: target.harness,
+              hostKeyIdentity,
+              protocolVersion: WIRE_PROTOCOL_VERSION,
+              workspace: target.workspace,
+            }),
+          )
           .digest("hex"),
         connectionReference,
+        connectionConfig,
         hostKey: selected,
         hostKeyIdentity,
         hostname: resolvedHostname,
@@ -586,6 +697,7 @@ export function createOpenSshTargetAccess(options: {
           binding: {
             bindingDigest: resolved.value.bindingDigest,
             connectionReference: resolved.value.connectionReference,
+            connectionConfig: resolved.value.connectionConfig,
             hostKey: resolved.value.hostKey,
             hostKeyIdentity: resolved.value.hostKeyIdentity,
             hostname: resolved.value.hostname,
@@ -607,7 +719,9 @@ export function createOpenSshTargetAccess(options: {
     const challenge: PrivateHostTrustChallenge = {
       algorithm: resolved.value.hostKey.algorithm,
       bindingDigest: resolved.value.bindingDigest,
-      expiresAt: new Date(options.clock().getTime() + CHALLENGE_TTL_MS).toISOString(),
+      expiresAt: new Date(
+        options.clock().getTime() + CHALLENGE_TTL_MS,
+      ).toISOString(),
       fingerprint: fingerprint(resolved.value.hostKey),
       id: options.id(),
       identity: resolved.value.hostKeyIdentity,
@@ -619,7 +733,12 @@ export function createOpenSshTargetAccess(options: {
     };
     challenges.set(challenge.id, challenge);
     challengeByTarget.set(target.id, challenge.id);
-    const { bindingDigest: _privateDigest, key: _key, lookupIdentity: _identity, ...projection } = challenge;
+    const {
+      bindingDigest: _privateDigest,
+      key: _key,
+      lookupIdentity: _identity,
+      ...projection
+    } = challenge;
     return {
       ok: true,
       value: {
@@ -666,7 +785,10 @@ export function createOpenSshTargetAccess(options: {
           : current;
       }
       try {
-        await options.trustStore.replace(challenge.lookupIdentity, challenge.key);
+        await options.trustStore.replace(
+          challenge.lookupIdentity,
+          challenge.key,
+        );
       } catch {
         return accessFailure(
           "host_trust_invalid",
@@ -691,7 +813,12 @@ export function createOpenSshTargetAccess(options: {
       const challenge =
         challengeId === undefined ? undefined : challenges.get(challengeId);
       if (challenge === undefined) return undefined;
-      const { bindingDigest: _digest, key: _key, lookupIdentity: _identity, ...projection } = challenge;
+      const {
+        bindingDigest: _digest,
+        key: _key,
+        lookupIdentity: _identity,
+        ...projection
+      } = challenge;
       return projection;
     },
   };

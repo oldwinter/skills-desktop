@@ -7,12 +7,13 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   createMemoryHostTrustStore,
-  createOpenSshHostTrustStore,
   createOpenSshHostKeyProbe,
   createOpenSshTargetAccess,
   type OpenSshToolInvocation,
   type OpenSshToolRunner,
 } from "./openssh-target.js";
+import { createRecoveryHostTrustStore } from "../persistence/recovery-host-trust.js";
+import { createJsonRecoveryRecords } from "../persistence/recovery-records.js";
 
 const keyA = "ssh-ed25519 AQIDBA==";
 const keyB = "ssh-ed25519 BQYHCA==";
@@ -34,9 +35,9 @@ const temporaryDirectories: string[] = [];
 
 afterEach(async () => {
   await Promise.all(
-    temporaryDirectories.splice(0).map((directory) =>
-      rm(directory, { force: true, recursive: true }),
-    ),
+    temporaryDirectories
+      .splice(0)
+      .map((directory) => rm(directory, { force: true, recursive: true })),
   );
 });
 
@@ -75,20 +76,16 @@ function scriptedTools(key = keyA): OpenSshToolRunner & {
 
 describe("OpenSSH Effective Target Binding and host trust", () => {
   it("captures a host key through hardened OpenSSH and removes its ephemeral store", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "skills-probe-"));
+    const directory = await mkdtemp(join(tmpdir(), "skills probe-"));
     temporaryDirectories.push(directory);
     let invocation: OpenSshToolInvocation | undefined;
-    let capturePath: string | undefined;
+    const capturePath = join(directory, "host-key-probe-probe-1");
     const probe = createOpenSshHostKeyProbe({
       directory,
       id: () => "probe-1",
       runner: {
         async run(candidate) {
           invocation = candidate;
-          capturePath = candidate.args
-            .find((argument) => argument.startsWith("UserKnownHostsFile="))
-            ?.slice("UserKnownHostsFile=".length);
-          if (capturePath === undefined) throw new Error();
           await writeFile(capturePath, `[resolved.internal]:2222 ${keyA}\n`);
           return { exitCode: 255, stderrBytes: 128, stdout: "" };
         },
@@ -97,7 +94,9 @@ describe("OpenSSH Effective Target Binding and host trust", () => {
 
     await expect(
       probe.scan({
-        connectionReference: "build-host",
+        connectionConfig:
+          "Host skills-desktop-frozen-target\n  HostName resolved.internal\n",
+        connectionReference: "skills-desktop-frozen-target",
         hostKeyIdentity: "[resolved.internal]:2222",
         hostname: "resolved.internal",
         port: 2222,
@@ -112,12 +111,15 @@ describe("OpenSSH Effective Target Binding and host trust", () => {
         "BatchMode=yes",
         "ClearAllForwardings=yes",
         "StrictHostKeyChecking=accept-new",
-        "build-host",
-        "exit",
+        "PreferredAuthentications=none",
+        `UserKnownHostsFile="${capturePath}"`,
+        "skills-desktop-frozen-target",
       ]),
       executable: "ssh",
     });
-    await expect(readFile(capturePath!, "utf8")).rejects.toMatchObject({
+    expect(invocation?.args).toContain("-N");
+    expect(invocation?.args).not.toContain("exit");
+    await expect(readFile(capturePath, "utf8")).rejects.toMatchObject({
       code: "ENOENT",
     });
   });
@@ -168,7 +170,12 @@ describe("OpenSSH Effective Target Binding and host trust", () => {
     const directory = await mkdtemp(join(tmpdir(), "skills-trust-"));
     temporaryDirectories.push(directory);
     const path = join(directory, "known_hosts");
-    const store = createOpenSshHostTrustStore({ path });
+    const records = createJsonRecoveryRecords({
+      directory,
+      id: () => "trust-write",
+      platform: "linux",
+    });
+    const store = createRecoveryHostTrustStore({ path, records });
     const firstAccess = createOpenSshTargetAccess({
       clock: () => new Date("2026-08-22T10:00:00.000Z"),
       id: () => "challenge-1",
@@ -176,7 +183,10 @@ describe("OpenSSH Effective Target Binding and host trust", () => {
       trustStore: store,
     });
     const first = await firstAccess.inspect(target);
-    expect(first).toMatchObject({ ok: true, value: { status: "trust-required" } });
+    expect(first).toMatchObject({
+      ok: true,
+      value: { status: "trust-required" },
+    });
     if (!first.ok || first.value.status !== "trust-required") throw new Error();
 
     await expect(
@@ -194,8 +204,7 @@ describe("OpenSSH Effective Target Binding and host trust", () => {
     });
     const changed = await changedAccess.inspect({
       ...target,
-      executionBindingDigest:
-        first.value.bindingDigest,
+      executionBindingDigest: first.value.bindingDigest,
       generation: 2,
     });
     expect(changed).toMatchObject({

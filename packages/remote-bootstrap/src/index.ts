@@ -1,4 +1,14 @@
-import { CLI_PACKAGE, CLI_VERSION } from "@skills-desktop/skills-runtime";
+import {
+  CLI_PACKAGE,
+  CLI_VERSION,
+  MAX_WIRE_FRAME_BYTES,
+  MAX_WIRE_HARNESS_LENGTH,
+  MAX_WIRE_INVENTORY_JSON_BYTES,
+  MAX_WIRE_REQUEST_BYTES,
+  MAX_WIRE_REQUEST_ID_LENGTH,
+  MAX_WIRE_WORKSPACE_LENGTH,
+  WIRE_PROTOCOL_VERSION,
+} from "@skills-desktop/skills-runtime";
 
 export const REMOTE_BOOTSTRAP_PROTOCOL_VERSION = 1 as const;
 
@@ -7,15 +17,24 @@ export const REMOTE_BOOTSTRAP_PROGRAM = String.raw`
   "use strict";
   const childProcess = process.getBuiltinModule("node:child_process");
   const path = process.getBuiltinModule("node:path");
-  const MAX_OUTPUT_BYTES = 8 * 1024 * 1024;
-  const MAX_REQUEST_BYTES = 64 * 1024;
-  const PROTOCOL_VERSION = 1;
-  const CLI_PACKAGE = "skills@1.5.23";
-  const CLI_VERSION = "1.5.23";
+  const MAX_FRAME_BYTES = ${MAX_WIRE_FRAME_BYTES};
+  const MAX_OUTPUT_BYTES = ${MAX_WIRE_INVENTORY_JSON_BYTES};
+  const MAX_REQUEST_BYTES = ${MAX_WIRE_REQUEST_BYTES};
+  const MAX_HARNESS_LENGTH = ${MAX_WIRE_HARNESS_LENGTH};
+  const MAX_REQUEST_ID_LENGTH = ${MAX_WIRE_REQUEST_ID_LENGTH};
+  const MAX_WORKSPACE_LENGTH = ${MAX_WIRE_WORKSPACE_LENGTH};
+  const PROTOCOL_VERSION = ${WIRE_PROTOCOL_VERSION};
+  const CLI_PACKAGE = ${JSON.stringify(CLI_PACKAGE)};
+  const CLI_VERSION = ${JSON.stringify(CLI_VERSION)};
   const children = new Set();
 
   const writeFrame = (value) => {
     const payload = Buffer.from(JSON.stringify(value), "utf8");
+    if (payload.length > MAX_FRAME_BYTES) {
+      throw Object.assign(new Error("Wire frame exceeds its byte limit."), {
+        code: "output_limit_exceeded",
+      });
+    }
     const header = Buffer.allocUnsafe(4);
     header.writeUInt32BE(payload.length, 0);
     process.stdout.write(header);
@@ -74,13 +93,13 @@ export const REMOTE_BOOTSTRAP_PROGRAM = String.raw`
     request.protocolVersion === PROTOCOL_VERSION &&
     typeof request.harness === "string" &&
     request.harness.length > 0 &&
-    request.harness.length <= 128 &&
+    request.harness.length <= MAX_HARNESS_LENGTH &&
     typeof request.requestId === "string" &&
     request.requestId.length > 0 &&
-    request.requestId.length <= 256 &&
+    request.requestId.length <= MAX_REQUEST_ID_LENGTH &&
     typeof request.workspace === "string" &&
     request.workspace.length > 0 &&
-    request.workspace.length <= 4096 &&
+    request.workspace.length <= MAX_WORKSPACE_LENGTH &&
     !request.workspace.includes("\0") &&
     path.posix.isAbsolute(request.workspace) &&
     path.posix.normalize(request.workspace) === request.workspace;
@@ -161,14 +180,22 @@ export const REMOTE_BOOTSTRAP_PROGRAM = String.raw`
         : "Remote Inventory observation failed.", request.requestId);
     return;
   }
-  writeFrame({
-    cliVersion: CLI_VERSION,
-    globalJson,
-    projectJson,
-    protocolVersion: PROTOCOL_VERSION,
-    requestId: request.requestId,
-    type: "inventory",
-  });
+  try {
+    writeFrame({
+      cliVersion: CLI_VERSION,
+      globalJson,
+      projectJson,
+      protocolVersion: PROTOCOL_VERSION,
+      requestId: request.requestId,
+      type: "inventory",
+    });
+  } catch {
+    failure(
+      "output_limit_exceeded",
+      "Remote Inventory output exceeds its Wire frame limit.",
+      request.requestId,
+    );
+  }
 })().catch(() => {
   try {
     const payload = Buffer.from(JSON.stringify({
@@ -186,14 +213,17 @@ export const REMOTE_BOOTSTRAP_PROGRAM = String.raw`
 });
 `;
 
-const bootstrapCrypto = process.getBuiltinModule("node:crypto") as typeof import("node:crypto");
+const bootstrapCrypto = process.getBuiltinModule(
+  "node:crypto",
+) as typeof import("node:crypto");
 export const REMOTE_BOOTSTRAP_DIGEST = bootstrapCrypto
   .createHash("sha256")
   .update(REMOTE_BOOTSTRAP_PROGRAM)
   .digest("hex");
 
 const bootstrapWrapper = `const program=${JSON.stringify(REMOTE_BOOTSTRAP_PROGRAM)};const digest=process.getBuiltinModule("node:crypto").createHash("sha256").update(program).digest("hex");Function("BUILD_DIGEST",program)(digest);`;
-const quotePosixShell = (value: string) => `'${value.replaceAll("'", `'\\''`)}'`;
+const quotePosixShell = (value: string) =>
+  `'${value.replaceAll("'", `'\\''`)}'`;
 
 export const REMOTE_BOOTSTRAP_COMMAND = `node -e ${quotePosixShell(bootstrapWrapper)}`;
 

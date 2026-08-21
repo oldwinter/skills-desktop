@@ -4,8 +4,13 @@ import type { PublicError, Result } from "./result.js";
 
 export const WIRE_PROTOCOL_VERSION = 1 as const;
 export const MAX_WIRE_FRAME_BYTES = 16 * 1024 * 1024 + 64 * 1024;
+export const MAX_WIRE_INVENTORY_JSON_BYTES = 8 * 1024 * 1024;
+export const MAX_WIRE_REQUEST_BYTES = 64 * 1024;
+export const MAX_WIRE_HARNESS_LENGTH = 128;
+export const MAX_WIRE_REQUEST_ID_LENGTH = 256;
+export const MAX_WIRE_WORKSPACE_LENGTH = 4_096;
 
-const boundedIdentifier = z.string().min(1).max(256);
+const boundedIdentifier = z.string().min(1).max(MAX_WIRE_REQUEST_ID_LENGTH);
 const baseFrame = {
   protocolVersion: z.literal(WIRE_PROTOCOL_VERSION),
 } as const;
@@ -20,20 +25,20 @@ export const wireFrameSchema = z.discriminatedUnion("type", [
     .strict(),
   z
     .object({
-      harness: z.string().min(1).max(128),
+      harness: z.string().min(1).max(MAX_WIRE_HARNESS_LENGTH),
       operation: z.literal("observe"),
       ...baseFrame,
       requestId: boundedIdentifier,
       type: z.literal("request"),
-      workspace: z.string().min(1).max(4_096),
+      workspace: z.string().min(1).max(MAX_WIRE_WORKSPACE_LENGTH),
     })
     .strict(),
   z
     .object({
       cliVersion: z.literal("1.5.23"),
-      globalJson: z.string().max(8 * 1024 * 1024),
+      globalJson: z.string().max(MAX_WIRE_INVENTORY_JSON_BYTES),
       ...baseFrame,
-      projectJson: z.string().max(8 * 1024 * 1024),
+      projectJson: z.string().max(MAX_WIRE_INVENTORY_JSON_BYTES),
       requestId: boundedIdentifier,
       type: z.literal("inventory"),
     })
@@ -109,7 +114,7 @@ function decodeUtf8(input: Uint8Array): string {
       codePoints.length = 0;
     }
   };
-  for (let index = 0; index < input.length; ) {
+  for (let index = 0; index < input.length;) {
     const first = input[index]!;
     let codePoint: number;
     let width: number;
@@ -186,7 +191,10 @@ export function decodeWireFrames(
       4,
     ).getUint32(0, false);
     if (length > MAX_WIRE_FRAME_BYTES) {
-      return wireFailure("frame_too_large", "Wire frame exceeds its byte limit.");
+      return wireFailure(
+        "frame_too_large",
+        "Wire frame exceeds its byte limit.",
+      );
     }
     if (input.byteLength - offset - 4 < length) {
       return wireFailure(
@@ -199,7 +207,10 @@ export function decodeWireFrames(
       const payload = input.subarray(offset + 4, offset + 4 + length);
       decoded = JSON.parse(decodeUtf8(payload));
     } catch {
-      return wireFailure("invalid_frame", "Wire frame is not valid UTF-8 JSON.");
+      return wireFailure(
+        "invalid_frame",
+        "Wire frame is not valid UTF-8 JSON.",
+      );
     }
     const parsed = wireFrameSchema.safeParse(decoded);
     if (!parsed.success) {

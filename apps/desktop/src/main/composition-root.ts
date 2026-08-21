@@ -14,8 +14,8 @@ import {
   createSshTransportRunner,
 } from "./adapters/ssh-skills-process.js";
 import { createJsonRecoveryRecords } from "./persistence/recovery-records.js";
+import { createRecoveryHostTrustStore } from "./persistence/recovery-host-trust.js";
 import {
-  createOpenSshHostTrustStore,
   createOpenSshHostKeyProbe,
   createOpenSshTargetAccess,
   createOpenSshToolRunner,
@@ -30,8 +30,9 @@ export async function createCompositionRoot(options?: {
   const workspace = await realpath(resolve(requestedWorkspace));
   const runner = createSpawnProcessRunner({ platform: process.platform });
   const userData = app.getPath("userData");
+  const recoveryDirectory = resolve(userData, "recovery");
   const recoveryRecords = createJsonRecoveryRecords({
-    directory: resolve(userData, "recovery"),
+    directory: recoveryDirectory,
     id: randomUUID,
     platform: process.platform,
   });
@@ -44,8 +45,9 @@ export async function createCompositionRoot(options?: {
     }),
     id: randomUUID,
     runner: sshToolRunner,
-    trustStore: createOpenSshHostTrustStore({
-      path: resolve(userData, "ssh", "known_hosts"),
+    trustStore: createRecoveryHostTrustStore({
+      path: resolve(recoveryDirectory, "known_hosts"),
+      records: recoveryRecords,
     }),
   });
   const sshRunner = createSshTransportRunner({ platform: process.platform });

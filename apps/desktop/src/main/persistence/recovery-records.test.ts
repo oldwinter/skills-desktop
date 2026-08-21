@@ -806,9 +806,9 @@ describe("RecoveryRecords Target Definition contract", () => {
       schemaVersion: 3,
       targets: restored.targetDefinitions,
     });
-    expect(JSON.parse(await readFile(`${targetPath}.v2.backup`, "utf8"))).toEqual(
-      legacyDocument,
-    );
+    expect(
+      JSON.parse(await readFile(`${targetPath}.v2.backup`, "utf8")),
+    ).toEqual(legacyDocument);
   });
 
   it("refuses to overwrite Target Definitions from a newer schema", async () => {
@@ -1072,5 +1072,63 @@ describe("RecoveryRecords Mutation Guard contract", () => {
         .stat(path)
         .then((details) => details.isDirectory()),
     ).resolves.toBe(true);
+  });
+
+  it("stores exact OpenSSH host trust through the closed durable interface", async () => {
+    const directory = await temporaryDirectory();
+    const records = createJsonRecoveryRecords({
+      directory,
+      id: () => "host-trust-write",
+      platform: "linux",
+    });
+
+    expect(
+      await records.commit({
+        record: {
+          algorithm: "ssh-ed25519",
+          identity: "[resolved.internal]:2222",
+          key: "AQIDBA==",
+        },
+        type: "host-trust.replace",
+      }),
+    ).toEqual({ ok: true, value: undefined });
+    expect(await readFile(join(directory, "known_hosts"), "utf8")).toBe(
+      "[resolved.internal]:2222 ssh-ed25519 AQIDBA==\n",
+    );
+    await expect(records.restore()).resolves.toMatchObject({
+      failures: [],
+      hostTrustRecords: [
+        {
+          algorithm: "ssh-ed25519",
+          identity: "[resolved.internal]:2222",
+          key: "AQIDBA==",
+        },
+      ],
+    });
+  });
+
+  it("isolates corrupt host trust and refuses to overwrite it", async () => {
+    const directory = await temporaryDirectory();
+    await writeFile(join(directory, "known_hosts"), "not an OpenSSH record\n");
+    const records = createJsonRecoveryRecords({
+      directory,
+      id: () => "host-trust-corrupt",
+      platform: "linux",
+    });
+
+    expect((await records.restore()).failures).toContainEqual({
+      code: "corrupt_store",
+      store: "hostTrustRecords",
+    });
+    expect(
+      await records.commit({
+        record: {
+          algorithm: "ssh-ed25519",
+          identity: "replacement.internal",
+          key: "AQIDBA==",
+        },
+        type: "host-trust.replace",
+      }),
+    ).toMatchObject({ error: { code: "persist_failed" }, ok: false });
   });
 });

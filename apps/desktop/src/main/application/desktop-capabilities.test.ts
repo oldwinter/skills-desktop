@@ -1109,17 +1109,21 @@ describe("DesktopCapabilities inventory role-session contract", () => {
         },
       }),
     });
-    const records = createMemoryRecoveryRecords([], [], [
-      {
-        connectionReference: null,
-        generation: target.generation,
-        harness: target.harness,
-        id: target.id,
-        kind: target.kind,
-        label: target.label,
-        workspace: target.workspace,
-      },
-    ]);
+    const records = createMemoryRecoveryRecords(
+      [],
+      [],
+      [
+        {
+          connectionReference: null,
+          generation: target.generation,
+          harness: target.harness,
+          id: target.id,
+          kind: target.kind,
+          label: target.label,
+          workspace: target.workspace,
+        },
+      ],
+    );
     const capabilities = createDesktopCapabilities({
       id: () => "target-change-operation",
       recoveryRecords: records,
@@ -1643,6 +1647,7 @@ describe("DesktopCapabilities inventory role-session contract", () => {
                 store: "targetDefinitions" as const,
               },
             ],
+            hostTrustRecords: [],
             inventorySnapshots: [],
             mutationGuards: [],
             targetDefinitions: [],
@@ -2013,9 +2018,7 @@ describe("DesktopCapabilities inventory role-session contract", () => {
                 commandPlan: {
                   harness: selected.harness,
                   names:
-                    preparationCalls === 1
-                      ? ["copy-me"]
-                      : ["must-not-publish"],
+                    preparationCalls === 1 ? ["copy-me"] : ["must-not-publish"],
                   operation: "add" as const,
                   preview: "review-only preview",
                   schemaVersion: 1 as const,
@@ -2323,6 +2326,8 @@ describe("DesktopCapabilities SSH host-trust role-session contract", () => {
               binding: {
                 bindingDigest: "a".repeat(64),
                 connectionReference: "build-host",
+                connectionConfig:
+                  "Host skills-desktop-frozen-target\n  HostName resolved.internal\n",
                 hostKey: { algorithm: "ssh-ed25519", key: "AQIDBA==" },
                 hostKeyIdentity: "[resolved.internal]:2222",
                 hostname: "resolved.internal",
@@ -2552,17 +2557,21 @@ describe("DesktopCapabilities mutation role-session contract", () => {
       onReviewRequested(reviewId) {
         presentedReviewId = reviewId;
       },
-      recoveryRecords: createMemoryRecoveryRecords([], [], [
-        {
-          connectionReference: null,
-          generation: target.generation,
-          harness: target.harness,
-          id: target.id,
-          kind: target.kind,
-          label: target.label,
-          workspace: target.workspace,
-        },
-      ]),
+      recoveryRecords: createMemoryRecoveryRecords(
+        [],
+        [],
+        [
+          {
+            connectionReference: null,
+            generation: target.generation,
+            harness: target.harness,
+            id: target.id,
+            kind: target.kind,
+            label: target.label,
+            workspace: target.workspace,
+          },
+        ],
+      ),
       skillsTargets,
     });
     await capabilities.initialize();
@@ -2788,7 +2797,9 @@ describe("DesktopCapabilities mutation role-session contract", () => {
       error: { code: "mutation_conflict", phase: "coordinate" },
       ok: false,
     });
-    await expect(review.snapshot()).resolves.toMatchObject({ status: "pending" });
+    await expect(review.snapshot()).resolves.toMatchObject({
+      status: "pending",
+    });
     await expect(workspace.snapshot()).resolves.toMatchObject({
       mutation: { phase: "idle" },
       target: { id: otherTarget.id },

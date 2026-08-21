@@ -1,4 +1,7 @@
 import { spawn } from "node:child_process";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import {
   CLI_VERSION,
@@ -19,7 +22,10 @@ import type {
   ObservationError,
   SkillsProcess,
 } from "./local-skills-process.js";
-import type { OpenSshEffectiveBinding } from "../ssh/openssh-target.js";
+import {
+  quoteOpenSshConfigValue,
+  type OpenSshEffectiveBinding,
+} from "../ssh/openssh-target.js";
 
 const SSH_TIMEOUT_MS = 60_000;
 const MAX_SSH_STDOUT_BYTES = MAX_WIRE_FRAME_BYTES + 4 + 1_024;
@@ -27,6 +33,7 @@ const MAX_SSH_STDERR_BYTES = 64 * 1024;
 
 export interface SshTransportInvocation {
   readonly args: readonly string[];
+  readonly configuration: string;
   readonly executable: "ssh";
   readonly input: Uint8Array;
   readonly maxStderrBytes: number;
@@ -59,137 +66,152 @@ export function createSshTransportRunner(options?: {
   readonly cancellationGraceMs?: number;
   readonly environment?: NodeJS.ProcessEnv;
   readonly platform?: NodeJS.Platform;
-  readonly sshConfigPath?: string;
 }): SshTransportRunner {
   const platform = options?.platform ?? process.platform;
   const cancellationGraceMs = options?.cancellationGraceMs ?? 2_000;
   return {
-    run(invocation) {
+    async run(invocation) {
       if (invocation.signal.aborted) {
-        return Promise.reject(
-          new SshTransportBoundaryError(
-            "SSH transport was cancelled before spawn.",
-            "cancelled",
-          ),
+        throw new SshTransportBoundaryError(
+          "SSH transport was cancelled before spawn.",
+          "cancelled",
         );
       }
-      return new Promise((resolve, reject) => {
-        const child = spawn(invocation.executable, [
-          ...(options?.sshConfigPath === undefined
-            ? []
-            : ["-F", options.sshConfigPath]),
-          ...invocation.args,
-        ], {
-          detached: platform !== "win32",
-          env: options?.environment,
-          shell: false,
-          stdio: ["pipe", "pipe", "pipe"],
-          windowsHide: true,
+      const directory = await mkdtemp(join(tmpdir(), "skills-desktop-ssh-"));
+      const configurationPath = join(directory, "config");
+      try {
+        await writeFile(configurationPath, invocation.configuration, {
+          flag: "wx",
+          mode: 0o600,
         });
-        const stdout: Buffer[] = [];
-        let stdoutBytes = 0;
-        let stderrBytes = 0;
-        let settled = false;
-        let boundaryError: SshTransportBoundaryError | undefined;
-        let forceTimer: NodeJS.Timeout | undefined;
+        if (invocation.signal.aborted) {
+          throw new SshTransportBoundaryError(
+            "SSH transport was cancelled before spawn.",
+            "cancelled",
+          );
+        }
+        return await new Promise((resolve, reject) => {
+          const child = spawn(
+            invocation.executable,
+            ["-F", configurationPath, ...invocation.args],
+            {
+              detached: platform !== "win32",
+              env: options?.environment,
+              shell: false,
+              stdio: ["pipe", "pipe", "pipe"],
+              windowsHide: true,
+            },
+          );
+          const stdout: Buffer[] = [];
+          let stdoutBytes = 0;
+          let stderrBytes = 0;
+          let settled = false;
+          let boundaryError: SshTransportBoundaryError | undefined;
+          let forceTimer: NodeJS.Timeout | undefined;
 
-        const signalProcess = (signal: NodeJS.Signals) => {
-          if (child.pid === undefined) return;
-          try {
-            if (platform === "win32") child.kill(signal);
-            else process.kill(-child.pid, signal);
-          } catch (error) {
-            if ((error as NodeJS.ErrnoException).code !== "ESRCH") {
-              boundaryError ??= new SshTransportBoundaryError(
-                "SSH transport termination failed.",
-                "failed",
+          const signalProcess = (signal: NodeJS.Signals) => {
+            if (child.pid === undefined) return;
+            try {
+              if (platform === "win32") child.kill(signal);
+              else process.kill(-child.pid, signal);
+            } catch (error) {
+              if ((error as NodeJS.ErrnoException).code !== "ESRCH") {
+                boundaryError ??= new SshTransportBoundaryError(
+                  "SSH transport termination failed.",
+                  "failed",
+                );
+              }
+            }
+          };
+          const terminate = (error: SshTransportBoundaryError) => {
+            boundaryError ??= error;
+            signalProcess("SIGTERM");
+            forceTimer ??= setTimeout(
+              () => signalProcess("SIGKILL"),
+              cancellationGraceMs,
+            );
+          };
+          const onAbort = () =>
+            terminate(
+              new SshTransportBoundaryError(
+                "SSH transport was cancelled.",
+                "cancelled",
+              ),
+            );
+          const timeout = setTimeout(
+            () =>
+              terminate(
+                new SshTransportBoundaryError(
+                  "SSH transport timed out.",
+                  "timed-out",
+                ),
+              ),
+            invocation.timeoutMs,
+          );
+          const cleanup = () => {
+            clearTimeout(timeout);
+            if (forceTimer !== undefined) clearTimeout(forceTimer);
+            invocation.signal.removeEventListener("abort", onAbort);
+          };
+          const rejectOnce = (error: Error) => {
+            if (settled) return;
+            settled = true;
+            cleanup();
+            reject(error);
+          };
+          child.stdout.on("data", (chunk: Buffer) => {
+            stdoutBytes += chunk.length;
+            if (stdoutBytes > invocation.maxStdoutBytes) {
+              terminate(
+                new SshTransportBoundaryError(
+                  "SSH stdout exceeded its byte limit.",
+                  "failed",
+                ),
+              );
+              return;
+            }
+            stdout.push(chunk);
+          });
+          child.stderr.on("data", (chunk: Buffer) => {
+            stderrBytes += chunk.length;
+            if (stderrBytes > invocation.maxStderrBytes) {
+              terminate(
+                new SshTransportBoundaryError(
+                  "SSH stderr exceeded its byte limit.",
+                  "failed",
+                ),
               );
             }
-          }
-        };
-        const terminate = (error: SshTransportBoundaryError) => {
-          boundaryError ??= error;
-          signalProcess("SIGTERM");
-          forceTimer ??= setTimeout(() => signalProcess("SIGKILL"), cancellationGraceMs);
-        };
-        const onAbort = () =>
-          terminate(
-            new SshTransportBoundaryError(
-              "SSH transport was cancelled.",
-              "cancelled",
-            ),
-          );
-        const timeout = setTimeout(
-          () =>
-            terminate(
-              new SshTransportBoundaryError(
-                "SSH transport timed out.",
-                "timed-out",
-              ),
-            ),
-          invocation.timeoutMs,
-        );
-        const cleanup = () => {
-          clearTimeout(timeout);
-          if (forceTimer !== undefined) clearTimeout(forceTimer);
-          invocation.signal.removeEventListener("abort", onAbort);
-        };
-        const rejectOnce = (error: Error) => {
-          if (settled) return;
-          settled = true;
-          cleanup();
-          reject(error);
-        };
-        child.stdout.on("data", (chunk: Buffer) => {
-          stdoutBytes += chunk.length;
-          if (stdoutBytes > invocation.maxStdoutBytes) {
-            terminate(
-              new SshTransportBoundaryError(
-                "SSH stdout exceeded its byte limit.",
-                "failed",
-              ),
-            );
-            return;
-          }
-          stdout.push(chunk);
-        });
-        child.stderr.on("data", (chunk: Buffer) => {
-          stderrBytes += chunk.length;
-          if (stderrBytes > invocation.maxStderrBytes) {
-            terminate(
-              new SshTransportBoundaryError(
-                "SSH stderr exceeded its byte limit.",
-                "failed",
-              ),
-            );
-          }
-        });
-        child.once("error", (error) => {
-          boundaryError = new SshTransportBoundaryError(
-            (error as NodeJS.ErrnoException).code === "ENOENT"
-              ? "SSH executable is unavailable."
-              : "SSH transport could not start.",
-            "failed",
-          );
-        });
-        child.once("close", (exitCode) => {
-          if (settled) return;
-          if (boundaryError !== undefined) {
-            rejectOnce(boundaryError);
-            return;
-          }
-          settled = true;
-          cleanup();
-          resolve({
-            exitCode: exitCode ?? 1,
-            stderrBytes,
-            stdout: new Uint8Array(Buffer.concat(stdout)),
           });
+          child.once("error", (error) => {
+            boundaryError = new SshTransportBoundaryError(
+              (error as NodeJS.ErrnoException).code === "ENOENT"
+                ? "SSH executable is unavailable."
+                : "SSH transport could not start.",
+              "failed",
+            );
+          });
+          child.once("close", (exitCode) => {
+            if (settled) return;
+            if (boundaryError !== undefined) {
+              rejectOnce(boundaryError);
+              return;
+            }
+            settled = true;
+            cleanup();
+            resolve({
+              exitCode: exitCode ?? 1,
+              stderrBytes,
+              stdout: new Uint8Array(Buffer.concat(stdout)),
+            });
+          });
+          invocation.signal.addEventListener("abort", onAbort, { once: true });
+          child.stdin.once("error", () => undefined);
+          child.stdin.end(Buffer.from(invocation.input));
         });
-        invocation.signal.addEventListener("abort", onAbort, { once: true });
-        child.stdin.once("error", () => undefined);
-        child.stdin.end(Buffer.from(invocation.input));
-      });
+      } finally {
+        await rm(directory, { force: true, recursive: true });
+      }
     },
   };
 }
@@ -241,13 +263,19 @@ function sshArguments(binding: SshSkillsProcessBinding) {
     "-o",
     "StrictHostKeyChecking=yes",
     "-o",
-    `UserKnownHostsFile=${trustStore}`,
+    `UserKnownHostsFile=${quoteOpenSshConfigValue(trustStore)}`,
     "-o",
-    `GlobalKnownHostsFile=${trustStore}`,
+    `GlobalKnownHostsFile=${quoteOpenSshConfigValue(trustStore)}`,
     "-o",
     "CheckHostIP=no",
     "-o",
     "UpdateHostKeys=no",
+    "-o",
+    "KnownHostsCommand=none",
+    "-o",
+    "VerifyHostKeyDNS=no",
+    "-o",
+    "CanonicalizeHostname=no",
     "-o",
     `HostName=${binding.ssh.hostname}`,
     "-o",
@@ -257,7 +285,7 @@ function sshArguments(binding: SshSkillsProcessBinding) {
     "-o",
     `HostKeyAlias=${binding.ssh.hostKeyIdentity}`,
     "--",
-    binding.ssh.connectionReference,
+    "skills-desktop-frozen-target",
     REMOTE_BOOTSTRAP_COMMAND,
   ] as const;
 }
@@ -302,6 +330,7 @@ export function createSshSkillsProcess(options: {
         try {
           transport = await options.runner.run({
             args: sshArguments(options.binding),
+            configuration: options.binding.ssh.connectionConfig,
             executable: "ssh",
             input: encodeWireFrame({
               harness: options.binding.harness,
@@ -398,7 +427,7 @@ export function createSshSkillsProcess(options: {
                 ? "The Remote Bootstrap rejected the Wire request."
                 : response.code === "output_limit_exceeded"
                   ? "Remote Inventory output exceeded its byte limit."
-                : "Remote Inventory observation failed.",
+                  : "Remote Inventory observation failed.",
             response.code === "remote_operation_failed",
           );
         }

@@ -18,6 +18,7 @@ import {
   ShieldCheck,
   Square,
   Trash2,
+  WifiOff,
 } from "lucide-react";
 
 import type {
@@ -48,9 +49,21 @@ function statusLabel(snapshot: WorkspaceSnapshot) {
   if (phase === "loading") return `Refreshing - ${freshnessLabel(freshness)}`;
   if (phase === "cancelled")
     return `Refresh cancelled - ${freshnessLabel(freshness)}`;
+  if (phase === "error" && isTargetOffline(snapshot))
+    return `Offline - ${freshnessLabel(freshness)}`;
   if (phase === "error")
     return freshness === "stale" ? "Stale after error" : "Refresh error";
   return freshnessLabel(freshness);
+}
+
+function isTargetOffline(snapshot: WorkspaceSnapshot) {
+  return (
+    snapshot.target.kind === "ssh" &&
+    snapshot.inventory.lastError !== null &&
+    ["transport_failed", "transport_lost", "transport_unavailable"].includes(
+      snapshot.inventory.lastError.code,
+    )
+  );
 }
 
 function statusTone(snapshot: WorkspaceSnapshot) {
@@ -92,11 +105,18 @@ function InventoryStatus({
     );
   }
   if (inventory.phase === "error" && inventory.lastError !== null) {
+    const offline = isTargetOffline(snapshot);
     return (
       <div className="state-banner state-banner--danger" role="alert">
-        <AlertCircle aria-hidden="true" size={16} />
+        {offline ? (
+          <WifiOff aria-hidden="true" size={16} />
+        ) : (
+          <AlertCircle aria-hidden="true" size={16} />
+        )}
         <span>{inventory.lastError.message}</span>
-        {inventory.freshness === "stale" ? (
+        {offline ? (
+          <strong>Target offline</strong>
+        ) : inventory.freshness === "stale" ? (
           <strong>Last complete evidence retained</strong>
         ) : null}
       </div>
@@ -582,7 +602,10 @@ export function InventoryApp({ client }: { readonly client: WorkspaceBridge }) {
               <InventoryStatus snapshot={snapshot} />
               {snapshot.inventory.lastError?.code === "host_trust_required" ||
               snapshot.inventory.lastError?.code === "host_key_changed" ? (
-                <div className="state-banner state-banner--warning" role="status">
+                <div
+                  className="state-banner state-banner--warning"
+                  role="status"
+                >
                   <ShieldCheck aria-hidden="true" size={16} />
                   <span>Host identity review required</span>
                   <button

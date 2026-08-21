@@ -34,6 +34,8 @@ const challenge: HostTrustChallenge = {
 };
 const sshBinding: OpenSshEffectiveBinding = {
   bindingDigest: "a".repeat(64),
+  connectionConfig:
+    "Host skills-desktop-frozen-target\n  HostName resolved.internal\n",
   connectionReference: "build-host",
   hostKey: { algorithm: "ssh-ed25519", key: "AQIDBA==" },
   hostKeyIdentity: "[resolved.internal]:2222",

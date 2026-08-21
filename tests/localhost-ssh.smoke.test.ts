@@ -1,4 +1,6 @@
 import { execFile } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { watch as watchFileSystem } from "node:fs";
 import {
   chmod,
   mkdir,
@@ -9,7 +11,7 @@ import {
 } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
-import { delimiter, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { promisify } from "node:util";
 
 import { afterEach, describe, expect, it } from "vitest";
@@ -19,20 +21,21 @@ import {
   createSshTransportRunner,
 } from "../apps/desktop/src/main/adapters/ssh-skills-process.js";
 import {
-  createOpenSshHostTrustStore,
   createOpenSshHostKeyProbe,
   createOpenSshTargetAccess,
   createOpenSshToolRunner,
 } from "../apps/desktop/src/main/ssh/openssh-target.js";
+import { createRecoveryHostTrustStore } from "../apps/desktop/src/main/persistence/recovery-host-trust.js";
+import { createJsonRecoveryRecords } from "../apps/desktop/src/main/persistence/recovery-records.js";
 
 const execFileAsync = promisify(execFile);
 const temporaryDirectories: string[] = [];
 
 afterEach(async () => {
   await Promise.all(
-    temporaryDirectories.splice(0).map((directory) =>
-      rm(directory, { force: true, recursive: true }),
-    ),
+    temporaryDirectories
+      .splice(0)
+      .map((directory) => rm(directory, { force: true, recursive: true })),
   );
 });
 
@@ -43,11 +46,41 @@ async function availablePort() {
     server.listen(0, "127.0.0.1", resolve);
   });
   const address = server.address();
-  const port = typeof address === "object" && address !== null ? address.port : 0;
+  const port =
+    typeof address === "object" && address !== null ? address.port : 0;
   await new Promise<void>((resolve, reject) =>
     server.close((error) => (error === undefined ? resolve() : reject(error))),
   );
   return port;
+}
+
+async function waitForFile(path: string) {
+  await new Promise<void>((resolve, reject) => {
+    const watcher = watchFileSystem(dirname(path));
+    const timeout = setTimeout(() => {
+      watcher.close();
+      reject(new Error("Timed out waiting for the SSH cancellation barrier."));
+    }, 10_000);
+    const inspect = () => {
+      void readFile(path, "utf8").then(
+        () => {
+          clearTimeout(timeout);
+          watcher.close();
+          resolve();
+        },
+        (error: NodeJS.ErrnoException) => {
+          if (error.code !== "ENOENT") {
+            clearTimeout(timeout);
+            watcher.close();
+            reject(error);
+          }
+        },
+      );
+    };
+    watcher.on("change", inspect);
+    watcher.on("error", reject);
+    inspect();
+  });
 }
 
 describe("disposable localhost OpenSSH integration", () => {
@@ -66,21 +99,45 @@ describe("disposable localhost OpenSSH integration", () => {
       ]);
       const hostKey = join(sshDirectory, "host_ed25519");
       const clientKey = join(sshDirectory, "client_ed25519");
-      await execFileAsync("ssh-keygen", ["-q", "-t", "ed25519", "-N", "", "-f", hostKey]);
-      await execFileAsync("ssh-keygen", ["-q", "-t", "ed25519", "-N", "", "-f", clientKey]);
+      await execFileAsync("ssh-keygen", [
+        "-q",
+        "-t",
+        "ed25519",
+        "-N",
+        "",
+        "-f",
+        hostKey,
+      ]);
+      await execFileAsync("ssh-keygen", [
+        "-q",
+        "-t",
+        "ed25519",
+        "-N",
+        "",
+        "-f",
+        clientKey,
+      ]);
       const authorizedKeys = join(sshDirectory, "authorized_keys");
-      await writeFile(authorizedKeys, await readFile(`${clientKey}.pub`, "utf8"), {
-        mode: 0o600,
-      });
+      await writeFile(
+        authorizedKeys,
+        await readFile(`${clientKey}.pub`, "utf8"),
+        {
+          mode: 0o600,
+        },
+      );
 
       const npx = join(bin, "npx");
       const pauseFile = join(root, "pause-observation");
+      const observationStartedFile = join(root, "observation-started");
       await writeFile(
         npx,
         `#!/usr/bin/env node
-const { existsSync } = require("node:fs");
+const { existsSync, writeFileSync } = require("node:fs");
 const operation = process.argv.slice(2).slice(2).join(" ");
-if (operation === "list --json" && existsSync(${JSON.stringify(pauseFile)})) setTimeout(() => process.stdout.write(JSON.stringify([{ name: "late-project", path: "/private/late", scope: "project", agents: ["Codex"], source: null, sourceType: null, sourceUrl: null }])), 30_000);
+if (operation === "list --json" && existsSync(${JSON.stringify(pauseFile)})) {
+  writeFileSync(${JSON.stringify(observationStartedFile)}, "started");
+  setTimeout(() => process.stdout.write(JSON.stringify([{ name: "late-project", path: "/private/late", scope: "project", agents: ["Codex"], source: null, sourceType: null, sourceUrl: null }])), 30_000);
+}
 else if (operation === "--version") process.stdout.write("1.5.23\\n");
 else if (operation === "list --json") process.stdout.write(JSON.stringify([{ name: "remote-project", path: "/private/project", scope: "project", agents: ["Codex"], source: null, sourceType: null, sourceUrl: null }]));
 else if (operation === "list --global --json") process.stdout.write(JSON.stringify([{ name: "remote-global", path: "/private/global", scope: "global", agents: ["Codex"], source: null, sourceType: null, sourceUrl: null }]));
@@ -182,8 +239,15 @@ exec /bin/sh -c "$SSH_ORIGINAL_COMMAND"
           environment,
           sshConfigPath: clientConfig,
         });
-        const trustStore = createOpenSshHostTrustStore({
-          path: join(sshDirectory, "known_hosts"),
+        const recoveryDirectory = join(sshDirectory, "recovery");
+        const recoveryRecords = createJsonRecoveryRecords({
+          directory: recoveryDirectory,
+          id: randomUUID,
+          platform: process.platform,
+        });
+        const trustStore = createRecoveryHostTrustStore({
+          path: join(recoveryDirectory, "known_hosts"),
+          records: recoveryRecords,
         });
         const access = createOpenSshTargetAccess({
           clock: () => new Date("2026-08-22T10:00:00.000Z"),
@@ -237,7 +301,6 @@ exec /bin/sh -c "$SSH_ORIGINAL_COMMAND"
           runner: createSshTransportRunner({
             environment,
             platform: process.platform,
-            sshConfigPath: clientConfig,
           }),
         });
         const observed = await processAdapter.observeInventory({
@@ -261,7 +324,8 @@ exec /bin/sh -c "$SSH_ORIGINAL_COMMAND"
         const cancelled = processAdapter.observeInventory({
           signal: controller.signal,
         });
-        setTimeout(() => controller.abort(), 100);
+        await waitForFile(observationStartedFile);
+        controller.abort();
         await expect(cancelled).resolves.toMatchObject({
           error: { code: "cancelled", effects: "none" },
           ok: false,
@@ -280,7 +344,9 @@ exec /bin/sh -c "$SSH_ORIGINAL_COMMAND"
         });
       } finally {
         daemon.kill("SIGTERM");
-        await new Promise<void>((resolve) => daemon.once("close", () => resolve()));
+        await new Promise<void>((resolve) =>
+          daemon.once("close", () => resolve()),
+        );
       }
     },
   );

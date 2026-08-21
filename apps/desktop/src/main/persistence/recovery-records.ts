@@ -20,14 +20,44 @@ import type {
 const STORE_NAME = "inventorySnapshots" as const;
 const GUARD_STORE_NAME = "mutationGuards" as const;
 const TARGET_STORE_NAME = "targetDefinitions" as const;
+const HOST_TRUST_STORE_NAME = "hostTrustRecords" as const;
 const DOCUMENT_NAME = "inventory-snapshots.json";
 const GUARD_DOCUMENT_NAME = "mutation-guards.json";
 const TARGET_DOCUMENT_NAME = "target-definitions.json";
 const TARGET_FAILURE_MARKER_NAME = "target-definitions.failure.json";
+const HOST_TRUST_DOCUMENT_NAME = "known_hosts";
+const HOST_TRUST_FAILURE_MARKER_NAME = "host-trust.failure.json";
 const CURRENT_SCHEMA_VERSION = 3 as const;
 const CURRENT_GUARD_SCHEMA_VERSION = 2 as const;
 const CURRENT_TARGET_SCHEMA_VERSION = 3 as const;
 const targetIdSchema = z.string().uuid();
+const hostTrustRecordSchema = z
+  .object({
+    algorithm: z
+      .string()
+      .regex(
+        /^(?:ssh-(?:ed25519|rsa)|ecdsa-sha2-nistp(?:256|384|521)|rsa-sha2-(?:256|512))$/,
+      ),
+    identity: z
+      .string()
+      .min(1)
+      .max(2_048)
+      .refine((value) => !/[\s\0]/.test(value)),
+    key: z
+      .string()
+      .min(1)
+      .max(16_384)
+      .regex(/^[A-Za-z0-9+/]+={0,2}$/)
+      .refine((value) => {
+        const decoded = Buffer.from(value, "base64");
+        return (
+          decoded.length > 0 &&
+          decoded.toString("base64").replace(/=+$/, "") ===
+            value.replace(/=+$/, "")
+        );
+      }),
+  })
+  .strict();
 
 const persistedEvidenceSchema = z.discriminatedUnion("status", [
   z.object({ status: z.literal("unknown") }).strict(),
@@ -256,6 +286,14 @@ const targetFailureMarkerSchema = z
   })
   .strict();
 
+const hostTrustFailureMarkerSchema = z
+  .object({
+    failure: z.literal("corrupt_store"),
+    kind: z.literal("host-trust-failure"),
+    schemaVersion: z.literal(1),
+  })
+  .strict();
+
 export type PersistedInventoryEntry = z.infer<typeof persistedEntrySchema>;
 
 export interface InventorySnapshot {
@@ -269,8 +307,13 @@ export interface InventorySnapshot {
 export interface RecoveryFailure {
   readonly code: "corrupt_store" | "migration_failed" | "unsupported_schema";
   readonly store:
-    typeof GUARD_STORE_NAME | typeof STORE_NAME | typeof TARGET_STORE_NAME;
+    | typeof GUARD_STORE_NAME
+    | typeof HOST_TRUST_STORE_NAME
+    | typeof STORE_NAME
+    | typeof TARGET_STORE_NAME;
 }
+
+export type HostTrustRecord = z.infer<typeof hostTrustRecordSchema>;
 
 export type DurableTargetDefinition = Omit<
   z.infer<typeof targetDefinitionSchema>,
@@ -290,6 +333,7 @@ export interface MutationGuard {
 
 export interface RestoredRecoveryRecords {
   readonly failures: readonly RecoveryFailure[];
+  readonly hostTrustRecords: readonly HostTrustRecord[];
   readonly inventorySnapshots: readonly InventorySnapshot[];
   readonly mutationGuards: readonly MutationGuard[];
   readonly targetDefinitions: readonly DurableTargetDefinition[];
@@ -315,6 +359,10 @@ export type DurableChange =
       readonly fromTargetId: string;
       readonly toTargetId: string;
       readonly type: "target.remap";
+    }
+  | {
+      readonly record: HostTrustRecord;
+      readonly type: "host-trust.replace";
     };
 
 export type RecoveryCommitError = PublicError<
@@ -467,10 +515,12 @@ export function createMemoryRecoveryRecords(
   initialSnapshots: readonly InventorySnapshot[] = [],
   initialGuards: readonly MutationGuard[] = [],
   initialTargets: readonly DurableTargetDefinition[] = [],
+  initialHostTrust: readonly HostTrustRecord[] = [],
 ): RecoveryRecords {
   let snapshots = [...initialSnapshots];
   let mutationGuards = [...initialGuards];
   let targetDefinitions = structuredClone(initialTargets);
+  let hostTrustRecords = structuredClone(initialHostTrust);
   return {
     async commit(change) {
       if (change.type === "target.remap") {
@@ -540,7 +590,7 @@ export function createMemoryRecoveryRecords(
         mutationGuards = mutationGuards.filter(
           ({ targetId }) => targetId !== change.targetId,
         );
-      } else {
+      } else if (change.type === "targets.replace") {
         const parsed = z
           .array(targetDefinitionSchema)
           .min(1)
@@ -553,12 +603,27 @@ export function createMemoryRecoveryRecords(
           );
         }
         targetDefinitions = structuredClone(parsed.data);
+      } else {
+        const parsed = hostTrustRecordSchema.safeParse(change.record);
+        if (!parsed.success) {
+          return commitFailure(
+            "persist_failed",
+            "Host Trust data did not pass durable validation.",
+          );
+        }
+        hostTrustRecords = [
+          ...hostTrustRecords.filter(
+            ({ identity }) => identity !== parsed.data.identity,
+          ),
+          parsed.data,
+        ].sort((left, right) => left.identity.localeCompare(right.identity));
       }
       return { ok: true, value: undefined };
     },
     async restore() {
       return {
         failures: [],
+        hostTrustRecords: structuredClone(hostTrustRecords),
         inventorySnapshots: structuredClone(snapshots),
         mutationGuards: structuredClone(mutationGuards),
         targetDefinitions: structuredClone(targetDefinitions),
@@ -567,23 +632,55 @@ export function createMemoryRecoveryRecords(
   };
 }
 
+function parseHostTrustRecords(raw: string): HostTrustRecord[] | undefined {
+  const records: HostTrustRecord[] = [];
+  const identities = new Set<string>();
+  for (const line of raw.split(/\r?\n/)) {
+    if (line === "") continue;
+    const [identity, algorithm, key, ...extra] = line.split(" ");
+    const parsed = hostTrustRecordSchema.safeParse({
+      algorithm,
+      identity,
+      key,
+    });
+    if (
+      !parsed.success ||
+      extra.length > 0 ||
+      identities.has(parsed.data.identity)
+    ) {
+      return undefined;
+    }
+    identities.add(parsed.data.identity);
+    records.push(parsed.data);
+  }
+  return records.sort((left, right) =>
+    left.identity.localeCompare(right.identity),
+  );
+}
+
+function serializeHostTrustRecords(records: readonly HostTrustRecord[]) {
+  return records
+    .map(({ algorithm, identity, key }) => `${identity} ${algorithm} ${key}\n`)
+    .join("");
+}
+
 function migrateLegacyDocument(
   input: z.infer<typeof legacyDocumentSchema>,
 ): InventorySnapshot[] {
   return input.records.map((record) => ({
-      cliVersion: record.cliVersion,
-      entries: record.skills.map((entry) => ({
-        agents: entry.agents,
-        contentFingerprint: { status: "unknown" as const },
-        declaredSource: { source: entry.source, sourceType: entry.sourceType },
-        name: entry.name,
-        revision: { status: "unknown" as const },
-        scope: entry.scope,
-      })),
-      generation: record.generation,
-      observedAt: record.capturedAt,
-      targetId: record.target,
-    }));
+    cliVersion: record.cliVersion,
+    entries: record.skills.map((entry) => ({
+      agents: entry.agents,
+      contentFingerprint: { status: "unknown" as const },
+      declaredSource: { source: entry.source, sourceType: entry.sourceType },
+      name: entry.name,
+      revision: { status: "unknown" as const },
+      scope: entry.scope,
+    })),
+    generation: record.generation,
+    observedAt: record.capturedAt,
+    targetId: record.target,
+  }));
 }
 
 export function createJsonRecoveryRecords(
@@ -595,6 +692,11 @@ export function createJsonRecoveryRecords(
   const targetFailureMarkerPath = join(
     options.directory,
     TARGET_FAILURE_MARKER_NAME,
+  );
+  const hostTrustPath = join(options.directory, HOST_TRUST_DOCUMENT_NAME);
+  const hostTrustFailureMarkerPath = join(
+    options.directory,
+    HOST_TRUST_FAILURE_MARKER_NAME,
   );
   const fileSystem = options.fileSystem ?? createNodeRecoveryFileSystem();
   let document: CurrentDocument = {
@@ -626,6 +728,10 @@ export function createJsonRecoveryRecords(
   let targetsLoaded = false;
   let targetUnsupportedSchema = false;
   let targetWriteBlocked = false;
+  let hostTrustRecords: HostTrustRecord[] = [];
+  let hostTrustFailures: RecoveryFailure[] = [];
+  let hostTrustLoaded = false;
+  let hostTrustWriteBlocked = false;
   let loaded = false;
   let unsupportedSchema = false;
   let writeBlocked = false;
@@ -640,9 +746,8 @@ export function createJsonRecoveryRecords(
     return result;
   };
 
-  const writeDocument = async (
-    nextDocument:
-      CurrentDocument | GuardDocument | TargetDocument | TargetFailureMarker,
+  const writeUtf8 = async (
+    contents: string,
     name = DOCUMENT_NAME,
     destinationPath = documentPath,
   ) => {
@@ -656,7 +761,7 @@ export function createJsonRecoveryRecords(
       const handle = await fileSystem.open(temporaryPath, "wx", 0o600);
       ownsTemporary = true;
       try {
-        await handle.writeFile(JSON.stringify(nextDocument), {
+        await handle.writeFile(contents, {
           encoding: "utf8",
         });
         await handle.sync();
@@ -680,6 +785,17 @@ export function createJsonRecoveryRecords(
       throw error;
     }
   };
+
+  const writeDocument = async (
+    nextDocument:
+      | CurrentDocument
+      | GuardDocument
+      | TargetDocument
+      | TargetFailureMarker
+      | z.infer<typeof hostTrustFailureMarkerSchema>,
+    name = DOCUMENT_NAME,
+    destinationPath = documentPath,
+  ) => writeUtf8(JSON.stringify(nextDocument), name, destinationPath);
 
   const quarantine = async () => {
     const quarantinePath = join(
@@ -985,15 +1101,14 @@ export function createJsonRecoveryRecords(
               ...definition,
               generation: 1,
             }))
-          : []).map((definition) => ({
+          : []
+      ).map((definition) => ({
         ...definition,
         executionBindingDigest: null,
       })),
     });
     if (!migrated.success) {
-      await quarantineAndMarkTargets("migration_failed").catch(
-        () => undefined,
-      );
+      await quarantineAndMarkTargets("migration_failed").catch(() => undefined);
       targetWriteBlocked = true;
       targetFailures = [{ code: "migration_failed", store: TARGET_STORE_NAME }];
       return;
@@ -1017,9 +1132,126 @@ export function createJsonRecoveryRecords(
     }
   };
 
+  const quarantineAndMarkHostTrust = async () => {
+    const quarantinePath = `${hostTrustPath}.quarantine-${options.id()}`;
+    await fileSystem.rename(hostTrustPath, quarantinePath);
+    try {
+      await writeDocument(
+        {
+          failure: "corrupt_store",
+          kind: "host-trust-failure",
+          schemaVersion: 1,
+        },
+        HOST_TRUST_FAILURE_MARKER_NAME,
+        hostTrustFailureMarkerPath,
+      );
+    } catch (error) {
+      await fileSystem
+        .rename(quarantinePath, hostTrustPath)
+        .catch(() => undefined);
+      throw error;
+    }
+  };
+
+  const loadHostTrust = async () => {
+    if (hostTrustLoaded) return;
+    hostTrustLoaded = true;
+    hostTrustFailures = [];
+    try {
+      const rawMarker = await fileSystem.readFile(
+        hostTrustFailureMarkerPath,
+        "utf8",
+      );
+      const marker = hostTrustFailureMarkerSchema.safeParse(
+        JSON.parse(rawMarker),
+      );
+      hostTrustWriteBlocked = true;
+      hostTrustFailures = [
+        {
+          code: marker.success ? marker.data.failure : "corrupt_store",
+          store: HOST_TRUST_STORE_NAME,
+        },
+      ];
+      return;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        hostTrustWriteBlocked = true;
+        hostTrustFailures = [
+          { code: "corrupt_store", store: HOST_TRUST_STORE_NAME },
+        ];
+        return;
+      }
+    }
+
+    let raw: string;
+    try {
+      raw = await fileSystem.readFile(hostTrustPath, "utf8");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+      hostTrustWriteBlocked = true;
+      hostTrustFailures = [
+        { code: "corrupt_store", store: HOST_TRUST_STORE_NAME },
+      ];
+      return;
+    }
+    const parsed = parseHostTrustRecords(raw);
+    if (parsed === undefined) {
+      await quarantineAndMarkHostTrust().catch(() => undefined);
+      hostTrustWriteBlocked = true;
+      hostTrustFailures = [
+        { code: "corrupt_store", store: HOST_TRUST_STORE_NAME },
+      ];
+      return;
+    }
+    hostTrustRecords = parsed;
+  };
+
   return {
     commit(change) {
       return underApplicationLock(async () => {
+        if (change.type === "host-trust.replace") {
+          await loadHostTrust();
+          if (hostTrustWriteBlocked) {
+            return commitFailure(
+              "persist_failed",
+              "Host Trust data could not be read safely and will not be overwritten.",
+            );
+          }
+          const parsed = hostTrustRecordSchema.safeParse(change.record);
+          if (!parsed.success) {
+            return commitFailure(
+              "persist_failed",
+              "Host Trust data did not pass durable validation.",
+            );
+          }
+          const nextRecords = [
+            ...hostTrustRecords.filter(
+              ({ identity }) => identity !== parsed.data.identity,
+            ),
+            parsed.data,
+          ].sort((left, right) => left.identity.localeCompare(right.identity));
+          if (nextRecords.length > 1_000) {
+            return commitFailure(
+              "persist_failed",
+              "Host Trust data exceeds its record limit.",
+            );
+          }
+          try {
+            await writeUtf8(
+              serializeHostTrustRecords(nextRecords),
+              HOST_TRUST_DOCUMENT_NAME,
+              hostTrustPath,
+            );
+            hostTrustRecords = nextRecords;
+            hostTrustFailures = [];
+            return { ok: true, value: undefined };
+          } catch {
+            return commitFailure(
+              "persist_failed",
+              "Host Trust data could not be saved.",
+            );
+          }
+        }
         if (change.type === "target.remap") {
           if (
             change.fromTargetId.length === 0 ||
@@ -1045,12 +1277,14 @@ export function createJsonRecoveryRecords(
             );
           }
 
-          const sourceSnapshots =
-            pendingLegacySnapshots ??
-            [...document.legacySnapshots, ...document.snapshots];
-          const sourceGuards =
-            pendingLegacyGuards ??
-            [...guardDocument.legacyGuards, ...guardDocument.guards];
+          const sourceSnapshots = pendingLegacySnapshots ?? [
+            ...document.legacySnapshots,
+            ...document.snapshots,
+          ];
+          const sourceGuards = pendingLegacyGuards ?? [
+            ...guardDocument.legacyGuards,
+            ...guardDocument.guards,
+          ];
           const remappedSnapshots = remapTargetId(
             sourceSnapshots,
             change.fromTargetId,
@@ -1301,12 +1535,15 @@ export function createJsonRecoveryRecords(
         await load();
         await loadGuards();
         await loadTargets();
+        await loadHostTrust();
         return {
           failures: structuredClone([
             ...failures,
             ...guardFailures,
             ...targetFailures,
+            ...hostTrustFailures,
           ]),
+          hostTrustRecords: structuredClone(hostTrustRecords),
           inventorySnapshots: structuredClone(
             pendingLegacySnapshots ?? [
               ...document.snapshots,
