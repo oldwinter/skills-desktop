@@ -1,0 +1,41 @@
+{
+  "name": "skills-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.20.0"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "allowScripts": {
+    "electron-winstaller@5.4.4": true,
+    "electron@43.4.1": true
+  },
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "typecheck": "tsc -b --pretty false",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "check:imports": "node scripts/check-imports.mjs",
+    "verify": "npm run typecheck && npm run check:imports && npm test && npm run build",
+    "smoke:cli": "vitest run --config vitest.smoke.config.ts tests/real-cli.smoke.test.ts",
+    "package:linux": "npm run build && npm exec --workspace @skills-desktop/desktop electron-forge package -- --platform=linux --arch=x64",
+    "smoke:packaged": "npm run package:linux && xvfb-run -a node tests/packaged-electron.smoke.mjs"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "7.0.1",
+    "@testing-library/react": "16.3.2",
+    "@babel/parser": "8.0.4",
+    "@types/node": "26.2.0",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.4",
+    "@vitejs/plugin-react": "6.1.0",
+    "jsdom": "30.0.1",
+    "typescript": "7.0.2",
+    "vite": "8.2.2",
+    "vitest": "4.1.11"
+  }
+}

@@ -5,4 +5,5 @@
 .scratch/
 node_modules/
 dist/
+out/
 visual-qa/

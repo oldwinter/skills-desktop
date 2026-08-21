@@ -1,0 +1,609 @@
+import { useEffect, useMemo, useState } from "react";
+import {
+  AlertCircle,
+  Boxes,
+  CheckCircle2,
+  CircleHelp,
+  Clock3,
+  FolderGit2,
+  HardDrive,
+  LibraryBig,
+  ListFilter,
+  MonitorCog,
+  RefreshCw,
+  Search,
+  Server,
+  Settings2,
+  Square,
+} from "lucide-react";
+
+import type {
+  DesktopEvent,
+  PublicInventoryEntry,
+  PublicInventoryState,
+  RendererError,
+  WorkspaceBridge,
+  WorkspaceSnapshot,
+} from "../../../contracts/workspace.js";
+
+type ScopeFilter = "all" | "global" | "project";
+type SelectedIdentity = Pick<PublicInventoryEntry, "name" | "scope">;
+
+function freshnessLabel(
+  freshness: WorkspaceSnapshot["inventory"]["freshness"],
+) {
+  if (freshness === "fresh") return "Fresh evidence";
+  if (freshness === "stale") return "Stale evidence";
+  return "No evidence";
+}
+
+function statusLabel(snapshot: WorkspaceSnapshot) {
+  const { freshness, phase } = snapshot.inventory;
+  if (phase === "loading") return `Refreshing - ${freshnessLabel(freshness)}`;
+  if (phase === "cancelled")
+    return `Refresh cancelled - ${freshnessLabel(freshness)}`;
+  if (phase === "error")
+    return freshness === "stale" ? "Stale after error" : "Refresh error";
+  return freshnessLabel(freshness);
+}
+
+function statusTone(snapshot: WorkspaceSnapshot) {
+  if (snapshot.inventory.phase === "error") return "danger";
+  if (
+    snapshot.inventory.phase === "cancelled" ||
+    snapshot.inventory.freshness === "stale"
+  ) {
+    return "warning";
+  }
+  return snapshot.inventory.freshness === "fresh" ? "healthy" : "neutral";
+}
+
+function scopeLabel(scope: PublicInventoryEntry["scope"]) {
+  return scope === "project" ? "Project" : "Global";
+}
+
+function sourceLabel(entry: PublicInventoryEntry) {
+  return entry.declaredSource.source ?? "Provenance unavailable";
+}
+
+function InventoryStatus({
+  snapshot,
+}: {
+  readonly snapshot: WorkspaceSnapshot;
+}) {
+  const { inventory } = snapshot;
+  if (inventory.phase === "loading") {
+    return (
+      <div className="state-banner state-banner--loading" role="status">
+        <RefreshCw aria-hidden="true" className="spin" size={16} />
+        <span>Refreshing project and global inventory</span>
+        <strong>
+          {inventory.freshness === "none"
+            ? "No prior evidence"
+            : `${freshnessLabel(inventory.freshness)} retained`}
+        </strong>
+      </div>
+    );
+  }
+  if (inventory.phase === "error" && inventory.lastError !== null) {
+    return (
+      <div className="state-banner state-banner--danger" role="alert">
+        <AlertCircle aria-hidden="true" size={16} />
+        <span>{inventory.lastError.message}</span>
+        {inventory.freshness === "stale" ? (
+          <strong>Last complete evidence retained</strong>
+        ) : null}
+      </div>
+    );
+  }
+  if (inventory.phase === "cancelled") {
+    return (
+      <div className="state-banner state-banner--warning" role="status">
+        <Square aria-hidden="true" size={15} />
+        <span>Refresh cancelled</span>
+        <strong>{freshnessLabel(inventory.freshness)}</strong>
+      </div>
+    );
+  }
+  if (inventory.freshness === "stale") {
+    return (
+      <div className="state-banner state-banner--warning" role="status">
+        <Clock3 aria-hidden="true" size={16} />
+        <span>
+          Showing stale evidence restored from the last complete observation
+        </span>
+      </div>
+    );
+  }
+  if (inventory.persistenceWarning !== null) {
+    return (
+      <div className="state-banner state-banner--warning" role="status">
+        <AlertCircle aria-hidden="true" size={16} />
+        <span>{inventory.persistenceWarning.message}</span>
+      </div>
+    );
+  }
+  return null;
+}
+
+function EmptyInventory({ filtered }: { readonly filtered: boolean }) {
+  return (
+    <div className="empty-state" role="status">
+      <CircleHelp aria-hidden="true" size={22} />
+      <h2>{filtered ? "No matching skills" : "No skills found"}</h2>
+      <p>
+        {filtered
+          ? "Change the current search or scope filter."
+          : "Project and global inventory are empty."}
+      </p>
+    </div>
+  );
+}
+
+function MissingInventoryEvidence({
+  phase,
+}: {
+  readonly phase: PublicInventoryState["phase"];
+}) {
+  const copy =
+    phase === "loading"
+      ? {
+          heading: "Waiting for inventory",
+          message:
+            "A complete project and global observation has not finished yet.",
+        }
+      : phase === "error"
+        ? {
+            heading: "Inventory unavailable",
+            message:
+              "No complete inventory evidence is available for this Target.",
+          }
+        : {
+            heading: "No inventory evidence",
+            message: "Refresh this Target to establish a complete inventory.",
+          };
+  return (
+    <div className="empty-state" role="status">
+      <CircleHelp aria-hidden="true" size={22} />
+      <h2>{copy.heading}</h2>
+      <p>{copy.message}</p>
+    </div>
+  );
+}
+
+export function InventoryApp({ client }: { readonly client: WorkspaceBridge }) {
+  const [snapshot, setSnapshot] = useState<WorkspaceSnapshot>();
+  const [bootstrapError, setBootstrapError] = useState<RendererError>();
+  const [bootstrapAttempt, setBootstrapAttempt] = useState(0);
+  const [query, setQuery] = useState("");
+  const [scope, setScope] = useState<ScopeFilter>("all");
+  const [selectedIdentity, setSelectedIdentity] = useState<SelectedIdentity>();
+
+  useEffect(() => {
+    let active = true;
+    const resynchronize = async () => {
+      const result = await client.getSnapshot();
+      if (!result.ok) {
+        if (active) setBootstrapError(result.error);
+        return undefined;
+      }
+      const next = result.value;
+      if (active) setBootstrapError(undefined);
+      if (active)
+        setSnapshot((current) =>
+          current && current.stateRevision > next.stateRevision
+            ? current
+            : next,
+        );
+      return next;
+    };
+    const receive = (event: DesktopEvent) => {
+      if (!active) return;
+      if (event.type === "resync.required") {
+        void resynchronize();
+        return;
+      }
+      setSnapshot((current) => {
+        if (
+          current !== undefined &&
+          current.sessionEpoch === event.sessionEpoch &&
+          event.sequence === current.eventSequence + 1
+        ) {
+          return event.snapshot;
+        }
+        void resynchronize();
+        return current;
+      });
+    };
+    const unsubscribe = client.subscribe(receive);
+    void resynchronize().then((initial) => {
+      if (
+        active &&
+        initial !== undefined &&
+        initial.inventory.phase !== "loading" &&
+        initial.inventory.freshness !== "fresh"
+      ) {
+        void client.refreshInventory(initial.target.id);
+      }
+    });
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, [bootstrapAttempt, client]);
+
+  const filteredEntries = useMemo(() => {
+    if (snapshot === undefined) return [];
+    const normalizedQuery = query.trim().toLocaleLowerCase();
+    return snapshot.inventory.entries.filter((entry) => {
+      const matchesScope = scope === "all" || entry.scope === scope;
+      const searchable = [
+        entry.name,
+        entry.declaredSource.source,
+        entry.declaredSource.sourceType,
+        ...entry.agents,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLocaleLowerCase();
+      return (
+        matchesScope &&
+        (normalizedQuery === "" || searchable.includes(normalizedQuery))
+      );
+    });
+  }, [query, scope, snapshot]);
+
+  const selected = useMemo(() => {
+    const entries = snapshot?.inventory.entries ?? [];
+    return (
+      entries.find(
+        (entry) =>
+          entry.name === selectedIdentity?.name &&
+          entry.scope === selectedIdentity.scope,
+      ) ?? entries[0]
+    );
+  }, [selectedIdentity, snapshot]);
+
+  if (snapshot === undefined) {
+    if (bootstrapError !== undefined) {
+      return (
+        <main className="boot-state boot-state--error" role="alert">
+          <AlertCircle aria-hidden="true" size={24} />
+          <span>{bootstrapError.message}</span>
+          <button
+            aria-label="Retry opening inventory"
+            className="icon-button"
+            onClick={() => setBootstrapAttempt((attempt) => attempt + 1)}
+            title="Retry opening inventory"
+            type="button"
+          >
+            <RefreshCw aria-hidden="true" size={17} />
+          </button>
+        </main>
+      );
+    }
+    return (
+      <main className="boot-state" aria-busy="true">
+        <Boxes aria-hidden="true" size={24} />
+        <span>Opening local inventory</span>
+      </main>
+    );
+  }
+
+  const projectCount = snapshot.inventory.entries.filter(
+    ({ scope: entryScope }) => entryScope === "project",
+  ).length;
+  const globalCount = snapshot.inventory.entries.length - projectCount;
+  const isFiltered = query.trim() !== "" || scope !== "all";
+  const activeOperationId = snapshot.inventory.activeOperationId;
+
+  return (
+    <div className="app-shell">
+      <header className="app-header">
+        <div className="brand-lockup">
+          <span className="brand-mark">
+            <Boxes aria-hidden="true" size={17} />
+          </span>
+          <span>Skills Desktop</span>
+        </div>
+        <div className="header-target">
+          <HardDrive aria-hidden="true" size={15} />
+          <span>{snapshot.target.label}</span>
+          <span aria-hidden="true">/</span>
+          <code>{snapshot.target.workspaceLabel}</code>
+        </div>
+        <div className="header-status">
+          <span className={`status-pill status-pill--${statusTone(snapshot)}`}>
+            {snapshot.inventory.freshness === "fresh" ? (
+              <CheckCircle2 aria-hidden="true" size={14} />
+            ) : (
+              <Clock3 aria-hidden="true" size={14} />
+            )}
+            {statusLabel(snapshot)}
+          </span>
+        </div>
+      </header>
+
+      <div className="workspace-layout">
+        <aside className="scope-rail" aria-label="Workspace navigation">
+          <nav className="primary-nav" aria-label="Primary">
+            <button
+              aria-current="page"
+              aria-label="Inventory"
+              className="nav-item nav-item--active"
+              title="Inventory"
+              type="button"
+            >
+              <ListFilter aria-hidden="true" size={17} />
+              <span>Inventory</span>
+            </button>
+            <button
+              aria-label="Comparison"
+              className="nav-item"
+              disabled
+              title="Comparison"
+              type="button"
+            >
+              <MonitorCog aria-hidden="true" size={17} />
+              <span>Comparison</span>
+            </button>
+            <button
+              aria-label="Collections"
+              className="nav-item"
+              disabled
+              title="Collections"
+              type="button"
+            >
+              <LibraryBig aria-hidden="true" size={17} />
+              <span>Collections</span>
+            </button>
+            <button
+              aria-label="Targets"
+              className="nav-item"
+              disabled
+              title="Targets"
+              type="button"
+            >
+              <Settings2 aria-hidden="true" size={17} />
+              <span>Targets</span>
+            </button>
+          </nav>
+
+          <section className="target-section" aria-labelledby="target-heading">
+            <h2 id="target-heading">Local Target</h2>
+            <div className="target-row target-row--active">
+              <HardDrive aria-hidden="true" size={16} />
+              <span>
+                <strong>{snapshot.target.label}</strong>
+                <small>{snapshot.target.workspaceLabel}</small>
+              </span>
+            </div>
+            <dl className="target-facts">
+              <div>
+                <dt>Harness</dt>
+                <dd>{snapshot.target.harness}</dd>
+              </div>
+              <div>
+                <dt>Project</dt>
+                <dd>{projectCount}</dd>
+              </div>
+              <div>
+                <dt>Global</dt>
+                <dd>{globalCount}</dd>
+              </div>
+            </dl>
+          </section>
+          <div className="rail-version">
+            <Server aria-hidden="true" size={14} />
+            <span>skills {snapshot.inventory.cliVersion ?? "1.5.23"}</span>
+          </div>
+        </aside>
+
+        <main
+          className="inventory-workspace"
+          aria-busy={snapshot.inventory.phase === "loading"}
+        >
+          <section className="page-heading">
+            <div>
+              <h1>Inventory</h1>
+              <p>
+                {snapshot.inventory.entries.length} skills across project and
+                global scopes
+              </p>
+              <p aria-label="Target summary" className="mobile-target-summary">
+                <HardDrive aria-hidden="true" size={14} />
+                {snapshot.target.label} / {snapshot.target.workspaceLabel} /{" "}
+                {snapshot.target.harness}
+              </p>
+            </div>
+            {snapshot.inventory.phase === "loading" &&
+            activeOperationId !== null ? (
+              <button
+                aria-label="Cancel refresh"
+                className="icon-button"
+                onClick={() => void client.cancelInventory(activeOperationId)}
+                title="Cancel refresh"
+                type="button"
+              >
+                <Square aria-hidden="true" size={16} />
+              </button>
+            ) : (
+              <button
+                aria-label="Refresh inventory"
+                className="icon-button"
+                onClick={() => void client.refreshInventory(snapshot.target.id)}
+                title="Refresh inventory"
+                type="button"
+              >
+                <RefreshCw aria-hidden="true" size={17} />
+              </button>
+            )}
+          </section>
+
+          <InventoryStatus snapshot={snapshot} />
+
+          <div className="inventory-toolbar">
+            <label className="search-control">
+              <Search aria-hidden="true" size={16} />
+              <span className="sr-only">Search inventory</span>
+              <input
+                onChange={(event) => setQuery(event.currentTarget.value)}
+                placeholder="Search skills or sources"
+                type="search"
+                value={query}
+              />
+            </label>
+            <div className="segmented-control" aria-label="Inventory scope">
+              {(["all", "project", "global"] as const).map((value) => (
+                <button
+                  aria-pressed={scope === value}
+                  key={value}
+                  onClick={() => setScope(value)}
+                  type="button"
+                >
+                  {value === "all"
+                    ? "All scopes"
+                    : `${scopeLabel(value)} scope`}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="inventory-table-wrap">
+            {filteredEntries.length === 0 ? (
+              snapshot.inventory.freshness === "none" ? (
+                <MissingInventoryEvidence phase={snapshot.inventory.phase} />
+              ) : (
+                <EmptyInventory filtered={isFiltered} />
+              )
+            ) : (
+              <table className="inventory-table">
+                <caption className="sr-only">
+                  Skills observed on the selected Local Target
+                </caption>
+                <thead>
+                  <tr>
+                    <th>Skill</th>
+                    <th>Scope</th>
+                    <th>Harness</th>
+                    <th>Declared source</th>
+                    <th>Evidence</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredEntries.map((entry) => {
+                    const selectedRow =
+                      selected?.name === entry.name &&
+                      selected.scope === entry.scope;
+                    return (
+                      <tr
+                        className={selectedRow ? "is-selected" : undefined}
+                        key={`${entry.scope}:${entry.name}`}
+                      >
+                        <td data-label="Skill">
+                          <button
+                            className="skill-button"
+                            onClick={() =>
+                              setSelectedIdentity({
+                                name: entry.name,
+                                scope: entry.scope,
+                              })
+                            }
+                            type="button"
+                          >
+                            <FolderGit2 aria-hidden="true" size={16} />
+                            <span>{entry.name}</span>
+                          </button>
+                        </td>
+                        <td data-label="Scope">
+                          <span className="scope-badge">
+                            {scopeLabel(entry.scope)}
+                          </span>
+                        </td>
+                        <td data-label="Harness">
+                          {entry.agents.includes(snapshot.target.harness)
+                            ? snapshot.target.harness
+                            : "Not linked"}
+                        </td>
+                        <td data-label="Declared source">
+                          <code className="wrapping-value">
+                            {sourceLabel(entry)}
+                          </code>
+                        </td>
+                        <td data-label="Evidence">
+                          <span className="unknown-label">
+                            <CircleHelp aria-hidden="true" size={14} />
+                            Unknown revision
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </main>
+
+        <aside className="inspector" aria-label="Selected skill evidence">
+          {selected === undefined ? (
+            <div className="inspector-empty">
+              <CircleHelp aria-hidden="true" size={22} />
+              <h2>No skill selected</h2>
+            </div>
+          ) : (
+            <>
+              <header className="inspector-heading">
+                <FolderGit2 aria-hidden="true" size={18} />
+                <div>
+                  <p>Skill evidence</p>
+                  <h2>{selected.name}</h2>
+                </div>
+              </header>
+              <dl className="evidence-list">
+                <div>
+                  <dt>Scope</dt>
+                  <dd>{scopeLabel(selected.scope)}</dd>
+                </div>
+                <div>
+                  <dt>Harness</dt>
+                  <dd>{selected.agents.join(", ") || "None reported"}</dd>
+                </div>
+                <div>
+                  <dt>Source type</dt>
+                  <dd>{selected.declaredSource.sourceType ?? "Unknown"}</dd>
+                </div>
+                <div>
+                  <dt>Declared source</dt>
+                  <dd>
+                    <code className="wrapping-value">
+                      {sourceLabel(selected)}
+                    </code>
+                  </dd>
+                </div>
+                <div>
+                  <dt>Revision</dt>
+                  <dd>
+                    <span className="unknown-label">
+                      <CircleHelp aria-hidden="true" size={14} />
+                      Revision unknown
+                    </span>
+                  </dd>
+                </div>
+                <div>
+                  <dt>Content fingerprint</dt>
+                  <dd>
+                    <span className="unknown-label">
+                      <CircleHelp aria-hidden="true" size={14} />
+                      Unknown
+                    </span>
+                  </dd>
+                </div>
+              </dl>
+            </>
+          )}
+        </aside>
+      </div>
+    </div>
+  );
+}

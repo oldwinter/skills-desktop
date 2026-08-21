@@ -1,0 +1,32 @@
+{
+  "name": "@skills-desktop/desktop",
+  "productName": "Skills Desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/main/index.js",
+  "scripts": {
+    "build": "vite build --config vite.main.config.ts && vite build --config vite.preload.config.ts && vite build --config vite.review-preload.config.ts && vite build --config vite.renderer.config.ts && vite build --config vite.review-renderer.config.ts",
+    "typecheck": "tsc -b --pretty false",
+    "package": "electron-forge package"
+  },
+  "dependencies": {
+    "@skills-desktop/skills-runtime": "0.1.0",
+    "lucide-react": "1.33.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@electron-forge/cli": "7.11.2",
+    "@electron-forge/maker-deb": "7.11.2",
+    "@electron-forge/maker-dmg": "7.11.2",
+    "@electron-forge/maker-rpm": "7.11.2",
+    "@electron-forge/maker-squirrel": "7.11.2",
+    "@electron-forge/maker-zip": "7.11.2",
+    "@electron-forge/plugin-fuses": "7.11.2",
+    "@electron-forge/shared-types": "7.11.2",
+    "@electron/fuses": "1.8.0",
+    "electron": "43.4.1"
+  }
+}

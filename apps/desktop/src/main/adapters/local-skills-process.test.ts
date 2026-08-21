@@ -1,0 +1,572 @@
+import {
+  chmod,
+  copyFile,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  watch,
+  writeFile,
+} from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { delimiter, join } from "node:path";
+
+import { describe, expect, it, vi } from "vitest";
+
+import { CLI_PACKAGE } from "@skills-desktop/skills-runtime";
+
+import {
+  createLocalSkillsProcess,
+  createSpawnProcessRunner,
+  resolveWindowsNpxCommand,
+  type ProcessInvocation,
+  type ProcessRunner,
+} from "./local-skills-process.js";
+
+const projectOutput = JSON.stringify([
+  {
+    name: "project-skill",
+    path: "/workspace/.agents/skills/project-skill",
+    scope: "project",
+    agents: ["Codex"],
+    source: null,
+    sourceUrl: null,
+    sourceType: null,
+  },
+]);
+
+const globalOutput = JSON.stringify([
+  {
+    name: "global-skill",
+    path: "/users/example/.agents/skills/global-skill",
+    scope: "global",
+    agents: ["Codex"],
+    source: "example/skills",
+    sourceUrl: "https://github.com/example/skills.git",
+    sourceType: "github",
+  },
+]);
+
+function scriptedRunner(): ProcessRunner & {
+  invocations: ProcessInvocation[];
+} {
+  const invocations: ProcessInvocation[] = [];
+  return {
+    invocations,
+    async run(invocation) {
+      invocations.push(invocation);
+      const packageIndex = invocation.args.indexOf(CLI_PACKAGE);
+      const operation = invocation.args.slice(packageIndex + 1).join(" ");
+      if (operation === "--version") {
+        return { exitCode: 0, stderr: "", stdout: "1.5.23\n" };
+      }
+      if (operation === "list --json") {
+        return {
+          exitCode: 0,
+          stderr: "informational notice",
+          stdout: projectOutput,
+        };
+      }
+      if (operation === "list --global --json") {
+        return { exitCode: 0, stderr: "", stdout: globalOutput };
+      }
+      throw new Error("Unexpected scripted invocation");
+    },
+  };
+}
+
+describe("Local SkillsProcess inventory contract", () => {
+  it.each(["linux", "darwin"] as const)(
+    "verifies the dialect once and publishes one complete project-and-global Inventory on %s",
+    async (platform) => {
+      const runner = scriptedRunner();
+      const process = createLocalSkillsProcess({
+        clock: () => new Date("2026-08-21T10:00:00.000Z"),
+        platform,
+        runner,
+        workspace: "/workspace",
+      });
+
+      const first = await process.observeInventory({
+        signal: new AbortController().signal,
+      });
+      const second = await process.observeInventory({
+        signal: new AbortController().signal,
+      });
+
+      expect(first).toMatchObject({
+        ok: true,
+        value: {
+          cliVersion: "1.5.23",
+          entries: [
+            { name: "project-skill", scope: "project" },
+            { name: "global-skill", scope: "global" },
+          ],
+          observedAt: "2026-08-21T10:00:00.000Z",
+          schemaVersion: 1,
+        },
+      });
+      expect(second.ok).toBe(true);
+      expect(
+        runner.invocations.map(({ args, executable, shell }) => ({
+          args,
+          executable,
+          shell,
+        })),
+      ).toEqual([
+        {
+          args: ["--yes", CLI_PACKAGE, "--version"],
+          executable: "npx",
+          shell: false,
+        },
+        {
+          args: ["--yes", CLI_PACKAGE, "list", "--json"],
+          executable: "npx",
+          shell: false,
+        },
+        {
+          args: ["--yes", CLI_PACKAGE, "list", "--global", "--json"],
+          executable: "npx",
+          shell: false,
+        },
+        {
+          args: ["--yes", CLI_PACKAGE, "list", "--json"],
+          executable: "npx",
+          shell: false,
+        },
+        {
+          args: ["--yes", CLI_PACKAGE, "list", "--global", "--json"],
+          executable: "npx",
+          shell: false,
+        },
+      ]);
+    },
+  );
+
+  it("retries dialect verification after its owning observation is cancelled", async () => {
+    const firstController = new AbortController();
+    let versionChecks = 0;
+    const runner = scriptedRunner();
+    const originalRun = runner.run.bind(runner);
+    runner.run = async (invocation) => {
+      if (invocation.args.at(-1) === "--version") {
+        versionChecks += 1;
+        if (versionChecks === 1) firstController.abort();
+      }
+      return originalRun(invocation);
+    };
+    const skillsProcess = createLocalSkillsProcess({
+      clock: () => new Date("2026-08-21T10:00:00.000Z"),
+      platform: "linux",
+      runner,
+      workspace: "/workspace",
+    });
+
+    expect(
+      await skillsProcess.observeInventory({ signal: firstController.signal }),
+    ).toMatchObject({
+      error: { code: "cancelled" },
+      ok: false,
+    });
+    expect(
+      await skillsProcess.observeInventory({
+        signal: new AbortController().signal,
+      }),
+    ).toMatchObject({ ok: true });
+    expect(versionChecks).toBe(2);
+  });
+
+  it("uses node.exe and npx-cli.js argument arrays with only the allowlisted Windows environment", async () => {
+    const runner = scriptedRunner();
+    const skillsProcess = createLocalSkillsProcess({
+      clock: () => new Date("2026-08-21T10:00:00.000Z"),
+      environment: {
+        APPDATA: "C:\\Users\\example\\AppData\\Roaming",
+        ComSpec: "C:\\Windows\\System32\\cmd.exe",
+        Path: "C:\\tools",
+        PATHEXT: ".COM;.EXE;.BAT;.CMD",
+        SECRET_TOKEN: "must-not-cross-boundary",
+        SystemRoot: "C:\\Windows",
+        USERPROFILE: "C:\\Users\\example",
+      },
+      platform: "win32",
+      runner,
+      windowsNpxCommand: {
+        executable: "C:\\tools\\node.exe",
+        npxCliPath: "C:\\tools\\node_modules\\npm\\bin\\npx-cli.js",
+      },
+      workspace: "C:\\workspace",
+    });
+
+    expect(
+      await skillsProcess.observeInventory({
+        signal: new AbortController().signal,
+      }),
+    ).toMatchObject({ ok: true });
+    expect(runner.invocations[0]).toMatchObject({
+      cwd: "C:\\workspace",
+      env: {
+        APPDATA: "C:\\Users\\example\\AppData\\Roaming",
+        ComSpec: "C:\\Windows\\System32\\cmd.exe",
+        PATH: "C:\\tools",
+        PATHEXT: ".COM;.EXE;.BAT;.CMD",
+        SystemRoot: "C:\\Windows",
+        USERPROFILE: "C:\\Users\\example",
+      },
+      args: [
+        "C:\\tools\\node_modules\\npm\\bin\\npx-cli.js",
+        "--yes",
+        CLI_PACKAGE,
+        "--version",
+      ],
+      executable: "C:\\tools\\node.exe",
+      shell: false,
+    });
+    expect(runner.invocations[0]?.env).not.toHaveProperty("SECRET_TOKEN");
+  });
+
+  it("resolves the Windows npx JavaScript entry point without parsing a command shim", async () => {
+    const existing = new Set([
+      "C:\\node\\node.exe",
+      "C:\\node\\node_modules\\npm\\bin\\npx-cli.js",
+    ]);
+
+    await expect(
+      resolveWindowsNpxCommand(
+        { PATH: "C:\\unrelated;C:\\node" },
+        async (path) => existing.has(path),
+      ),
+    ).resolves.toEqual({
+      executable: "C:\\node\\node.exe",
+      npxCliPath: "C:\\node\\node_modules\\npm\\bin\\npx-cli.js",
+    });
+  });
+
+  it("starts Windows process-tree termination before the wrapper can close", async () => {
+    const controller = new AbortController();
+    const killed: number[] = [];
+    const runner = createSpawnProcessRunner({
+      async killWindowsTree(pid) {
+        killed.push(pid);
+        process.kill(pid, "SIGKILL");
+      },
+      platform: "win32",
+    });
+    const pending = runner.run({
+      args: ["-e", "setInterval(() => undefined, 1000)"],
+      cwd: process.cwd(),
+      env: { PATH: process.env.PATH ?? "" },
+      executable: process.execPath,
+      maxOutputBytes: 1_024,
+      shell: false,
+      signal: controller.signal,
+      timeoutMs: 10_000,
+      windowsHide: true,
+    });
+
+    controller.abort();
+
+    await expect(pending).resolves.toMatchObject({ exitCode: 1 });
+    expect(killed).toHaveLength(1);
+  });
+
+  it("surfaces a bounded error when Windows tree termination cannot be confirmed", async () => {
+    const controller = new AbortController();
+    const runner = createSpawnProcessRunner({
+      async killWindowsTree() {
+        throw new Error("taskkill failed");
+      },
+      platform: "win32",
+      windowsTreeTerminationTimeoutMs: 20,
+    });
+    const pending = runner.run({
+      args: ["-e", "setInterval(() => undefined, 1000)"],
+      cwd: process.cwd(),
+      env: { PATH: process.env.PATH ?? "" },
+      executable: process.execPath,
+      maxOutputBytes: 1_024,
+      shell: false,
+      signal: controller.signal,
+      timeoutMs: 10_000,
+      windowsHide: true,
+    });
+
+    controller.abort();
+
+    await expect(pending).rejects.toThrow(
+      "Process tree termination could not be confirmed",
+    );
+  });
+
+  it("returns cancellation without publishing either partial list", async () => {
+    const controller = new AbortController();
+    const runner: ProcessRunner = {
+      run: vi.fn(async (invocation) => {
+        if (invocation.args.at(-1) === "--version") {
+          return { exitCode: 0, stderr: "", stdout: "1.5.23" };
+        }
+        controller.abort();
+        return { exitCode: 0, stderr: "", stdout: projectOutput };
+      }),
+    };
+    const process = createLocalSkillsProcess({
+      clock: () => new Date("2026-08-21T10:00:00.000Z"),
+      platform: "win32",
+      runner,
+      windowsNpxCommand: {
+        executable: "C:\\tools\\node.exe",
+        npxCliPath: "C:\\tools\\node_modules\\npm\\bin\\npx-cli.js",
+      },
+      workspace: "C:\\workspace",
+    });
+
+    const result = await process.observeInventory({
+      signal: controller.signal,
+    });
+
+    expect(result).toMatchObject({
+      error: { code: "cancelled", effects: "none", phase: "observe" },
+      ok: false,
+    });
+  });
+
+  it.skipIf(process.platform === "win32")(
+    "observes through the production process boundary without developer state",
+    async () => {
+      const directory = await mkdtemp(
+        join(tmpdir(), "skills-desktop-process-"),
+      );
+      const executable = join(directory, "npx");
+      await writeFile(
+        executable,
+        `#!/usr/bin/env node
+const args = process.argv.slice(2);
+if (args.at(-1) === "--version") {
+  process.stdout.write("1.5.23\\n");
+} else if (args.join(" ").endsWith("list --json")) {
+  process.stdout.write(${JSON.stringify(projectOutput)});
+} else if (args.join(" ").endsWith("list --global --json")) {
+  process.stdout.write(${JSON.stringify(globalOutput)});
+} else {
+  process.exitCode = 2;
+}
+`,
+        { mode: 0o700 },
+      );
+      await chmod(executable, 0o700);
+
+      try {
+        const localProcess = createLocalSkillsProcess({
+          clock: () => new Date("2026-08-21T10:00:00.000Z"),
+          environment: {
+            HOME: directory,
+            PATH: `${directory}${delimiter}${process.env.PATH ?? ""}`,
+          },
+          platform: process.platform,
+          runner: createSpawnProcessRunner({ platform: process.platform }),
+          workspace: directory,
+        });
+
+        const result = await localProcess.observeInventory({
+          signal: new AbortController().signal,
+        });
+
+        expect(result).toMatchObject({
+          ok: true,
+          value: {
+            entries: [
+              { name: "project-skill", scope: "project" },
+              { name: "global-skill", scope: "global" },
+            ],
+          },
+        });
+      } finally {
+        await rm(directory, { force: true, recursive: true });
+      }
+    },
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "terminates a cancelled production process tree without publishing partial output",
+    async () => {
+      const directory = await mkdtemp(join(tmpdir(), "skills-desktop-cancel-"));
+      const executable = join(directory, "npx");
+      await writeFile(
+        executable,
+        `#!/usr/bin/env node
+const { writeFileSync } = require("node:fs");
+const { join } = require("node:path");
+const args = process.argv.slice(2);
+if (args.at(-1) === "--version") {
+  process.stdout.write("1.5.23\\n");
+} else {
+  writeFileSync(join(process.env.HOME, "list-started-" + process.pid), "started");
+  process.on("SIGTERM", () => undefined);
+  setInterval(() => undefined, 1000);
+}
+`,
+        { mode: 0o700 },
+      );
+      await chmod(executable, 0o700);
+      const changes = watch(directory);
+      const iterator = changes[Symbol.asyncIterator]();
+
+      try {
+        const localProcess = createLocalSkillsProcess({
+          clock: () => new Date("2026-08-21T10:00:00.000Z"),
+          environment: {
+            HOME: directory,
+            PATH: `${directory}${delimiter}${process.env.PATH ?? ""}`,
+          },
+          platform: process.platform,
+          runner: createSpawnProcessRunner({
+            cancellationGraceMs: 20,
+            platform: process.platform,
+          }),
+          workspace: directory,
+        });
+        const controller = new AbortController();
+        const pending = localProcess.observeInventory({
+          signal: controller.signal,
+        });
+
+        await iterator.next();
+        controller.abort();
+
+        expect(await pending).toMatchObject({
+          error: { code: "cancelled", effects: "none" },
+          ok: false,
+        });
+      } finally {
+        await iterator.return?.();
+        await rm(directory, { force: true, recursive: true });
+      }
+    },
+  );
+
+  it.runIf(process.platform === "win32")(
+    "resolves and observes through the production Windows process boundary",
+    async () => {
+      const directory = await mkdtemp(
+        join(tmpdir(), "skills-desktop-windows-process-"),
+      );
+      const npmBin = join(directory, "node_modules", "npm", "bin");
+      await mkdir(npmBin, { recursive: true });
+      await copyFile(process.execPath, join(directory, "node.exe"));
+      await writeFile(
+        join(npmBin, "npx-cli.js"),
+        `const args = process.argv.slice(2);
+if (args.at(-1) === "--version") {
+  process.stdout.write("1.5.23\\n");
+} else if (args.join(" ").endsWith("list --json")) {
+  process.stdout.write(${JSON.stringify(projectOutput)});
+} else if (args.join(" ").endsWith("list --global --json")) {
+  process.stdout.write(${JSON.stringify(globalOutput)});
+} else {
+  process.exitCode = 2;
+}
+`,
+      );
+
+      try {
+        const localProcess = createLocalSkillsProcess({
+          clock: () => new Date("2026-08-21T10:00:00.000Z"),
+          environment: {
+            PATH: `${directory}${delimiter}${process.env.PATH ?? ""}`,
+            SystemRoot: process.env.SystemRoot,
+            TEMP: process.env.TEMP,
+            TMP: process.env.TMP,
+            USERPROFILE: directory,
+          },
+          platform: "win32",
+          runner: createSpawnProcessRunner({ platform: "win32" }),
+          workspace: directory,
+        });
+
+        expect(
+          await localProcess.observeInventory({
+            signal: new AbortController().signal,
+          }),
+        ).toMatchObject({
+          ok: true,
+          value: {
+            entries: [
+              { name: "project-skill", scope: "project" },
+              { name: "global-skill", scope: "global" },
+            ],
+          },
+        });
+      } finally {
+        await rm(directory, { force: true, recursive: true });
+      }
+    },
+  );
+
+  it.runIf(process.platform === "win32")(
+    "terminates a real Windows descendant tree with taskkill",
+    async () => {
+      const directory = await mkdtemp(
+        join(tmpdir(), "skills-desktop-windows-cancel-"),
+      );
+      const pidPath = join(directory, "descendant.pid");
+      const script = join(directory, "parent.cjs");
+      await writeFile(
+        script,
+        `const { spawn } = require("node:child_process");
+const { writeFileSync } = require("node:fs");
+const child = spawn(process.execPath, ["-e", "setInterval(() => undefined, 1000)"], {
+  stdio: "ignore",
+});
+writeFileSync(process.argv[2], String(child.pid));
+setInterval(() => undefined, 1000);
+`,
+      );
+      const changes = watch(directory);
+      const iterator = changes[Symbol.asyncIterator]();
+      const controller = new AbortController();
+      let descendantPid: number | undefined;
+
+      try {
+        const runner = createSpawnProcessRunner({ platform: "win32" });
+        const pending = runner.run({
+          args: [script, pidPath],
+          cwd: directory,
+          env: {
+            PATH: process.env.PATH ?? "",
+            SystemRoot: process.env.SystemRoot ?? "",
+            TEMP: process.env.TEMP ?? "",
+            TMP: process.env.TMP ?? "",
+          },
+          executable: process.execPath,
+          maxOutputBytes: 1_024,
+          shell: false,
+          signal: controller.signal,
+          timeoutMs: 10_000,
+          windowsHide: true,
+        });
+        while (descendantPid === undefined) {
+          await iterator.next();
+          descendantPid = await readFile(pidPath, "utf8").then(
+            (value) => Number(value),
+            () => undefined,
+          );
+        }
+
+        controller.abort();
+
+        await expect(pending).resolves.toMatchObject({ exitCode: 1 });
+        expect(() => process.kill(descendantPid!, 0)).toThrow();
+      } finally {
+        await iterator.return?.();
+        if (descendantPid !== undefined) {
+          try {
+            process.kill(descendantPid, "SIGKILL");
+          } catch {
+            // The production tree kill already removed the process.
+          }
+        }
+        await rm(directory, { force: true, recursive: true });
+      }
+    },
+  );
+});
