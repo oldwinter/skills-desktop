@@ -1,10 +1,10 @@
 /// <reference types="vite/client" />
 
-import type { WorkspaceBridge } from "../contracts/workspace.js";
+import type { DesktopBridge } from "../contracts/desktop.js";
 
 declare global {
   interface Window {
-    readonly skillsDesktop: WorkspaceBridge;
+    readonly skillsDesktop: DesktopBridge;
   }
 }
 

@@ -13,9 +13,10 @@ import {
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import type { AboutBridge } from "../../../contracts/about.js";
+import type { DesktopBridge } from "../../../contracts/desktop.js";
 import type {
   DesktopEvent,
-  WorkspaceBridge,
   WorkspaceSnapshot,
 } from "../../../contracts/workspace.js";
 import { InventoryApp } from "./InventoryApp.js";
@@ -155,8 +156,9 @@ const collectionSnapshot: WorkspaceSnapshot = {
   },
 };
 
-function clientFor(value: WorkspaceSnapshot): WorkspaceBridge {
+function clientFor(value: WorkspaceSnapshot): DesktopBridge {
   return {
+    about: aboutClient,
     async cancelInventory(operationId) {
       return { ok: true, value: { operationId } };
     },
@@ -211,6 +213,45 @@ function clientFor(value: WorkspaceSnapshot): WorkspaceBridge {
   };
 }
 
+const aboutClient: AboutBridge = {
+  async getSnapshot() {
+    return {
+      ok: true,
+      value: {
+        application: {
+          architecture: "x64",
+          platform: "linux",
+          version: "0.1.0",
+        },
+        lastCheckAt: null,
+        nextAutomaticCheckAt: null,
+        policy: {
+          message:
+            "Download a newer package from GitHub Releases and install it manually.",
+          mode: "manual",
+          releasePageUrl:
+            "https://github.com/oldwinter/skills-desktop/releases",
+        },
+        schemaVersion: 1,
+        state: { kind: "manual" },
+      },
+    };
+  },
+  async requestCheck() {
+    return {
+      error: {
+        code: "invalid_request",
+        message: "The update request is not supported.",
+        retryable: false,
+      },
+      ok: false,
+    };
+  },
+  subscribe() {
+    return () => undefined;
+  },
+};
+
 afterEach(cleanup);
 
 describe("Local Target Inventory shell", () => {
@@ -239,7 +280,7 @@ describe("Local Target Inventory shell", () => {
   });
 
   it("shows a bounded opening error returned by the IPC boundary", async () => {
-    const client: WorkspaceBridge = {
+    const client: DesktopBridge = {
       ...clientFor(snapshot),
       async getSnapshot() {
         return {
@@ -380,6 +421,18 @@ describe("Local Target Inventory shell", () => {
       "title",
       "Comparison",
     );
+  });
+
+  it("opens About from workspace navigation", async () => {
+    render(<InventoryApp client={clientFor(snapshot)} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "About" }));
+
+    expect(
+      await screen.findByRole("heading", { name: "About" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Version 0.1.0")).toBeInTheDocument();
+    expect(screen.getByText("Manual upgrade")).toBeInTheDocument();
   });
 
   it("requires explicit eligible Collection selections before preparing", async () => {
@@ -762,7 +815,7 @@ describe("Local Target Inventory shell", () => {
   it("resynchronizes from the authoritative Snapshot after an event-buffer overflow", async () => {
     let listener: ((event: DesktopEvent) => void) | undefined;
     let snapshots = 0;
-    const client: WorkspaceBridge = {
+    const client: DesktopBridge = {
       ...clientFor(snapshot),
       async getSnapshot() {
         snapshots += 1;
@@ -854,7 +907,7 @@ describe("Local Target Inventory shell", () => {
       ok: true as const,
       value: { operationId: "review-1" },
     }));
-    const client: WorkspaceBridge = {
+    const client: DesktopBridge = {
       ...clientFor({
         ...snapshot,
         mutation: {
@@ -918,7 +971,7 @@ describe("Local Target Inventory shell", () => {
   });
 
   it("shows bounded mutation request errors at the action surface", async () => {
-    const client: WorkspaceBridge = {
+    const client: DesktopBridge = {
       ...clientFor(snapshot),
       async prepareMutation() {
         return {

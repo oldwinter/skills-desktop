@@ -615,6 +615,7 @@ try {
   console.log("packaged smoke: fresh inventory rendered");
 
   const rendererBoundary = await first.page.evaluate(`({
+    aboutBridgeKeys: Object.keys(window.skillsDesktop.about).sort(),
     bridgeKeys: Object.keys(window.skillsDesktop).sort(),
     hasNodeProcess: typeof window.process !== "undefined",
     hasRequire: typeof window.require !== "undefined",
@@ -631,6 +632,7 @@ try {
   if (
     JSON.stringify(rendererBoundary.bridgeKeys) !==
     JSON.stringify([
+      "about",
       "cancelInventory",
       "compareTargets",
       "createTarget",
@@ -648,12 +650,58 @@ try {
       "requestReview",
       "subscribe",
       "updateTarget",
-    ])
+    ]) ||
+    JSON.stringify(rendererBoundary.aboutBridgeKeys) !==
+      JSON.stringify(["getSnapshot", "requestCheck", "subscribe"])
   ) {
     throw new Error(
       `Unexpected preload surface: ${rendererBoundary.bridgeKeys.join(", ")}`,
     );
   }
+  await first.page.evaluate(`(() => {
+    const button = document.querySelector('button[aria-label="About"]');
+    if (!(button instanceof HTMLButtonElement)) throw new Error("About navigation is unavailable.");
+    button.click();
+  })()`);
+  await first.page.waitFor(
+    `document.body?.textContent?.includes("Version 0.1.0") &&
+      document.body?.textContent?.includes("linux / x64") &&
+      document.body?.textContent?.includes("Manual upgrade") &&
+      document.body?.textContent?.includes("Download a newer package from GitHub Releases and install it manually.")`,
+    "packaged Linux About guidance",
+  );
+  const aboutBoundary = await first.page.evaluate(`(async () => {
+    const result = await window.skillsDesktop.about.getSnapshot();
+    return {
+      hasCheckButton: [...document.querySelectorAll("button")].some(
+        (button) => button.textContent?.includes("Check for updates"),
+      ),
+      hasInstallCommand: [...document.querySelectorAll("button")].some(
+        (button) => /install|restart/i.test(button.textContent ?? ""),
+      ),
+      result,
+    };
+  })()`);
+  if (
+    aboutBoundary.hasCheckButton ||
+    aboutBoundary.hasInstallCommand ||
+    !aboutBoundary.result.ok ||
+    aboutBoundary.result.value.application.version !== "0.1.0" ||
+    aboutBoundary.result.value.application.platform !== "linux" ||
+    aboutBoundary.result.value.application.architecture !== "x64" ||
+    aboutBoundary.result.value.policy.mode !== "manual" ||
+    JSON.stringify(aboutBoundary.result).includes("update.electronjs.org")
+  ) {
+    throw new Error(
+      `Unexpected packaged About boundary: ${JSON.stringify(aboutBoundary)}`,
+    );
+  }
+  console.log("packaged smoke: Linux About guidance verified");
+  await first.page.evaluate(`(() => {
+    const button = document.querySelector('button[aria-label="Inventory"]');
+    if (!(button instanceof HTMLButtonElement)) throw new Error("Inventory navigation is unavailable.");
+    button.click();
+  })()`);
   await first.page.evaluate(`(() => {
     const button = document.querySelector('button[aria-label="Collections"]');
     if (!(button instanceof HTMLButtonElement)) throw new Error("Collections navigation is unavailable.");
@@ -1241,7 +1289,13 @@ try {
   })`);
   if (
     JSON.stringify(compactNavigation.labels) !==
-      JSON.stringify(["Inventory", "Comparison", "Collections", "Targets"]) ||
+      JSON.stringify([
+        "Inventory",
+        "Comparison",
+        "Collections",
+        "Targets",
+        "About",
+      ]) ||
     !compactNavigation.targetSummary.includes("Codex")
   ) {
     throw new Error(
@@ -1415,6 +1469,25 @@ try {
     )
   ) {
     throw new Error("Exact reviewed removal invocation is missing.");
+  }
+  const linuxUpdateRecordExists = await readFile(
+    join(
+      temporaryRoot,
+      "config",
+      "Skills Desktop",
+      "updates",
+      "check-record-v1.json",
+    ),
+    "utf8",
+  ).then(
+    () => true,
+    (error) => {
+      if (error?.code === "ENOENT") return false;
+      throw error;
+    },
+  );
+  if (linuxUpdateRecordExists) {
+    throw new Error("Packaged Linux claimed automatic update eligibility.");
   }
 } finally {
   await sshServer?.close();

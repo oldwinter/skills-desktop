@@ -1,6 +1,13 @@
 import type { IpcMain, IpcMainInvokeEvent, WebContents } from "electron";
 
 import {
+  aboutUpdateCheckRequestSchema,
+  aboutUpdateResultSchema,
+  aboutUpdateSnapshotSchema,
+  type AboutUpdateResult,
+  type AboutUpdateSnapshot,
+} from "../../contracts/about.js";
+import {
   desktopEventSchema,
   workspaceRequestResultSchema,
   workspaceSnapshotSchema,
@@ -19,6 +26,9 @@ import type {
 } from "../application/desktop-capabilities.js";
 
 const CHANNELS = {
+  aboutCheck: "about:update:check",
+  aboutEvent: "about:update:snapshot-changed",
+  aboutSnapshot: "about:update:snapshot:get",
   cancel: "workspace:inventory:cancel",
   compare: "workspace:comparison:open",
   comparisonPrepare: "workspace:comparison:prepare",
@@ -72,6 +82,25 @@ function authorizationFailure(): WorkspaceRequestResult {
   };
 }
 
+function aboutFailure(
+  code: "internal_error" | "invalid_request" | "unauthorized",
+): AboutUpdateResult {
+  const failure = {
+    error: {
+      code,
+      message:
+        code === "unauthorized"
+          ? "This window cannot make that request."
+          : code === "invalid_request"
+            ? "The update request is not supported."
+            : "The update request could not be completed.",
+      retryable: code === "internal_error",
+    },
+    ok: false as const,
+  };
+  return aboutUpdateResultSchema.parse(failure);
+}
+
 export function isAuthorizedSender(
   endpoint: Pick<RegisteredEndpoint, "expectedUrl" | "role"> & {
     readonly webContentsId: number;
@@ -95,6 +124,11 @@ export function registerDesktopIpc(input: {
   readonly capabilities: DesktopCapabilities;
   readonly ipcMain: IpcMain;
   readonly newEpoch: () => string;
+  readonly updates: {
+    getSnapshot(): AboutUpdateSnapshot;
+    requestCheck(): Promise<void>;
+    subscribe(listener: (snapshot: AboutUpdateSnapshot) => void): () => void;
+  };
 }) {
   const endpoints = new Map<number, RegisteredEndpoint>();
 
@@ -125,6 +159,44 @@ export function registerDesktopIpc(input: {
     }
     return endpoint;
   };
+
+  input.ipcMain.handle(CHANNELS.aboutSnapshot, async (event, ...args) => {
+    if (authorized(event, "workspace") === undefined) {
+      return aboutFailure("unauthorized");
+    }
+    if (args.length !== 0) return aboutFailure("invalid_request");
+    try {
+      return aboutUpdateResultSchema.parse({
+        ok: true,
+        value: aboutUpdateSnapshotSchema.parse(input.updates.getSnapshot()),
+      });
+    } catch {
+      return aboutFailure("internal_error");
+    }
+  });
+  input.ipcMain.handle(
+    CHANNELS.aboutCheck,
+    async (event, request: unknown, ...args) => {
+      if (authorized(event, "workspace") === undefined) {
+        return aboutFailure("unauthorized");
+      }
+      if (
+        args.length !== 0 ||
+        !aboutUpdateCheckRequestSchema.safeParse(request).success
+      ) {
+        return aboutFailure("invalid_request");
+      }
+      try {
+        await input.updates.requestCheck();
+        return aboutUpdateResultSchema.parse({
+          ok: true,
+          value: aboutUpdateSnapshotSchema.parse(input.updates.getSnapshot()),
+        });
+      } catch {
+        return aboutFailure("internal_error");
+      }
+    },
+  );
 
   input.ipcMain.handle(CHANNELS.snapshot, async (event) => {
     const endpoint = authorized(event, "workspace");
@@ -490,6 +562,19 @@ export function registerDesktopIpc(input: {
   input.ipcMain.handle(CHANNELS.reviewApprove, decideReview("approve"));
   input.ipcMain.handle(CHANNELS.reviewReject, decideReview("reject"));
 
+  const unsubscribeUpdates = input.updates.subscribe((snapshot) => {
+    const parsed = aboutUpdateSnapshotSchema.safeParse(snapshot);
+    if (!parsed.success) return;
+    for (const endpoint of endpoints.values()) {
+      if (
+        endpoint.role === "workspace" &&
+        !endpoint.webContents.isDestroyed()
+      ) {
+        endpoint.webContents.send(CHANNELS.aboutEvent, parsed.data);
+      }
+    }
+  });
+
   const detach = (webContentsId: number) => {
     const prior = endpoints.get(webContentsId);
     if (prior === undefined) return;
@@ -524,7 +609,10 @@ export function registerDesktopIpc(input: {
     attach,
     detach,
     dispose() {
+      unsubscribeUpdates();
       for (const webContentsId of endpoints.keys()) detach(webContentsId);
+      input.ipcMain.removeHandler(CHANNELS.aboutSnapshot);
+      input.ipcMain.removeHandler(CHANNELS.aboutCheck);
       input.ipcMain.removeHandler(CHANNELS.snapshot);
       input.ipcMain.removeHandler(CHANNELS.hostTrustReview);
       input.ipcMain.removeHandler(CHANNELS.refresh);

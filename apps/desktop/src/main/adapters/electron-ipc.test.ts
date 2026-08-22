@@ -70,6 +70,11 @@ describe("Electron IPC sender authorization", () => {
       capabilities: capabilities as never,
       ipcMain: ipcMain as never,
       newEpoch: () => "epoch-1",
+      updates: {
+        getSnapshot: vi.fn(),
+        requestCheck: vi.fn(async () => undefined),
+        subscribe: vi.fn(() => () => undefined),
+      },
     });
     const mainFrame = { url: "skills-desktop://workspace/index.html" };
     const webContents = {
@@ -256,5 +261,142 @@ describe("Electron IPC sender authorization", () => {
       type: "review.decide",
       version: 1,
     });
+  });
+
+  it("grants only the workspace main frame versioned About read and check intents", async () => {
+    const handlers = new Map<
+      string,
+      (event: never, ...args: unknown[]) => unknown
+    >();
+    const ipcMain = {
+      handle(
+        channel: string,
+        handler: (event: never, ...args: unknown[]) => unknown,
+      ) {
+        handlers.set(channel, handler);
+      },
+      removeHandler: vi.fn(),
+    };
+    const aboutSnapshot = {
+      application: {
+        architecture: "x64",
+        platform: "linux",
+        version: "0.1.0",
+      },
+      lastCheckAt: null,
+      nextAutomaticCheckAt: null,
+      policy: {
+        message:
+          "Download a newer package from GitHub Releases and install it manually.",
+        mode: "manual",
+        releasePageUrl:
+          "https://github.com/oldwinter/skills-desktop/releases",
+      },
+      schemaVersion: 1,
+      state: { kind: "manual" },
+    } as const;
+    let publishUpdate: ((snapshot: typeof aboutSnapshot) => void) | undefined;
+    const updates = {
+      getSnapshot: vi.fn(() => aboutSnapshot),
+      requestCheck: vi.fn(async () => undefined),
+      subscribe: vi.fn((listener: (snapshot: typeof aboutSnapshot) => void) => {
+        publishUpdate = listener;
+        return () => undefined;
+      }),
+    };
+    const session = {
+      request: vi.fn(),
+      snapshot: vi.fn(),
+      teardown: vi.fn(),
+    };
+    const registration = registerDesktopIpc({
+      capabilities: { attach: vi.fn(() => session) } as never,
+      ipcMain: ipcMain as never,
+      newEpoch: () => "epoch-1",
+      updates,
+    });
+    const mainFrame = { url: "skills-desktop://workspace/index.html" };
+    const workspaceContents = {
+      id: 17,
+      isDestroyed: () => false,
+      mainFrame,
+      send: vi.fn(),
+    };
+    registration.attach(
+      workspaceContents as never,
+      "workspace",
+      mainFrame.url,
+    );
+    const workspaceEvent = {
+      sender: workspaceContents,
+      senderFrame: mainFrame,
+    };
+
+    expect(
+      [...handlers.keys()].filter((channel) => channel.startsWith("about:")),
+    ).toEqual(["about:update:snapshot:get", "about:update:check"]);
+    await expect(
+      handlers.get("about:update:snapshot:get")!(workspaceEvent as never),
+    ).resolves.toEqual({ ok: true, value: aboutSnapshot });
+    await expect(
+      handlers.get("about:update:check")!(workspaceEvent as never, {
+        type: "update.check",
+        version: 1,
+      }),
+    ).resolves.toEqual({ ok: true, value: aboutSnapshot });
+    expect(updates.requestCheck).toHaveBeenCalledTimes(1);
+
+    const hostileSubframe = {
+      sender: workspaceContents,
+      senderFrame: { url: mainFrame.url },
+    };
+    await expect(
+      handlers.get("about:update:check")!(hostileSubframe as never, {
+        type: "update.check",
+        version: 1,
+      }),
+    ).resolves.toMatchObject({ error: { code: "unauthorized" }, ok: false });
+    await expect(
+      handlers.get("about:update:check")!(workspaceEvent as never, {
+        feedUrl: "https://attacker.invalid",
+        type: "update.check",
+        version: 1,
+      }),
+    ).resolves.toMatchObject({ error: { code: "invalid_request" }, ok: false });
+    expect(updates.requestCheck).toHaveBeenCalledTimes(1);
+    expect([...handlers.keys()].join(" ")).not.toMatch(
+      /download|install|restart|quit|argv|shell/i,
+    );
+
+    const reviewFrame = { url: "skills-desktop://review/index.html" };
+    const reviewContents = {
+      id: 18,
+      isDestroyed: () => false,
+      mainFrame: reviewFrame,
+      send: vi.fn(),
+    };
+    registration.attach(
+      reviewContents as never,
+      "review",
+      reviewFrame.url,
+      "review-1",
+    );
+    await expect(
+      handlers.get("about:update:check")!(
+        { sender: reviewContents, senderFrame: reviewFrame } as never,
+        { type: "update.check", version: 1 },
+      ),
+    ).resolves.toMatchObject({ error: { code: "unauthorized" }, ok: false });
+    expect(updates.requestCheck).toHaveBeenCalledTimes(1);
+    expect(updates.subscribe).toHaveBeenCalledTimes(1);
+    publishUpdate?.(aboutSnapshot);
+    expect(workspaceContents.send).toHaveBeenCalledWith(
+      "about:update:snapshot-changed",
+      aboutSnapshot,
+    );
+    expect(reviewContents.send).not.toHaveBeenCalledWith(
+      "about:update:snapshot-changed",
+      expect.anything(),
+    );
   });
 });

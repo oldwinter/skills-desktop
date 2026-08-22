@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { realpath } from "node:fs/promises";
 import { basename, resolve } from "node:path";
 
-import { app } from "electron";
+import { app, autoUpdater } from "electron";
 
 import { createDesktopCapabilities } from "./application/desktop-capabilities.js";
 import { BUNDLED_OFFICIAL_COLLECTION_CATALOG } from "./application/bundled-official-collections.js";
@@ -22,6 +22,7 @@ import {
   createOpenSshToolRunner,
 } from "./ssh/openssh-target.js";
 import { createLocalSkillsTargets } from "./targets/local-skills-targets.js";
+import { createElectronUpdateComposition } from "./update-composition.js";
 
 export async function createCompositionRoot(options?: {
   readonly onReviewRequested?: (reviewId: string) => void;
@@ -98,5 +99,11 @@ export async function createCompositionRoot(options?: {
     skillsTargets,
   });
   await capabilities.initialize();
-  return { capabilities };
+  const updates = await createElectronUpdateComposition({
+    app,
+    architecture: process.arch,
+    autoUpdater,
+    platform: process.platform,
+  });
+  return { capabilities, updates };
 }

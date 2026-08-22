@@ -37,7 +37,7 @@ if (!app.requestSingleInstanceLock()) {
     .whenReady()
     .then(async () => {
       let presentReview = (_reviewId: string) => undefined;
-      const { capabilities } = await createCompositionRoot({
+      const { capabilities, updates } = await createCompositionRoot({
         onReviewRequested(reviewId) {
           presentReview(reviewId);
         },
@@ -50,6 +50,7 @@ if (!app.requestSingleInstanceLock()) {
         capabilities,
         ipcMain,
         newEpoch: randomUUID,
+        updates,
       });
 
       const createWorkspaceWindow = () => {
@@ -123,6 +124,7 @@ if (!app.requestSingleInstanceLock()) {
         event.preventDefault();
         if (shutdownStarted) return;
         shutdownStarted = true;
+        updates.dispose();
         void capabilities.shutdown().finally(() => {
           desktopIpc.dispose();
           readyToQuit = true;

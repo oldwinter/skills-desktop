@@ -152,6 +152,26 @@ code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; fo
 .command-preview { display: block; padding: 9px; color: var(--text); background: var(--surface-muted); border-radius: var(--radius-control); }
 .mutation-outcome { color: var(--text-secondary); font-size: var(--font-size-meta); }
 
+.about-workspace { grid-column: 2 / -1; min-width: 0; min-height: 0; overflow: auto; }
+.about-content { width: min(720px, calc(100% - 40px)); margin: 0 20px 28px; border-top: 1px solid var(--line); }
+.about-loading { display: flex; min-height: 220px; align-items: center; justify-content: center; gap: 8px; color: var(--text-secondary); }
+.about-product { display: flex; align-items: center; gap: 14px; min-width: 0; padding: 20px 0; border-bottom: 1px solid var(--line); }
+.about-product-mark { display: inline-grid; width: 44px; height: 44px; flex: 0 0 auto; place-items: center; color: white; background: #202124; border-radius: var(--radius-panel); }
+.about-product > div { min-width: 0; }
+.about-product h2 { font-size: var(--font-size-panel); }
+.about-product p { margin-top: 2px; color: var(--text-secondary); font-size: var(--font-size-meta); }
+.about-product code { display: block; margin-top: 5px; color: var(--text-tertiary); overflow-wrap: anywhere; }
+.about-facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border-bottom: 1px solid var(--line); }
+.about-facts > div { min-width: 0; padding: 16px 0; }
+.about-facts > div + div { padding-left: 20px; border-left: 1px solid var(--line); }
+.about-facts dt, .about-status-label { color: var(--text-tertiary); font-size: var(--font-size-meta); }
+.about-facts dd { min-width: 0; margin-top: 4px; font-size: var(--font-size-row); overflow-wrap: anywhere; }
+.about-update-status { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px 20px; min-width: 0; padding: 18px 0; border-bottom: 1px solid var(--line); }
+.about-update-status > div { min-width: 0; }
+.about-update-status h2 { margin-top: 2px; font-size: var(--font-size-ui); }
+.about-update-status > p, .about-update-status > code { grid-column: 1; min-width: 0; color: var(--text-secondary); font-size: var(--font-size-meta); overflow-wrap: anywhere; }
+.about-update-status > .text-button { grid-column: 2; grid-row: 1 / span 3; }
+
 .comparison-workspace, .targets-workspace { display: grid; grid-template-rows: auto auto auto minmax(0, 1fr); min-width: 0; min-height: 0; overflow: hidden; }
 .collections-workspace { display: flex; min-width: 0; min-height: 0; flex-direction: column; overflow: hidden; }
 .collection-controls { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(180px, 240px); align-items: end; gap: 12px; padding: 0 20px 14px; }
@@ -278,7 +298,8 @@ code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; fo
   .nav-item { width: auto; flex: 0 0 auto; }
   .target-section, .target-facts, .rail-version { display: none; }
   .inventory-workspace { display: block; overflow: visible; }
-  .comparison-workspace, .collections-workspace, .targets-workspace { display: block; overflow: visible; }
+  .about-workspace, .comparison-workspace, .collections-workspace, .targets-workspace { display: block; overflow: visible; }
+  .about-content { width: auto; margin: 0 14px 24px; }
   .page-heading { padding: 16px 14px 10px; }
   .mobile-target-summary { display: flex; align-items: center; gap: 5px; overflow-wrap: anywhere; }
   .state-banner { margin: 0 14px 10px; align-items: flex-start; flex-wrap: wrap; }
@@ -340,6 +361,10 @@ code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; fo
   .collection-progress-heading, .collection-progress-list ul li { grid-template-columns: 1fr; gap: 2px; }
   .target-item { grid-template-columns: 1fr; }
   .target-item > header, .target-item dl, .target-item-actions { grid-column: 1; }
+  .about-facts { grid-template-columns: 1fr; }
+  .about-facts > div + div { padding-left: 0; border-top: 1px solid var(--line); border-left: 0; }
+  .about-update-status { grid-template-columns: 1fr; }
+  .about-update-status > .text-button { grid-column: 1; grid-row: auto; }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -7,6 +7,7 @@ import {
   Clock3,
   FolderGit2,
   HardDrive,
+  Info,
   LibraryBig,
   ListFilter,
   MonitorCog,
@@ -21,22 +22,28 @@ import {
   WifiOff,
 } from "lucide-react";
 
+import type { DesktopBridge } from "../../../contracts/desktop.js";
 import { isInventoryEntryAvailableToHarness } from "../../../contracts/inventory-availability.js";
 import type {
   DesktopEvent,
   PublicInventoryEntry,
   PublicInventoryState,
   RendererError,
-  WorkspaceBridge,
   WorkspaceSnapshot,
 } from "../../../contracts/workspace.js";
+import { AboutView } from "../about/AboutView.js";
 import { ComparisonView } from "../comparison/ComparisonView.js";
 import { CollectionsView } from "../collections/CollectionsView.js";
 import { TargetsView } from "../targets/TargetsView.js";
 
 type ScopeFilter = "all" | "global" | "project";
 type SelectedIdentity = Pick<PublicInventoryEntry, "name" | "scope">;
-type WorkspaceView = "collections" | "comparison" | "inventory" | "targets";
+type WorkspaceView =
+  | "about"
+  | "collections"
+  | "comparison"
+  | "inventory"
+  | "targets";
 
 function freshnessLabel(
   freshness: WorkspaceSnapshot["inventory"]["freshness"],
@@ -200,7 +207,7 @@ function MissingInventoryEvidence({
   );
 }
 
-export function InventoryApp({ client }: { readonly client: WorkspaceBridge }) {
+export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
   const [baseSnapshot, setBaseSnapshot] = useState<WorkspaceSnapshot>();
   const [bootstrapError, setBootstrapError] = useState<RendererError>();
   const [bootstrapAttempt, setBootstrapAttempt] = useState(0);
@@ -503,6 +510,17 @@ export function InventoryApp({ client }: { readonly client: WorkspaceBridge }) {
             >
               <Settings2 aria-hidden="true" size={17} />
               <span>Targets</span>
+            </button>
+            <button
+              aria-current={view === "about" ? "page" : undefined}
+              aria-label="About"
+              className={`nav-item${view === "about" ? " nav-item--active" : ""}`}
+              onClick={() => setView("about")}
+              title="About"
+              type="button"
+            >
+              <Info aria-hidden="true" size={17} />
+              <span>About</span>
             </button>
           </nav>
 
@@ -1002,6 +1020,8 @@ export function InventoryApp({ client }: { readonly client: WorkspaceBridge }) {
           />
         ) : view === "collections" ? (
           <CollectionsView client={client} snapshot={snapshot} />
+        ) : view === "about" ? (
+          <AboutView client={client.about} />
         ) : (
           <TargetsView
             client={client}

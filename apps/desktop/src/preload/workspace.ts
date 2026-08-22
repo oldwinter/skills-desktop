@@ -1,6 +1,12 @@
 import { contextBridge, ipcRenderer } from "electron";
 
 import {
+  aboutUpdateResultSchema,
+  aboutUpdateSnapshotSchema,
+  type AboutBridge,
+} from "../contracts/about.js";
+import type { DesktopBridge } from "../contracts/desktop.js";
+import {
   desktopEventSchema,
   workspaceRequestResultSchema,
   workspaceSnapshotResultSchema,
@@ -9,10 +15,34 @@ import {
   type PrepareCollectionAcrossTargetsRequest,
   type PrepareCollectionRequest,
   type TargetDraft,
-  type WorkspaceBridge,
 } from "../contracts/workspace.js";
 
-const bridge: WorkspaceBridge = Object.freeze({
+const about: AboutBridge = Object.freeze({
+  async getSnapshot() {
+    return aboutUpdateResultSchema.parse(
+      await ipcRenderer.invoke("about:update:snapshot:get"),
+    );
+  },
+  async requestCheck() {
+    return aboutUpdateResultSchema.parse(
+      await ipcRenderer.invoke("about:update:check", {
+        type: "update.check",
+        version: 1,
+      }),
+    );
+  },
+  subscribe(listener: Parameters<AboutBridge["subscribe"]>[0]) {
+    const receive = (_event: Electron.IpcRendererEvent, value: unknown) => {
+      listener(aboutUpdateSnapshotSchema.parse(value));
+    };
+    ipcRenderer.on("about:update:snapshot-changed", receive);
+    return () =>
+      ipcRenderer.removeListener("about:update:snapshot-changed", receive);
+  },
+});
+
+const bridge: DesktopBridge = Object.freeze({
+  about,
   async cancelInventory(operationId: string) {
     return workspaceRequestResultSchema.parse(
       await ipcRenderer.invoke("workspace:inventory:cancel", operationId),
