@@ -31,17 +31,21 @@ function run(command, args, options = {}) {
       shell: false,
       stdio: options.capture ? ["ignore", "pipe", "inherit"] : "inherit",
     });
-    let stdout = "";
+    const stdout = [];
     if (options.capture) {
-      child.stdout.setEncoding("utf8");
       child.stdout.on("data", (chunk) => {
-        stdout += chunk;
+        stdout.push(chunk);
       });
     }
     child.once("error", rejectRun);
     child.once("close", (exitCode, signal) => {
       if (exitCode === 0) {
-        resolveRun(stdout.trim());
+        const bytes = Buffer.concat(stdout);
+        resolveRun(
+          options.capture === "buffer"
+            ? bytes
+            : bytes.toString("utf8").trim(),
+        );
         return;
       }
       rejectRun(
@@ -59,10 +63,6 @@ async function runNpm(args, environment) {
     throw new Error("Candidate generation must run through npm.");
   }
   await run(process.execPath, [npmExecutable, ...args], { environment });
-}
-
-async function hashFile(path) {
-  return createHash("sha256").update(await readFile(path)).digest("hex");
 }
 
 async function main() {
@@ -106,6 +106,14 @@ async function main() {
   if (trackedChanges !== "") {
     throw new Error("Release candidates require a clean tracked source tree.");
   }
+  const packageLockBytes = await run(
+    "git",
+    ["cat-file", "blob", `${options.sourceCommit}:package-lock.json`],
+    { capture: "buffer" },
+  );
+  const packageLockDigest = createHash("sha256")
+    .update(packageLockBytes)
+    .digest("hex");
 
   const candidateEnvironment = {
     ...process.env,
@@ -188,7 +196,7 @@ async function main() {
     buildInputs: {
       electronVersion: desktopPackage.devDependencies.electron,
       forgeVersion: desktopPackage.devDependencies["@electron-forge/cli"],
-      lockfileSha256: await hashFile(join(repositoryRoot, "package-lock.json")),
+      lockfileSha256: packageLockDigest,
       nodeVersion: process.versions.node,
       remoteBootstrapDigest: bootstrapDescription.digest,
       remoteBootstrapProtocolVersion: bootstrapDescription.protocolVersion,

@@ -8,6 +8,15 @@ import { describe, expect, it } from "vitest";
 const pinnedAction = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+@[a-f0-9]{40}$/;
 
 describe("unsigned candidate workflow contract", () => {
+  it("checks out the root lockfile with platform-independent bytes", async () => {
+    const attributes = await readFile(
+      new URL("../.gitattributes", import.meta.url),
+      "utf8",
+    );
+
+    expect(attributes.split(/\r?\n/)).toContain("package-lock.json text eol=lf");
+  });
+
   it("loads the release integrity CLI with Node's native ESM loader", () => {
     const result = spawnSync(
       process.execPath,
