@@ -16,6 +16,7 @@
   },
   "scripts": {
     "build": "npm run build --workspaces --if-present",
+    "candidate:build": "node scripts/release/build-candidate.mjs",
     "typecheck": "tsc -b --pretty false",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -37,6 +38,7 @@
     "jsdom": "30.0.1",
     "typescript": "7.0.2",
     "vite": "8.2.2",
-    "vitest": "4.1.11"
+    "vitest": "4.1.11",
+    "yaml": "2.9.0"
   }
 }

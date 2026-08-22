@@ -6,4 +6,5 @@
 node_modules/
 dist/
 out/
+release-candidates/
 visual-qa/

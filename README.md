@@ -47,6 +47,31 @@ The production workspaces are `apps/desktop`, `packages/skills-runtime`, and
 `packages/remote-bootstrap`. Production skill discovery and mutation must keep
 using argument-array invocations of the pinned `npx skills` package.
 
+## Unsigned Native Candidates
+
+Issue #23 candidates are local or internal evidence only. They have no signing
+identity or publication authority, and the stable/public release gate remains
+closed. Candidate generation requires a clean tracked tree and must run on the
+target operating system. Linux additionally requires `fakeroot` and `rpmbuild`.
+
+```bash
+npm run candidate:build -- \
+  --platform linux \
+  --architecture x64 \
+  --output-directory release-candidates \
+  --repository oldwinter/skills-desktop \
+  --source-commit "$(git rev-parse HEAD)" \
+  --workflow-event local \
+  --workflow-run-attempt 1 \
+  --workflow-run-id 1
+```
+
+Use `darwin` with `arm64` or `x64`, or `win32` with `x64`, on the
+corresponding native host. Each immutable candidate directory contains only
+the ADR-defined Forge outputs, `candidate-manifest-v1.json`, and its SHA-256
+sidecar. The cross-platform workflow retains only manifest evidence; it never
+uploads unsigned installers from this public repository.
+
 ## Run The Prototype
 
 ```bash

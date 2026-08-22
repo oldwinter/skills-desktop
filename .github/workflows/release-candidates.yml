@@ -1,0 +1,76 @@
+name: Unsigned Release Candidates
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: unsigned-candidates-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  candidate:
+    name: Candidate ${{ matrix.platform }} ${{ matrix.architecture }}
+    permissions:
+      contents: read
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - architecture: arm64
+            platform: darwin
+            runner: macos-15
+          - architecture: x64
+            platform: darwin
+            runner: macos-15
+          - architecture: x64
+            platform: win32
+            runner: windows-2025
+          - architecture: x64
+            platform: linux
+            runner: ubuntu-24.04
+    steps:
+      - name: Check out candidate source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          cache: npm
+          node-version: 24
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Typecheck candidate generator
+        run: npm run typecheck
+      - name: Test candidate contract
+        run: npm test -- tests/release-candidate.test.ts tests/release-candidate-workflow.test.ts
+      - if: matrix.platform == 'linux'
+        name: Install official Linux maker prerequisites
+        run: sudo apt-get install --no-install-recommends --yes fakeroot rpm
+      - name: Generate unsigned candidate
+        run: >-
+          npm run candidate:build --
+          --platform "${{ matrix.platform }}"
+          --architecture "${{ matrix.architecture }}"
+          --output-directory "release-candidates"
+          --repository "${{ github.repository }}"
+          --source-commit "${{ github.sha }}"
+          --workflow-event "${{ github.event_name }}"
+          --workflow-run-attempt "${{ github.run_attempt }}"
+          --workflow-run-id "${{ github.run_id }}"
+      - name: Retain manifest evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          compression-level: 0
+          if-no-files-found: error
+          name: unsigned-candidate-${{ matrix.platform }}-${{ matrix.architecture }}-manifest
+          path: release-candidates/**/candidate-manifest-v1.*
+          retention-days: 7
