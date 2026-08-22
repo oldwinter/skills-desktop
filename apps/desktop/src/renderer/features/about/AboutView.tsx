@@ -12,6 +12,7 @@ import type {
   AboutBridge,
   AboutUpdateResult,
   AboutUpdateSnapshot,
+  RestartGuardReason,
 } from "../../../contracts/about.js";
 
 function resultError(result: AboutUpdateResult) {
@@ -50,13 +51,13 @@ function automaticStatus(snapshot: AboutUpdateSnapshot) {
   }
 }
 
-const guardLabels = {
+const guardLabels: Record<RestartGuardReason, string> = {
   "mutation-active": "Mutation active",
   "protected-process-active": "Protected process active",
   "trusted-review-active": "Trusted Review active",
   "reconciliation-required": "Reconciliation required",
   "recovery-uncertain": "Recovery state uncertain",
-} as const;
+};
 
 export function AboutView({ client }: { readonly client: AboutBridge }) {
   const [snapshot, setSnapshot] = useState<AboutUpdateSnapshot>();
@@ -106,6 +107,9 @@ export function AboutView({ client }: { readonly client: AboutBridge }) {
       unsubscribe();
     };
   }, [client]);
+
+  const restartCandidate =
+    snapshot?.schemaVersion === 2 ? snapshot.candidate : null;
 
   return (
     <main className="about-workspace">
@@ -183,10 +187,10 @@ export function AboutView({ client }: { readonly client: AboutBridge }) {
                 </h2>
               </div>
               <p>{automaticStatus(snapshot)?.message}</p>
-              {snapshot.schemaVersion === 2 && snapshot.candidate !== null ? (
+              {snapshot.schemaVersion === 2 && restartCandidate !== null ? (
                 <div className="about-restart-control">
                   <p className="about-candidate">
-                    Candidate {snapshot.candidate.version}
+                    Candidate {restartCandidate.version}
                   </p>
                   {snapshot.restart.guardReasons.length > 0 ? (
                     <ul className="about-guard-reasons" aria-label="Restart guards">
@@ -198,7 +202,7 @@ export function AboutView({ client }: { readonly client: AboutBridge }) {
                   <button
                     className="text-button text-button--primary"
                     disabled={!snapshot.restart.immediateRestartAvailable}
-                    onClick={() => void requestRestart(snapshot.candidate!.id)}
+                    onClick={() => void requestRestart(restartCandidate.id)}
                     type="button"
                   >
                     <RotateCw aria-hidden="true" size={15} />

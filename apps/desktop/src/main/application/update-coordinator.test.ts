@@ -646,6 +646,61 @@ describe("UpdateCoordinator deferred restart and diagnostics", () => {
     });
   });
 
+  it("blocks normal quit while downloaded candidate persistence is pending", async () => {
+    let finishSave: (() => void) | undefined;
+    let candidateEvent:
+      | ((event: UpdateAdapterEvent) => void | Promise<void>)
+      | undefined;
+    const coordinator = createUpdateCoordinator({
+      application: {
+        architecture: "x64",
+        isPackaged: true,
+        platform: "win32",
+        version: "0.1.0",
+      },
+      clock: { now: () => new Date("2026-08-22T06:00:00.000Z") },
+      deferredRecords: {
+        clear: vi.fn(async () => undefined),
+        load: vi.fn(async () => null),
+        save: vi.fn(
+          () =>
+            new Promise<void>((resolve) => {
+              finishSave = resolve;
+            }),
+        ),
+      },
+      id: () => candidateId,
+      records: {
+        load: vi.fn(async () => null),
+        save: vi.fn(async () => undefined),
+      },
+      restartSafety: () => ({ guardReasons: ["mutation-active"] }),
+      scheduler: { after: vi.fn(() => () => undefined) },
+      updater: {
+        checkForUpdates: vi.fn(({ onEvent }) => {
+          candidateEvent = onEvent;
+        }),
+        restartAndInstall: vi.fn(),
+      },
+    });
+    await coordinator.start();
+    await coordinator.requestCheck();
+
+    const download = candidateEvent?.({
+      candidateVersion: "0.2.0",
+      type: "update-downloaded",
+    });
+
+    expect(coordinator.prepareNormalQuit()).toBe(false);
+    expect(coordinator.getSnapshot().restart.guardReasons).toEqual([
+      "mutation-active",
+      "recovery-uncertain",
+    ]);
+    finishSave?.();
+    await download;
+    expect(coordinator.prepareNormalQuit()).toBe(false);
+  });
+
   it.each(["0.1.0", "0.0.9", "0.2.0-rc.1"])(
     "rejects non-forward stable candidate %s",
     async (candidateVersion) => {
@@ -783,6 +838,34 @@ describe("UpdateCoordinator deferred restart and diagnostics", () => {
     ).resolves.toBe("stale");
     expect(fixture.restartAndInstall).not.toHaveBeenCalled();
   });
+
+  it.each(["0.1.0", "0.0.9"])(
+    "clears recovered non-forward candidate %s",
+    async (candidateVersion) => {
+      const fixture = releaseFixture({
+        recovered: {
+          candidate: {
+            architecture: "x64",
+            id: candidateId,
+            platform: "win32",
+            version: candidateVersion,
+          },
+          downloadedAt: "2026-08-22T05:00:00.000Z",
+          runningVersion: "0.1.0",
+        },
+      });
+
+      await fixture.coordinator.start();
+
+      expect(fixture.deferredRecords.clear).toHaveBeenCalledTimes(1);
+      expect(fixture.coordinator.getSnapshot()).toMatchObject({
+        candidate: null,
+        restart: { immediateRestartAvailable: false, kind: "none" },
+      });
+      expect(fixture.coordinator.prepareNormalQuit()).toBe(true);
+      expect(fixture.restartAndInstall).not.toHaveBeenCalled();
+    },
+  );
 
   it("blocks a potentially updating quit when deferred recovery is unreadable", async () => {
     const fixture = releaseFixture({ loadError: true });

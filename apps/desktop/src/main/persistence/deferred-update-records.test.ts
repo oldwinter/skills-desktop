@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -37,7 +37,17 @@ describe("JSON deferred update records", () => {
         }).load(),
       ).resolves.toEqual(record);
       await expect(readFile(path, "utf8")).resolves.toBe(
-        `${JSON.stringify({ ...record, schemaVersion: 1 }, null, 2)}\n`,
+        `${JSON.stringify(
+          {
+            candidate: record.candidate,
+            downloadedAt: record.downloadedAt,
+            kind: "deferred-update",
+            runningVersion: record.runningVersion,
+            schemaVersion: 1,
+          },
+          null,
+          2,
+        )}\n`,
       );
       expect((await readFile(path, "utf8")).length).toBeLessThan(1_024);
 
@@ -58,7 +68,6 @@ describe("JSON deferred update records", () => {
         schemaVersion: 1,
       }),
     ],
-    ["a newer schema", JSON.stringify({ ...record, schemaVersion: 2 })],
     [
       "an arbitrary path",
       JSON.stringify({
@@ -67,15 +76,45 @@ describe("JSON deferred update records", () => {
         schemaVersion: 1,
       }),
     ],
-  ])("rejects %s without replacing it", async (_name, source) => {
+  ])("quarantines %s instead of treating it as live state", async (_name, source) => {
     const directory = await mkdtemp(join(tmpdir(), "skills-deferred-update-"));
     const path = join(directory, "deferred-update.json");
     try {
       await writeFile(path, source, "utf8");
       await expect(
-        createJsonDeferredUpdateRecords({ id: () => "unused", path }).load(),
+        createJsonDeferredUpdateRecords({ id: () => "quarantine-1", path }).load(),
       ).rejects.toThrow();
+      await expect(readFile(path, "utf8")).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+      await expect(
+        readFile(join(directory, "deferred-update.json.corrupt.quarantine-1"), "utf8"),
+      ).resolves.toBe(source);
+      await expect(
+        createJsonDeferredUpdateRecords({ id: () => "unused", path }).load(),
+      ).rejects.toThrow("quarantined");
+    } finally {
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("retains a newer unsupported schema at the live path", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "skills-deferred-update-"));
+    const path = join(directory, "deferred-update.json");
+    const source = JSON.stringify({
+      ...record,
+      kind: "deferred-update",
+      schemaVersion: 2,
+    });
+    try {
+      await writeFile(path, source, "utf8");
+
+      await expect(
+        createJsonDeferredUpdateRecords({ id: () => "unused", path }).load(),
+      ).rejects.toThrow("newer schema");
+
       await expect(readFile(path, "utf8")).resolves.toBe(source);
+      await expect(readdir(directory)).resolves.toEqual(["deferred-update.json"]);
     } finally {
       await rm(directory, { force: true, recursive: true });
     }
