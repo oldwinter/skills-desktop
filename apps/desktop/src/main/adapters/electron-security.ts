@@ -32,11 +32,13 @@ export function reviewWindowOptions(
   preload: string,
   isPackaged: boolean,
   parent?: BrowserWindow,
+  icon?: string,
 ): BrowserWindowConstructorOptions {
   return {
     autoHideMenuBar: true,
     backgroundColor: "#f5f6f7",
     height: 560,
+    icon,
     minHeight: 480,
     minWidth: 360,
     modal: parent !== undefined,
@@ -61,11 +63,13 @@ export function reviewWindowOptions(
 export function workspaceWindowOptions(
   preload: string,
   isPackaged: boolean,
+  icon?: string,
 ): BrowserWindowConstructorOptions {
   return {
     autoHideMenuBar: true,
     backgroundColor: "#f5f6f7",
     height: 900,
+    icon,
     minHeight: 640,
     minWidth: 360,
     show: false,

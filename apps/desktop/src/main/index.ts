@@ -30,6 +30,9 @@ if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   const currentDirectory = dirname(fileURLToPath(import.meta.url));
+  const appIcon = app.isPackaged
+    ? resolve(process.resourcesPath, "app-icon.png")
+    : resolve(currentDirectory, "../../assets/app-icon.png");
   let workspaceWindow: BrowserWindow | undefined;
   let reviewWindow: BrowserWindow | undefined;
 
@@ -58,6 +61,7 @@ if (!app.requestSingleInstanceLock()) {
           workspaceWindowOptions(
             resolve(currentDirectory, "../preload/workspace.cjs"),
             app.isPackaged,
+            appIcon,
           ),
         );
         secureWindow(window, WORKSPACE_URL);
@@ -86,6 +90,7 @@ if (!app.requestSingleInstanceLock()) {
             resolve(currentDirectory, "../preload/review.cjs"),
             app.isPackaged,
             workspaceWindow,
+            appIcon,
           ),
         );
         secureWindow(window, REVIEW_URL);
