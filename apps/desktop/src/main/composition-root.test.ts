@@ -6,7 +6,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const fixture = vi.hoisted(() => ({
   capabilitiesOptions: undefined as
-    { readonly skillsTargets: { readonly primaryTarget: unknown } } | undefined,
+    | {
+        readonly skillsTargets: { readonly primaryTarget: unknown };
+        readonly v1LocalOnlyTargets?: boolean;
+      }
+    | undefined,
   home: "",
   updateOptions: undefined as { readonly releaseChannel?: string } | undefined,
   userData: "",
@@ -26,6 +30,7 @@ vi.mock("./application/desktop-capabilities.js", () => ({
   createDesktopCapabilities: vi.fn(
     (options: {
       readonly skillsTargets: { readonly primaryTarget: unknown };
+      readonly v1LocalOnlyTargets?: boolean;
     }) => {
       fixture.capabilitiesOptions = options;
       return {
@@ -78,6 +83,9 @@ describe("desktop composition workspace selection", () => {
         workspaceLabel: basename(directory),
       });
       expect(getPath).toHaveBeenCalledWith("home");
+      expect(fixture.capabilitiesOptions).toMatchObject({
+        v1LocalOnlyTargets: true,
+      });
       expect(fixture.updateOptions).toMatchObject({
         releaseChannel: "unsigned-preview",
       });

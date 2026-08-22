@@ -1050,6 +1050,72 @@ describe("DesktopCapabilities inventory role-session contract", () => {
     });
   });
 
+  it("rejects ssh Target create drafts when v1LocalOnlyTargets is enabled", async () => {
+    const records = createMemoryRecoveryRecords(
+      [],
+      [],
+      [
+        {
+          connectionReference: null,
+          generation: target.generation,
+          harness: target.harness,
+          id: target.id,
+          kind: target.kind,
+          label: target.label,
+          workspace: target.workspace,
+        },
+      ],
+    );
+    const capabilities = createDesktopCapabilities({
+      id: () => "00000000-0000-4000-8000-0000000000aa",
+      recoveryRecords: records,
+      skillsTargets: targetsWith(
+        {
+          ...mutationNotExercised,
+          async observeInventory() {
+            return { ok: true, value: freshInventory };
+          },
+        },
+        () => "00000000-0000-4000-8000-0000000000aa",
+      ),
+      v1LocalOnlyTargets: true,
+    });
+    await capabilities.initialize();
+    const session = capabilities.attach(
+      {
+        endpointId: "workspace-v1-local-only",
+        role: "workspace",
+        sessionEpoch: "epoch-v1-local-only",
+      },
+      () => undefined,
+    );
+
+    await expect(
+      session.request({
+        definition: {
+          connectionReference: "build-host",
+          harness: "Codex",
+          kind: "ssh",
+          label: "Build host",
+          workspace: "/srv/skills",
+        },
+        type: "target.create",
+        version: 1,
+      }),
+    ).resolves.toMatchObject({
+      error: {
+        code: "invalid_request",
+        message:
+          "SSH Targets are next-scope and outside the V1 Local commitment.",
+      },
+      ok: false,
+    });
+
+    await expect(session.snapshot()).resolves.toMatchObject({
+      targets: [{ target: { id: "00000000-0000-4000-8000-000000000001" } }],
+    });
+  });
+
   it("retains independent explicitly refreshed Target Sessions", async () => {
     const otherTarget: TargetDefinition = {
       ...target,

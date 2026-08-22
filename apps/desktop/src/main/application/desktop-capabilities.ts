@@ -104,6 +104,7 @@ export interface DesktopCapabilitiesOptions {
   readonly scheduleEventDelivery?: (deliver: () => void) => void;
   readonly shutdownTimeoutMs?: number;
   readonly skillsTargets: SkillsTargets;
+  readonly v1LocalOnlyTargets?: boolean;
 }
 
 interface EndpointState extends DesktopEndpoint {
@@ -2108,6 +2109,19 @@ export function createDesktopCapabilities(
             parsed.data.type === "target.update"
           ) {
             const targetChangeRequest = parsed.data;
+            if (
+              options.v1LocalOnlyTargets === true &&
+              targetChangeRequest.definition.kind === "ssh"
+            ) {
+              return requestFailure(
+                publicError(
+                  "invalid_request",
+                  "SSH Targets are next-scope and outside the V1 Local commitment.",
+                  "target",
+                  false,
+                ),
+              );
+            }
             const updatedTargetId =
               targetChangeRequest.type === "target.update"
                 ? targetChangeRequest.targetId
@@ -2426,6 +2440,19 @@ export function createDesktopCapabilities(
             const requestedTarget = targetDefinitions().find(
               ({ id }) => id === request.targetId,
             );
+            if (
+              options.v1LocalOnlyTargets === true &&
+              requestedTarget?.kind === "ssh"
+            ) {
+              return requestFailure(
+                publicError(
+                  "invalid_request",
+                  "SSH Targets are next-scope and outside the V1 Local commitment.",
+                  "target",
+                  false,
+                ),
+              );
+            }
             const release = officialCollectionCatalog.releases.find(
               (candidate) =>
                 candidate.manifest.collectionId === request.collectionId &&
@@ -3302,6 +3329,16 @@ export function createDesktopCapabilities(
           }
 
           if (parsed.data.type === "mutation.prepare") {
+            if (options.v1LocalOnlyTargets === true && target.kind === "ssh") {
+              return requestFailure(
+                publicError(
+                  "invalid_request",
+                  "SSH Targets are next-scope and outside the V1 Local commitment.",
+                  "target",
+                  false,
+                ),
+              );
+            }
             if (mutationState.phase === "reconciliation-required") {
               return requestFailure(
                 publicError(
