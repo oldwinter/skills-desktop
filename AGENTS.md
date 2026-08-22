@@ -5,10 +5,16 @@ before changing product behavior.
 
 ## Current Phase
 
-The repository contains a validated throwaway prototype and no production
-implementation. Use the prototype to recover interaction decisions; do not
-silently promote its sample data, command-preview strings, or monolithic UI
-module into production.
+The production Local Target tracer exists and is the source of truth together
+with the accepted ADRs: inventory via the pinned skills CLI, allowlisted stale
+Snapshot restore, and mutation confirmation. **V1 public commitment is
+Local-only.** SSH Target, remote-bootstrap, and cross-machine reconciliation
+are out of V1 scope / next (they may stay in-tree as experiments).
+
+V1 docs accept a reliable local tracer, unsigned candidates that are buildable,
+and docs that match reality — not a signed public release. The prototype
+remains evidence only; do not silently promote its sample data,
+command-preview strings, or monolithic UI module into production.
 
 For the initial product-definition pass, use this sequence:
 
@@ -30,6 +36,7 @@ For the initial product-definition pass, use this sequence:
   schema.
 - Do not commit credentials, raw SSH output containing sensitive data, or
   generated visual-QA artifacts.
+- Do not widen V1 acceptance to remote without an explicit product decision.
 
 ## Prototype Validation
 
