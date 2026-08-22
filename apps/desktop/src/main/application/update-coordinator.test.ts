@@ -812,7 +812,7 @@ describe("UpdateCoordinator deferred restart and diagnostics", () => {
     expect(fixture.restartAndInstall).not.toHaveBeenCalled();
   });
 
-  it("clears deferred authority bound to a different running version", async () => {
+  it("retains and blocks deferred authority bound to a different running version", async () => {
     const fixture = releaseFixture({
       recovered: {
         candidate: {
@@ -828,15 +828,45 @@ describe("UpdateCoordinator deferred restart and diagnostics", () => {
 
     await fixture.coordinator.start();
 
+    expect(fixture.deferredRecords.clear).not.toHaveBeenCalled();
+    expect(fixture.coordinator.getSnapshot()).toMatchObject({
+      candidate: null,
+      restart: {
+        guardReasons: ["recovery-uncertain"],
+        immediateRestartAvailable: false,
+        kind: "blocked",
+      },
+      state: { error: { code: "check_failed" }, kind: "error" },
+    });
+    await expect(
+      fixture.coordinator.requestRestart(candidateId),
+    ).resolves.toBe("stale");
+    expect(fixture.coordinator.prepareNormalQuit()).toBe(false);
+    expect(fixture.restartAndInstall).not.toHaveBeenCalled();
+  });
+
+  it("clears recovery evidence after the candidate becomes the running version", async () => {
+    const fixture = releaseFixture({
+      recovered: {
+        candidate: {
+          architecture: "x64",
+          id: candidateId,
+          platform: "win32",
+          version: "0.1.0",
+        },
+        downloadedAt: "2026-08-22T05:00:00.000Z",
+        runningVersion: "0.0.9",
+      },
+    });
+
+    await fixture.coordinator.start();
+
     expect(fixture.deferredRecords.clear).toHaveBeenCalledTimes(1);
     expect(fixture.coordinator.getSnapshot()).toMatchObject({
       candidate: null,
       restart: { immediateRestartAvailable: false, kind: "none" },
     });
-    await expect(
-      fixture.coordinator.requestRestart(candidateId),
-    ).resolves.toBe("stale");
-    expect(fixture.restartAndInstall).not.toHaveBeenCalled();
+    expect(fixture.coordinator.prepareNormalQuit()).toBe(true);
   });
 
   it.each(["0.1.0", "0.0.9"])(
@@ -857,12 +887,17 @@ describe("UpdateCoordinator deferred restart and diagnostics", () => {
 
       await fixture.coordinator.start();
 
-      expect(fixture.deferredRecords.clear).toHaveBeenCalledTimes(1);
+      expect(fixture.deferredRecords.clear).not.toHaveBeenCalled();
       expect(fixture.coordinator.getSnapshot()).toMatchObject({
         candidate: null,
-        restart: { immediateRestartAvailable: false, kind: "none" },
+        restart: {
+          guardReasons: ["recovery-uncertain"],
+          immediateRestartAvailable: false,
+          kind: "blocked",
+        },
+        state: { error: { code: "check_failed" }, kind: "error" },
       });
-      expect(fixture.coordinator.prepareNormalQuit()).toBe(true);
+      expect(fixture.coordinator.prepareNormalQuit()).toBe(false);
       expect(fixture.restartAndInstall).not.toHaveBeenCalled();
     },
   );

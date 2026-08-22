@@ -178,18 +178,29 @@ export function createDeferredUpdateController(input: {
         return "failed";
       }
       if (recovered === null) return "empty";
-      const matchesRuntime =
-        recovered.runningVersion === input.application.version &&
+      const matchesPlatform =
         recovered.candidate.platform === input.application.platform &&
-        recovered.candidate.architecture === input.application.architecture &&
+        recovered.candidate.architecture === input.application.architecture;
+      const matchesDownloadRuntime =
+        matchesPlatform &&
+        recovered.runningVersion === input.application.version &&
         isStrictlyNewerStableVersion(
           recovered.candidate.version,
           input.application.version,
         );
-      if (matchesRuntime) {
+      if (matchesDownloadRuntime) {
         candidate = recovered.candidate;
         candidateDownloadedInSession = false;
         return "recovered";
+      }
+      const updateCompleted =
+        matchesPlatform &&
+        recovered.runningVersion !== input.application.version &&
+        recovered.candidate.version === input.application.version;
+      if (!updateCompleted) {
+        // Removing app evidence cannot cancel bytes already staged by Electron.
+        recoveryUncertain = true;
+        return "failed";
       }
       try {
         await input.records.clear();
