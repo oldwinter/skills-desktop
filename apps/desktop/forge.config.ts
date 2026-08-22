@@ -23,12 +23,25 @@ const config: ForgeConfig = {
     },
     {
       name: "@electron-forge/maker-deb",
-      config: { options: { homepage: "https://github.com/oldwinter/skills-desktop", maintainer: "Skills Desktop maintainers" } },
+      config: {
+        options: {
+          bin: "skills-desktop",
+          homepage: "https://github.com/oldwinter/skills-desktop",
+          maintainer: "Skills Desktop maintainers",
+          name: "skills-desktop",
+        },
+      },
       platforms: ["linux"],
     },
     {
       name: "@electron-forge/maker-rpm",
-      config: { options: { homepage: "https://github.com/oldwinter/skills-desktop" } },
+      config: {
+        options: {
+          bin: "skills-desktop",
+          homepage: "https://github.com/oldwinter/skills-desktop",
+          name: "skills-desktop",
+        },
+      },
       platforms: ["linux"],
     },
   ],

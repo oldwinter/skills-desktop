@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import forgeConfig from "../apps/desktop/forge.config.js";
 import {
   assertPublicReleaseEligible,
   assertUnsignedCandidateEnvironment,
@@ -83,6 +84,26 @@ describe("unsigned release candidate contract", () => {
       productName: "Skills Desktop",
       version: "0.1.0",
     });
+    const linuxMakers = Array.isArray(forgeConfig.makers)
+      ? forgeConfig.makers.filter((maker) =>
+          ["@electron-forge/maker-deb", "@electron-forge/maker-rpm"].includes(
+            maker.name,
+          ),
+        )
+      : [];
+    expect(linuxMakers).toHaveLength(2);
+    expect(linuxMakers).toEqual(
+      linuxMakers.map((maker) =>
+        expect.objectContaining({
+          config: expect.objectContaining({
+            options: expect.objectContaining({
+              bin: "skills-desktop",
+              name: "skills-desktop",
+            }),
+          }),
+        }),
+      ),
+    );
   });
 
   it.each([
