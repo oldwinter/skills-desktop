@@ -24,19 +24,23 @@ vi.mock("electron", () => ({
 }));
 
 describe("workspace preload authority", () => {
-  it("exposes only read, check, and subscribe About capabilities", async () => {
+  it("exposes only bounded About status, restart intent, and diagnostic export capabilities", async () => {
     await import("./workspace.js");
     const bridge = electron.exposeInMainWorld.mock.calls[0]?.[1] as {
       readonly about: {
+        exportDiagnostics(): Promise<unknown>;
         getSnapshot(): Promise<unknown>;
         requestCheck(): Promise<unknown>;
+        requestRestart(candidateId: string): Promise<unknown>;
         subscribe(listener: (snapshot: unknown) => void): () => void;
       };
     };
 
     expect(Object.keys(bridge.about).sort()).toEqual([
+      "exportDiagnostics",
       "getSnapshot",
       "requestCheck",
+      "requestRestart",
       "subscribe",
     ]);
     await bridge.about.requestCheck();
@@ -44,5 +48,18 @@ describe("workspace preload authority", () => {
       type: "update.check",
       version: 1,
     });
+    await bridge.about.requestRestart(
+      "00000000-0000-4000-8000-000000000025",
+    );
+    expect(electron.invoke).toHaveBeenCalledWith("about:update:restart", {
+      candidateId: "00000000-0000-4000-8000-000000000025",
+      type: "update.restart",
+      version: 1,
+    });
+    await bridge.about.exportDiagnostics();
+    expect(electron.invoke).toHaveBeenCalledWith(
+      "about:release-diagnostics:export",
+      { type: "release-diagnostics.export", version: 1 },
+    );
   });
 });

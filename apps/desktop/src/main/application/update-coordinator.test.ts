@@ -1,9 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  aboutReleaseDiagnosticsSchema,
   aboutUpdateSnapshotSchema,
   type AboutUpdateSnapshot,
+  type RestartGuardReason,
 } from "../../contracts/about.js";
+import type {
+  DeferredUpdateRecord,
+  DeferredUpdateRecords,
+} from "../persistence/deferred-update-records.js";
 import {
   createUpdateCoordinator,
   type UpdateAdapterEvent,
@@ -206,7 +212,7 @@ describe("UpdateCoordinator policy", () => {
       expectedState: { kind: "update-available" },
     },
     {
-      event: { type: "update-downloaded" },
+      event: { candidateVersion: "0.2.0", type: "update-downloaded" },
       expectedState: { kind: "update-downloaded" },
     },
     {
@@ -227,7 +233,9 @@ describe("UpdateCoordinator policy", () => {
   ])(
     "projects the $event.type updater event",
     async ({ event, expectedState }) => {
-      let receiveEvent: ((event: UpdateAdapterEvent) => void) | undefined;
+      let receiveEvent:
+        | ((event: UpdateAdapterEvent) => void | Promise<void>)
+        | undefined;
       const coordinator = createUpdateCoordinator({
         application: {
           architecture: "x64",
@@ -250,7 +258,7 @@ describe("UpdateCoordinator policy", () => {
 
       await coordinator.start();
       await coordinator.requestCheck();
-      receiveEvent?.(event);
+      await receiveEvent?.(event);
 
       expect(coordinator.getSnapshot().state).toEqual(expectedState);
     },
@@ -391,7 +399,7 @@ describe("UpdateCoordinator policy", () => {
         releasePageUrl:
           "https://github.com/oldwinter/skills-desktop/releases",
       },
-      schemaVersion: 1,
+      schemaVersion: 2,
       state: { kind: "manual" },
     });
   });
@@ -523,5 +531,378 @@ describe("UpdateCoordinator policy", () => {
       error: { code: "check_failed" },
       kind: "error",
     });
+  });
+});
+
+describe("UpdateCoordinator deferred restart and diagnostics", () => {
+  const candidateId = "00000000-0000-4000-8000-000000000025";
+
+  function releaseFixture(options?: {
+    readonly loadError?: boolean;
+    readonly recovered?: DeferredUpdateRecord | null;
+  }) {
+    let candidateEvent:
+      | ((event: UpdateAdapterEvent) => void | Promise<void>)
+      | undefined;
+    let guards: RestartGuardReason[] = [];
+    let prepareRestart: () => Promise<void> = async () => undefined;
+    let record = options?.recovered ?? null;
+    let exportedSource: string | undefined;
+    const deferredRecords: DeferredUpdateRecords = {
+      clear: vi.fn(async () => {
+        record = null;
+      }),
+      load: vi.fn(async () => {
+        if (options?.loadError) throw new Error("SECRET_DEFERRED_RECORD_PATH");
+        return record;
+      }),
+      save: vi.fn(async (next) => {
+        record = structuredClone(next);
+      }),
+    };
+    const restartAndInstall = vi.fn();
+    const coordinator = createUpdateCoordinator({
+      application: {
+        architecture: "x64",
+        isPackaged: true,
+        platform: "win32",
+        version: "0.1.0",
+      },
+      clock: { now: () => new Date("2026-08-22T06:00:00.000Z") },
+      deferredRecords,
+      diagnosticsExporter: {
+        async export(source) {
+          exportedSource = source;
+          return "saved";
+        },
+      },
+      id: () => candidateId,
+      prepareRestart: () => prepareRestart(),
+      records: {
+        load: vi.fn(async () => null),
+        save: vi.fn(async () => undefined),
+      },
+      restartSafety: () => ({ guardReasons: guards }),
+      scheduler: { after: vi.fn(() => () => undefined) },
+      updater: {
+        checkForUpdates: vi.fn(({ onEvent }) => {
+          candidateEvent = onEvent;
+        }),
+        restartAndInstall,
+      },
+    });
+    return {
+      candidateEvent: () => candidateEvent,
+      coordinator,
+      deferredRecords,
+      exportedSource: () => exportedSource,
+      record: () => record,
+      restartAndInstall,
+      setGuards(next: RestartGuardReason[]) {
+        guards = next;
+      },
+      setPrepareRestart(next: () => Promise<void>) {
+        prepareRestart = next;
+      },
+    };
+  }
+
+  async function downloadCandidate(
+    fixture: ReturnType<typeof releaseFixture>,
+  ) {
+    await fixture.coordinator.start();
+    await fixture.coordinator.requestCheck();
+    await fixture.candidateEvent()?.({
+      candidateVersion: "0.2.0",
+      type: "update-downloaded",
+    });
+  }
+
+  it("durably defers a downloaded candidate without restarting", async () => {
+    const fixture = releaseFixture();
+
+    await downloadCandidate(fixture);
+
+    expect(fixture.restartAndInstall).not.toHaveBeenCalled();
+    expect(fixture.record()).toEqual({
+      candidate: {
+        architecture: "x64",
+        id: candidateId,
+        platform: "win32",
+        version: "0.2.0",
+      },
+      downloadedAt: "2026-08-22T06:00:00.000Z",
+      runningVersion: "0.1.0",
+    });
+    expect(fixture.coordinator.getSnapshot()).toMatchObject({
+      candidate: { id: candidateId, version: "0.2.0" },
+      restart: {
+        guardReasons: [],
+        immediateRestartAvailable: true,
+        kind: "deferred",
+      },
+      schemaVersion: 2,
+      state: { kind: "update-downloaded" },
+    });
+  });
+
+  it.each(["0.1.0", "0.0.9", "0.2.0-rc.1"])(
+    "rejects non-forward stable candidate %s",
+    async (candidateVersion) => {
+      const fixture = releaseFixture();
+      await fixture.coordinator.start();
+      await fixture.coordinator.requestCheck();
+
+      await fixture.candidateEvent()?.({
+        candidateVersion,
+        type: "update-downloaded",
+      });
+
+      expect(fixture.record()).toBeNull();
+      expect(fixture.coordinator.getSnapshot()).toMatchObject({
+        candidate: null,
+        restart: {
+          guardReasons: ["recovery-uncertain"],
+          immediateRestartAvailable: false,
+          kind: "blocked",
+        },
+        state: { error: { code: "check_failed" }, kind: "error" },
+      });
+      expect(fixture.coordinator.prepareNormalQuit()).toBe(false);
+      expect(fixture.restartAndInstall).not.toHaveBeenCalled();
+    },
+  );
+
+  it("restarts only for the current candidate after explicit approval", async () => {
+    const fixture = releaseFixture();
+    await downloadCandidate(fixture);
+
+    await expect(
+      fixture.coordinator.requestRestart(
+        "00000000-0000-4000-8000-000000000099",
+      ),
+    ).resolves.toBe("stale");
+    expect(fixture.restartAndInstall).not.toHaveBeenCalled();
+
+    await expect(
+      fixture.coordinator.requestRestart(candidateId),
+    ).resolves.toBe("started");
+    expect(fixture.restartAndInstall).toHaveBeenCalledTimes(1);
+  });
+
+  it("cancels an approved restart when the coordinator is disposed", async () => {
+    const fixture = releaseFixture();
+    await downloadCandidate(fixture);
+    let releasePreparation: (() => void) | undefined;
+    const preparation = new Promise<void>((resolve) => {
+      releasePreparation = resolve;
+    });
+    fixture.setPrepareRestart(() => preparation);
+
+    const restart = fixture.coordinator.requestRestart(candidateId);
+    fixture.coordinator.dispose();
+    releasePreparation?.();
+
+    await expect(restart).resolves.toBe("cancelled");
+    expect(fixture.restartAndInstall).not.toHaveBeenCalled();
+  });
+
+  it("re-evaluates guards immediately before installation", async () => {
+    const fixture = releaseFixture();
+    await downloadCandidate(fixture);
+    fixture.setPrepareRestart(async () => {
+      fixture.setGuards(["mutation-active", "trusted-review-active"]);
+    });
+
+    await expect(
+      fixture.coordinator.requestRestart(candidateId),
+    ).resolves.toBe("blocked");
+
+    expect(fixture.restartAndInstall).not.toHaveBeenCalled();
+    expect(fixture.coordinator.getSnapshot().restart).toEqual({
+      guardReasons: ["mutation-active", "trusted-review-active"],
+      immediateRestartAvailable: false,
+      kind: "blocked",
+    });
+    expect(fixture.coordinator.prepareNormalQuit()).toBe(false);
+  });
+
+  it("restores deferred normal-restart state without reviving immediate authority", async () => {
+    const recovered = {
+      candidate: {
+        architecture: "x64",
+        id: candidateId,
+        platform: "win32",
+        version: "0.2.0",
+      },
+      downloadedAt: "2026-08-22T05:00:00.000Z",
+      runningVersion: "0.1.0",
+    } as const;
+    const fixture = releaseFixture({ recovered });
+
+    await fixture.coordinator.start();
+
+    expect(fixture.coordinator.getSnapshot()).toMatchObject({
+      candidate: recovered.candidate,
+      restart: {
+        immediateRestartAvailable: false,
+        kind: "deferred",
+      },
+      state: { kind: "update-downloaded" },
+    });
+    await expect(
+      fixture.coordinator.requestRestart(candidateId),
+    ).resolves.toBe("stale");
+    expect(fixture.coordinator.prepareNormalQuit()).toBe(true);
+    expect(fixture.restartAndInstall).not.toHaveBeenCalled();
+  });
+
+  it("clears deferred authority bound to a different running version", async () => {
+    const fixture = releaseFixture({
+      recovered: {
+        candidate: {
+          architecture: "x64",
+          id: candidateId,
+          platform: "win32",
+          version: "0.2.0",
+        },
+        downloadedAt: "2026-08-22T05:00:00.000Z",
+        runningVersion: "0.0.9",
+      },
+    });
+
+    await fixture.coordinator.start();
+
+    expect(fixture.deferredRecords.clear).toHaveBeenCalledTimes(1);
+    expect(fixture.coordinator.getSnapshot()).toMatchObject({
+      candidate: null,
+      restart: { immediateRestartAvailable: false, kind: "none" },
+    });
+    await expect(
+      fixture.coordinator.requestRestart(candidateId),
+    ).resolves.toBe("stale");
+    expect(fixture.restartAndInstall).not.toHaveBeenCalled();
+  });
+
+  it("blocks a potentially updating quit when deferred recovery is unreadable", async () => {
+    const fixture = releaseFixture({ loadError: true });
+
+    await fixture.coordinator.start();
+
+    expect(fixture.coordinator.getSnapshot()).toMatchObject({
+      candidate: null,
+      restart: {
+        guardReasons: ["recovery-uncertain"],
+        immediateRestartAvailable: false,
+        kind: "blocked",
+      },
+      state: { error: { code: "check_failed" }, kind: "error" },
+    });
+    expect(fixture.coordinator.prepareNormalQuit()).toBe(false);
+    expect(JSON.stringify(fixture.coordinator.getSnapshot())).not.toContain(
+      "SECRET_DEFERRED_RECORD_PATH",
+    );
+  });
+
+  it("exports only bounded redacted release evidence through the main exporter", async () => {
+    const fixture = releaseFixture();
+    await fixture.coordinator.start();
+    await fixture.coordinator.requestCheck();
+    await fixture.candidateEvent()?.({
+      error: new Error(
+        "https://token@example.test /SECRET_PATH ssh raw --argv shell text",
+      ),
+      type: "error",
+    });
+    fixture.setGuards([
+      "protected-process-active",
+      "reconciliation-required",
+    ]);
+
+    await expect(fixture.coordinator.exportDiagnostics()).resolves.toBe(
+      "saved",
+    );
+
+    const source = fixture.exportedSource();
+    expect(source).toBeDefined();
+    expect(source!.length).toBeLessThan(16_384);
+    const diagnostics = aboutReleaseDiagnosticsSchema.parse(
+      JSON.parse(source!),
+    );
+    expect(diagnostics).toMatchObject({
+      application: { version: "0.1.0" },
+      candidate: null,
+      errors: [{ code: "check_failed" }],
+      guardReasons: [
+        "protected-process-active",
+        "reconciliation-required",
+      ],
+      restartState: "blocked",
+      schemaVersion: 1,
+      updateState: "error",
+    });
+    expect(source).not.toMatch(
+      /token|SECRET|ssh raw|update\.electronjs\.org|--argv|shell text/i,
+    );
+  });
+
+  it("keeps Linux manual-only while including current guards in diagnostics", async () => {
+    let exportedSource: string | undefined;
+    const deferredRecords: DeferredUpdateRecords = {
+      clear: vi.fn(async () => undefined),
+      load: vi.fn(async () => null),
+      save: vi.fn(async () => undefined),
+    };
+    const restartAndInstall = vi.fn();
+    const coordinator = createUpdateCoordinator({
+      application: {
+        architecture: "x64",
+        isPackaged: true,
+        platform: "linux",
+        version: "0.1.0",
+      },
+      clock: { now: () => new Date("2026-08-22T06:00:00.000Z") },
+      deferredRecords,
+      diagnosticsExporter: {
+        async export(source) {
+          exportedSource = source;
+          return "saved";
+        },
+      },
+      records: {
+        load: vi.fn(async () => null),
+        save: vi.fn(async () => undefined),
+      },
+      restartSafety: () => ({
+        guardReasons: ["mutation-active", "reconciliation-required"],
+      }),
+      scheduler: { after: vi.fn(() => () => undefined) },
+      updater: { checkForUpdates: vi.fn(), restartAndInstall },
+    });
+
+    await coordinator.start();
+
+    expect(coordinator.getSnapshot()).toMatchObject({
+      candidate: null,
+      policy: { mode: "manual" },
+      restart: { guardReasons: [], kind: "none" },
+      state: { kind: "manual" },
+    });
+    expect(coordinator.prepareNormalQuit()).toBe(true);
+    await expect(
+      coordinator.requestRestart(
+        "00000000-0000-4000-8000-000000000025",
+      ),
+    ).resolves.toBe("stale");
+    await expect(coordinator.exportDiagnostics()).resolves.toBe("saved");
+    expect(
+      aboutReleaseDiagnosticsSchema.parse(JSON.parse(exportedSource!)),
+    ).toMatchObject({
+      guardReasons: ["mutation-active", "reconciliation-required"],
+      restartState: "blocked",
+    });
+    expect(deferredRecords.load).not.toHaveBeenCalled();
+    expect(deferredRecords.save).not.toHaveBeenCalled();
+    expect(restartAndInstall).not.toHaveBeenCalled();
   });
 });

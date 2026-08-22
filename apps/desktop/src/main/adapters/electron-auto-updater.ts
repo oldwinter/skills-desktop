@@ -4,8 +4,19 @@ import type { UpdateAdapterEvent } from "../application/update-coordinator.js";
 
 export type ElectronAutoUpdater = Pick<
   AutoUpdater,
-  "checkForUpdates" | "on" | "removeListener" | "setFeedURL"
+  | "checkForUpdates"
+  | "on"
+  | "quitAndInstall"
+  | "removeListener"
+  | "setFeedURL"
 >;
+
+function normalizeCandidateVersion(releaseName: string) {
+  const match = /^v?(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)$/.exec(
+    releaseName.trim(),
+  );
+  return match?.[1];
+}
 
 export function createElectronUpdateAdapter(updater: ElectronAutoUpdater) {
   return {
@@ -22,9 +33,18 @@ export function createElectronUpdateAdapter(updater: ElectronAutoUpdater) {
         updater.removeListener("update-not-available", notAvailable);
         updater.removeListener("error", failed);
       };
-      const downloaded = () => {
+      const downloaded = (
+        _event: Electron.Event,
+        _releaseNotes: string,
+        releaseName: string,
+      ) => {
         cleanup();
-        input.onEvent({ type: "update-downloaded" });
+        const candidateVersion = normalizeCandidateVersion(releaseName);
+        if (candidateVersion === undefined) {
+          void input.onEvent({ type: "error" });
+          return;
+        }
+        void input.onEvent({ candidateVersion, type: "update-downloaded" });
       };
       const notAvailable = () => {
         cleanup();
@@ -47,6 +67,9 @@ export function createElectronUpdateAdapter(updater: ElectronAutoUpdater) {
         cleanup();
         throw error;
       }
+    },
+    restartAndInstall() {
+      updater.quitAndInstall();
     },
   };
 }

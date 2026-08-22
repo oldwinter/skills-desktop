@@ -171,6 +171,10 @@ code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; fo
 .about-update-status h2 { margin-top: 2px; font-size: var(--font-size-ui); }
 .about-update-status > p, .about-update-status > code { grid-column: 1; min-width: 0; color: var(--text-secondary); font-size: var(--font-size-meta); overflow-wrap: anywhere; }
 .about-update-status > .text-button { grid-column: 2; grid-row: 1 / span 3; }
+.about-restart-control { display: grid; grid-column: 2; grid-row: 1 / span 3; justify-items: end; gap: 8px; min-width: 180px; }
+.about-candidate { color: var(--text-secondary); font-size: var(--font-size-meta); }
+.about-guard-reasons { display: grid; gap: 3px; margin: 0; padding: 0; color: var(--danger); font-size: var(--font-size-meta); list-style: none; text-align: right; }
+.about-actions { display: flex; justify-content: flex-end; padding: 16px 0; }
 
 .comparison-workspace, .targets-workspace { display: grid; grid-template-rows: auto auto auto minmax(0, 1fr); min-width: 0; min-height: 0; overflow: hidden; }
 .collections-workspace { display: flex; min-width: 0; min-height: 0; flex-direction: column; overflow: hidden; }
@@ -365,6 +369,8 @@ code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; fo
   .about-facts > div + div { padding-left: 0; border-top: 1px solid var(--line); border-left: 0; }
   .about-update-status { grid-template-columns: 1fr; }
   .about-update-status > .text-button { grid-column: 1; grid-row: auto; }
+  .about-restart-control { grid-column: 1; grid-row: auto; justify-items: start; min-width: 0; }
+  .about-guard-reasons { text-align: left; }
 }
 
 @media (prefers-reduced-motion: reduce) {

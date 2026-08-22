@@ -2,6 +2,8 @@ import { basename, posix } from "node:path";
 
 import type { Result } from "@skills-desktop/skills-runtime";
 
+import type { RestartGuardReason } from "../../contracts/about.js";
+
 import {
   workspaceRequestSchema,
   type DesktopEvent,
@@ -84,6 +86,7 @@ export interface DesktopCapabilities {
     sink: (event: DesktopEvent) => void,
   ): DesktopSession;
   initialize(): Promise<void>;
+  restartSafety(): { readonly guardReasons: readonly RestartGuardReason[] };
   shutdown(): Promise<void>;
 }
 
@@ -310,6 +313,7 @@ export function createDesktopCapabilities(
   const guardedTargetIds = new Set<string>();
   const reservedTargetIds = new Set<string>();
   let initialized = false;
+  let recoveryUncertain = false;
   let targetAuthorityUnavailable = false;
   let targetDefinitionsChanging = false;
   let shuttingDown = false;
@@ -3476,6 +3480,9 @@ export function createDesktopCapabilities(
       const targetStoreFailed = restored.failures.some(
         (failure) => failure.store === "targetDefinitions",
       );
+      recoveryUncertain = restored.failures.some((failure) =>
+        ["mutationGuards", "targetDefinitions"].includes(failure.store),
+      );
       targetAuthorityUnavailable = targetStoreFailed;
       if (restored.targetDefinitions.length > 0) {
         options.skillsTargets.replaceDefinitions(
@@ -3490,6 +3497,7 @@ export function createDesktopCapabilities(
           type: "targets.replace",
         });
         if (!committed.ok) {
+          recoveryUncertain = true;
           targetAuthorityUnavailable = true;
           inventoryState = {
             ...inventoryState,
@@ -3530,6 +3538,7 @@ export function createDesktopCapabilities(
             type: "target.remap",
           });
           if (!remapped.ok) {
+            recoveryUncertain = true;
             targetAuthorityUnavailable = true;
             inventoryState = {
               ...inventoryState,
@@ -3659,6 +3668,38 @@ export function createDesktopCapabilities(
         };
       }
       storeActiveTargetState();
+    },
+    restartSafety() {
+      const guardReasons: RestartGuardReason[] = [];
+      if (activeMutation !== undefined) guardReasons.push("mutation-active");
+      if (
+        activeObservation !== undefined ||
+        activePreparation !== undefined ||
+        targetDefinitionsChanging
+      ) {
+        guardReasons.push("protected-process-active");
+      }
+      if (
+        [...reviews.values()].some(({ decision }) => decision === undefined) ||
+        [...hostTrustReviews.values()].some(
+          ({ decision }) => decision === undefined,
+        )
+      ) {
+        guardReasons.push("trusted-review-active");
+      }
+      if (
+        guardedTargetIds.size > 0 ||
+        mutationState.phase === "reconciliation-required" ||
+        [...mutationStates.values()].some(
+          ({ phase }) => phase === "reconciliation-required",
+        )
+      ) {
+        guardReasons.push("reconciliation-required");
+      }
+      if (recoveryUncertain || targetAuthorityUnavailable) {
+        guardReasons.push("recovery-uncertain");
+      }
+      return { guardReasons };
     },
     shutdown() {
       if (shutdownPromise !== undefined) return shutdownPromise;

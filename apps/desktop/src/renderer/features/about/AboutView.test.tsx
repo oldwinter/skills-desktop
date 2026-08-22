@@ -38,10 +38,16 @@ const linuxSnapshot: AboutUpdateSnapshot = {
 
 function clientFor(snapshot: AboutUpdateSnapshot): AboutBridge {
   return {
+    async exportDiagnostics() {
+      return { ok: true, value: { status: "saved" } };
+    },
     async getSnapshot() {
       return { ok: true, value: snapshot };
     },
     async requestCheck() {
+      return { ok: true, value: snapshot };
+    },
+    async requestRestart() {
       return { ok: true, value: snapshot };
     },
     subscribe() {
@@ -92,6 +98,9 @@ describe("About surface", () => {
       value: checkingSnapshot,
     }));
     const client: AboutBridge = {
+      async exportDiagnostics() {
+        return { ok: true, value: { status: "saved" } };
+      },
       async getSnapshot() {
         return {
           ok: true,
@@ -103,6 +112,9 @@ describe("About surface", () => {
         };
       },
       requestCheck,
+      async requestRestart() {
+        return { ok: true, value: checkingSnapshot };
+      },
       subscribe() {
         return () => undefined;
       },
@@ -141,10 +153,16 @@ describe("About surface", () => {
     };
     let publish: ((snapshot: AboutUpdateSnapshot) => void) | undefined;
     const client: AboutBridge = {
+      async exportDiagnostics() {
+        return { ok: true, value: { status: "saved" } };
+      },
       async getSnapshot() {
         return { ok: true, value: idleSnapshot };
       },
       async requestCheck() {
+        return { ok: true, value: idleSnapshot };
+      },
+      async requestRestart() {
         return { ok: true, value: idleSnapshot };
       },
       subscribe(listener) {
@@ -200,11 +218,17 @@ describe("About surface", () => {
       state: { kind: "idle" },
     };
     const client: AboutBridge = {
+      async exportDiagnostics() {
+        return { ok: true, value: { status: "saved" } };
+      },
       getSnapshot: () =>
         new Promise((resolve) => {
           resolveInitial = resolve;
         }),
       async requestCheck() {
+        return { ok: true, value: initialSnapshot };
+      },
+      async requestRestart() {
         return { ok: true, value: initialSnapshot };
       },
       subscribe(listener) {
@@ -237,5 +261,98 @@ describe("About surface", () => {
     expect(screen.getByText("Checking for updates")).toBeInTheDocument();
     expect(screen.queryByText("Ready to check")).not.toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("offers only the current safe candidate for explicit restart and exports diagnostics", async () => {
+    const snapshot: AboutUpdateSnapshot = {
+      application: {
+        architecture: "x64",
+        platform: "win32",
+        version: "0.1.0",
+      },
+      candidate: {
+        architecture: "x64",
+        id: "00000000-0000-4000-8000-000000000025",
+        platform: "win32",
+        version: "0.2.0",
+      },
+      lastCheckAt: "2026-08-22T06:00:00.000Z",
+      nextAutomaticCheckAt: "2026-08-23T06:00:00.000Z",
+      policy: { channel: "stable", mode: "automatic" },
+      restart: {
+        guardReasons: [],
+        immediateRestartAvailable: true,
+        kind: "deferred",
+      },
+      schemaVersion: 2,
+      state: { kind: "update-downloaded" },
+    };
+    const requestRestart = vi.fn(async () => ({
+      ok: true as const,
+      value: { ...snapshot, restart: { ...snapshot.restart, kind: "restarting" as const } },
+    }));
+    const exportDiagnostics = vi.fn(async () => ({
+      ok: true as const,
+      value: { status: "saved" as const },
+    }));
+    const client: AboutBridge = {
+      exportDiagnostics,
+      async getSnapshot() {
+        return { ok: true, value: snapshot };
+      },
+      async requestCheck() {
+        return { ok: true, value: snapshot };
+      },
+      requestRestart,
+      subscribe() {
+        return () => undefined;
+      },
+    };
+    render(<AboutView client={client} />);
+
+    expect(await screen.findByText("Candidate 0.2.0")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Restart to update" }));
+    await waitFor(() =>
+      expect(requestRestart).toHaveBeenCalledWith(
+        "00000000-0000-4000-8000-000000000025",
+      ),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Export release diagnostics" }),
+    );
+    await waitFor(() => expect(exportDiagnostics).toHaveBeenCalledTimes(1));
+  });
+
+  it("shows current restart guards and withholds immediate restart authority", async () => {
+    const snapshot: AboutUpdateSnapshot = {
+      application: {
+        architecture: "arm64",
+        platform: "darwin",
+        version: "0.1.0",
+      },
+      candidate: {
+        architecture: "arm64",
+        id: "00000000-0000-4000-8000-000000000025",
+        platform: "darwin",
+        version: "0.2.0",
+      },
+      lastCheckAt: "2026-08-22T06:00:00.000Z",
+      nextAutomaticCheckAt: "2026-08-23T06:00:00.000Z",
+      policy: { channel: "stable", mode: "automatic" },
+      restart: {
+        guardReasons: ["mutation-active", "reconciliation-required"],
+        immediateRestartAvailable: false,
+        kind: "blocked",
+      },
+      schemaVersion: 2,
+      state: { kind: "update-downloaded" },
+    };
+    render(<AboutView client={clientFor(snapshot)} />);
+
+    expect(await screen.findByText("Mutation active")).toBeInTheDocument();
+    expect(screen.getByText("Reconciliation required")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Restart to update" }),
+    ).toBeDisabled();
   });
 });

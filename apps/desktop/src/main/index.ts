@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { app, BrowserWindow, ipcMain, protocol } from "electron";
+import { app, autoUpdater, BrowserWindow, ipcMain, protocol } from "electron";
 
 import {
   registerAssetProtocol,
@@ -119,10 +119,19 @@ if (!app.requestSingleInstanceLock()) {
       app.on("second-instance", () => workspaceWindow?.focus());
       let shutdownStarted = false;
       let readyToQuit = false;
+      let updaterOwnedQuit = false;
+      autoUpdater.on("before-quit-for-update", () => {
+        updaterOwnedQuit = true;
+        updates.dispose();
+        desktopIpc.dispose();
+        void capabilities.shutdown();
+      });
       app.on("before-quit", (event) => {
+        if (updaterOwnedQuit) return;
         if (readyToQuit) return;
         event.preventDefault();
         if (shutdownStarted) return;
+        if (!updates.prepareNormalQuit()) return;
         shutdownStarted = true;
         updates.dispose();
         void capabilities.shutdown().finally(() => {

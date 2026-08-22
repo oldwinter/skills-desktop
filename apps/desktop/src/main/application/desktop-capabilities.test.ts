@@ -2467,6 +2467,158 @@ describe("DesktopCapabilities inventory role-session contract", () => {
   });
 });
 
+describe("DesktopCapabilities release restart guard contract", () => {
+  it("blocks a protected observation and clears the reason after it settles", async () => {
+    let markObservationStarted: (() => void) | undefined;
+    const observationStarted = new Promise<void>((resolve) => {
+      markObservationStarted = resolve;
+    });
+    let finishObservation:
+      | ((value: Awaited<ReturnType<SkillsProcess["observeInventory"]>>) => void)
+      | undefined;
+    const process: SkillsProcess = {
+      ...mutationNotExercised,
+      observeInventory: () =>
+        new Promise((resolve) => {
+          finishObservation = resolve;
+          markObservationStarted?.();
+        }),
+    };
+    const capabilities = createDesktopCapabilities({
+      id: () => "protected-observation",
+      recoveryRecords: createMemoryRecoveryRecords(),
+      skillsTargets: targetsWith(process),
+    });
+    await capabilities.initialize();
+    const workspace = capabilities.attach(
+      {
+        endpointId: "workspace-restart-protected",
+        role: "workspace",
+        sessionEpoch: "restart-protected-epoch",
+      },
+      () => undefined,
+    );
+
+    const refresh = workspace.request({
+      targetId: target.id,
+      type: "inventory.refresh",
+      version: 1,
+    });
+    await observationStarted;
+    expect(capabilities.restartSafety()).toEqual({
+      guardReasons: ["protected-process-active"],
+    });
+
+    finishObservation?.({ ok: true, value: freshInventory });
+    await refresh;
+    expect(capabilities.restartSafety()).toEqual({ guardReasons: [] });
+  });
+
+  it("blocks one pending Trusted Review and clears it on deterministic teardown", async () => {
+    const fixture = await createHostTrustRoleFixture();
+
+    expect(fixture.capabilities.restartSafety()).toEqual({
+      guardReasons: ["trusted-review-active"],
+    });
+
+    fixture.review.teardown();
+    expect(fixture.capabilities.restartSafety()).toEqual({ guardReasons: [] });
+  });
+
+  it("keeps reconciliation blocked while its mutation process is active", async () => {
+    let markObservationStarted: (() => void) | undefined;
+    const observationStarted = new Promise<void>((resolve) => {
+      markObservationStarted = resolve;
+    });
+    let finishObservation:
+      | ((value: Awaited<ReturnType<SkillsProcess["observeInventory"]>>) => void)
+      | undefined;
+    const records = createMemoryRecoveryRecords([], [
+      {
+        deadline: "2026-08-22T05:59:00.000Z",
+        effects: "possible",
+        generation: target.generation,
+        operationId: "uncertain-mutation",
+        phase: "reconciliation-required",
+        targetId: target.id,
+      },
+    ]);
+    const process: SkillsProcess = {
+      ...mutationNotExercised,
+      observeInventory: () =>
+        new Promise((resolve) => {
+          finishObservation = resolve;
+          markObservationStarted?.();
+        }),
+    };
+    const capabilities = createDesktopCapabilities({
+      clock: () => new Date("2026-08-22T06:00:00.000Z"),
+      id: () => "reconciliation-operation",
+      recoveryRecords: records,
+      skillsTargets: targetsWith(process),
+    });
+    await capabilities.initialize();
+    const workspace = capabilities.attach(
+      {
+        endpointId: "workspace-restart-reconciliation",
+        role: "workspace",
+        sessionEpoch: "restart-reconciliation-epoch",
+      },
+      () => undefined,
+    );
+
+    expect(capabilities.restartSafety()).toEqual({
+      guardReasons: ["reconciliation-required"],
+    });
+    const reconcile = workspace.request({
+      targetId: target.id,
+      type: "mutation.reconcile",
+      version: 1,
+    });
+    await observationStarted;
+    expect(capabilities.restartSafety()).toEqual({
+      guardReasons: ["mutation-active", "reconciliation-required"],
+    });
+
+    finishObservation?.({ ok: true, value: freshInventory });
+    await reconcile;
+    expect(capabilities.restartSafety()).toEqual({ guardReasons: [] });
+  });
+
+  it("fails closed when Mutation Guard recovery is uncertain", async () => {
+    const memory = createMemoryRecoveryRecords();
+    const capabilities = createDesktopCapabilities({
+      id: () => "uncertain-recovery",
+      recoveryRecords: {
+        commit: (change) => memory.commit(change),
+        async restore() {
+          return {
+            ...(await memory.restore()),
+            failures: [
+              {
+                code: "corrupt_store" as const,
+                store: "mutationGuards" as const,
+              },
+            ],
+          };
+        },
+      },
+      skillsTargets: targetsWith({
+        ...mutationNotExercised,
+        async observeInventory() {
+          return { ok: true, value: freshInventory };
+        },
+      }),
+    });
+
+    await capabilities.initialize();
+
+    expect(capabilities.restartSafety()).toEqual({
+      guardReasons: ["reconciliation-required", "recovery-uncertain"],
+    });
+  });
+});
+
 describe("DesktopCapabilities SSH host-trust role-session contract", () => {
   it("requires isolated reviewed trust before publishing a remote Inventory", async () => {
     const sshTarget: TargetDefinition = {

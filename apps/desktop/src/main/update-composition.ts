@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 
 import {
@@ -5,6 +6,8 @@ import {
   type ElectronAutoUpdater,
 } from "./adapters/electron-auto-updater.js";
 import { createUpdateCoordinator } from "./application/update-coordinator.js";
+import type { RestartGuardReason } from "../contracts/about.js";
+import { createJsonDeferredUpdateRecords } from "./persistence/deferred-update-records.js";
 import { createJsonUpdateCheckRecords } from "./persistence/update-check-records.js";
 
 interface UpdateRuntimeApp {
@@ -18,13 +21,22 @@ export async function createElectronUpdateComposition(input: {
   readonly architecture: string;
   readonly autoUpdater: ElectronAutoUpdater;
   readonly clock?: () => Date;
+  readonly diagnosticsExporter?: {
+    export(source: string): Promise<"cancelled" | "saved">;
+  };
+  readonly id?: () => string;
   readonly platform: NodeJS.Platform;
+  readonly prepareRestart?: () => Promise<void>;
+  readonly restartSafety?: () => {
+    readonly guardReasons: readonly RestartGuardReason[];
+  };
   readonly schedule?: (
     delayMs: number,
     action: () => void | Promise<void>,
   ) => () => void;
 }) {
   const now = input.clock ?? (() => new Date());
+  const newId = input.id ?? randomUUID;
   const schedule =
     input.schedule ??
     ((delayMs: number, action: () => void | Promise<void>) => {
@@ -41,6 +53,18 @@ export async function createElectronUpdateComposition(input: {
       version: input.app.getVersion(),
     },
     clock: { now },
+    deferredRecords: createJsonDeferredUpdateRecords({
+      id: newId,
+      path: resolve(
+        input.app.getPath("userData"),
+        "updates",
+        "deferred-restart-v1.json",
+      ),
+      platform: input.platform,
+    }),
+    diagnosticsExporter: input.diagnosticsExporter,
+    id: newId,
+    prepareRestart: input.prepareRestart,
     records: createJsonUpdateCheckRecords({
       path: resolve(
         input.app.getPath("userData"),
@@ -49,6 +73,7 @@ export async function createElectronUpdateComposition(input: {
       ),
     }),
     scheduler: { after: schedule },
+    restartSafety: input.restartSafety,
     updater: createElectronUpdateAdapter(input.autoUpdater),
   });
   await updates.start();

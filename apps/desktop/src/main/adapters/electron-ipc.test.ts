@@ -71,8 +71,10 @@ describe("Electron IPC sender authorization", () => {
       ipcMain: ipcMain as never,
       newEpoch: () => "epoch-1",
       updates: {
+        exportDiagnostics: vi.fn(async () => "cancelled" as const),
         getSnapshot: vi.fn(),
         requestCheck: vi.fn(async () => undefined),
+        requestRestart: vi.fn(async () => "stale" as const),
         subscribe: vi.fn(() => () => undefined),
       },
     });
@@ -297,8 +299,10 @@ describe("Electron IPC sender authorization", () => {
     } as const;
     let publishUpdate: ((snapshot: typeof aboutSnapshot) => void) | undefined;
     const updates = {
+      exportDiagnostics: vi.fn(async () => "saved" as const),
       getSnapshot: vi.fn(() => aboutSnapshot),
       requestCheck: vi.fn(async () => undefined),
+      requestRestart: vi.fn(async () => "blocked" as const),
       subscribe: vi.fn((listener: (snapshot: typeof aboutSnapshot) => void) => {
         publishUpdate = listener;
         return () => undefined;
@@ -334,7 +338,12 @@ describe("Electron IPC sender authorization", () => {
 
     expect(
       [...handlers.keys()].filter((channel) => channel.startsWith("about:")),
-    ).toEqual(["about:update:snapshot:get", "about:update:check"]);
+    ).toEqual([
+      "about:update:snapshot:get",
+      "about:update:check",
+      "about:update:restart",
+      "about:release-diagnostics:export",
+    ]);
     await expect(
       handlers.get("about:update:snapshot:get")!(workspaceEvent as never),
     ).resolves.toEqual({ ok: true, value: aboutSnapshot });
@@ -345,6 +354,23 @@ describe("Electron IPC sender authorization", () => {
       }),
     ).resolves.toEqual({ ok: true, value: aboutSnapshot });
     expect(updates.requestCheck).toHaveBeenCalledTimes(1);
+    await expect(
+      handlers.get("about:update:restart")!(workspaceEvent as never, {
+        candidateId: "00000000-0000-4000-8000-000000000025",
+        type: "update.restart",
+        version: 1,
+      }),
+    ).resolves.toEqual({ ok: true, value: aboutSnapshot });
+    expect(updates.requestRestart).toHaveBeenCalledWith(
+      "00000000-0000-4000-8000-000000000025",
+    );
+    await expect(
+      handlers.get("about:release-diagnostics:export")!(
+        workspaceEvent as never,
+        { type: "release-diagnostics.export", version: 1 },
+      ),
+    ).resolves.toEqual({ ok: true, value: { status: "saved" } });
+    expect(updates.exportDiagnostics).toHaveBeenCalledTimes(1);
 
     const hostileSubframe = {
       sender: workspaceContents,
@@ -364,8 +390,28 @@ describe("Electron IPC sender authorization", () => {
       }),
     ).resolves.toMatchObject({ error: { code: "invalid_request" }, ok: false });
     expect(updates.requestCheck).toHaveBeenCalledTimes(1);
+    await expect(
+      handlers.get("about:update:restart")!(workspaceEvent as never, {
+        candidateId: "00000000-0000-4000-8000-000000000025",
+        feedUrl: "https://attacker.invalid",
+        type: "update.restart",
+        version: 1,
+      }),
+    ).resolves.toMatchObject({ error: { code: "invalid_request" }, ok: false });
+    await expect(
+      handlers.get("about:release-diagnostics:export")!(
+        workspaceEvent as never,
+        {
+          outputPath: "/SECRET_PATH/diagnostics.json",
+          type: "release-diagnostics.export",
+          version: 1,
+        },
+      ),
+    ).resolves.toMatchObject({ error: { code: "invalid_request" }, ok: false });
+    expect(updates.requestRestart).toHaveBeenCalledTimes(1);
+    expect(updates.exportDiagnostics).toHaveBeenCalledTimes(1);
     expect([...handlers.keys()].join(" ")).not.toMatch(
-      /download|install|restart|quit|argv|shell/i,
+      /download|install|quit|argv|shell|path/i,
     );
 
     const reviewFrame = { url: "skills-desktop://review/index.html" };
@@ -385,6 +431,16 @@ describe("Electron IPC sender authorization", () => {
       handlers.get("about:update:check")!(
         { sender: reviewContents, senderFrame: reviewFrame } as never,
         { type: "update.check", version: 1 },
+      ),
+    ).resolves.toMatchObject({ error: { code: "unauthorized" }, ok: false });
+    await expect(
+      handlers.get("about:update:restart")!(
+        { sender: reviewContents, senderFrame: reviewFrame } as never,
+        {
+          candidateId: "00000000-0000-4000-8000-000000000025",
+          type: "update.restart",
+          version: 1,
+        },
       ),
     ).resolves.toMatchObject({ error: { code: "unauthorized" }, ok: false });
     expect(updates.requestCheck).toHaveBeenCalledTimes(1);

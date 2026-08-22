@@ -1,5 +1,12 @@
 import { useEffect, useState } from "react";
-import { AlertCircle, Info, PackageOpen, RefreshCw } from "lucide-react";
+import {
+  AlertCircle,
+  Download,
+  Info,
+  PackageOpen,
+  RefreshCw,
+  RotateCw,
+} from "lucide-react";
 
 import type {
   AboutBridge,
@@ -43,6 +50,14 @@ function automaticStatus(snapshot: AboutUpdateSnapshot) {
   }
 }
 
+const guardLabels = {
+  "mutation-active": "Mutation active",
+  "protected-process-active": "Protected process active",
+  "trusted-review-active": "Trusted Review active",
+  "reconciliation-required": "Reconciliation required",
+  "recovery-uncertain": "Recovery state uncertain",
+} as const;
+
 export function AboutView({ client }: { readonly client: AboutBridge }) {
   const [snapshot, setSnapshot] = useState<AboutUpdateSnapshot>();
   const [error, setError] = useState<string>();
@@ -53,6 +68,20 @@ export function AboutView({ client }: { readonly client: AboutBridge }) {
       setError(undefined);
       setSnapshot(result.value);
     } else setError(resultError(result));
+  };
+
+  const requestRestart = async (candidateId: string) => {
+    const result = await client.requestRestart(candidateId);
+    if (result.ok) {
+      setError(undefined);
+      setSnapshot(result.value);
+    } else setError(resultError(result));
+  };
+
+  const exportDiagnostics = async () => {
+    const result = await client.exportDiagnostics();
+    if (result.ok) setError(undefined);
+    else setError(result.error.message);
   };
 
   useEffect(() => {
@@ -154,19 +183,43 @@ export function AboutView({ client }: { readonly client: AboutBridge }) {
                 </h2>
               </div>
               <p>{automaticStatus(snapshot)?.message}</p>
-              <button
-                className="text-button text-button--primary"
-                disabled={snapshot.state.kind === "checking"}
-                onClick={() => void requestCheck()}
-                type="button"
-              >
-                <RefreshCw
-                  aria-hidden="true"
-                  className={snapshot.state.kind === "checking" ? "spin" : undefined}
-                  size={15}
-                />
-                Check for updates
-              </button>
+              {snapshot.schemaVersion === 2 && snapshot.candidate !== null ? (
+                <div className="about-restart-control">
+                  <p className="about-candidate">
+                    Candidate {snapshot.candidate.version}
+                  </p>
+                  {snapshot.restart.guardReasons.length > 0 ? (
+                    <ul className="about-guard-reasons" aria-label="Restart guards">
+                      {snapshot.restart.guardReasons.map((reason) => (
+                        <li key={reason}>{guardLabels[reason]}</li>
+                      ))}
+                    </ul>
+                  ) : null}
+                  <button
+                    className="text-button text-button--primary"
+                    disabled={!snapshot.restart.immediateRestartAvailable}
+                    onClick={() => void requestRestart(snapshot.candidate!.id)}
+                    type="button"
+                  >
+                    <RotateCw aria-hidden="true" size={15} />
+                    Restart to update
+                  </button>
+                </div>
+              ) : (
+                <button
+                  className="text-button text-button--primary"
+                  disabled={snapshot.state.kind === "checking"}
+                  onClick={() => void requestCheck()}
+                  type="button"
+                >
+                  <RefreshCw
+                    aria-hidden="true"
+                    className={snapshot.state.kind === "checking" ? "spin" : undefined}
+                    size={15}
+                  />
+                  Check for updates
+                </button>
+              )}
             </section>
           ) : snapshot.policy.mode === "manual" ? (
             <section className="about-update-status" aria-labelledby="update-status-heading">
@@ -188,6 +241,16 @@ export function AboutView({ client }: { readonly client: AboutBridge }) {
               <p>{snapshot.policy.message}</p>
             </section>
           ) : null}
+          <div className="about-actions">
+            <button
+              className="text-button"
+              onClick={() => void exportDiagnostics()}
+              type="button"
+            >
+              <Download aria-hidden="true" size={15} />
+              Export release diagnostics
+            </button>
+          </div>
         </div>
       )}
     </main>

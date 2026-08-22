@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from "electron";
 
 import {
+  aboutDiagnosticsExportResultSchema,
   aboutUpdateResultSchema,
   aboutUpdateSnapshotSchema,
   type AboutBridge,
@@ -18,6 +19,14 @@ import {
 } from "../contracts/workspace.js";
 
 const about: AboutBridge = Object.freeze({
+  async exportDiagnostics() {
+    return aboutDiagnosticsExportResultSchema.parse(
+      await ipcRenderer.invoke("about:release-diagnostics:export", {
+        type: "release-diagnostics.export",
+        version: 1,
+      }),
+    );
+  },
   async getSnapshot() {
     return aboutUpdateResultSchema.parse(
       await ipcRenderer.invoke("about:update:snapshot:get"),
@@ -27,6 +36,15 @@ const about: AboutBridge = Object.freeze({
     return aboutUpdateResultSchema.parse(
       await ipcRenderer.invoke("about:update:check", {
         type: "update.check",
+        version: 1,
+      }),
+    );
+  },
+  async requestRestart(candidateId: string) {
+    return aboutUpdateResultSchema.parse(
+      await ipcRenderer.invoke("about:update:restart", {
+        candidateId,
+        type: "update.restart",
         version: 1,
       }),
     );

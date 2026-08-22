@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { realpath } from "node:fs/promises";
 import { basename, resolve } from "node:path";
 
-import { app, autoUpdater } from "electron";
+import { app, autoUpdater, dialog } from "electron";
 
 import { createDesktopCapabilities } from "./application/desktop-capabilities.js";
 import { BUNDLED_OFFICIAL_COLLECTION_CATALOG } from "./application/bundled-official-collections.js";
@@ -10,6 +10,7 @@ import {
   createSpawnProcessRunner,
   createLocalSkillsProcess,
 } from "./adapters/local-skills-process.js";
+import { createElectronReleaseDiagnosticsExporter } from "./adapters/electron-release-diagnostics.js";
 import {
   createSshSkillsProcess,
   createSshTransportRunner,
@@ -103,7 +104,9 @@ export async function createCompositionRoot(options?: {
     app,
     architecture: process.arch,
     autoUpdater,
+    diagnosticsExporter: createElectronReleaseDiagnosticsExporter({ dialog }),
     platform: process.platform,
+    restartSafety: () => capabilities.restartSafety(),
   });
   return { capabilities, updates };
 }

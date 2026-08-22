@@ -652,7 +652,13 @@ try {
       "updateTarget",
     ]) ||
     JSON.stringify(rendererBoundary.aboutBridgeKeys) !==
-      JSON.stringify(["getSnapshot", "requestCheck", "subscribe"])
+      JSON.stringify([
+        "exportDiagnostics",
+        "getSnapshot",
+        "requestCheck",
+        "requestRestart",
+        "subscribe",
+      ])
   ) {
     throw new Error(
       `Unexpected preload surface: ${rendererBoundary.bridgeKeys.join(", ")}`,
@@ -672,6 +678,9 @@ try {
   );
   const aboutBoundary = await first.page.evaluate(`(async () => {
     const result = await window.skillsDesktop.about.getSnapshot();
+    const rejectedRestart = await window.skillsDesktop.about.requestRestart(
+      "00000000-0000-4000-8000-000000000025",
+    );
     return {
       hasCheckButton: [...document.querySelectorAll("button")].some(
         (button) => button.textContent?.includes("Check for updates"),
@@ -679,17 +688,25 @@ try {
       hasInstallCommand: [...document.querySelectorAll("button")].some(
         (button) => /install|restart/i.test(button.textContent ?? ""),
       ),
+      hasDiagnosticExport: [...document.querySelectorAll("button")].some(
+        (button) => button.textContent?.includes("Export release diagnostics"),
+      ),
+      rejectedRestart,
       result,
     };
   })()`);
   if (
     aboutBoundary.hasCheckButton ||
     aboutBoundary.hasInstallCommand ||
+    !aboutBoundary.hasDiagnosticExport ||
     !aboutBoundary.result.ok ||
     aboutBoundary.result.value.application.version !== "0.1.0" ||
     aboutBoundary.result.value.application.platform !== "linux" ||
     aboutBoundary.result.value.application.architecture !== "x64" ||
+    aboutBoundary.result.value.schemaVersion !== 2 ||
     aboutBoundary.result.value.policy.mode !== "manual" ||
+    aboutBoundary.rejectedRestart.ok ||
+    aboutBoundary.rejectedRestart.error.code !== "invalid_request" ||
     JSON.stringify(aboutBoundary.result).includes("update.electronjs.org")
   ) {
     throw new Error(

@@ -214,6 +214,9 @@ function clientFor(value: WorkspaceSnapshot): DesktopBridge {
 }
 
 const aboutClient: AboutBridge = {
+  async exportDiagnostics() {
+    return { ok: true, value: { status: "saved" } };
+  },
   async getSnapshot() {
     return {
       ok: true,
@@ -238,6 +241,16 @@ const aboutClient: AboutBridge = {
     };
   },
   async requestCheck() {
+    return {
+      error: {
+        code: "invalid_request",
+        message: "The update request is not supported.",
+        retryable: false,
+      },
+      ok: false,
+    };
+  },
+  async requestRestart() {
     return {
       error: {
         code: "invalid_request",

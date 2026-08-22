@@ -1,7 +1,10 @@
 import type { IpcMain, IpcMainInvokeEvent, WebContents } from "electron";
 
 import {
+  aboutDiagnosticsExportRequestSchema,
+  aboutDiagnosticsExportResultSchema,
   aboutUpdateCheckRequestSchema,
+  aboutUpdateRestartRequestSchema,
   aboutUpdateResultSchema,
   aboutUpdateSnapshotSchema,
   type AboutUpdateResult,
@@ -27,7 +30,9 @@ import type {
 
 const CHANNELS = {
   aboutCheck: "about:update:check",
+  aboutDiagnosticsExport: "about:release-diagnostics:export",
   aboutEvent: "about:update:snapshot-changed",
+  aboutRestart: "about:update:restart",
   aboutSnapshot: "about:update:snapshot:get",
   cancel: "workspace:inventory:cancel",
   compare: "workspace:comparison:open",
@@ -125,8 +130,12 @@ export function registerDesktopIpc(input: {
   readonly ipcMain: IpcMain;
   readonly newEpoch: () => string;
   readonly updates: {
+    exportDiagnostics(): Promise<"cancelled" | "saved">;
     getSnapshot(): AboutUpdateSnapshot;
     requestCheck(): Promise<void>;
+    requestRestart(
+      candidateId: string,
+    ): Promise<"blocked" | "cancelled" | "stale" | "started">;
     subscribe(listener: (snapshot: AboutUpdateSnapshot) => void): () => void;
   };
 }) {
@@ -194,6 +203,60 @@ export function registerDesktopIpc(input: {
         });
       } catch {
         return aboutFailure("internal_error");
+      }
+    },
+  );
+  input.ipcMain.handle(
+    CHANNELS.aboutRestart,
+    async (event, request: unknown, ...args) => {
+      if (authorized(event, "workspace") === undefined) {
+        return aboutFailure("unauthorized");
+      }
+      const parsed = aboutUpdateRestartRequestSchema.safeParse(request);
+      if (args.length !== 0 || !parsed.success) {
+        return aboutFailure("invalid_request");
+      }
+      try {
+        const outcome = await input.updates.requestRestart(
+          parsed.data.candidateId,
+        );
+        if (outcome === "stale" || outcome === "cancelled") {
+          return aboutFailure("invalid_request");
+        }
+        return aboutUpdateResultSchema.parse({
+          ok: true,
+          value: aboutUpdateSnapshotSchema.parse(input.updates.getSnapshot()),
+        });
+      } catch {
+        return aboutFailure("internal_error");
+      }
+    },
+  );
+  input.ipcMain.handle(
+    CHANNELS.aboutDiagnosticsExport,
+    async (event, request: unknown, ...args) => {
+      if (authorized(event, "workspace") === undefined) {
+        return aboutDiagnosticsExportResultSchema.parse(
+          aboutFailure("unauthorized"),
+        );
+      }
+      if (
+        args.length !== 0 ||
+        !aboutDiagnosticsExportRequestSchema.safeParse(request).success
+      ) {
+        return aboutDiagnosticsExportResultSchema.parse(
+          aboutFailure("invalid_request"),
+        );
+      }
+      try {
+        return aboutDiagnosticsExportResultSchema.parse({
+          ok: true,
+          value: { status: await input.updates.exportDiagnostics() },
+        });
+      } catch {
+        return aboutDiagnosticsExportResultSchema.parse(
+          aboutFailure("internal_error"),
+        );
       }
     },
   );
@@ -613,6 +676,8 @@ export function registerDesktopIpc(input: {
       for (const webContentsId of endpoints.keys()) detach(webContentsId);
       input.ipcMain.removeHandler(CHANNELS.aboutSnapshot);
       input.ipcMain.removeHandler(CHANNELS.aboutCheck);
+      input.ipcMain.removeHandler(CHANNELS.aboutRestart);
+      input.ipcMain.removeHandler(CHANNELS.aboutDiagnosticsExport);
       input.ipcMain.removeHandler(CHANNELS.snapshot);
       input.ipcMain.removeHandler(CHANNELS.hostTrustReview);
       input.ipcMain.removeHandler(CHANNELS.refresh);

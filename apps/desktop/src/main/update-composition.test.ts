@@ -19,9 +19,11 @@ describe("packaged Electron update composition", () => {
       );
       const updater = new EventEmitter() as EventEmitter & {
         checkForUpdates: ReturnType<typeof vi.fn>;
+        quitAndInstall: ReturnType<typeof vi.fn>;
         setFeedURL: ReturnType<typeof vi.fn>;
       };
       updater.checkForUpdates = vi.fn();
+      updater.quitAndInstall = vi.fn();
       updater.setFeedURL = vi.fn();
       const getPath = vi.fn(() => userData);
       const getVersion = vi.fn(() => "0.1.0");
@@ -39,7 +41,12 @@ describe("packaged Electron update composition", () => {
           architecture,
           autoUpdater: updater as never,
           clock: () => new Date("2026-08-22T06:00:00.000Z"),
+          diagnosticsExporter: {
+            export: vi.fn(async () => "saved" as const),
+          },
+          id: () => "00000000-0000-4000-8000-000000000025",
           platform,
+          restartSafety: () => ({ guardReasons: [] }),
           schedule(delayMs, action) {
             scheduled.push({ action, delayMs });
             return () => undefined;
@@ -61,7 +68,38 @@ describe("packaged Electron update composition", () => {
         await expect(
           readFile(join(userData, "updates", "check-record-v1.json"), "utf8"),
         ).resolves.toContain('"schemaVersion": 1');
-        updater.emit("update-not-available");
+        updater.emit(
+          "update-downloaded",
+          {},
+          "notes",
+          "v0.2.0",
+          new Date("2026-08-22T06:00:00.000Z"),
+          "https://token@example.test/update",
+        );
+        await vi.waitFor(() =>
+          expect(updates.getSnapshot()).toMatchObject({
+            candidate: {
+              id: "00000000-0000-4000-8000-000000000025",
+              version: "0.2.0",
+            },
+            state: { kind: "update-downloaded" },
+          }),
+        );
+        await expect(
+          readFile(
+            join(userData, "updates", "deferred-restart-v1.json"),
+            "utf8",
+          ),
+        ).resolves.not.toMatch(/token|example\.test|notes/i);
+        expect(updater.quitAndInstall).not.toHaveBeenCalled();
+        await expect(
+          updates.requestRestart("00000000-0000-4000-8000-000000000099"),
+        ).resolves.toBe("stale");
+        expect(updater.quitAndInstall).not.toHaveBeenCalled();
+        await expect(
+          updates.requestRestart("00000000-0000-4000-8000-000000000025"),
+        ).resolves.toBe("started");
+        expect(updater.quitAndInstall).toHaveBeenCalledTimes(1);
         updates.dispose();
       } finally {
         await rm(userData, { force: true, recursive: true });
