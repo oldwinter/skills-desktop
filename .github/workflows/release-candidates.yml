@@ -16,6 +16,7 @@ permissions:
 jobs:
   package:
     name: Package ${{ matrix.platform }} ${{ matrix.architecture }}
+    if: github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main'
     permissions:
       contents: read
     runs-on: ${{ matrix.runner }}
@@ -89,7 +90,7 @@ jobs:
           name: unsigned-package-manifest-${{ steps.identity.outputs.manifest-digest }}
           path: ${{ steps.identity.outputs.candidate-directory }}/candidate-manifest-v1.*
           retention-days: 7
-      - if: github.event_name == 'workflow_dispatch'
+      - if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
         name: Exchange digest-addressed candidate
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -102,7 +103,7 @@ jobs:
 
   evidence:
     name: Generate integrity evidence
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
     needs: package
     permissions:
       artifact-metadata: write
@@ -180,7 +181,7 @@ jobs:
 
   verify:
     name: Verify exact candidate and evidence bytes
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
     needs: evidence
     permissions:
       attestations: read
@@ -320,7 +321,7 @@ jobs:
 
   draft-assembly:
     name: Assemble private GitHub draft
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
     needs: verify
     permissions:
       contents: write

@@ -28,6 +28,7 @@ describe("unsigned candidate workflow contract", () => {
     ]);
 
     const packageJob = workflow.jobs.package;
+    expect(packageJob.if).toContain("github.ref == 'refs/heads/main'");
     expect(packageJob.permissions).toEqual({ contents: "read" });
     expect(packageJob.strategy.matrix.include).toEqual([
       { architecture: "arm64", platform: "darwin", runner: "macos-15" },
@@ -78,6 +79,7 @@ describe("unsigned candidate workflow contract", () => {
     const evidenceJob = workflow.jobs.evidence;
     expect(evidenceJob.needs).toBe("package");
     expect(evidenceJob.if).toContain("github.event_name == 'workflow_dispatch'");
+    expect(evidenceJob.if).toContain("github.ref == 'refs/heads/main'");
     expect(evidenceJob.permissions).toEqual({
       "artifact-metadata": "write",
       attestations: "write",
@@ -139,6 +141,7 @@ describe("unsigned candidate workflow contract", () => {
 
     const verifyJob = workflow.jobs.verify;
     expect(verifyJob.needs).toBe("evidence");
+    expect(verifyJob.if).toContain("github.ref == 'refs/heads/main'");
     expect(verifyJob.permissions).toEqual({
       attestations: "read",
       contents: "read",
@@ -165,6 +168,7 @@ describe("unsigned candidate workflow contract", () => {
     expect(draftJob.needs).toBe("verify");
     expect(draftJob.permissions).toEqual({ contents: "write" });
     expect(draftJob.if).toContain("github.event_name == 'workflow_dispatch'");
+    expect(draftJob.if).toContain("github.ref == 'refs/heads/main'");
     const draftSource = draftJob.steps
       .map((step: { run?: string }) => step.run ?? "")
       .join("\n");

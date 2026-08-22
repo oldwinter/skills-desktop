@@ -278,6 +278,17 @@ function compareNames(left, right) {
   return left < right ? -1 : left > right ? 1 : 0;
 }
 
+function checksumInventory(files) {
+  return [...files]
+    .sort((left, right) => compareNames(left.fileName, right.fileName))
+    .map(({ fileName, sha256 }) => `${sha256} *${fileName}\n`)
+    .join("");
+}
+
+function digestInventory(files) {
+  return createHash("sha256").update(checksumInventory(files)).digest("hex");
+}
+
 async function readCandidatePackage(path, expected) {
   const entries = await readdir(path, { withFileTypes: true });
   if (entries.some((entry) => !entry.isFile())) {
@@ -393,14 +404,10 @@ async function assertCandidateLockfile(candidateSet, packageLockPath) {
 }
 
 function bindCandidateSetDigest(candidateSet) {
-  const checksumBytes = candidateSet.artifacts
-    .map(({ fileName, sha256 }) => `${sha256} *${fileName}\n`)
-    .join("");
+  const checksumBytes = checksumInventory(candidateSet.artifacts);
   return {
     ...candidateSet,
-    candidateSetDigest: createHash("sha256")
-      .update(checksumBytes)
-      .digest("hex"),
+    candidateSetDigest: digestInventory(candidateSet.artifacts),
     checksumBytes,
   };
 }
@@ -729,13 +736,7 @@ export async function finalizeReleaseEvidence({
       sizeBytes: fileStat.size,
     });
   }
-  const evidenceSetDigest = createHash("sha256")
-    .update(
-      files
-        .map(({ fileName, sha256 }) => `${sha256} *${fileName}\n`)
-        .join(""),
-    )
-    .digest("hex");
+  const evidenceSetDigest = digestInventory(files);
   await writeJson(join(evidenceRoot, "candidate-evidence-v1.json"), {
     candidateSetDigest: expectedCandidateSetDigest,
     evidenceSetDigest,
@@ -753,13 +754,7 @@ export async function finalizeReleaseEvidence({
       sizeBytes: indexStat.size,
     },
   ].sort((left, right) => compareNames(left.fileName, right.fileName));
-  const evidenceArtifactDigest = createHash("sha256")
-    .update(
-      evidenceArtifactFiles
-        .map(({ fileName, sha256 }) => `${sha256} *${fileName}\n`)
-        .join(""),
-    )
-    .digest("hex");
+  const evidenceArtifactDigest = digestInventory(evidenceArtifactFiles);
   return {
     candidateSetDigest: expectedCandidateSetDigest,
     evidenceArtifactDigest,
@@ -861,13 +856,7 @@ async function inspectDraftPayload(payloadRoot) {
       sizeBytes: fileStat.size,
     });
   }
-  const payloadDigest = createHash("sha256")
-    .update(
-      assets
-        .map(({ fileName, sha256 }) => `${sha256} *${fileName}\n`)
-        .join(""),
-    )
-    .digest("hex");
+  const payloadDigest = digestInventory(assets);
   return { assets, payloadDigest };
 }
 
@@ -1127,13 +1116,7 @@ async function verifyReleaseEvidence({
       fail("Release evidence bytes do not match the evidence index.");
     }
   }
-  const calculatedEvidenceSetDigest = createHash("sha256")
-    .update(
-      sortedIndexFiles
-        .map(({ fileName, sha256 }) => `${sha256} *${fileName}\n`)
-        .join(""),
-    )
-    .digest("hex");
+  const calculatedEvidenceSetDigest = digestInventory(sortedIndexFiles);
   if (calculatedEvidenceSetDigest !== expectedEvidenceSetDigest) {
     fail("Release evidence set digest is invalid.");
   }
@@ -1147,19 +1130,13 @@ async function verifyReleaseEvidence({
       sizeBytes: indexStat.size,
     },
   ].sort((left, right) => compareNames(left.fileName, right.fileName));
-  const calculatedEvidenceArtifactDigest = createHash("sha256")
-    .update(
-      evidenceArtifactFiles
-        .map(({ fileName, sha256 }) => `${sha256} *${fileName}\n`)
-        .join(""),
-    )
-    .digest("hex");
+  const calculatedEvidenceArtifactDigest = digestInventory(
+    evidenceArtifactFiles,
+  );
   if (calculatedEvidenceArtifactDigest !== expectedEvidenceArtifactDigest) {
     fail("Release evidence artifact digest is invalid.");
   }
-  const checksumBytes = candidateSet.artifacts
-    .map(({ fileName, sha256 }) => `${sha256} *${fileName}\n`)
-    .join("");
+  const checksumBytes = checksumInventory(candidateSet.artifacts);
   if (
     (await readFile(join(evidenceRoot, "SHA256SUMS"), "utf8")) !== checksumBytes
   ) {
@@ -1374,13 +1351,7 @@ export async function assembleVerifiedDraft({
     const path = join(outputRoot, fileName);
     payloadFiles.push({ fileName, sha256: await digestFile(path) });
   }
-  const payloadDigest = createHash("sha256")
-    .update(
-      payloadFiles
-        .map(({ fileName, sha256 }) => `${sha256} *${fileName}\n`)
-        .join(""),
-    )
-    .digest("hex");
+  const payloadDigest = digestInventory(payloadFiles);
   return {
     candidateSetDigest: candidateSet.candidateSetDigest,
     evidenceArtifactDigest: expectedEvidenceArtifactDigest,
