@@ -5,11 +5,11 @@ import {
   mkdtemp,
   readFile,
   rm,
-  watch,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { createServer } from "node:net";
 import { promisify } from "node:util";
@@ -29,6 +29,94 @@ const invocationLog = join(homeDirectory, "invocations.log");
 const projectInventoryState = join(homeDirectory, "project-inventory.json");
 const activeChildren = new Set();
 const execFileAsync = promisify(execFile);
+const filePollIntervalMs = 25;
+
+function observeChildExit(child) {
+  return new Promise((resolveExit) => {
+    child.once("error", () => {
+      activeChildren.delete(child);
+      resolveExit({ kind: "spawn-error" });
+    });
+    child.once("exit", (code, signal) => {
+      activeChildren.delete(child);
+      resolveExit({ code, kind: "exit", signal });
+    });
+  });
+}
+
+function childExitError(subject, phase, outcome) {
+  if (outcome.kind === "spawn-error") {
+    return new Error(`${subject} could not be started.`);
+  }
+  const disposition =
+    outcome.code !== null
+      ? `exit code ${outcome.code}`
+      : outcome.signal !== null
+        ? `signal ${outcome.signal}`
+        : "an unknown disposition";
+  return new Error(`${subject} exited ${phase} (${disposition}).`);
+}
+
+async function waitForFileValue(
+  path,
+  {
+    parse,
+    signal,
+    timeoutMessage,
+    timeoutMs,
+    unreadableMessage,
+  },
+) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    if (signal.aborted) {
+      throw new Error("File availability wait was cancelled.");
+    }
+    try {
+      const contents = await readFile(path, { encoding: "utf8", signal });
+      const value = parse(contents);
+      if (value !== undefined) return value;
+    } catch (error) {
+      if (signal.aborted) {
+        throw new Error("File availability wait was cancelled.");
+      }
+      if (error?.code !== "ENOENT") throw new Error(unreadableMessage);
+    }
+
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) throw new Error(timeoutMessage);
+    await delay(Math.min(filePollIntervalMs, remainingMs), undefined, {
+      signal,
+    }).catch(() => {
+      throw new Error("File availability wait was cancelled.");
+    });
+  }
+}
+
+async function stopPackagedElectron(child, childExit) {
+  if (child.exitCode === null && child.signalCode === null) {
+    child.kill("SIGTERM");
+  }
+  let stopTimer;
+  const stopped = await Promise.race([
+    childExit.then(() => true),
+    new Promise((resolveStop) => {
+      stopTimer = setTimeout(() => resolveStop(false), 3_000);
+    }),
+  ]);
+  if (stopTimer !== undefined) clearTimeout(stopTimer);
+  if (stopped || child.exitCode !== null || child.signalCode !== null) return;
+
+  child.kill("SIGKILL");
+  let killTimer;
+  await Promise.race([
+    childExit,
+    new Promise((resolveStop) => {
+      killTimer = setTimeout(resolveStop, 3_000);
+    }),
+  ]);
+  if (killTimer !== undefined) clearTimeout(killTimer);
+}
 
 class CdpPage {
   constructor(socket) {
@@ -285,42 +373,44 @@ exec /usr/bin/ssh -F '${join(userSshDirectory, "config")}' "$@"
     stdio: ["ignore", "ignore", "pipe"],
   });
   activeChildren.add(daemon);
-  const errors = [];
-  daemon.stderr.on("data", (chunk) => errors.push(chunk));
-  await new Promise((resolveReady, rejectReady) => {
-    const deadline = setTimeout(
-      () =>
-        rejectReady(
-          new Error("Packaged disposable sshd did not become ready."),
-        ),
-      10_000,
-    );
-    const inspect = () => {
-      void readFile(pidFile, "utf8").then(
-        () => {
-          clearTimeout(deadline);
-          resolveReady();
-        },
-        () => setImmediate(inspect),
-      );
-    };
-    daemon.once("exit", (code) => {
-      clearTimeout(deadline);
-      rejectReady(
-        new Error(
-          `Packaged disposable sshd exited ${code}: ${Buffer.concat(errors).toString("utf8")}`,
-        ),
-      );
-    });
-    inspect();
+  let stderrBytes = 0;
+  daemon.stderr.on("data", (chunk) => {
+    stderrBytes += chunk.length;
   });
+  const daemonExit = observeChildExit(daemon);
+  const readiness = new AbortController();
+  try {
+    const outcome = await Promise.race([
+      waitForFileValue(pidFile, {
+        parse(contents) {
+          const pid = Number(contents.trim());
+          return Number.isSafeInteger(pid) && pid > 0 ? pid : undefined;
+        },
+        signal: readiness.signal,
+        timeoutMessage: "Packaged disposable sshd did not become ready.",
+        timeoutMs: 10_000,
+        unreadableMessage: "Packaged disposable sshd readiness could not be read.",
+      }).then(() => ({ kind: "ready" })),
+      daemonExit.then((exit) => ({ exit, kind: "exit" })),
+    ]);
+    if (outcome.kind === "exit") {
+      const failure = childExitError(
+        "Packaged disposable sshd",
+        "before readiness",
+        outcome.exit,
+      );
+      failure.message += ` Stderr bytes: ${stderrBytes}.`;
+      throw failure;
+    }
+  } finally {
+    readiness.abort();
+  }
   return {
     async close() {
       if (daemon.exitCode === null && daemon.signalCode === null) {
         daemon.kill("SIGTERM");
-        await new Promise((resolveClose) => daemon.once("close", resolveClose));
+        await daemonExit;
       }
-      activeChildren.delete(daemon);
     },
     port,
   };
@@ -420,52 +510,89 @@ const launchEnvironment = {
 };
 
 async function launch() {
-  const errors = [];
   const userDataDirectory = join(temporaryRoot, "config", "Skills Desktop");
   const portFile = join(userDataDirectory, "DevToolsActivePort");
   await mkdir(userDataDirectory, { recursive: true });
   await rm(portFile, { force: true });
-  const changes = watch(userDataDirectory);
-  const changeIterator = changes[Symbol.asyncIterator]();
   const child = spawn(executablePath, ["--remote-debugging-port=0"], {
     env: launchEnvironment,
-    stdio: ["ignore", "pipe", "pipe"],
+    stdio: ["ignore", "ignore", "ignore"],
   });
   activeChildren.add(child);
-  const childExit = new Promise((resolveExit, rejectExit) => {
-    child.once("error", rejectExit);
-    child.once("exit", (code, signal) => {
-      activeChildren.delete(child);
-      resolveExit({ code, signal });
-    });
-  });
+  const childExit = observeChildExit(child);
+  let page;
   let port;
   try {
-    for (;;) {
-      try {
-        port = (await readFile(portFile, "utf8")).split("\n")[0];
-        if (port) break;
-      } catch (error) {
-        if (error.code !== "ENOENT") throw error;
-      }
-      const next = await Promise.race([
-        changeIterator.next(),
-        childExit.then(({ code, signal }) => {
-          throw new Error(
-            `Packaged Electron exited before CDP was ready (${code ?? signal}).`,
-          );
-        }),
+    const readiness = new AbortController();
+    try {
+      const outcome = await Promise.race([
+        waitForFileValue(portFile, {
+          parse(contents) {
+            const candidate = Number(contents.split(/\r?\n/, 1)[0]);
+            return Number.isSafeInteger(candidate) &&
+              candidate > 0 &&
+              candidate <= 65_535
+              ? candidate
+              : undefined;
+          },
+          signal: readiness.signal,
+          timeoutMessage:
+            "Packaged Electron did not publish a valid CDP port within 30 seconds.",
+          timeoutMs: 30_000,
+          unreadableMessage:
+            "Packaged Electron CDP port readiness could not be read.",
+        }).then((value) => ({ kind: "ready", value })),
+        childExit.then((exit) => ({ exit, kind: "exit" })),
       ]);
-      if (next.done)
-        throw new Error("DevTools port watcher ended before launch.");
+      if (outcome.kind === "exit") {
+        throw childExitError(
+          "Packaged Electron",
+          "before CDP readiness",
+          outcome.exit,
+        );
+      }
+      port = outcome.value;
+    } finally {
+      readiness.abort();
     }
-  } finally {
-    await changeIterator.return?.();
+
+    let connectionTimer;
+    const connection = await Promise.race([
+      CdpPage.connect(port, "skills-desktop://workspace/index.html").then(
+        (connectedPage) => ({ kind: "ready", page: connectedPage }),
+        () => ({ kind: "connection-error" }),
+      ),
+      childExit.then((exit) => ({ exit, kind: "exit" })),
+      new Promise((resolveConnection) => {
+        connectionTimer = setTimeout(
+          () => resolveConnection({ kind: "timeout" }),
+          30_000,
+        );
+      }),
+    ]);
+    if (connectionTimer !== undefined) clearTimeout(connectionTimer);
+    if (connection.kind === "exit") {
+      throw childExitError(
+        "Packaged Electron",
+        "before the CDP connection",
+        connection.exit,
+      );
+    }
+    if (connection.kind === "connection-error") {
+      throw new Error(
+        "Packaged Electron CDP connection could not be established.",
+      );
+    }
+    if (connection.kind === "timeout") {
+      throw new Error(
+        "Packaged Electron CDP connection was not established within 30 seconds.",
+      );
+    }
+    page = connection.page;
+  } catch (error) {
+    await stopPackagedElectron(child, childExit);
+    throw error;
   }
-  const page = await CdpPage.connect(
-    port,
-    "skills-desktop://workspace/index.html",
-  );
   const connectPage = (expectedUrl) => CdpPage.connect(port, expectedUrl);
   return {
     connectPage,
@@ -473,20 +600,7 @@ async function launch() {
     page,
     async close() {
       page.close();
-      if (child.exitCode === null && child.signalCode === null)
-        child.kill("SIGTERM");
-      let forceTimer;
-      const exited = await Promise.race([
-        childExit.then(() => true),
-        new Promise((resolveExit) => {
-          forceTimer = setTimeout(() => resolveExit(false), 3_000);
-        }),
-      ]);
-      if (forceTimer !== undefined) clearTimeout(forceTimer);
-      if (!exited && child.exitCode === null && child.signalCode === null) {
-        child.kill("SIGKILL");
-        await childExit;
-      }
+      await stopPackagedElectron(child, childExit);
     },
   };
 }
