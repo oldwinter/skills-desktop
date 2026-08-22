@@ -673,8 +673,10 @@ try {
     `document.body?.textContent?.includes("Version 0.1.0") &&
       document.body?.textContent?.includes("linux / x64") &&
       document.body?.textContent?.includes("Manual upgrade") &&
-      document.body?.textContent?.includes("Download a newer package from GitHub Releases and install it manually.")`,
-    "packaged Linux About guidance",
+      document.body?.textContent?.includes(
+        "This unsigned-preview build is not signed or notarized. Download a newer package from GitHub Releases, verify it per docs/unsigned-developer-preview.md, then install it manually.",
+      )`,
+    "packaged unsigned-preview About guidance",
   );
   const aboutBoundary = await first.page.evaluate(`(async () => {
     const result = await window.skillsDesktop.about.getSnapshot();
@@ -713,7 +715,7 @@ try {
       `Unexpected packaged About boundary: ${JSON.stringify(aboutBoundary)}`,
     );
   }
-  console.log("packaged smoke: Linux About guidance verified");
+  console.log("packaged smoke: unsigned-preview About guidance verified");
   await first.page.evaluate(`(() => {
     const button = document.querySelector('button[aria-label="Inventory"]');
     if (!(button instanceof HTMLButtonElement)) throw new Error("Inventory navigation is unavailable.");
