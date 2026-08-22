@@ -545,8 +545,9 @@ else process.exitCode = 2;
       const descendantProgram = `
 const { writeFileSync } = require("node:fs");
 process.on("SIGTERM", () => undefined);
-writeFileSync(${JSON.stringify(startedFile)}, String(process.pid));
-setTimeout(() => writeFileSync(${JSON.stringify(lateMutationFile)}, "late"), 1500);
+process.on("SIGUSR1", () => writeFileSync(${JSON.stringify(lateMutationFile)}, "late"));
+writeFileSync(${JSON.stringify(startedFile)}, String(process.ppid));
+setInterval(() => {}, 30_000);
 `;
       await writeFile(
         executable,
@@ -592,7 +593,7 @@ else process.exitCode = 2;
       );
 
       await waitForFile(startedFile);
-      const descendantPid = Number(await readFile(startedFile, "utf8"));
+      const mutationGroupPid = Number(await readFile(startedFile, "utf8"));
       child.stdin.end(
         encodeWireFrame({
           operation: "cancel",
@@ -624,7 +625,7 @@ else process.exitCode = 2;
           },
         ],
       });
-      expect(() => process.kill(descendantPid, 0)).toThrow(
+      expect(() => process.kill(-mutationGroupPid, "SIGUSR1")).toThrow(
         expect.objectContaining({ code: "ESRCH" }),
       );
       await expect(readFile(lateMutationFile, "utf8")).rejects.toMatchObject({
