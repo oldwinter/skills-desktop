@@ -25,13 +25,14 @@ import {
   SLSA_PROVENANCE_PREDICATE_TYPE,
   assembleVerifiedDraft,
   assertVerifiedAttestationResult,
-  createDraftReleaseNotes,
-  draftReleaseName,
-  draftReleaseTag,
+  createPreviewReleaseNotes,
   finalizeReleaseEvidence,
   generateReleaseEvidence,
   identifyCandidatePackage,
+  previewReleaseName,
+  previewReleaseTag,
   verifyGitHubDraftRelease,
+  verifyGitHubPreviewRelease,
 } from "../scripts/release/release-integrity.mjs";
 
 const releaseContext = {
@@ -305,7 +306,7 @@ describe("release integrity evidence contract", () => {
       );
       expect(predicate).toMatchObject({
         candidateSetDigest: result.candidateSetDigest,
-        candidateUse: "private-draft-only",
+        candidateUse: "unsigned-preview-only",
         repository: releaseContext.repository,
         schemaVersion: 1,
         signingStatus: "unsigned",
@@ -600,7 +601,7 @@ describe("release integrity evidence contract", () => {
       );
       expect(receipt).toEqual({
         candidateSetDigest: generated.candidateSetDigest,
-        candidateUse: "private-draft-only",
+        candidateUse: "unsigned-preview-only",
         evidenceArtifactDigest: finalized.evidenceArtifactDigest,
         evidenceSetDigest: finalized.evidenceSetDigest,
         predicateTypes: [
@@ -746,11 +747,11 @@ describe("release integrity evidence contract", () => {
           .join(""),
       );
       const version = "0.1.0";
-      const tag = draftReleaseTag({
+      const tag = previewReleaseTag({
         sourceCommit: releaseContext.sourceCommit,
         version,
       });
-      const notes = createDraftReleaseNotes({
+      const expected = {
         candidateSetDigest: "a".repeat(64),
         evidenceSetDigest: "b".repeat(64),
         payloadDigest,
@@ -759,10 +760,14 @@ describe("release integrity evidence contract", () => {
         version,
         workflowRunUrl:
           "https://github.com/oldwinter/skills-desktop/actions/runs/123456",
-      });
+      };
+      const notes = createPreviewReleaseNotes(expected);
       expect(notes).toContain("\n\n");
-      expect(notes).toContain("UNSIGNED PRIVATE DRAFT");
+      expect(notes).toContain("UNSIGNED DEVELOPER PREVIEW");
       expect(notes).toContain("not stable-eligible");
+      expect(notes).toContain(
+        `/blob/${releaseContext.sourceCommit}/docs/unsigned-developer-preview.md`,
+      );
       const release = {
         assets: payloadFiles.map((file) => ({
           digest: `sha256:${file.sha256}`,
@@ -774,7 +779,7 @@ describe("release integrity evidence contract", () => {
         draft: true,
         html_url:
           "https://github.com/oldwinter/skills-desktop/releases/tag/candidate",
-        name: draftReleaseName({
+        name: previewReleaseName({
           sourceCommit: releaseContext.sourceCommit,
           version,
         }),
@@ -786,12 +791,7 @@ describe("release integrity evidence contract", () => {
 
       expect(
         await verifyGitHubDraftRelease({
-          expected: {
-            payloadDigest,
-            repository: releaseContext.repository,
-            sourceCommit: releaseContext.sourceCommit,
-            version,
-          },
+          expected,
           payloadRoot,
           release,
         }),
@@ -803,24 +803,14 @@ describe("release integrity evidence contract", () => {
       });
       await expect(
         verifyGitHubDraftRelease({
-          expected: {
-            payloadDigest,
-            repository: releaseContext.repository,
-            sourceCommit: releaseContext.sourceCommit,
-            version,
-          },
+          expected,
           payloadRoot,
           release: { ...release, draft: false, published_at: "2026-08-22" },
         }),
       ).rejects.toThrow("GitHub candidate release is not a private draft.");
       await expect(
         verifyGitHubDraftRelease({
-          expected: {
-            payloadDigest,
-            repository: releaseContext.repository,
-            sourceCommit: releaseContext.sourceCommit,
-            version,
-          },
+          expected,
           payloadRoot,
           release: {
             ...release,
@@ -837,6 +827,52 @@ describe("release integrity evidence contract", () => {
         }),
       ).rejects.toThrow(
         "GitHub draft assets are missing, duplicated, extra, or changed.",
+      );
+      for (const requiredEvidence of [
+        expected.candidateSetDigest,
+        expected.evidenceSetDigest,
+        expected.workflowRunUrl,
+        "unsigned, not notarized",
+        "macOS and Windows may block it",
+      ]) {
+        await expect(
+          verifyGitHubDraftRelease({
+            expected,
+            payloadRoot,
+            release: {
+              ...release,
+              body: release.body.replace(requiredEvidence, "removed"),
+            },
+          }),
+        ).rejects.toThrow("GitHub draft release identity is invalid.");
+      }
+
+      const publishedAt = "2026-08-22T10:00:00Z";
+      expect(
+        await verifyGitHubPreviewRelease({
+          expected,
+          payloadRoot,
+          release: {
+            ...release,
+            draft: false,
+            published_at: publishedAt,
+          },
+        }),
+      ).toEqual({
+        assets: payloadFiles,
+        publishedAt,
+        state: "preview",
+        tag,
+        url: release.html_url,
+      });
+      await expect(
+        verifyGitHubPreviewRelease({
+          expected,
+          payloadRoot,
+          release,
+        }),
+      ).rejects.toThrow(
+        "GitHub candidate release is not a public developer preview.",
       );
     } finally {
       await rm(root, { force: true, recursive: true });

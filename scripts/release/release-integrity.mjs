@@ -130,7 +130,7 @@ function parseCandidateManifest(value, expected) {
     !["arm64", "x64"].includes(value.architecture) ||
     !["darwin", "linux", "win32"].includes(value.platform) ||
     value.schemaVersion !== 1 ||
-    value.candidateUse !== "local-or-internal-only" ||
+    value.candidateUse !== "unsigned-preview-only" ||
     value.signingStatus !== "unsigned"
   ) {
     fail("Release candidate manifest schema is invalid.");
@@ -785,24 +785,24 @@ export const SPDX_PREDICATE_TYPE = "https://spdx.dev/Document/v2.3";
 export const CANDIDATE_IDENTITY_PREDICATE_TYPE =
   "https://github.com/oldwinter/skills-desktop/attestations/unsigned-candidate/v1";
 
-export function draftReleaseTag({ sourceCommit, version }) {
+export function previewReleaseTag({ sourceCommit, version }) {
   assertString(
     sourceCommit,
     commitPattern,
-    "Draft release identity is invalid.",
+    "Preview release identity is invalid.",
   );
-  assertString(version, versionPattern, "Draft release identity is invalid.");
-  return `candidate-v${version}-${sourceCommit}`;
+  assertString(version, versionPattern, "Preview release identity is invalid.");
+  return `preview-v${version}-${sourceCommit}`;
 }
 
-export function draftReleaseName({ sourceCommit, version }) {
-  return `Skills Desktop ${version} unsigned candidate ${draftReleaseTag({
+export function previewReleaseName({ sourceCommit, version }) {
+  return `Skills Desktop ${version} unsigned developer preview ${previewReleaseTag({
     sourceCommit,
     version,
   }).slice(-12)}`;
 }
 
-export function createDraftReleaseNotes({
+export function createPreviewReleaseNotes({
   candidateSetDigest,
   evidenceSetDigest,
   payloadDigest,
@@ -816,34 +816,29 @@ export function createDraftReleaseNotes({
     evidenceSetDigest,
     payloadDigest,
   ]) {
-    assertString(digest, sha256Pattern, "Draft release notes are invalid.");
+    assertString(digest, sha256Pattern, "Preview release notes are invalid.");
   }
   assertString(
     repository,
     repositoryPattern,
-    "Draft release notes are invalid.",
+    "Preview release notes are invalid.",
   );
   assertString(
     sourceCommit,
     commitPattern,
-    "Draft release notes are invalid.",
+    "Preview release notes are invalid.",
   );
-  assertString(version, versionPattern, "Draft release notes are invalid.");
-  if (
-    typeof workflowRunUrl !== "string" ||
-    workflowRunUrl !==
-      `https://github.com/${repository}/actions/runs/${workflowRunUrl.split("/").at(-1)}` ||
-    !/^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/actions\/runs\/[1-9]\d*$/.test(
-      workflowRunUrl,
-    )
-  ) {
-    fail("Draft release notes are invalid.");
-  }
+  assertString(version, versionPattern, "Preview release notes are invalid.");
+  assertWorkflowRunUrl(
+    workflowRunUrl,
+    repository,
+    "Preview release notes are invalid.",
+  );
   return [
-    "# UNSIGNED PRIVATE DRAFT",
+    "# UNSIGNED DEVELOPER PREVIEW",
     "",
-    "This candidate is unsigned, unpublished, private to collaborators, and not stable-eligible.",
-    "It must not be represented as signed or promoted to a public or stable release.",
+    "This public pre-release is unsigned, not notarized, and not stable-eligible.",
+    "macOS and Windows may block it. Verify the exact bytes before following the manual installation guidance.",
     "",
     `- Version: \`${version}\``,
     `- Source commit: \`${sourceCommit}\``,
@@ -852,6 +847,9 @@ export function createDraftReleaseNotes({
     `- Verified payload SHA-256: \`${payloadDigest}\``,
     `- Workflow run: ${workflowRunUrl}`,
     "",
+    `Installation and verification: https://github.com/${repository}/blob/${sourceCommit}/docs/unsigned-developer-preview.md`,
+    "",
+    "This pre-release is never latest and is excluded from the stable automatic-update feed. Preview upgrades are manual.",
     "Apple/Windows signing, notarization, Authenticode, production approval, stable publication, and stable-feed activation remain deferred human gates under issue #22.",
     "",
   ].join("\n");
@@ -889,53 +887,77 @@ export async function verifyDraftPayload({ expectedPayloadDigest, payloadRoot })
   return payload;
 }
 
-export async function verifyGitHubDraftRelease({
-  expected,
-  payloadRoot,
-  release,
-}) {
+function assertWorkflowRunUrl(value, repository, message) {
+  if (
+    typeof value !== "string" ||
+    value !==
+      `https://github.com/${repository}/actions/runs/${value.split("/").at(-1)}` ||
+    !/^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/actions\/runs\/[1-9]\d*$/.test(
+      value,
+    )
+  ) {
+    fail(message);
+  }
+}
+
+function assertGitHubCandidateInput(expected, message) {
   assertExactKeys(
     expected,
-    ["payloadDigest", "repository", "sourceCommit", "version"],
-    "GitHub draft verification input is invalid.",
+    [
+      "candidateSetDigest",
+      "evidenceSetDigest",
+      "payloadDigest",
+      "repository",
+      "sourceCommit",
+      "version",
+      "workflowRunUrl",
+    ],
+    message,
   );
-  assertString(
-    expected.payloadDigest,
-    sha256Pattern,
-    "GitHub draft verification input is invalid.",
-  );
-  assertString(
-    expected.repository,
-    repositoryPattern,
-    "GitHub draft verification input is invalid.",
-  );
-  const tag = draftReleaseTag(expected);
-  if (
-    !isPlainObject(release) ||
-    release.draft !== true ||
-    release.prerelease !== true ||
-    release.published_at !== null
-  ) {
-    fail("GitHub candidate release is not a private draft.");
-  }
+  assertString(expected.candidateSetDigest, sha256Pattern, message);
+  assertString(expected.evidenceSetDigest, sha256Pattern, message);
+  assertString(expected.payloadDigest, sha256Pattern, message);
+  assertString(expected.repository, repositoryPattern, message);
+  assertString(expected.sourceCommit, commitPattern, message);
+  assertString(expected.version, versionPattern, message);
+  assertWorkflowRunUrl(expected.workflowRunUrl, expected.repository, message);
+}
+
+function assertGitHubCandidateIdentity({ expected, release, tag }, message) {
   if (
     release.tag_name !== tag ||
     release.target_commitish !== expected.sourceCommit ||
-    release.name !== draftReleaseName(expected) ||
+    release.name !== previewReleaseName(expected) ||
     typeof release.body !== "string" ||
-    !release.body.includes("# UNSIGNED PRIVATE DRAFT") ||
+    !release.body.includes("# UNSIGNED DEVELOPER PREVIEW") ||
+    !release.body.includes(expected.candidateSetDigest) ||
+    !release.body.includes(expected.evidenceSetDigest) ||
     !release.body.includes(expected.payloadDigest) ||
     !release.body.includes(expected.sourceCommit) ||
+    !release.body.includes(expected.workflowRunUrl) ||
+    !release.body.includes("unsigned, not notarized") ||
+    !release.body.includes("macOS and Windows may block it") ||
+    !release.body.includes(
+      `/blob/${expected.sourceCommit}/docs/unsigned-developer-preview.md`,
+    ) ||
     typeof release.html_url !== "string" ||
     !release.html_url.startsWith(
       `https://github.com/${expected.repository}/releases/`,
     )
   ) {
-    fail("GitHub draft release identity is invalid.");
+    fail(message);
   }
+}
+
+async function verifyGitHubCandidateAssets({
+  expectedPayloadDigest,
+  message,
+  payloadRoot,
+  release,
+}) {
   const { assets, payloadDigest } = await inspectDraftPayload(payloadRoot);
-  if (payloadDigest !== expected.payloadDigest || !Array.isArray(release.assets)) {
-    fail("GitHub draft assets are missing, duplicated, extra, or changed.");
+  if (payloadDigest !== expectedPayloadDigest || !Array.isArray(release.assets)) {
+    fail(message);
   }
   const remoteAssets = new Map();
   for (const asset of release.assets) {
@@ -944,7 +966,7 @@ export async function verifyGitHubDraftRelease({
       typeof asset.name !== "string" ||
       remoteAssets.has(asset.name)
     ) {
-      fail("GitHub draft assets are missing, duplicated, extra, or changed.");
+      fail(message);
     }
     remoteAssets.set(asset.name, asset);
   }
@@ -960,9 +982,79 @@ export async function verifyGitHubDraftRelease({
       );
     })
   ) {
-    fail("GitHub draft assets are missing, duplicated, extra, or changed.");
+    fail(message);
   }
+  return assets;
+}
+
+export async function verifyGitHubDraftRelease({
+  expected,
+  payloadRoot,
+  release,
+}) {
+  assertGitHubCandidateInput(
+    expected,
+    "GitHub draft verification input is invalid.",
+  );
+  const tag = previewReleaseTag(expected);
+  if (
+    !isPlainObject(release) ||
+    release.draft !== true ||
+    release.prerelease !== true ||
+    release.published_at !== null
+  ) {
+    fail("GitHub candidate release is not a private draft.");
+  }
+  assertGitHubCandidateIdentity(
+    { expected, release, tag },
+    "GitHub draft release identity is invalid.",
+  );
+  const assets = await verifyGitHubCandidateAssets({
+    expectedPayloadDigest: expected.payloadDigest,
+    message: "GitHub draft assets are missing, duplicated, extra, or changed.",
+    payloadRoot,
+    release,
+  });
   return { assets, state: "draft", tag, url: release.html_url };
+}
+
+export async function verifyGitHubPreviewRelease({
+  expected,
+  payloadRoot,
+  release,
+}) {
+  assertGitHubCandidateInput(
+    expected,
+    "GitHub preview verification input is invalid.",
+  );
+  const publishedAt = release?.published_at;
+  const tag = previewReleaseTag(expected);
+  if (
+    !isPlainObject(release) ||
+    release.draft !== false ||
+    release.prerelease !== true ||
+    typeof publishedAt !== "string" ||
+    !Number.isFinite(Date.parse(publishedAt))
+  ) {
+    fail("GitHub candidate release is not a public developer preview.");
+  }
+  assertGitHubCandidateIdentity(
+    { expected, release, tag },
+    "GitHub preview release identity is invalid.",
+  );
+  const assets = await verifyGitHubCandidateAssets({
+    expectedPayloadDigest: expected.payloadDigest,
+    message: "GitHub preview assets are missing, duplicated, extra, or changed.",
+    payloadRoot,
+    release,
+  });
+  return {
+    assets,
+    publishedAt,
+    state: "preview",
+    tag,
+    url: release.html_url,
+  };
 }
 
 export function assertVerifiedAttestationResult({
@@ -1212,7 +1304,7 @@ async function verifyReleaseEvidence({
   if (
     predicate.schemaVersion !== 1 ||
     predicate.candidateSetDigest !== candidateSet.candidateSetDigest ||
-    predicate.candidateUse !== "private-draft-only" ||
+    predicate.candidateUse !== "unsigned-preview-only" ||
     predicate.repository !== expected.repository ||
     predicate.signingStatus !== "unsigned" ||
     predicate.sourceCommit !== expected.sourceCommit ||
@@ -1331,7 +1423,7 @@ export async function assembleVerifiedDraft({
     }
     await writeJson(join(outputRoot, "verification-receipt-v1.json"), {
       candidateSetDigest: candidateSet.candidateSetDigest,
-      candidateUse: "private-draft-only",
+      candidateUse: "unsigned-preview-only",
       evidenceArtifactDigest: expectedEvidenceArtifactDigest,
       evidenceSetDigest: evidenceIndex.evidenceSetDigest,
       predicateTypes,
@@ -1419,7 +1511,7 @@ export async function generateReleaseEvidence({
   }));
   await writeJson(join(outputRoot, "candidate-provenance-v1.json"), {
     candidateSetDigest,
-    candidateUse: "private-draft-only",
+    candidateUse: "unsigned-preview-only",
     repository: expected.repository,
     schemaVersion: 1,
     signingStatus: "unsigned",

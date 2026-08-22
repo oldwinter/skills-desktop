@@ -38,7 +38,26 @@ describe("unsigned candidate workflow contract", () => {
     expect(result.stderr).not.toContain("SyntaxError");
   });
 
-  it("keeps package, evidence, verification, and private draft authority distinct", async () => {
+  it("keeps unsigned installation guidance bounded to verified local overrides", async () => {
+    const guide = await readFile(
+      new URL("../docs/unsigned-developer-preview.md", import.meta.url),
+      "utf8",
+    );
+
+    expect(guide).toContain("gh attestation verify");
+    expect(guide).toContain("--source-digest");
+    expect(guide).toContain("codesign --force --deep --sign -");
+    expect(guide).toContain("Open Anyway");
+    expect(guide).toContain(
+      "A public self-signed certificate is not trusted by Windows by default.",
+    );
+    expect(guide).toContain("normal package tool");
+    expect(guide).not.toMatch(
+      /\bxattr\b|spctl\s+--master-disable|certutil.+-addstore|Import-Certificate/i,
+    );
+  });
+
+  it("keeps build, verification, staging, and explicit preview publication distinct", async () => {
     const source = await readFile(
       new URL("../.github/workflows/release-candidates.yml", import.meta.url),
       "utf8",
@@ -52,11 +71,19 @@ describe("unsigned candidate workflow contract", () => {
       "workflow_dispatch",
     ]);
     expect(workflow.permissions).toEqual({ contents: "read" });
+    expect(workflow.on.workflow_dispatch.inputs.publish_preview).toEqual({
+      default: false,
+      description:
+        "Publish the verified draft as an unsigned developer preview",
+      required: true,
+      type: "boolean",
+    });
     expect(Object.keys(workflow.jobs)).toEqual([
       "package",
       "evidence",
       "verify",
       "draft-assembly",
+      "publish-preview",
     ]);
 
     const packageJob = workflow.jobs.package;
@@ -213,6 +240,35 @@ describe("unsigned candidate workflow contract", () => {
     expect(draftSource).toContain("release-integrity-cli.mjs verify-release");
     expect(draftSource).not.toMatch(/gh release edit|draft=false|make_latest=true/i);
 
+    const publishJob = workflow.jobs["publish-preview"];
+    expect(publishJob.needs).toEqual(["verify", "draft-assembly"]);
+    expect(publishJob.permissions).toEqual({ contents: "write" });
+    expect(publishJob.if.replace(/\s+/g, " ").trim()).toBe(
+      "github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.publish_preview == true",
+    );
+    const publishSource = publishJob.steps
+      .map((step: { run?: string }) => step.run ?? "")
+      .join("\n");
+    expect(publishSource).toContain("release-integrity-cli.mjs verify-release");
+    expect(publishSource).toContain("gh release edit");
+    expect(publishSource).toContain("--draft=false");
+    expect(publishSource).toContain("--prerelease");
+    expect(publishSource).toContain("--latest=false");
+    expect(publishSource).toContain(
+      "release-integrity-cli.mjs verify-preview-release",
+    );
+    const publishStepNames = publishJob.steps.map(
+      (step: { name?: string }) => step.name,
+    );
+    expect(
+      publishStepNames.indexOf("Verify staged GitHub draft assets"),
+    ).toBeLessThan(
+      publishStepNames.indexOf("Publish staged preview without changing assets"),
+    );
+    expect(publishSource).not.toMatch(
+      /\bnpm\s+(ci|exec|run)\b|electron-forge|xvfb|candidate:build/i,
+    );
+
     for (const job of Object.values(workflow.jobs) as Array<{
       steps: Array<{ uses?: string }>;
     }>) {
@@ -222,7 +278,7 @@ describe("unsigned candidate workflow contract", () => {
         }
       }
     }
-    const laterJobSource = [evidenceJob, verifyJob, draftJob]
+    const laterJobSource = [evidenceJob, verifyJob, draftJob, publishJob]
       .flatMap((job) => job.steps)
       .map((step: { run?: string }) => step.run ?? "")
       .join("\n");
@@ -238,7 +294,7 @@ describe("unsigned candidate workflow contract", () => {
     );
   });
 
-  it("has no public, stable, signing, or package-publisher surface", async () => {
+  it("keeps signing, stable publication, and package publishers unavailable", async () => {
     const workflowDirectory = new URL("../.github/workflows/", import.meta.url);
     const allWorkflowSources = await Promise.all(
       (await readdir(workflowDirectory)).map((fileName) =>
@@ -252,7 +308,7 @@ describe("unsigned candidate workflow contract", () => {
       /\belectron-forge\s+publish\b/i,
       /\bnpm\s+publish\b/i,
       /softprops\/action-gh-release/i,
-      /\bgh\s+release\s+(edit|upload)\b/i,
+      /\bgh\s+release\s+upload\b/i,
       /\b(stable-feed|production-release|release-signing)\b/i,
     ];
     for (const candidate of [

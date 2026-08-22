@@ -6,15 +6,16 @@ import {
   SLSA_PROVENANCE_PREDICATE_TYPE,
   assembleVerifiedDraft,
   assertVerifiedAttestationResult,
-  createDraftReleaseNotes,
-  draftReleaseName,
-  draftReleaseTag,
+  createPreviewReleaseNotes,
   finalizeReleaseEvidence,
   generateReleaseEvidence,
   identifyCandidatePackage,
   inspectCandidateSubjects,
+  previewReleaseName,
+  previewReleaseTag,
   verifyDraftPayload,
   verifyGitHubDraftRelease,
+  verifyGitHubPreviewRelease,
 } from "./release-integrity.mjs";
 
 const commonContextOptions = [
@@ -290,7 +291,7 @@ async function notes(argv) {
   };
   await writeFile(
     options["--output-path"],
-    createDraftReleaseNotes({
+    createPreviewReleaseNotes({
       candidateSetDigest: options["--candidate-set-digest"],
       evidenceSetDigest: options["--evidence-set-digest"],
       payloadDigest: options["--payload-digest"],
@@ -301,8 +302,8 @@ async function notes(argv) {
     { flag: "wx" },
   );
   const result = {
-    name: draftReleaseName(identity),
-    tag: draftReleaseTag(identity),
+    name: previewReleaseName(identity),
+    tag: previewReleaseTag(identity),
   };
   await emitOutputs({
     "release-name": result.name,
@@ -311,22 +312,31 @@ async function notes(argv) {
   return result;
 }
 
-async function verifyRelease(argv) {
+async function verifyGitHubReleaseCommand(
+  argv,
+  { missingMessage, outputPrefix, verify },
+) {
   const options = parseOptions(argv, [
+    "--candidate-set-digest",
+    "--evidence-set-digest",
     "--payload-digest",
     "--payload-root",
     "--release-list-json",
     "--repository",
     "--source-commit",
     "--version",
+    "--workflow-run-url",
   ]);
   const expected = {
+    candidateSetDigest: options["--candidate-set-digest"],
+    evidenceSetDigest: options["--evidence-set-digest"],
     payloadDigest: options["--payload-digest"],
     repository: options["--repository"],
     sourceCommit: options["--source-commit"],
     version: options["--version"],
+    workflowRunUrl: options["--workflow-run-url"],
   };
-  const tag = draftReleaseTag(expected);
+  const tag = previewReleaseTag(expected);
   const releases = await readJson(
     options["--release-list-json"],
     "GitHub release response is invalid.",
@@ -336,19 +346,35 @@ async function verifyRelease(argv) {
   }
   const matches = releases.filter((release) => release?.tag_name === tag);
   if (matches.length !== 1) {
-    throw new Error("GitHub draft release is missing or duplicated.");
+    throw new Error(missingMessage);
   }
-  const result = await verifyGitHubDraftRelease({
+  const result = await verify({
     expected,
     payloadRoot: options["--payload-root"],
     release: matches[0],
   });
   await emitOutputs({
-    "draft-state": result.state,
-    "draft-tag": result.tag,
-    "draft-url": result.url,
+    [`${outputPrefix}-state`]: result.state,
+    [`${outputPrefix}-tag`]: result.tag,
+    [`${outputPrefix}-url`]: result.url,
   });
   return result;
+}
+
+async function verifyRelease(argv) {
+  return verifyGitHubReleaseCommand(argv, {
+    missingMessage: "GitHub draft release is missing or duplicated.",
+    outputPrefix: "draft",
+    verify: verifyGitHubDraftRelease,
+  });
+}
+
+async function verifyPreviewRelease(argv) {
+  return verifyGitHubReleaseCommand(argv, {
+    missingMessage: "GitHub preview release is missing or duplicated.",
+    outputPrefix: "preview",
+    verify: verifyGitHubPreviewRelease,
+  });
 }
 
 async function preflightDraft(argv) {
@@ -372,6 +398,7 @@ const commands = new Map([
   ["preflight-draft", preflightDraft],
   ["subjects", subjects],
   ["verify-attestation", verifyAttestation],
+  ["verify-preview-release", verifyPreviewRelease],
   ["verify-release", verifyRelease],
 ]);
 
