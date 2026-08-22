@@ -1358,7 +1358,7 @@ try {
   const versionChecks = invocations.filter(
     (line) => line === "--yes skills@1.5.23 --version",
   );
-  if (versionChecks.length !== 7) {
+  if (versionChecks.length !== 5) {
     throw new Error(
       `Expected one version check per opened Target Adapter, got ${versionChecks.length}.`,
     );
@@ -1377,13 +1377,10 @@ try {
   );
   if (
     targetDocument.schemaVersion !== 3 ||
-    targetDocument.targets.length !== 3 ||
-    targetDocument.targets
-      .filter(({ kind }) => kind === "local")
-      .some(({ executionBindingDigest }) => executionBindingDigest !== null) ||
-    !targetDocument.targets.some(
-      ({ executionBindingDigest, kind }) =>
-        kind === "ssh" && /^[a-f0-9]{64}$/.test(executionBindingDigest),
+    targetDocument.targets.length !== 2 ||
+    targetDocument.targets.some(({ kind }) => kind !== "local") ||
+    targetDocument.targets.some(
+      ({ executionBindingDigest }) => executionBindingDigest !== null,
     )
   ) {
     throw new Error("Packaged Target Definitions were not durably restored.");
