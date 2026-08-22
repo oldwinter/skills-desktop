@@ -152,11 +152,22 @@ code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; fo
 .command-preview { display: block; padding: 9px; color: var(--text); background: var(--surface-muted); border-radius: var(--radius-control); }
 .mutation-outcome { color: var(--text-secondary); font-size: var(--font-size-meta); }
 
-.comparison-workspace, .collections-workspace, .targets-workspace { display: grid; grid-template-rows: auto auto auto minmax(0, 1fr); min-width: 0; min-height: 0; overflow: hidden; }
+.comparison-workspace, .targets-workspace { display: grid; grid-template-rows: auto auto auto minmax(0, 1fr); min-width: 0; min-height: 0; overflow: hidden; }
+.collections-workspace { display: flex; min-width: 0; min-height: 0; flex-direction: column; overflow: hidden; }
 .collection-controls { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(180px, 240px); align-items: end; gap: 12px; padding: 0 20px 14px; }
 .collection-controls label { display: grid; gap: 5px; color: var(--text-tertiary); font-size: var(--font-size-meta); }
 .collection-controls select { width: 100%; height: 40px; padding: 0 9px; color: var(--text); background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--radius-control); }
-.collection-table-wrap { min-width: 0; min-height: 0; overflow: auto; padding: 0 20px 20px; }
+.collection-machine-list { min-width: 0; min-height: 0; flex: 1; overflow: auto; padding: 0 20px 20px; }
+.collection-machine { min-width: 0; padding: 14px 0 18px; border-top: 1px solid var(--line); }
+.collection-machine > header { display: grid; grid-template-columns: minmax(0, 1fr) 150px; align-items: center; gap: 16px; margin-bottom: 10px; }
+.collection-machine-toggle { display: grid; grid-template-columns: 20px 18px minmax(0, 1fr); align-items: center; gap: 8px; min-width: 0; }
+.collection-machine-toggle > span { min-width: 0; }
+.collection-machine-toggle strong, .collection-machine-toggle small { display: block; min-width: 0; overflow-wrap: anywhere; }
+.collection-machine-toggle small { margin-top: 2px; color: var(--text-tertiary); font-size: var(--font-size-meta); }
+.collection-scope-select { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 8px; color: var(--text-tertiary); font-size: var(--font-size-meta); }
+.collection-scope-select select { min-width: 0; width: 100%; height: 36px; padding: 0 8px; color: var(--text); background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--radius-control); }
+.collection-target-blockers { display: grid; gap: 3px; margin: 0 0 10px 46px; color: var(--danger); font-size: var(--font-size-meta); }
+.collection-table-wrap { min-width: 0; overflow: auto; }
 .collection-table { width: 100%; border-spacing: 0; background: var(--surface); box-shadow: 0 0 0 1px var(--line); border-radius: var(--radius-panel); overflow: hidden; table-layout: fixed; }
 .collection-table th { height: 36px; padding: 0 10px; color: var(--text-tertiary); background: #fafbfc; border-bottom: 1px solid var(--line); font-size: var(--font-size-meta); font-weight: 600; text-align: left; }
 .collection-table th:nth-child(1) { width: 48px; }
@@ -174,6 +185,21 @@ code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; fo
 .collection-plan-summary header { display: flex; align-items: center; gap: 7px; }
 .collection-plan-summary h3 { font-size: var(--font-size-ui); }
 .collection-plan-summary code { overflow-wrap: anywhere; }
+.collection-plan-summary p, .collection-plan-summary li { color: var(--text-secondary); font-size: var(--font-size-meta); overflow-wrap: anywhere; }
+.collection-plan-summary ol { display: grid; gap: 4px; padding-left: 18px; }
+.collection-execution { max-height: 38%; overflow: auto; margin: 0 20px 14px; padding: 12px 0; border-block: 1px solid var(--line); }
+.collection-execution > header { display: flex; align-items: flex-start; gap: 8px; }
+.collection-execution > header > div { min-width: 0; }
+.collection-execution h2 { font-size: var(--font-size-ui); }
+.collection-execution header p { margin-top: 2px; color: var(--text-tertiary); font-size: var(--font-size-meta); }
+.collection-progress-list { display: grid; margin-top: 10px; list-style: none; }
+.collection-progress-list > li { min-width: 0; padding: 9px 0; border-top: 1px solid var(--line); }
+.collection-progress-heading, .collection-progress-list ul li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; min-width: 0; }
+.collection-progress-heading span, .collection-progress-list ul { color: var(--text-secondary); font-size: var(--font-size-meta); }
+.collection-progress-list ul { display: grid; gap: 3px; margin-top: 6px; list-style: none; }
+.collection-progress-list li span { min-width: 0; overflow-wrap: anywhere; }
+.collection-child-error { margin-top: 7px; color: var(--danger); font-size: var(--font-size-meta); overflow-wrap: anywhere; }
+.collection-progress-list .text-button { margin-top: 9px; }
 .comparison-controls { display: grid; grid-template-columns: minmax(160px, 1fr) 40px minmax(160px, 1fr) auto; align-items: end; gap: 10px; padding: 0 20px 14px; }
 .comparison-controls label, .target-form label { display: grid; min-width: 0; gap: 5px; color: var(--text-tertiary); font-size: var(--font-size-meta); }
 .comparison-controls select, .target-form select, .target-form input { min-width: 0; width: 100%; height: 40px; padding: 0 9px; color: var(--text); background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--radius-control); }
@@ -267,7 +293,11 @@ code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; fo
   .paired-status { grid-template-columns: 1fr; margin: 0 14px 12px; }
   .comparison-table-wrap { overflow: visible; padding: 0 14px 14px; }
   .collection-controls { grid-template-columns: 1fr; padding: 0 14px 12px; }
-  .collection-table-wrap { overflow: visible; padding: 0 14px 14px; }
+  .collection-machine-list { overflow: visible; padding: 0 14px 14px; }
+  .collection-machine > header { grid-template-columns: minmax(0, 1fr) 130px; gap: 10px; }
+  .collection-target-blockers { margin-left: 0; padding-left: 18px; }
+  .collection-execution { max-height: none; margin: 0 14px 12px; }
+  .collection-table-wrap { overflow: visible; }
   .collection-table, .collection-table tbody { display: block; box-shadow: none; background: transparent; }
   .collection-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); }
   .collection-table tr { display: grid; grid-template-columns: 40px minmax(0, 1fr); margin-bottom: 8px; padding: 8px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-panel); }
@@ -305,6 +335,9 @@ code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; fo
   .inspector-actions { grid-template-columns: 1fr; }
   .comparison-controls { grid-template-columns: 1fr 40px; }
   .comparison-actions { grid-template-columns: 1fr; }
+  .collection-machine > header { grid-template-columns: 1fr; }
+  .collection-scope-select { grid-template-columns: 48px minmax(0, 1fr); padding-left: 46px; }
+  .collection-progress-heading, .collection-progress-list ul li { grid-template-columns: 1fr; gap: 2px; }
   .target-item { grid-template-columns: 1fr; }
   .target-item > header, .target-item dl, .target-item-actions { grid-column: 1; }
 }

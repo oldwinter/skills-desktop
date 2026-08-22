@@ -4932,4 +4932,566 @@ describe("DesktopCapabilities Official Collection contract", () => {
       },
     });
   });
+
+  it("plans exact children for an ordered Local and SSH Target selection", async () => {
+    const sshTarget: TargetDefinition = {
+      connectionReference: "build-host",
+      executionBindingDigest: "a".repeat(64),
+      generation: 3,
+      harness: "Codex",
+      id: "00000000-0000-4000-8000-000000000019",
+      kind: "ssh",
+      label: "Build host",
+      workspace: "/srv/skills-desktop",
+      workspaceLabel: "skills-desktop",
+    };
+    let definitions = [target, sshTarget];
+    const preparedTargets: string[] = [];
+    const executedTargets: string[] = [];
+    const processFor = (definition: TargetDefinition): SkillsProcess => ({
+      async executeConfirmed({ confirmation }) {
+        executedTargets.push(definition.id);
+        expect(confirmation).toEqual({
+          digest:
+            definition.kind === "local" ? "b".repeat(64) : "c".repeat(64),
+          preparedMutationId: `prepared-${definition.kind}`,
+        });
+        return {
+          ok: true as const,
+          value: {
+            effects: { status: "content-unverified" as const },
+            inventory: freshInventory,
+            preparedMutationId: `prepared-${definition.kind}`,
+            process: {
+              disposition: "completed" as const,
+              exitCode: 0,
+              termination: "known" as const,
+            },
+          },
+        };
+      },
+      async observeInventory() {
+        return { ok: true as const, value: freshInventory };
+      },
+      async prepareMutation(input) {
+        preparedTargets.push(definition.id);
+        const preparedId = `prepared-${definition.kind}`;
+        return {
+          ok: true as const,
+          value: {
+            commandPlan: {
+              harness: definition.harness,
+              names:
+                input.intent.type === "update-all"
+                  ? []
+                  : [...input.intent.names],
+              operation: "add" as const,
+              preview: `review-only ${definition.kind} plan`,
+              schemaVersion: 1 as const,
+              scope: input.intent.scope,
+              source:
+                input.intent.type === "add" ? input.intent.source : null,
+              targetId: definition.id,
+              timeoutMs: 600_000,
+            },
+            digest: definition.kind === "local" ? "b".repeat(64) : "c".repeat(64),
+            expiresAt: "2026-08-22T06:10:00.000Z",
+            id: preparedId,
+            inventoryId: input.inventoryId,
+            targetGeneration: definition.generation,
+            targetId: definition.id,
+          },
+        };
+      },
+    });
+    const skillsTargets: SkillsTargets = {
+      async commitHostTrust() {
+        throw new Error("Host trust is not part of this planning case.");
+      },
+      get definitions() {
+        return definitions;
+      },
+      legacyIdFor() {
+        return undefined;
+      },
+      async open(targetId) {
+        const definition = definitions.find(({ id }) => id === targetId);
+        if (definition === undefined) throw new Error("Unexpected Target.");
+        return {
+          ok: true as const,
+          value: {
+            binding: {
+              generation: definition.generation,
+              harness: definition.harness,
+              kind: definition.kind,
+              targetId: definition.id,
+              workspace: definition.workspace,
+            },
+            process: processFor(definition),
+            target: definition,
+          },
+        };
+      },
+      pendingHostTrust() {
+        return undefined;
+      },
+      proposeCreate() {
+        throw new Error("Target creation is not part of this planning case.");
+      },
+      proposeDelete() {
+        throw new Error("Target deletion is not part of this planning case.");
+      },
+      proposeHostTrust() {
+        throw new Error("Host trust is not part of this planning case.");
+      },
+      proposeUpdate() {
+        throw new Error("Target updates are not part of this planning case.");
+      },
+      get primaryTarget() {
+        return definitions[0]!;
+      },
+      replaceDefinitions(next) {
+        definitions = [...next];
+      },
+    };
+    const multiTargetCatalog = structuredClone(validCatalog);
+    multiTargetCatalog.releases[0]!.manifest.compatibility.requiredCapabilities = [
+      "local",
+      "ssh",
+    ];
+    refreshEnvelopeDigest(multiTargetCatalog.releases[0]!);
+    const ids = [
+      "refresh-local",
+      "inventory-local",
+      "refresh-ssh",
+      "inventory-ssh",
+      "collection-plan-many",
+      "collection-review-many",
+      "collection-execution-many",
+    ];
+    const capabilities = createDesktopCapabilities({
+      clock: () => new Date("2026-08-22T06:00:00.000Z"),
+      id: () => ids.shift() ?? "unexpected",
+      officialCollectionCatalog: multiTargetCatalog,
+      platform: "linux",
+      recoveryRecords: createMemoryRecoveryRecords(),
+      skillsTargets,
+    });
+    await capabilities.initialize();
+    const workspace = capabilities.attach(
+      {
+        endpointId: "workspace-multi-target-collection-plan",
+        role: "workspace",
+        sessionEpoch: "multi-target-plan-epoch",
+      },
+      () => undefined,
+    );
+    for (const targetId of [target.id, sshTarget.id]) {
+      await workspace.request({
+        targetId,
+        type: "inventory.refresh",
+        version: 1,
+      });
+    }
+
+    await expect(
+      workspace.request({
+        collectionId: "skills-desktop-starter",
+        manifestDigest: multiTargetCatalog.releases[0]!.manifestDigest,
+        releaseNumber: 1,
+        targets: [
+          {
+            scope: "global",
+            selections: [{ mode: "add", name: "find-skills" }],
+            targetId: sshTarget.id,
+          },
+          {
+            scope: "project",
+            selections: [{ mode: "add", name: "find-skills" }],
+            targetId: target.id,
+          },
+        ],
+        type: "collection.prepare-many",
+        version: 1,
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      value: { operationId: "collection-plan-many" },
+    });
+    expect(preparedTargets).toEqual([sshTarget.id, target.id]);
+    await expect(workspace.snapshot()).resolves.toMatchObject({
+      collections: {
+        plan: {
+          children: [
+            {
+              commandPlan: { scope: "global", targetId: sshTarget.id },
+              position: 1,
+              selections: [{ mode: "add", name: "find-skills" }],
+              target: {
+                generation: sshTarget.generation,
+                id: sshTarget.id,
+                kind: "ssh",
+              },
+            },
+            {
+              commandPlan: { scope: "project", targetId: target.id },
+              position: 2,
+              selections: [{ mode: "add", name: "find-skills" }],
+              target: { generation: target.generation, id: target.id, kind: "local" },
+            },
+          ],
+          collectionId: "skills-desktop-starter",
+          reviewDigest: expect.stringMatching(/^sha256:[a-f0-9]{64}$/),
+          schemaVersion: 2,
+        },
+      },
+    });
+    await expect(
+      workspace.request({
+        collectionPlanId: "collection-plan-many",
+        type: "collection.review.request",
+        version: 1,
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      value: { operationId: "collection-review-many" },
+    });
+    const review = capabilities.attach(
+      {
+        endpointId: "review-multi-target-collection",
+        reviewId: "collection-review-many",
+        role: "review",
+        sessionEpoch: "review-multi-target-epoch",
+      },
+      () => undefined,
+    );
+    await expect(review.snapshot()).resolves.toMatchObject({
+      projection: {
+        collectionPlan: {
+          children: [
+            { position: 1, target: { id: sshTarget.id } },
+            { position: 2, target: { id: target.id } },
+          ],
+          schemaVersion: 2,
+        },
+      },
+      status: "pending",
+    });
+    await expect(
+      review.request({
+        decision: "approve",
+        type: "review.decide",
+        version: 1,
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      value: { operationId: "collection-execution-many" },
+    });
+    expect(executedTargets).toEqual([sshTarget.id, target.id]);
+    await expect(workspace.snapshot()).resolves.toMatchObject({
+      collections: {
+        execution: {
+          children: [
+            {
+              skills: [
+                {
+                  effects: "content-unverified",
+                  name: "find-skills",
+                  status: "completed",
+                },
+              ],
+              status: "completed",
+              target: { id: sshTarget.id },
+            },
+            {
+              skills: [
+                {
+                  effects: "content-unverified",
+                  name: "find-skills",
+                  status: "completed",
+                },
+              ],
+              status: "completed",
+              target: { id: target.id },
+            },
+          ],
+          phase: "completed",
+          semantics: "non-transactional",
+        },
+        plan: null,
+      },
+    });
+  });
+
+  it("reserves every child before execution and fails closed without rollback or resume", async () => {
+    const secondTarget: TargetDefinition = {
+      ...target,
+      id: "00000000-0000-4000-8000-000000000004",
+      label: "Second local",
+      workspace: "/work/second",
+      workspaceLabel: "second",
+    };
+    const preparedTargets: string[] = [];
+    const executedTargets: string[] = [];
+    let markFirstStarted: (() => void) | undefined;
+    let releaseFirst: (() => void) | undefined;
+    const firstStarted = new Promise<void>((resolve) => {
+      markFirstStarted = resolve;
+    });
+    const firstBarrier = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const skillsTargets = createSkillsTargetsCatalog({
+      id: () => "00000000-0000-4000-8000-000000000099",
+      initialTarget: target,
+      processFor(binding) {
+        return {
+          async executeConfirmed() {
+            executedTargets.push(binding.targetId);
+            if (binding.targetId === target.id) {
+              markFirstStarted?.();
+              await firstBarrier;
+            }
+            return {
+              ok: true as const,
+              value: {
+                effects: {
+                  status:
+                    binding.targetId === target.id
+                      ? ("not-observed" as const)
+                      : ("content-unverified" as const),
+                },
+                inventory: freshInventory,
+                preparedMutationId: `prepared-${binding.targetId}`,
+                process: {
+                  disposition:
+                    binding.targetId === target.id
+                      ? ("failed" as const)
+                      : ("completed" as const),
+                  exitCode: binding.targetId === target.id ? 1 : 0,
+                  termination: "known" as const,
+                },
+              },
+            };
+          },
+          async observeInventory() {
+            return { ok: true as const, value: freshInventory };
+          },
+          async prepareMutation(input) {
+            preparedTargets.push(binding.targetId);
+            return {
+              ok: true as const,
+              value: {
+                commandPlan: {
+                  harness: binding.harness,
+                  names: ["find-skills"],
+                  operation: "add" as const,
+                  preview: `review-only ${binding.targetId}`,
+                  schemaVersion: 1 as const,
+                  scope: input.intent.scope,
+                  source:
+                    input.intent.type === "add" ? input.intent.source : null,
+                  targetId: binding.targetId,
+                  timeoutMs: 600_000,
+                },
+                digest:
+                  binding.targetId === target.id
+                    ? "d".repeat(64)
+                    : "e".repeat(64),
+                expiresAt: "2026-08-22T06:10:00.000Z",
+                id: `prepared-${binding.targetId}`,
+                inventoryId: input.inventoryId,
+                targetGeneration: binding.generation,
+                targetId: binding.targetId,
+              },
+            };
+          },
+        };
+      },
+    });
+    const records = createMemoryRecoveryRecords(
+      [],
+      [],
+      [target, secondTarget].map((definition) => ({
+        connectionReference: null,
+        generation: definition.generation,
+        harness: definition.harness,
+        id: definition.id,
+        kind: definition.kind,
+        label: definition.label,
+        workspace: definition.workspace,
+      })),
+    );
+    const ids = [
+      "refresh-first",
+      "inventory-first",
+      "refresh-second",
+      "inventory-second",
+      "fail-stop-plan",
+      "fail-stop-review",
+      "fail-stop-execution",
+      "fail-stop-cancel-review",
+    ];
+    const capabilities = createDesktopCapabilities({
+      clock: () => new Date("2026-08-22T06:00:00.000Z"),
+      id: () => ids.shift() ?? "unexpected",
+      officialCollectionCatalog: validCatalog,
+      platform: "linux",
+      recoveryRecords: records,
+      skillsTargets,
+    });
+    await capabilities.initialize();
+    const workspace = capabilities.attach(
+      {
+        endpointId: "workspace-collection-fail-stop",
+        role: "workspace",
+        sessionEpoch: "collection-fail-stop-epoch",
+      },
+      () => undefined,
+    );
+    for (const targetId of [target.id, secondTarget.id]) {
+      await workspace.request({
+        targetId,
+        type: "inventory.refresh",
+        version: 1,
+      });
+    }
+    const targets = [target.id, secondTarget.id].map((targetId) => ({
+      scope: "project" as const,
+      selections: [{ mode: "add" as const, name: "find-skills" }],
+      targetId,
+    }));
+    await workspace.request({
+      collectionId: "skills-desktop-starter",
+      manifestDigest,
+      releaseNumber: 1,
+      targets,
+      type: "collection.prepare-many",
+      version: 1,
+    });
+    await workspace.request({
+      collectionPlanId: "fail-stop-plan",
+      type: "collection.review.request",
+      version: 1,
+    });
+    const review = capabilities.attach(
+      {
+        endpointId: "review-collection-fail-stop",
+        reviewId: "fail-stop-review",
+        role: "review",
+        sessionEpoch: "review-collection-fail-stop-epoch",
+      },
+      () => undefined,
+    );
+    const approval = review.request({
+      decision: "approve",
+      type: "review.decide",
+      version: 1,
+    });
+    await firstStarted;
+
+    await expect(workspace.snapshot()).resolves.toMatchObject({
+      mutation: {
+        activeOperationId: "fail-stop-execution",
+        phase: "running",
+      },
+    });
+    await expect(
+      workspace.request({
+        operationId: "fail-stop-execution",
+        type: "review.cancel-request",
+        version: 1,
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      value: { operationId: "fail-stop-cancel-review" },
+    });
+    const cancellationReview = capabilities.attach(
+      {
+        endpointId: "review-collection-fail-stop-cancellation",
+        reviewId: "fail-stop-cancel-review",
+        role: "review",
+        sessionEpoch: "review-collection-fail-stop-cancellation-epoch",
+      },
+      () => undefined,
+    );
+    await expect(cancellationReview.snapshot()).resolves.toMatchObject({
+      projection: {
+        purpose: "cancel",
+        target: { id: target.id },
+      },
+      status: "pending",
+    });
+    await expect(
+      cancellationReview.request({
+        decision: "reject",
+        type: "review.decide",
+        version: 1,
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      value: { operationId: "fail-stop-cancel-review" },
+    });
+
+    await expect(
+      workspace.request({
+        definition: {
+          connectionReference: null,
+          harness: "Codex",
+          kind: "local",
+          label: "Drifted second local",
+          workspace: secondTarget.workspace,
+        },
+        targetId: secondTarget.id,
+        type: "target.update",
+        version: 1,
+      }),
+    ).resolves.toMatchObject({
+      error: { code: "mutation_conflict" },
+      ok: false,
+    });
+    releaseFirst?.();
+    await expect(approval).resolves.toMatchObject({
+      error: { code: "process_failed" },
+      ok: false,
+    });
+    expect(executedTargets).toEqual([target.id]);
+    await expect(workspace.snapshot()).resolves.toMatchObject({
+      collections: {
+        execution: {
+          children: [
+            {
+              outcome: {
+                effects: { status: "not-observed" },
+                process: { disposition: "failed" },
+              },
+              status: "failed",
+              target: { id: target.id },
+            },
+            { outcome: null, status: "stopped", target: { id: secondTarget.id } },
+          ],
+          phase: "stopped",
+          semantics: "non-transactional",
+        },
+      },
+      targets: [
+        { inventory: { freshness: "stale" }, target: { id: target.id } },
+        { inventory: { freshness: "stale" }, target: { id: secondTarget.id } },
+      ],
+    });
+    await expect(
+      workspace.request({
+        collectionId: "skills-desktop-starter",
+        manifestDigest,
+        releaseNumber: 1,
+        targets,
+        type: "collection.prepare-many",
+        version: 1,
+      }),
+    ).resolves.toMatchObject({
+      error: { code: "stale_inventory" },
+      ok: false,
+    });
+    expect(preparedTargets).toEqual([target.id, secondTarget.id]);
+  });
 });

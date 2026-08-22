@@ -178,6 +178,9 @@ function clientFor(value: WorkspaceSnapshot): WorkspaceBridge {
     async prepareCollection() {
       return { ok: true, value: { operationId: "collection-plan-1" } };
     },
+    async prepareCollectionAcrossTargets() {
+      return { ok: true, value: { operationId: "collection-plan-many" } };
+    },
     async prepareComparison() {
       return { ok: true, value: { operationId: "prepared-comparison-1" } };
     },
@@ -380,7 +383,7 @@ describe("Local Target Inventory shell", () => {
   });
 
   it("requires explicit eligible Collection selections before preparing", async () => {
-    const prepareCollection = vi.fn(async () => ({
+    const prepareCollectionAcrossTargets = vi.fn(async () => ({
       ok: true as const,
       value: { operationId: "collection-plan-1" },
     }));
@@ -388,7 +391,7 @@ describe("Local Target Inventory shell", () => {
       <InventoryApp
         client={{
           ...clientFor(collectionSnapshot),
-          prepareCollection,
+          prepareCollectionAcrossTargets,
         }}
       />,
     );
@@ -410,15 +413,216 @@ describe("Local Target Inventory shell", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "Prepare plan" }));
     await waitFor(() =>
-      expect(prepareCollection).toHaveBeenCalledWith({
+      expect(prepareCollectionAcrossTargets).toHaveBeenCalledWith({
         collectionId: "skills-desktop-starter",
         manifestDigest: `sha256:${"a".repeat(64)}`,
         releaseNumber: 1,
-        scope: "project",
-        selections: [{ mode: "add", name: "find-skills" }],
-        targetId: snapshot.target.id,
+        targets: [
+          {
+            scope: "project",
+            selections: [{ mode: "add", name: "find-skills" }],
+            targetId: snapshot.target.id,
+          },
+        ],
       }),
     );
+  });
+
+  it("prepares exact entries in the visible machine order", async () => {
+    const otherTarget = {
+      ...snapshot.target,
+      id: "00000000-0000-4000-8000-000000000002",
+      kind: "ssh" as const,
+      label: "Build host",
+      workspaceLabel: "remote",
+    };
+    const otherCollections = structuredClone(collectionSnapshot.collections!);
+    otherCollections.releases[0]!.compatibility.requiredCapabilities = [
+      "local",
+      "ssh",
+    ];
+    for (const assessment of otherCollections.releases[0]!.assessments) {
+      assessment.targetId = otherTarget.id;
+    }
+    const localCollections = structuredClone(collectionSnapshot.collections!);
+    localCollections.releases[0]!.compatibility.requiredCapabilities = [
+      "local",
+      "ssh",
+    ];
+    const prepareCollectionAcrossTargets = vi.fn(async () => ({
+      ok: true as const,
+      value: { operationId: "collection-plan-many" },
+    }));
+    const targetState = {
+      deletionBlocked: false,
+      inventory: collectionSnapshot.inventory,
+      mutation: collectionSnapshot.mutation,
+    };
+    render(
+      <InventoryApp
+        client={{
+          ...clientFor(collectionSnapshot),
+          prepareCollectionAcrossTargets,
+          async getSnapshot() {
+            return {
+              ok: true as const,
+              value: {
+                ...collectionSnapshot,
+                collections: localCollections,
+                targets: [
+                  {
+                    ...targetState,
+                    collections: localCollections,
+                    target: collectionSnapshot.target,
+                  },
+                  {
+                    ...targetState,
+                    collections: otherCollections,
+                    target: otherTarget,
+                  },
+                ],
+              },
+            };
+          },
+        }}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Collections" }));
+    fireEvent.click(
+      screen.getByRole("checkbox", {
+        name: "Select find-skills on This device",
+      }),
+    );
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: "Include Build host" }),
+    );
+    fireEvent.click(
+      screen.getByRole("checkbox", {
+        name: "Select find-skills on Build host",
+      }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Prepare plan" }));
+
+    await waitFor(() =>
+      expect(prepareCollectionAcrossTargets).toHaveBeenCalledWith({
+        collectionId: "skills-desktop-starter",
+        manifestDigest: `sha256:${"a".repeat(64)}`,
+        releaseNumber: 1,
+        targets: [
+          {
+            scope: "project",
+            selections: [{ mode: "add", name: "find-skills" }],
+            targetId: snapshot.target.id,
+          },
+          {
+            scope: "project",
+            selections: [{ mode: "add", name: "find-skills" }],
+            targetId: otherTarget.id,
+          },
+        ],
+      }),
+    );
+  });
+
+  it("shows non-transactional stopped progress and routes recovery to the affected Target", async () => {
+    const otherTarget = {
+      ...snapshot.target,
+      id: "00000000-0000-4000-8000-000000000002",
+      label: "Second local",
+      workspaceLabel: "second",
+    };
+    const stoppedSnapshot: WorkspaceSnapshot = {
+      ...collectionSnapshot,
+      collections: {
+        ...collectionSnapshot.collections!,
+        execution: {
+          children: [
+            {
+              error: {
+                code: "process_failed",
+                effects: "none",
+                message: "The Collection child failed.",
+                phase: "execute",
+                retryable: false,
+              },
+              outcome: {
+                effects: { status: "not-observed" },
+                process: {
+                  disposition: "failed",
+                  exitCode: 1,
+                  termination: "known",
+                },
+              },
+              position: 1,
+              scope: "project",
+              skills: [
+                {
+                  effects: "not-observed",
+                  mode: "reapply",
+                  name: "find-skills",
+                  status: "failed",
+                },
+              ],
+              status: "failed",
+              target: snapshot.target,
+            },
+            {
+              error: {
+                code: "reconciliation_required",
+                effects: "possible",
+                message: "Reconcile this Target before continuing.",
+                phase: "recover",
+                retryable: false,
+              },
+              outcome: null,
+              position: 2,
+              scope: "global",
+              skills: [
+                {
+                  effects: "possible",
+                  mode: "add",
+                  name: "tdd",
+                  status: "stopped",
+                },
+              ],
+              status: "reconciliation-required",
+              target: otherTarget,
+            },
+          ],
+          collectionId: "skills-desktop-starter",
+          id: "collection-run-stopped",
+          manifestDigest: `sha256:${"a".repeat(64)}`,
+          phase: "stopped",
+          reviewDigest: `sha256:${"e".repeat(64)}`,
+          semantics: "non-transactional",
+        },
+      },
+    };
+    const reconcileMutation = vi.fn(async (targetId: string) => ({
+      ok: true as const,
+      value: { operationId: `reconcile:${targetId}` },
+    }));
+    render(
+      <InventoryApp
+        client={{ ...clientFor(stoppedSnapshot), reconcileMutation }}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Collections" }));
+    expect(
+      screen.getByRole("heading", { name: "Collection run stopped" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Sequential, non-transactional execution"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("failed / not-observed")).toBeInTheDocument();
+    expect(screen.getByText("stopped / possible")).toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Reconcile Second local" }),
+    );
+    await waitFor(() => expect(reconcileMutation).toHaveBeenCalledWith(otherTarget.id));
   });
 
   it("uses the selected Target's Collection assessment", async () => {
@@ -470,7 +674,9 @@ describe("Local Target Inventory shell", () => {
     fireEvent.click(screen.getByRole("button", { name: "Collections" }));
 
     expect(
-      screen.getByRole("checkbox", { name: "Select find-skills" }),
+      screen.getByRole("checkbox", {
+        name: "Select find-skills on Other workspace",
+      }),
     ).toBeDisabled();
     expect(screen.getAllByText("Source conflict").length).toBeGreaterThan(0);
   });

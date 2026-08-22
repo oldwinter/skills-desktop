@@ -36,9 +36,9 @@ const compatibilitySchema = z
       .max(3)
       .refine((values) => new Set(values).size === values.length),
     requiredCapabilities: z
-      .array(z.literal("local"))
+      .array(z.enum(["local", "ssh"]))
       .min(1)
-      .max(1)
+      .max(2)
       .refine((values) => new Set(values).size === values.length),
   })
   .strict();
@@ -229,8 +229,7 @@ function isCompatible(input: {
 }) {
   const { compatibility } = input.release.manifest;
   return (
-    input.target.kind === "local" &&
-    compatibility.requiredCapabilities.includes("local") &&
+    compatibility.requiredCapabilities.includes(input.target.kind) &&
     compatibility.harnesses.includes(input.target.harness) &&
     compatibility.platforms.includes(
       input.platform as "darwin" | "linux" | "win32",

@@ -642,6 +642,7 @@ try {
       "deleteTarget",
       "getSnapshot",
       "prepareCollection",
+      "prepareCollectionAcrossTargets",
       "prepareComparison",
       "prepareMutation",
       "reconcileMutation",
@@ -1043,6 +1044,104 @@ try {
       document.querySelector(".header-status")?.textContent?.includes("Fresh evidence") === true`,
     "second Local Target Fresh Inventory",
   );
+  const collectionInvocationsBeforeMany = (await readFile(invocationLog, "utf8"))
+    .split("\n")
+    .filter((invocation) => invocation === collectionInvocation).length;
+  await first.page.evaluate(`(() => {
+    const collections = document.querySelector('button[aria-label="Collections"]');
+    if (!(collections instanceof HTMLButtonElement)) throw new Error("Collections navigation is unavailable.");
+    collections.click();
+  })()`);
+  await first.page.waitFor(
+    `document.querySelector('input[aria-label="Select find-skills on This device"]') !== null &&
+      document.querySelector('input[aria-label="Select find-skills on Second local"]') !== null`,
+    "packaged multi-Target Collection workspace",
+  );
+  await first.page.evaluate(`(() => {
+    const includePrimary = document.querySelector('input[aria-label="Include This device"]');
+    const primarySelection = document.querySelector('input[aria-label="Select find-skills on This device"]');
+    const secondSelection = document.querySelector('input[aria-label="Select find-skills on Second local"]');
+    if (!(includePrimary instanceof HTMLInputElement)) throw new Error("Primary Target inclusion is unavailable.");
+    if (!(primarySelection instanceof HTMLInputElement)) throw new Error("Primary Collection selection is unavailable.");
+    if (!(secondSelection instanceof HTMLInputElement)) throw new Error("Second Collection selection is unavailable.");
+    includePrimary.click();
+    primarySelection.click();
+    secondSelection.click();
+  })()`);
+  await first.page.waitFor(
+    `[...document.querySelectorAll("button")].find(
+      (button) => button.textContent?.includes("Prepare plan"),
+    )?.disabled === false`,
+    "packaged multi-Target Collection selections",
+  );
+  await first.page.evaluate(`(() => {
+    const prepare = [...document.querySelectorAll("button")].find(
+      (candidate) => candidate.textContent?.includes("Prepare plan"),
+    );
+    if (!(prepare instanceof HTMLButtonElement)) throw new Error("Multi-Target Collection planning is unavailable.");
+    prepare.click();
+  })()`);
+  await first.page.waitFor(
+    `document.body?.textContent?.includes("Collection Plan") &&
+      document.body?.textContent?.includes("Sequential, non-transactional") &&
+      document.body?.textContent?.includes("Open Trusted Review")`,
+    "packaged aggregate Collection plan",
+  );
+  await first.page.evaluate(`(() => {
+    const review = [...document.querySelectorAll("button")].find(
+      (candidate) => candidate.textContent?.includes("Open Trusted Review"),
+    );
+    if (!(review instanceof HTMLButtonElement)) throw new Error("Aggregate Collection review is unavailable.");
+    review.click();
+  })()`);
+  const multiCollectionReviewPage = await first.connectPage(
+    "skills-desktop://review/index.html",
+  );
+  await multiCollectionReviewPage.waitFor(
+    `document.body?.textContent?.includes("Stable child order") &&
+      document.body?.textContent?.includes("1. This device") &&
+      document.body?.textContent?.includes("2. Second local") &&
+      document.body?.textContent?.includes("Sequential, non-transactional") &&
+      document.body?.textContent?.includes("archive/435076e78988e1e6ec40d00b0b1d76bdbbc5419a.tar.gz --skill find-skills --agent codex --yes")`,
+    "packaged aggregate Collection Trusted Review",
+  );
+  await multiCollectionReviewPage.evaluate(`(() => {
+    const approve = document.querySelector('button[aria-label="Approve Official Collection plan"]');
+    if (!(approve instanceof HTMLButtonElement)) throw new Error("Aggregate Collection approval is unavailable.");
+    approve.click();
+  })()`);
+  await multiCollectionReviewPage.waitFor(
+    `document.body?.textContent?.includes("Mutation started")`,
+    "packaged aggregate Collection execution",
+  );
+  await first.page.waitFor(
+    `document.body?.textContent?.includes("Collection run completed") &&
+      document.body?.textContent?.includes("1. This device") &&
+      document.body?.textContent?.includes("2. Second local") &&
+      document.body?.textContent?.includes("completed / content-unverified")`,
+    "packaged aggregate Collection postflight",
+  );
+  await multiCollectionReviewPage.disconnect();
+  const collectionInvocationsAfterMany = (await readFile(invocationLog, "utf8"))
+    .split("\n")
+    .filter((invocation) => invocation === collectionInvocation).length;
+  if (collectionInvocationsAfterMany !== collectionInvocationsBeforeMany + 2) {
+    throw new Error(
+      `Aggregate Collection did not execute exactly two sequential pinned child plans: ${collectionInvocationsBeforeMany} -> ${collectionInvocationsAfterMany}.`,
+    );
+  }
+  const multiCollectionLaunch = first;
+  await multiCollectionLaunch.close();
+  if (multiCollectionLaunch.errors.length > 0) {
+    throw new Error(multiCollectionLaunch.errors.join("\n"));
+  }
+  first = await launch();
+  await first.page.waitFor(
+    `document.body?.textContent?.includes("Second local") === true &&
+      document.querySelector(".header-status")?.textContent?.includes("Fresh evidence") === true`,
+    "aggregate Collection postflight restart",
+  );
+  console.log("packaged smoke: aggregate Local Collection executed sequentially");
   const invocationsBeforeComparison = (await readFile(invocationLog, "utf8"))
     .trim()
     .split("\n").length;
@@ -1257,7 +1356,7 @@ try {
   const versionChecks = invocations.filter(
     (line) => line === "--yes skills@1.5.23 --version",
   );
-  if (versionChecks.length !== 6) {
+  if (versionChecks.length !== 7) {
     throw new Error(
       `Expected one version check per opened Target Adapter, got ${versionChecks.length}.`,
     );

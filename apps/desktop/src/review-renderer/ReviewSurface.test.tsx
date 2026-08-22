@@ -8,6 +8,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -139,6 +140,180 @@ describe("Trusted Review surface", () => {
     );
     await waitFor(() => expect(approve).toHaveBeenCalledWith());
   });
+
+  it("shows every aggregate Collection child in stable order before one approval", async () => {
+    const approve = vi.fn(async () => ({
+      ok: true as const,
+      value: { operationId: "collection-execution-many" },
+    }));
+    const localTarget = {
+      generation: 1,
+      harness: "Codex",
+      id: "00000000-0000-4000-8000-000000000001",
+      kind: "local" as const,
+      label: "This device",
+      workspaceLabel: "skills-desktop",
+    };
+    const sshTarget = {
+      connectionReference: "build-host",
+      generation: 3,
+      harness: "Codex",
+      id: "00000000-0000-4000-8000-000000000002",
+      kind: "ssh" as const,
+      label: "Build host",
+      workspace: "/srv/skills-desktop",
+      workspaceLabel: "remote",
+    };
+    const commandPlan = (
+      targetId: string,
+      name: string,
+      preview: string,
+      scope: "global" | "project",
+    ) => ({
+      harness: "Codex",
+      names: [name],
+      operation: "add" as const,
+      preview,
+      schemaVersion: 1 as const,
+      scope,
+      source: {
+        revision: "0123456789abcdef0123456789abcdef01234567",
+        source: "vercel-labs/skills",
+        sourceType: "github" as const,
+      },
+      targetId,
+      timeoutMs: 600_000,
+    });
+    const client: ReviewBridge = {
+      approve,
+      async getReview() {
+        return {
+          ok: true as const,
+          value: {
+            projection: {
+              collectionPlan: {
+                children: [
+                  {
+                    assessmentDigest: `sha256:${"1".repeat(64)}`,
+                    bindingDigest: `sha256:${"2".repeat(64)}`,
+                    commandPlan: commandPlan(
+                      localTarget.id,
+                      "find-skills",
+                      "Pinned local add preview",
+                      "project",
+                    ),
+                    inventoryDigest: `sha256:${"3".repeat(64)}`,
+                    position: 1,
+                    preparedDigest: "4".repeat(64),
+                    scope: "project" as const,
+                    selections: [
+                      { mode: "add" as const, name: "find-skills" },
+                    ],
+                    target: localTarget,
+                  },
+                  {
+                    assessmentDigest: `sha256:${"5".repeat(64)}`,
+                    bindingDigest: `sha256:${"6".repeat(64)}`,
+                    commandPlan: commandPlan(
+                      sshTarget.id,
+                      "tdd",
+                      "Pinned SSH add preview",
+                      "global",
+                    ),
+                    inventoryDigest: `sha256:${"7".repeat(64)}`,
+                    position: 2,
+                    preparedDigest: "8".repeat(64),
+                    scope: "global" as const,
+                    selections: [{ mode: "add" as const, name: "tdd" }],
+                    target: sshTarget,
+                  },
+                ],
+                collectionId: "skills-desktop-starter",
+                expiresAt: "2026-08-22T06:10:00.000Z",
+                id: "collection-plan-many",
+                manifestDigest: `sha256:${"a".repeat(64)}`,
+                order: [
+                  {
+                    names: ["find-skills"],
+                    position: 1,
+                    scope: "project" as const,
+                    targetId: localTarget.id,
+                  },
+                  {
+                    names: ["tdd"],
+                    position: 2,
+                    scope: "global" as const,
+                    targetId: sshTarget.id,
+                  },
+                ],
+                releaseEvidence: {
+                  compatibility: {
+                    cliVersion: "1.5.23" as const,
+                    harnesses: ["Codex"],
+                    platforms: ["linux" as const],
+                    requiredCapabilities: ["local" as const, "ssh" as const],
+                  },
+                  receipt: {
+                    author: "Collection author",
+                    manifestDigest: `sha256:${"a".repeat(64)}`,
+                    reviewLocation:
+                      "https://github.com/oldwinter/skills-desktop/issues/20",
+                    reviewPolicy: "official-collection-v1" as const,
+                    reviewedAt: "2026-08-22T05:00:00.000Z",
+                    reviewer: "Reviewer B",
+                    schemaVersion: 1 as const,
+                    status: "approved" as const,
+                  },
+                  status: "active" as const,
+                },
+                releaseNumber: 1,
+                reviewDigest: `sha256:${"e".repeat(64)}`,
+                schemaVersion: 2 as const,
+                source: {
+                  repository: "vercel-labs/skills",
+                  reviewedRevision: "0123456789abcdef0123456789abcdef01234567",
+                },
+              },
+              expiresAt: "2026-08-22T06:10:00.000Z",
+              reviewId: "collection-review-many",
+              target: localTarget,
+            },
+            schemaVersion: 1 as const,
+            status: "pending" as const,
+          },
+        };
+      },
+      async reject() {
+        return {
+          ok: true as const,
+          value: { operationId: "collection-review-many" },
+        };
+      },
+    };
+    render(<ReviewSurface client={client} />);
+
+    const heading = await screen.findByRole("heading", {
+      name: "Stable child order",
+    });
+    const orderedList = heading.parentElement?.querySelector("ol");
+    expect(orderedList).not.toBeNull();
+    const children = within(orderedList!).getAllByRole("listitem");
+    expect(children).toHaveLength(2);
+    expect(children[0]).toHaveTextContent("1. This device");
+    expect(children[0]).toHaveTextContent("Pinned local add preview");
+    expect(children[0]).toHaveTextContent(`sha256:${"2".repeat(64)}`);
+    expect(children[1]).toHaveTextContent("2. Build host");
+    expect(children[1]).toHaveTextContent("SSH / generation 3 / Global");
+    expect(children[1]).toHaveTextContent("Pinned SSH add preview");
+    expect(children[1]).toHaveTextContent("8".repeat(64));
+    expect(screen.getByText("Sequential, non-transactional")).toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Approve Official Collection plan" }),
+    );
+    await waitFor(() => expect(approve).toHaveBeenCalledWith());
+  });
+
   it("shows its immutable assignment and decides without renderer-supplied authority", async () => {
     const approve = vi.fn(async () => ({
       ok: true as const,

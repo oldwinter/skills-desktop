@@ -8,6 +8,9 @@ import {
   type PublicInventoryEntry,
   type PublicInventoryState,
   type PublicCollectionPlan,
+  type PublicCollectionExecution,
+  type PublicMultiTargetCollectionPlan,
+  type PublicSingleTargetCollectionPlan,
   type PublicMutationState,
   type RendererError,
   type TargetDefinition as PublicTargetDefinition,
@@ -126,7 +129,7 @@ interface TrustedReview {
 }
 
 interface CollectionPlan {
-  readonly preparedId: string;
+  readonly preparedIds: readonly string[];
   readonly projection: PublicCollectionPlan;
 }
 
@@ -163,6 +166,12 @@ function publicError<Code extends RequestError["code"]>(
 
 function requestFailure(error: RequestError): Result<never, RequestError> {
   return { error, ok: false };
+}
+
+function isSingleTargetCollectionPlan(
+  plan: PublicCollectionPlan,
+): plan is PublicSingleTargetCollectionPlan {
+  return plan.schemaVersion === 1;
 }
 
 interface ProjectableInventoryEntry {
@@ -299,6 +308,7 @@ export function createDesktopCapabilities(
   let target = options.skillsTargets.primaryTarget;
   const targetDefinitions = () => options.skillsTargets.definitions;
   const guardedTargetIds = new Set<string>();
+  const reservedTargetIds = new Set<string>();
   let initialized = false;
   let targetAuthorityUnavailable = false;
   let targetDefinitionsChanging = false;
@@ -317,6 +327,7 @@ export function createDesktopCapabilities(
   let inventoryState: PublicInventoryState = emptyInventoryState();
   let mutationState: PublicMutationState = emptyMutationState();
   let collectionAcknowledgements: CollectionAcknowledgement[] = [];
+  let collectionExecution: PublicCollectionExecution | undefined;
   let currentCollectionPlan: CollectionPlan | undefined;
   const inventoryStates = new Map<string, PublicInventoryState>();
   const mutationStates = new Map<string, PublicMutationState>();
@@ -486,7 +497,8 @@ export function createDesktopCapabilities(
       }
     }
     for (const [planId, plan] of collectionPlans) {
-      if (!invalidatedPreparedIds.has(plan.preparedId)) continue;
+      if (!plan.preparedIds.some((preparedId) => invalidatedPreparedIds.has(preparedId)))
+        continue;
       collectionPlans.delete(planId);
       if (currentCollectionPlan?.projection.id === planId) {
         currentCollectionPlan = undefined;
@@ -505,12 +517,14 @@ export function createDesktopCapabilities(
 
   const discardCollectionPlan = (plan: CollectionPlan) => {
     collectionPlans.delete(plan.projection.id);
-    preparedMutations.delete(plan.preparedId);
-    preparedDependencies.delete(plan.preparedId);
+    for (const preparedId of plan.preparedIds) {
+      preparedMutations.delete(preparedId);
+      preparedDependencies.delete(preparedId);
+    }
     if (currentCollectionPlan === plan) currentCollectionPlan = undefined;
     rejectPendingReviews(
       (review) =>
-        review.collectionPlan === plan || review.prepared.id === plan.preparedId,
+        review.collectionPlan === plan || plan.preparedIds.includes(review.prepared.id),
     );
   };
 
@@ -546,7 +560,12 @@ export function createDesktopCapabilities(
       inventory,
       platform,
       plan:
-        currentCollectionPlan?.projection.targetId === definition.id
+        currentCollectionPlan !== undefined &&
+        (currentCollectionPlan.projection.schemaVersion === 1
+          ? currentCollectionPlan.projection.targetId === definition.id
+          : currentCollectionPlan.projection.children.some(
+              ({ target }) => target.id === definition.id,
+            ))
           ? currentCollectionPlan.projection
           : null,
       target: projectTarget(definition),
@@ -557,7 +576,10 @@ export function createDesktopCapabilities(
     eventSequence = endpoint.sequence,
   ): WorkspaceSnapshot => ({
     comparison: structuredClone(currentComparison()),
-    collections: collectionsForTarget(target, inventoryState),
+    collections: {
+      ...collectionsForTarget(target, inventoryState),
+      execution: structuredClone(collectionExecution ?? null),
+    },
     eventSequence,
     inventory: structuredClone(inventoryState),
     mutation: structuredClone(mutationState),
@@ -573,9 +595,13 @@ export function createDesktopCapabilities(
             inventoryStates.get(definition.id) ?? emptyInventoryState(),
           );
       return {
-        collections: collectionsForTarget(definition, targetInventory),
+        collections: {
+          ...collectionsForTarget(definition, targetInventory),
+          execution: structuredClone(collectionExecution ?? null),
+        },
         deletionBlocked:
           guardedTargetIds.has(definition.id) ||
+          reservedTargetIds.has(definition.id) ||
           targetDefinitions().length === 1,
         inventory: targetInventory,
         mutation: isActive
@@ -643,6 +669,11 @@ export function createDesktopCapabilities(
         type: "snapshot.changed",
       });
     }
+  };
+
+  const publishCollectionExecution = (next: PublicCollectionExecution) => {
+    collectionExecution = next;
+    publish({ ...inventoryState });
   };
 
   const publishMutationForTarget = (
@@ -951,12 +982,11 @@ export function createDesktopCapabilities(
   };
 
   const runApprovedMutation = async (
-    review: TrustedReview,
+    prepared: PreparedMutation,
     operationId: string,
     session: FreshTargetSession,
     controller: AbortController,
   ): Promise<Result<RequestValue, RequestError>> => {
-    const prepared = review.prepared;
     const deadline = new Date(
       clock().getTime() + prepared.commandPlan.timeoutMs,
     ).toISOString();
@@ -1110,6 +1140,300 @@ export function createDesktopCapabilities(
       reconciliationDeadline: null,
     });
     return { ok: true, value: { operationId } };
+  };
+
+  const runApprovedCollection = async (
+    review: TrustedReview,
+    operationId: string,
+    controller: AbortController,
+  ): Promise<Result<RequestValue, RequestError>> => {
+    const plan = review.collectionPlan;
+    if (
+      plan === undefined ||
+      plan.projection.schemaVersion !== 2 ||
+      currentCollectionPlan !== plan ||
+      collectionPlans.get(plan.projection.id) !== plan
+    ) {
+      return requestFailure(
+        publicError(
+          "review_invalid",
+          "The Collection Plan is unavailable for execution.",
+          "review",
+          false,
+        ),
+      );
+    }
+    const projection = plan.projection;
+    const release = officialCollectionCatalog.releases.find(
+      (candidate) =>
+        candidate.manifest.collectionId === projection.collectionId &&
+        candidate.manifest.releaseNumber === projection.releaseNumber &&
+        candidate.manifestDigest === projection.manifestDigest &&
+        candidate.manifest.status === "active" &&
+        candidate.receipt.status === "approved",
+    );
+    const { id: _planId, reviewDigest: _reviewDigest, ...reviewEvidence } =
+      projection;
+    const children = projection.children.map((child, index) => {
+      const preparedId = plan.preparedIds[index];
+      const prepared =
+        preparedId === undefined
+          ? undefined
+          : preparedMutations.get(preparedId);
+      const definition = targetDefinitions().find(
+        ({ id }) => id === child.target.id,
+      );
+      const session =
+        child.target.id === target.id
+          ? freshTargetSession
+          : freshTargetSessions.get(child.target.id);
+      const inventory = inventoryForTarget(child.target.id);
+      const mutation =
+        child.target.id === target.id
+          ? mutationState
+          : (mutationStates.get(child.target.id) ?? emptyMutationState());
+      const assessment =
+        definition === undefined
+          ? undefined
+          : projectOfficialCollections({
+              catalog: officialCollectionCatalog,
+              inventory,
+              platform,
+              target: projectTarget(definition),
+            })
+              .releases.find(
+                (candidate) =>
+                  candidate.collectionId === projection.collectionId &&
+                  candidate.releaseNumber === projection.releaseNumber &&
+                  candidate.manifestDigest === projection.manifestDigest,
+              )
+              ?.assessments.find(({ scope }) => scope === child.scope);
+      return {
+        assessment,
+        child,
+        definition,
+        inventory,
+        mutation,
+        prepared,
+        session,
+      };
+    });
+    const invalid =
+      release === undefined ||
+      clock().getTime() >= Date.parse(projection.expiresAt) ||
+      plan.preparedIds.length !== projection.children.length ||
+      digestCanonicalJson(reviewEvidence) !== projection.reviewDigest ||
+      digestCanonicalJson(projection.releaseEvidence) !==
+        digestCanonicalJson({
+          compatibility: release?.manifest.compatibility,
+          receipt: release?.receipt,
+          status: release?.manifest.status,
+        }) ||
+      children.some(
+        ({ assessment, child, definition, inventory, mutation, prepared, session }) =>
+          definition === undefined ||
+          session === undefined ||
+          prepared === undefined ||
+          inventory.freshness !== "fresh" ||
+          mutation.phase === "reconciliation-required" ||
+          guardedTargetIds.has(child.target.id) ||
+          reservedTargetIds.has(child.target.id) ||
+          definition.generation !== child.target.generation ||
+          session.binding.targetId !== child.target.id ||
+          session.binding.generation !== child.target.generation ||
+          prepared.targetId !== child.target.id ||
+          prepared.targetGeneration !== child.target.generation ||
+          prepared.inventoryId !== session.inventoryId ||
+          prepared.digest !== child.preparedDigest ||
+          digestCanonicalJson(session.binding) !== child.bindingDigest ||
+          digestCanonicalJson({
+            inventory: session.inventory,
+            inventoryId: session.inventoryId,
+            targetGeneration: session.binding.generation,
+          }) !== child.inventoryDigest ||
+          assessment === undefined ||
+          digestCanonicalJson(assessment) !== child.assessmentDigest,
+      );
+    if (invalid) {
+      discardCollectionPlan(plan);
+      const error = publicError(
+        "review_invalid",
+        "A selected Target or Collection Plan changed before reservation.",
+        "review",
+        false,
+      );
+      return requestFailure(error);
+    }
+
+    for (const { child } of children) reservedTargetIds.add(child.target.id);
+    try {
+      const acknowledgement: CollectionAcknowledgement = {
+        acknowledgedAt: clock().toISOString(),
+        collectionId: projection.collectionId,
+        kind: "release",
+        manifestDigest: projection.manifestDigest,
+        releaseNumber: projection.releaseNumber,
+      };
+      const nextAcknowledgements = [
+        ...collectionAcknowledgements.filter(
+          ({ collectionId }) => collectionId !== acknowledgement.collectionId,
+        ),
+        acknowledgement,
+      ].sort((left, right) =>
+        left.collectionId.localeCompare(right.collectionId),
+      );
+      const acknowledged = await options.recoveryRecords.commit({
+        acknowledgements: nextAcknowledgements,
+        type: "collections.acknowledgements.replace",
+      });
+      if (!acknowledged.ok) {
+        discardCollectionPlan(plan);
+        return requestFailure(acknowledged.error);
+      }
+      collectionAcknowledgements = nextAcknowledgements;
+
+      const confirmedChildren = children.map(({ child, prepared, session }) => ({
+        child,
+        prepared: prepared!,
+        session: session!,
+      }));
+      for (const preparedId of plan.preparedIds) {
+        preparedMutations.delete(preparedId);
+        preparedDependencies.delete(preparedId);
+      }
+      collectionPlans.delete(projection.id);
+      if (currentCollectionPlan === plan) currentCollectionPlan = undefined;
+
+      let execution: PublicCollectionExecution = {
+        children: confirmedChildren.map(({ child }) => ({
+          error: null,
+          outcome: null,
+          position: child.position,
+          scope: child.scope,
+          skills: child.selections.map(({ mode, name }) => ({
+            effects: null,
+            mode,
+            name,
+            status: "pending",
+          })),
+          status: "pending",
+          target: structuredClone(child.target),
+        })),
+        collectionId: projection.collectionId,
+        id: operationId,
+        manifestDigest: projection.manifestDigest,
+        phase: "running",
+        reviewDigest: projection.reviewDigest,
+        semantics: "non-transactional",
+      };
+      publishCollectionExecution(execution);
+
+      for (let index = 0; index < confirmedChildren.length; index += 1) {
+        const confirmedChild = confirmedChildren[index]!;
+        const definition = targetDefinitions().find(
+          ({ id }) => id === confirmedChild.child.target.id,
+        )!;
+        if (definition.id !== target.id) activateTarget(definition);
+        execution = {
+          ...execution,
+          children: execution.children.map((child, childIndex) =>
+            childIndex === index
+              ? {
+                  ...child,
+                  skills: child.skills.map((skill) => ({
+                    ...skill,
+                    status: "running",
+                  })),
+                  status: "running",
+                }
+              : child,
+          ),
+        };
+        publishCollectionExecution(execution);
+        if (activeMutation !== undefined) {
+          activeMutation = {
+            ...activeMutation,
+            prepared: confirmedChild.prepared,
+          };
+        }
+        const result = await runApprovedMutation(
+          confirmedChild.prepared,
+          operationId,
+          confirmedChild.session,
+          controller,
+        );
+        const succeeded = result.ok && mutationState.phase === "succeeded";
+        const childError = succeeded
+          ? null
+          : (mutationState.lastError ??
+            (result.ok
+              ? publicError(
+                  "process_failed",
+                  "The Collection child did not complete safely.",
+                  "collection",
+                  false,
+                )
+              : result.error));
+        const childOutcome = mutationState.outcome;
+        execution = {
+          ...execution,
+          children: execution.children.map((child, childIndex) => {
+            if (childIndex === index) {
+              return {
+                ...child,
+                error: childError,
+                outcome: childOutcome,
+                skills: child.skills.map((skill) => ({
+                  ...skill,
+                  effects: childOutcome?.effects.status ?? null,
+                  status: succeeded ? "completed" : "failed",
+                })),
+                status: succeeded
+                  ? "completed"
+                  : mutationState.phase === "reconciliation-required"
+                    ? "reconciliation-required"
+                    : "failed",
+              };
+            }
+            if (!succeeded && childIndex > index) {
+              return {
+                ...child,
+                skills: child.skills.map((skill) => ({
+                  ...skill,
+                  status: "stopped",
+                })),
+                status: "stopped",
+              };
+            }
+            return child;
+          }),
+          phase: succeeded ? execution.phase : "stopped",
+        };
+        publishCollectionExecution(execution);
+        if (!succeeded) {
+          for (const { child } of confirmedChildren) {
+            const childInventory = inventoryForTarget(child.target.id);
+            const staleInventory: PublicInventoryState = {
+              ...childInventory,
+              freshness: staleAfterFailure(childInventory.freshness),
+            };
+            inventoryStates.set(child.target.id, staleInventory);
+            freshTargetSessions.delete(child.target.id);
+            if (child.target.id === target.id) {
+              inventoryState = structuredClone(staleInventory);
+              freshTargetSession = undefined;
+            }
+          }
+          publishCollectionExecution(execution);
+          return requestFailure(childError!);
+        }
+      }
+      execution = { ...execution, phase: "completed" };
+      publishCollectionExecution(execution);
+      return { ok: true, value: { operationId } };
+    } finally {
+      for (const { child } of children) reservedTargetIds.delete(child.target.id);
+    }
   };
 
   const runReconciliation = async (
@@ -1418,6 +1742,27 @@ export function createDesktopCapabilities(
               };
             }
 
+            if (review.collectionPlan?.projection.schemaVersion === 2) {
+              const operationId = options.id();
+              const controller = new AbortController();
+              const promise = runApprovedCollection(
+                review,
+                operationId,
+                controller,
+              ).finally(() => {
+                if (activeMutation?.id === operationId) {
+                  activeMutation = undefined;
+                }
+              });
+              activeMutation = {
+                controller,
+                id: operationId,
+                prepared: review.prepared,
+                promise,
+              };
+              return promise;
+            }
+
             const reviewedTarget = targetDefinitions().find(
               ({ id }) => id === review.prepared.targetId,
             );
@@ -1490,9 +1835,14 @@ export function createDesktopCapabilities(
               );
             }
 
-            if (review.collectionPlan !== undefined) {
-              const collectionPlan = review.collectionPlan;
-              const projection = collectionPlan.projection;
+            const reviewedCollectionPlan = review.collectionPlan;
+            if (
+              reviewedCollectionPlan !== undefined &&
+              isSingleTargetCollectionPlan(reviewedCollectionPlan.projection)
+            ) {
+              const collectionPlan = reviewedCollectionPlan;
+              const projection =
+                collectionPlan.projection as PublicSingleTargetCollectionPlan;
               const release = officialCollectionCatalog.releases.find(
                 (candidate) =>
                   candidate.manifest.collectionId === projection.collectionId &&
@@ -1506,7 +1856,7 @@ export function createDesktopCapabilities(
                 release === undefined ||
                 currentCollectionPlan !== collectionPlan ||
                 collectionPlans.get(projection.id) !== collectionPlan ||
-                collectionPlan.preparedId !== prepared.id ||
+                collectionPlan.preparedIds[0] !== prepared.id ||
                 projection.childPreparedDigest !== prepared.digest ||
                 digestCanonicalJson(projection.releaseEvidence) !==
                   digestCanonicalJson({
@@ -1573,7 +1923,7 @@ export function createDesktopCapabilities(
             const operationId = options.id();
             const controller = new AbortController();
             const promise = runApprovedMutation(
-              review,
+              prepared,
               operationId,
               session,
               controller,
@@ -1661,6 +2011,19 @@ export function createDesktopCapabilities(
                 publicError(
                   "mutation_conflict",
                   "This Target has an active Inventory observation.",
+                  "coordinate",
+                  true,
+                ),
+              );
+            }
+            if (
+              existing !== undefined &&
+              reservedTargetIds.has(existing.id)
+            ) {
+              return requestFailure(
+                publicError(
+                  "mutation_conflict",
+                  "This Target is reserved by a Collection execution.",
                   "coordinate",
                   true,
                 ),
@@ -1858,6 +2221,16 @@ export function createDesktopCapabilities(
                 publicError(
                   "mutation_conflict",
                   "This Target has an active Inventory observation.",
+                  "coordinate",
+                  true,
+                ),
+              );
+            }
+            if (reservedTargetIds.has(existing.id)) {
+              return requestFailure(
+                publicError(
+                  "mutation_conflict",
+                  "This Target is reserved by a Collection execution.",
                   "coordinate",
                   true,
                 ),
@@ -2079,7 +2452,7 @@ export function createDesktopCapabilities(
               targetId: requestedTarget.id,
             };
             const plan: CollectionPlan = {
-              preparedId: prepared.id,
+              preparedIds: [prepared.id],
               projection: {
                 ...evidence,
                 id: planId,
@@ -2092,12 +2465,297 @@ export function createDesktopCapabilities(
             return { ok: true, value: { operationId: planId } };
           }
 
+          if (parsed.data.type === "collection.prepare-many") {
+            const request = parsed.data;
+            const release = officialCollectionCatalog.releases.find(
+              (candidate) =>
+                candidate.manifest.collectionId === request.collectionId &&
+                candidate.manifest.releaseNumber === request.releaseNumber &&
+                candidate.manifestDigest === request.manifestDigest,
+            );
+            if (
+              release === undefined ||
+              release.manifest.status !== "active" ||
+              release.receipt.status !== "approved"
+            ) {
+              return requestFailure(
+                publicError(
+                  "mutation_ineligible",
+                  "The selected Official Collection release is unavailable.",
+                  "collection",
+                  false,
+                ),
+              );
+            }
+            if (
+              activeMutation !== undefined ||
+              activeObservation !== undefined ||
+              activePreparation !== undefined
+            ) {
+              return requestFailure(
+                publicError(
+                  "mutation_conflict",
+                  "Another operation is active for a selected Target.",
+                  "coordinate",
+                  true,
+                ),
+              );
+            }
+
+            const plannedChildren: Array<{
+              readonly assessment: ReturnType<
+                typeof projectOfficialCollections
+              >["releases"][number]["assessments"][number];
+              readonly request: (typeof request.targets)[number];
+              readonly session: FreshTargetSession;
+              readonly target: TargetDefinition;
+            }> = [];
+            for (const requestedChild of request.targets) {
+              const selectedTarget = targetDefinitions().find(
+                ({ id }) => id === requestedChild.targetId,
+              );
+              const selectedInventory = inventoryForTarget(
+                requestedChild.targetId,
+              );
+              const selectedMutation =
+                requestedChild.targetId === target.id
+                  ? mutationState
+                  : (mutationStates.get(requestedChild.targetId) ??
+                    emptyMutationState());
+              const selectedSession =
+                requestedChild.targetId === target.id
+                  ? freshTargetSession
+                  : freshTargetSessions.get(requestedChild.targetId);
+              if (
+                selectedTarget === undefined ||
+                selectedSession === undefined ||
+                selectedInventory.freshness !== "fresh" ||
+                selectedMutation.phase === "reconciliation-required" ||
+                guardedTargetIds.has(requestedChild.targetId)
+              ) {
+                return requestFailure(
+                  publicError(
+                    selectedMutation.phase === "reconciliation-required" ||
+                      guardedTargetIds.has(requestedChild.targetId)
+                      ? "reconciliation_required"
+                      : "stale_inventory",
+                    "Every selected Target requires a Fresh Inventory and available mutation lifecycle.",
+                    "collection",
+                    true,
+                  ),
+                );
+              }
+              const projected = projectOfficialCollections({
+                catalog: officialCollectionCatalog,
+                inventory: selectedInventory,
+                platform,
+                target: projectTarget(selectedTarget),
+              });
+              const publicRelease = projected.releases.find(
+                (candidate) =>
+                  candidate.collectionId === request.collectionId &&
+                  candidate.releaseNumber === request.releaseNumber &&
+                  candidate.manifestDigest === request.manifestDigest,
+              );
+              const assessment = publicRelease?.assessments.find(
+                ({ scope }) => scope === requestedChild.scope,
+              );
+              const eligible =
+                publicRelease?.executable === true &&
+                assessment?.compatibility === "compatible" &&
+                assessment.inventoryFreshness === "fresh" &&
+                requestedChild.selections.every((selection) => {
+                  const entry = assessment.entries.find(
+                    ({ name }) => name === selection.name,
+                  );
+                  return (
+                    entry?.selectable === true &&
+                    entry.selectionModes.includes(selection.mode)
+                  );
+                });
+              if (!eligible || assessment === undefined) {
+                return requestFailure(
+                  publicError(
+                    "mutation_ineligible",
+                    "One or more Collection selections are not executable.",
+                    "collection",
+                    false,
+                  ),
+                );
+              }
+              plannedChildren.push({
+                assessment,
+                request: requestedChild,
+                session: selectedSession,
+                target: selectedTarget,
+              });
+            }
+
+            for (const child of plannedChildren) {
+              invalidatePreparedForTarget(child.target.id);
+            }
+            if (currentCollectionPlan !== undefined) {
+              discardCollectionPlan(currentCollectionPlan);
+            }
+            const preparation: ActivePreparation = {
+              dependentTargetIds: plannedChildren.map(({ target }) => target.id),
+              invalidated: false,
+              ownerEndpointId: endpointState.endpointId,
+              promise: undefined,
+              session: plannedChildren[0]!.session,
+            };
+            activePreparation = preparation;
+            const promise = (async (): Promise<
+              Result<RequestValue, RequestError>
+            > => {
+              try {
+                const preparedChildren: Array<{
+                  readonly assessment: (typeof plannedChildren)[number]["assessment"];
+                  readonly prepared: PreparedMutation;
+                  readonly request: (typeof request.targets)[number];
+                  readonly session: FreshTargetSession;
+                  readonly target: TargetDefinition;
+                }> = [];
+                for (const child of plannedChildren) {
+                  const prepared = await child.session.process.prepareMutation({
+                    freshness: "fresh",
+                    intent: {
+                      names: child.request.selections.map(({ name }) => name),
+                      scope: child.request.scope,
+                      source: {
+                        revision: release.manifest.source.reviewedRevision,
+                        source: release.manifest.source.repository,
+                        sourceType: "github",
+                      },
+                      type: "add",
+                    },
+                    inventory: child.session.inventory,
+                    inventoryId: child.session.inventoryId,
+                  });
+                  if (preparation.invalidated) {
+                    return requestFailure(
+                      publicError(
+                        "cancelled",
+                        "Collection preparation was invalidated before completion.",
+                        "prepare",
+                        true,
+                      ),
+                    );
+                  }
+                  if (!prepared.ok) {
+                    return requestFailure(prepared.error as RequestError);
+                  }
+                  preparedChildren.push({ ...child, prepared: prepared.value });
+                }
+
+                const expiresAt = new Date(
+                  Math.min(
+                    ...preparedChildren.map(({ prepared }) =>
+                      Date.parse(prepared.expiresAt),
+                    ),
+                  ),
+                ).toISOString();
+                const planId = options.id();
+                const evidence: Omit<
+                  PublicMultiTargetCollectionPlan,
+                  "id" | "reviewDigest"
+                > = {
+                  children: preparedChildren.map(
+                    ({ assessment, prepared, request: childRequest, session, target: childTarget }, index) => ({
+                      assessmentDigest: digestCanonicalJson(assessment),
+                      bindingDigest: digestCanonicalJson(session.binding),
+                      commandPlan: projectCommandPlan(prepared.commandPlan),
+                      inventoryDigest: digestCanonicalJson({
+                        inventory: session.inventory,
+                        inventoryId: session.inventoryId,
+                        targetGeneration: session.binding.generation,
+                      }),
+                      position: index + 1,
+                      preparedDigest: prepared.digest,
+                      scope: childRequest.scope,
+                      selections: childRequest.selections,
+                      target: projectTarget(childTarget),
+                    }),
+                  ),
+                  collectionId: request.collectionId,
+                  expiresAt,
+                  manifestDigest: request.manifestDigest,
+                  order: preparedChildren.map(
+                    ({ request: childRequest, target: childTarget }, index) => ({
+                      names: childRequest.selections.map(({ name }) => name),
+                      position: index + 1,
+                      scope: childRequest.scope,
+                      targetId: childTarget.id,
+                    }),
+                  ),
+                  releaseEvidence: {
+                    compatibility: structuredClone(
+                      release.manifest.compatibility,
+                    ),
+                    receipt: structuredClone(release.receipt),
+                    status: release.manifest.status,
+                  },
+                  releaseNumber: request.releaseNumber,
+                  schemaVersion: 2,
+                  source: {
+                    repository: release.manifest.source.repository,
+                    reviewedRevision: release.manifest.source.reviewedRevision,
+                  },
+                };
+                const plan: CollectionPlan = {
+                  preparedIds: preparedChildren.map(
+                    ({ prepared }) => prepared.id,
+                  ),
+                  projection: {
+                    ...evidence,
+                    id: planId,
+                    reviewDigest: digestCanonicalJson(evidence),
+                  },
+                };
+                for (const { prepared, target: childTarget } of preparedChildren) {
+                  preparedMutations.set(prepared.id, prepared);
+                  preparedDependencies.set(
+                    prepared.id,
+                    plannedChildren.map(({ target }) => target.id),
+                  );
+                  const childMutation =
+                    childTarget.id === target.id
+                      ? mutationState
+                      : (mutationStates.get(childTarget.id) ??
+                        emptyMutationState());
+                  mutationStates.set(childTarget.id, {
+                    ...childMutation,
+                    activeOperationId: null,
+                    commandPlan: projectCommandPlan(prepared.commandPlan),
+                    lastError: null,
+                    outcome: null,
+                    phase: "planned",
+                    reconciliationDeadline: null,
+                  });
+                }
+                currentCollectionPlan = plan;
+                collectionPlans.set(planId, plan);
+                if (mutationStates.has(target.id)) {
+                  mutationState = structuredClone(mutationStates.get(target.id)!);
+                }
+                publish({ ...inventoryState });
+                return { ok: true, value: { operationId: planId } };
+              } finally {
+                if (activePreparation === preparation) {
+                  activePreparation = undefined;
+                }
+              }
+            })();
+            preparation.promise = promise;
+            return promise;
+          }
+
           if (parsed.data.type === "collection.review.request") {
             const plan = collectionPlans.get(parsed.data.collectionPlanId);
             const prepared =
               plan === undefined
                 ? undefined
-                : preparedMutations.get(plan.preparedId);
+                : preparedMutations.get(plan.preparedIds[0]!);
             if (
               plan === undefined ||
               plan !== currentCollectionPlan ||
@@ -2112,12 +2770,16 @@ export function createDesktopCapabilities(
                 false,
               );
               if (plan !== undefined) {
+                const plannedTargetId =
+                  plan.projection.schemaVersion === 1
+                    ? plan.projection.targetId
+                    : plan.projection.children[0]!.target.id;
                 const plannedTargetMutation =
-                  plan.projection.targetId === target.id
+                  plannedTargetId === target.id
                     ? mutationState
-                    : (mutationStates.get(plan.projection.targetId) ??
+                    : (mutationStates.get(plannedTargetId) ??
                       emptyMutationState());
-                publishMutationForTarget(plan.projection.targetId, {
+                publishMutationForTarget(plannedTargetId, {
                   ...plannedTargetMutation,
                   activeOperationId: null,
                   commandPlan: null,

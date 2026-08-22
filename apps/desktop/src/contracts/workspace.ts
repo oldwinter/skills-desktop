@@ -287,7 +287,7 @@ const collectionCompatibilitySchema = z
     cliVersion: z.literal("1.5.23"),
     harnesses: z.array(z.string().min(1).max(128)).max(64),
     platforms: z.array(z.enum(["darwin", "linux", "win32"])).max(3),
-    requiredCapabilities: z.array(z.literal("local")).max(1),
+    requiredCapabilities: z.array(z.enum(["local", "ssh"])).max(2),
   })
   .strict();
 
@@ -343,7 +343,22 @@ export const collectionAcknowledgementSchema = z
   })
   .strict();
 
-export const publicCollectionPlanSchema = z
+const collectionSelectionSchema = z
+  .object({
+    mode: z.enum(["add", "reapply"]),
+    name: z.string().min(1).max(256),
+  })
+  .strict();
+
+const collectionReleaseEvidenceSchema = z
+  .object({
+    compatibility: collectionCompatibilitySchema,
+    receipt: collectionReceiptSchema,
+    status: z.enum(["active", "deprecated", "revoked"]),
+  })
+  .strict();
+
+const publicSingleTargetCollectionPlanSchema = z
   .object({
     assessmentDigest: z.string().regex(/^sha256:[a-f0-9]{64}$/),
     childCommandPlan: commandPlanSchema,
@@ -364,28 +379,12 @@ export const publicCollectionPlanSchema = z
           .strict(),
       )
       .length(1),
-    releaseEvidence: z
-      .object({
-        compatibility: collectionCompatibilitySchema,
-        receipt: collectionReceiptSchema,
-        status: z.enum(["active", "deprecated", "revoked"]),
-      })
-      .strict(),
+    releaseEvidence: collectionReleaseEvidenceSchema,
     releaseNumber: z.number().int().positive(),
     reviewDigest: z.string().regex(/^sha256:[a-f0-9]{64}$/),
     schemaVersion: z.literal(1),
     scope: z.enum(["global", "project"]),
-    selections: z
-      .array(
-        z
-          .object({
-            mode: z.enum(["add", "reapply"]),
-            name: z.string().min(1).max(256),
-          })
-          .strict(),
-      )
-      .min(1)
-      .max(128),
+    selections: z.array(collectionSelectionSchema).min(1).max(128),
     source: z
       .object({
         repository: z.string().min(3).max(256),
@@ -397,9 +396,157 @@ export const publicCollectionPlanSchema = z
   })
   .strict();
 
+const publicMultiTargetCollectionPlanSchema = z
+  .object({
+    children: z
+      .array(
+        z
+          .object({
+            assessmentDigest: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+            bindingDigest: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+            commandPlan: commandPlanSchema,
+            inventoryDigest: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+            position: z.number().int().positive(),
+            preparedDigest: z.string().regex(/^[a-f0-9]{64}$/),
+            scope: z.enum(["global", "project"]),
+            selections: z.array(collectionSelectionSchema).min(1).max(128),
+            target: targetDefinitionSchema,
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(128),
+    collectionId: z.string().min(1).max(128),
+    expiresAt: z.string().datetime({ offset: true }),
+    id: z.string().min(1).max(256),
+    manifestDigest: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+    order: z
+      .array(
+        z
+          .object({
+            names: z.array(z.string().min(1).max(256)).min(1).max(128),
+            position: z.number().int().positive(),
+            scope: z.enum(["global", "project"]),
+            targetId: targetIdSchema,
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(128),
+    releaseEvidence: collectionReleaseEvidenceSchema,
+    releaseNumber: z.number().int().positive(),
+    reviewDigest: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+    schemaVersion: z.literal(2),
+    source: z
+      .object({
+        repository: z.string().min(3).max(256),
+        reviewedRevision: z.string().regex(/^[a-f0-9]{40}$/),
+      })
+      .strict(),
+  })
+  .strict()
+  .superRefine((plan, context) => {
+    const targetIds = plan.children.map(({ target }) => target.id);
+    const childrenMatchOrder =
+      plan.children.length === plan.order.length &&
+      plan.children.every((child, index) => {
+        const order = plan.order[index];
+        const names = child.selections.map(({ name }) => name);
+        return (
+          order !== undefined &&
+          order.position === child.position &&
+          order.scope === child.scope &&
+          order.targetId === child.target.id &&
+          JSON.stringify(order.names) === JSON.stringify(names) &&
+          child.commandPlan.operation === "add" &&
+          child.commandPlan.scope === child.scope &&
+          child.commandPlan.targetId === child.target.id &&
+          JSON.stringify(child.commandPlan.names) === JSON.stringify(names) &&
+          new Set(names).size === names.length
+        );
+      });
+    if (
+      new Set(targetIds).size !== targetIds.length ||
+      plan.children.some((child, index) => child.position !== index + 1) ||
+      plan.order.some((child, index) => child.position !== index + 1) ||
+      !childrenMatchOrder
+    ) {
+      context.addIssue({
+        code: "custom",
+        message:
+          "Collection children, selections, Command Plans, and stable order must agree.",
+      });
+    }
+  });
+
+export const publicCollectionPlanSchema = z.union([
+  publicSingleTargetCollectionPlanSchema,
+  publicMultiTargetCollectionPlanSchema,
+]);
+
+const publicCollectionExecutionSchema = z
+  .object({
+    children: z
+      .array(
+        z
+          .object({
+            error: rendererErrorSchema.nullable(),
+            outcome: publicMutationOutcomeSchema.nullable(),
+            position: z.number().int().positive(),
+            scope: z.enum(["global", "project"]),
+            skills: z
+              .array(
+                z
+                  .object({
+                    effects: z
+                      .enum([
+                        "content-unverified",
+                        "not-observed",
+                        "possible",
+                        "verified",
+                      ])
+                      .nullable(),
+                    mode: z.enum(["add", "reapply"]),
+                    name: z.string().min(1).max(256),
+                    status: z.enum([
+                      "completed",
+                      "failed",
+                      "pending",
+                      "running",
+                      "stopped",
+                    ]),
+                  })
+                  .strict(),
+              )
+              .min(1)
+              .max(128),
+            status: z.enum([
+              "completed",
+              "failed",
+              "pending",
+              "reconciliation-required",
+              "running",
+              "stopped",
+            ]),
+            target: targetDefinitionSchema,
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(128),
+    collectionId: z.string().min(1).max(128),
+    id: z.string().min(1).max(256),
+    manifestDigest: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+    phase: z.enum(["completed", "running", "stopped"]),
+    reviewDigest: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+    semantics: z.literal("non-transactional"),
+  })
+  .strict();
+
 export const publicCollectionsStateSchema = z
   .object({
     acknowledgements: z.array(collectionAcknowledgementSchema).max(1_000),
+    execution: publicCollectionExecutionSchema.nullable().optional(),
     plan: publicCollectionPlanSchema.nullable(),
     releases: z.array(publicCollectionReleaseSchema).max(1_000),
   })
@@ -590,6 +737,41 @@ export const prepareCollectionRequestSchema = z
   })
   .strict();
 
+export const prepareCollectionAcrossTargetsRequestSchema = z
+  .object({
+    collectionId: z.string().min(1).max(128),
+    manifestDigest: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+    releaseNumber: z.number().int().positive(),
+    targets: z
+      .array(
+        z
+          .object({
+            scope: z.enum(["global", "project"]),
+            selections: z
+              .array(collectionSelectionSchema)
+              .min(1)
+              .max(128)
+              .refine(
+                (selections) =>
+                  new Set(selections.map(({ name }) => name)).size ===
+                  selections.length,
+              ),
+            targetId: targetIdSchema,
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(128)
+      .refine(
+        (targets) =>
+          new Set(targets.map(({ targetId }) => targetId)).size ===
+          targets.length,
+      ),
+    type: z.literal("collection.prepare-many"),
+    version: z.literal(1),
+  })
+  .strict();
+
 export const requestCollectionReviewSchema = z
   .object({
     collectionPlanId: z.string().min(1).max(256),
@@ -612,6 +794,7 @@ export const workspaceRequestSchema = z.discriminatedUnion("type", [
   openComparisonRequestSchema,
   prepareComparisonRequestSchema,
   prepareCollectionRequestSchema,
+  prepareCollectionAcrossTargetsRequestSchema,
   requestCollectionReviewSchema,
 ]);
 
@@ -634,8 +817,20 @@ export type PublicCollectionsState = z.infer<
   typeof publicCollectionsStateSchema
 >;
 export type PublicCollectionPlan = z.infer<typeof publicCollectionPlanSchema>;
+export type PublicSingleTargetCollectionPlan = z.infer<
+  typeof publicSingleTargetCollectionPlanSchema
+>;
+export type PublicMultiTargetCollectionPlan = z.infer<
+  typeof publicMultiTargetCollectionPlanSchema
+>;
+export type PublicCollectionExecution = z.infer<
+  typeof publicCollectionExecutionSchema
+>;
 export type PrepareCollectionRequest = z.infer<
   typeof prepareCollectionRequestSchema
+>;
+export type PrepareCollectionAcrossTargetsRequest = z.infer<
+  typeof prepareCollectionAcrossTargetsRequestSchema
 >;
 export type PublicMutationState = z.infer<typeof publicMutationStateSchema>;
 export type RendererError = z.infer<typeof rendererErrorSchema>;
@@ -665,6 +860,9 @@ export interface WorkspaceBridge {
   ): Promise<WorkspaceRequestResult>;
   prepareCollection(
     request: Omit<PrepareCollectionRequest, "type" | "version">,
+  ): Promise<WorkspaceRequestResult>;
+  prepareCollectionAcrossTargets(
+    request: Omit<PrepareCollectionAcrossTargetsRequest, "type" | "version">,
   ): Promise<WorkspaceRequestResult>;
   getSnapshot(): Promise<WorkspaceSnapshotResult>;
   prepareMutation(

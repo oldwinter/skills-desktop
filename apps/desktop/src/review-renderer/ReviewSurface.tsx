@@ -150,6 +150,141 @@ export function ReviewSurface({ client }: { readonly client: ReviewBridge }) {
 
   if ("collectionPlan" in snapshot.projection) {
     const { collectionPlan, target } = snapshot.projection;
+    if (collectionPlan.schemaVersion === 2) {
+      return (
+        <main className="review-surface">
+          <header className="review-heading">
+            <span className="review-mark">
+              <ShieldCheck aria-hidden="true" size={20} />
+            </span>
+            <div>
+              <p>Trusted Review</p>
+              <h1>Review Official Collection</h1>
+            </div>
+          </header>
+          <dl className="review-facts">
+            <div>
+              <dt>Collection</dt>
+              <dd>{collectionPlan.collectionId}</dd>
+            </div>
+            <div>
+              <dt>Release</dt>
+              <dd>{collectionPlan.releaseNumber}</dd>
+            </div>
+            <div>
+              <dt>Targets</dt>
+              <dd>{collectionPlan.children.length}</dd>
+            </div>
+            <div>
+              <dt>Execution</dt>
+              <dd>Sequential, non-transactional</dd>
+            </div>
+            <div className="review-facts__wide">
+              <dt>Pinned source</dt>
+              <dd>
+                {collectionPlan.source.repository}@
+                {collectionPlan.source.reviewedRevision}
+              </dd>
+            </div>
+            <div>
+              <dt>Release status</dt>
+              <dd>{collectionPlan.releaseEvidence.status}</dd>
+            </div>
+            <div>
+              <dt>Independent reviewer</dt>
+              <dd>{collectionPlan.releaseEvidence.receipt.reviewer}</dd>
+            </div>
+            <div>
+              <dt>Reviewed at</dt>
+              <dd>{collectionPlan.releaseEvidence.receipt.reviewedAt}</dd>
+            </div>
+            <div>
+              <dt>Review policy</dt>
+              <dd>{collectionPlan.releaseEvidence.receipt.reviewPolicy}</dd>
+            </div>
+            <div className="review-facts__wide">
+              <dt>Review location</dt>
+              <dd>{collectionPlan.releaseEvidence.receipt.reviewLocation}</dd>
+            </div>
+            <div className="review-facts__wide">
+              <dt>Manifest digest</dt>
+              <dd>{collectionPlan.manifestDigest}</dd>
+            </div>
+            <div className="review-facts__wide">
+              <dt>Review digest</dt>
+              <dd>{collectionPlan.reviewDigest}</dd>
+            </div>
+            <div>
+              <dt>Expires</dt>
+              <dd>{collectionPlan.expiresAt}</dd>
+            </div>
+          </dl>
+          <section className="review-plan" aria-labelledby="review-plan-heading">
+            <h2 id="review-plan-heading">Stable child order</h2>
+            <ol className="review-child-list">
+              {collectionPlan.children.map((child) => (
+                <li key={child.target.id}>
+                  <header>
+                    <strong>
+                      {child.position}. {child.target.label}
+                    </strong>
+                    <span>
+                      {child.target.kind.toUpperCase()} / generation{" "}
+                      {child.target.generation} / {scopeLabel(child.scope)}
+                    </span>
+                  </header>
+                  <p>
+                    {child.selections
+                      .map(({ mode, name }) => `${name} (${mode})`)
+                      .join(", ")}
+                  </p>
+                  <code>{child.commandPlan.preview}</code>
+                  <dl className="review-child-evidence">
+                    <div>
+                      <dt>Binding</dt>
+                      <dd>{child.bindingDigest}</dd>
+                    </div>
+                    <div>
+                      <dt>Inventory</dt>
+                      <dd>{child.inventoryDigest}</dd>
+                    </div>
+                    <div>
+                      <dt>Assessment</dt>
+                      <dd>{child.assessmentDigest}</dd>
+                    </div>
+                    <div>
+                      <dt>Prepared child</dt>
+                      <dd>{child.preparedDigest}</dd>
+                    </div>
+                  </dl>
+                </li>
+              ))}
+            </ol>
+          </section>
+          <div className="review-actions">
+            <button
+              className="review-button"
+              disabled={pendingDecision !== undefined}
+              onClick={() => void decide("reject")}
+              type="button"
+            >
+              <X aria-hidden="true" size={16} />
+              Reject
+            </button>
+            <button
+              aria-label="Approve Official Collection plan"
+              className="review-button review-button--primary"
+              disabled={pendingDecision !== undefined}
+              onClick={() => void decide("approve")}
+              type="button"
+            >
+              <Check aria-hidden="true" size={16} />
+              {pendingDecision === "approve" ? "Applying" : "Approve"}
+            </button>
+          </div>
+        </main>
+      );
+    }
     return (
       <main className="review-surface">
         <header className="review-heading">

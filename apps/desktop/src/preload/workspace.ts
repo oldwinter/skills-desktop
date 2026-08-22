@@ -6,6 +6,7 @@ import {
   workspaceSnapshotResultSchema,
   type DesktopEvent,
   type MutationIntent,
+  type PrepareCollectionAcrossTargetsRequest,
   type PrepareCollectionRequest,
   type TargetDraft,
   type WorkspaceBridge,
@@ -51,6 +52,16 @@ const bridge: WorkspaceBridge = Object.freeze({
   ) {
     return workspaceRequestResultSchema.parse(
       await ipcRenderer.invoke("workspace:collection:prepare", request),
+    );
+  },
+  async prepareCollectionAcrossTargets(
+    request: Omit<
+      PrepareCollectionAcrossTargetsRequest,
+      "type" | "version"
+    >,
+  ) {
+    return workspaceRequestResultSchema.parse(
+      await ipcRenderer.invoke("workspace:collection:prepare-many", request),
     );
   },
   async prepareComparison(

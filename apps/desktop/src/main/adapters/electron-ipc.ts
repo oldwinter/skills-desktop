@@ -23,6 +23,7 @@ const CHANNELS = {
   compare: "workspace:comparison:open",
   comparisonPrepare: "workspace:comparison:prepare",
   collectionPrepare: "workspace:collection:prepare",
+  collectionPrepareMany: "workspace:collection:prepare-many",
   collectionReview: "workspace:collection:review-request",
   event: "workspace:event",
   hostTrustReview: "workspace:host-trust:review",
@@ -259,6 +260,56 @@ export function registerDesktopIpc(input: {
     },
   );
   input.ipcMain.handle(
+    CHANNELS.collectionPrepareMany,
+    async (event, request: unknown) => {
+      const endpoint = authorized(event, "workspace");
+      if (endpoint === undefined) return authorizationFailure();
+      const fields =
+        typeof request === "object" && request !== null
+          ? (request as Record<string, unknown>)
+          : {};
+      const targets = Array.isArray(fields.targets)
+        ? fields.targets.map((target) => {
+            const targetFields =
+              typeof target === "object" && target !== null
+                ? (target as Record<string, unknown>)
+                : {};
+            const selections = Array.isArray(targetFields.selections)
+              ? targetFields.selections.map((selection) => {
+                  const selectionFields =
+                    typeof selection === "object" && selection !== null
+                      ? (selection as Record<string, unknown>)
+                      : {};
+                  return {
+                    mode: selectionFields.mode,
+                    name: selectionFields.name,
+                  };
+                })
+              : targetFields.selections;
+            return {
+              scope: targetFields.scope,
+              selections,
+              targetId: targetFields.targetId,
+            };
+          })
+        : fields.targets;
+      try {
+        return workspaceRequestResultSchema.parse(
+          await endpoint.session.request({
+            collectionId: fields.collectionId,
+            manifestDigest: fields.manifestDigest,
+            releaseNumber: fields.releaseNumber,
+            targets,
+            type: "collection.prepare-many",
+            version: 1,
+          }),
+        );
+      } catch {
+        return internalFailure();
+      }
+    },
+  );
+  input.ipcMain.handle(
     CHANNELS.targetCreate,
     async (event, definition: unknown) => {
       const endpoint = authorized(event, "workspace");
@@ -481,6 +532,7 @@ export function registerDesktopIpc(input: {
       input.ipcMain.removeHandler(CHANNELS.compare);
       input.ipcMain.removeHandler(CHANNELS.comparisonPrepare);
       input.ipcMain.removeHandler(CHANNELS.collectionPrepare);
+      input.ipcMain.removeHandler(CHANNELS.collectionPrepareMany);
       input.ipcMain.removeHandler(CHANNELS.collectionReview);
       input.ipcMain.removeHandler(CHANNELS.targetCreate);
       input.ipcMain.removeHandler(CHANNELS.targetDelete);
