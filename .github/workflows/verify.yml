@@ -24,7 +24,48 @@ jobs:
           node-version: 24
       - run: npm ci
       - run: npm run verify
-      - run: npm run smoke:packaged
+      - name: Run packaged Electron smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run package:linux
+
+          repository_root="${GITHUB_WORKSPACE:?GITHUB_WORKSPACE is required}"
+          runner_temp="${RUNNER_TEMP:?RUNNER_TEMP is required}"
+          executable_path="$(realpath "$repository_root/apps/desktop/out/Skills Desktop-linux-x64/skills-desktop")"
+          profile_path="$(mktemp "$runner_temp/skills-desktop-apparmor.XXXXXX")"
+          profile_loaded=0
+
+          cleanup() {
+            local cleanup_status="$1"
+            trap - EXIT INT TERM
+            if [[ "$profile_loaded" == 1 ]] && ! sudo apparmor_parser --skip-cache --remove "$profile_path"; then
+              echo "::error::Temporary AppArmor profile cleanup failed." >&2
+              cleanup_status=1
+            fi
+            if ! rm -f "$profile_path"; then
+              echo "::error::Temporary AppArmor profile file cleanup failed." >&2
+              cleanup_status=1
+            fi
+            exit "$cleanup_status"
+          }
+          trap 'cleanup "$?"' EXIT
+          trap 'exit 130' INT
+          trap 'exit 143' TERM
+
+          # Ubuntu 24.04 requires an executable-scoped userns profile for Chromium's sandbox.
+          cat >"$profile_path" <<EOF
+          abi <abi/4.0>,
+          include <tunables/global>
+
+          profile skills-desktop-ci "$executable_path" flags=(unconfined) {
+            userns,
+          }
+          EOF
+          sudo apparmor_parser --skip-cache --replace "$profile_path"
+          profile_loaded=1
+
+          CI=true xvfb-run -a node tests/packaged-electron.smoke.mjs
       - if: github.event_name == 'push'
         run: npm run smoke:cli
 
