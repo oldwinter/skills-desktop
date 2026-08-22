@@ -35,6 +35,9 @@ const isWireRequest = (value) => validateWireRequest(
 
 (async () => {
   const childProcess = process.getBuiltinModule("node:child_process");
+  const fileSystem = process.getBuiltinModule("node:fs");
+  const operatingSystem = process.getBuiltinModule("node:os");
+  const pathModule = process.getBuiltinModule("node:path");
   const MAX_OUTPUT_BYTES = ${MAX_WIRE_INVENTORY_JSON_BYTES};
   const MAX_REQUEST_BYTES = ${MAX_WIRE_REQUEST_BYTES};
   const CLI_PACKAGE = ${JSON.stringify(CLI_PACKAGE)};
@@ -183,48 +186,160 @@ const isWireRequest = (value) => validateWireRequest(
     if (typeof process.env[name] === "string") environment[name] = process.env[name];
   }
   const invoke = (args, timeoutMs = 60_000) => new Promise((resolve, reject) => {
-    const child = childProcess.spawn("npx", ["--yes", CLI_PACKAGE, ...args], {
-      cwd: request.workspace,
-      env: environment,
-      shell: false,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    children.add(child);
-    const stdout = [];
-    let stdoutBytes = 0;
+    let captureDirectory;
+    let stdoutFile;
+    try {
+      captureDirectory = fileSystem.mkdtempSync(
+        pathModule.join(operatingSystem.tmpdir(), "skills-desktop-remote-output-"),
+      );
+      const stdoutPath = pathModule.join(captureDirectory, "stdout");
+      stdoutFile = fileSystem.openSync(stdoutPath, "wx+", 0o600);
+      if (process.platform !== "win32") fileSystem.unlinkSync(stdoutPath);
+    } catch {
+      if (stdoutFile !== undefined) {
+        try { fileSystem.closeSync(stdoutFile); } catch {}
+      }
+      if (captureDirectory !== undefined) {
+        try { fileSystem.rmSync(captureDirectory, { force: true, recursive: true }); } catch {}
+      }
+      reject({ code: "remote_operation_failed" });
+      return;
+    }
+
+    let child;
+    let closeTimer;
+    let forceTimer;
+    let outputTimer;
+    let settled = false;
     let stderrBytes = 0;
     let outputExceeded = false;
-    const timeout = setTimeout(() => {
-      child.kill("SIGTERM");
-      reject({ code: "remote_operation_failed" });
-    }, timeoutMs);
-    child.stdout.on("data", (chunk) => {
-      stdoutBytes += chunk.length;
-      if (stdoutBytes > MAX_OUTPUT_BYTES) {
-        outputExceeded = true;
-        child.kill("SIGTERM");
+    let processFailure;
+    let timeout;
+
+    const cleanup = () => {
+      if (timeout !== undefined) clearTimeout(timeout);
+      if (closeTimer !== undefined) clearTimeout(closeTimer);
+      if (forceTimer !== undefined) clearTimeout(forceTimer);
+      if (outputTimer !== undefined) clearInterval(outputTimer);
+      if (child !== undefined) children.delete(child);
+      let failed = false;
+      try { fileSystem.closeSync(stdoutFile); } catch { failed = true; }
+      try {
+        fileSystem.rmSync(captureDirectory, { force: true, recursive: true });
+      } catch {
+        failed = true;
+      }
+      return !failed;
+    };
+    const rejectOnce = (code) => {
+      if (settled) return;
+      settled = true;
+      reject({ code: cleanup() ? code : "remote_operation_failed" });
+    };
+    const resolveOnce = (value) => {
+      if (settled) return;
+      settled = true;
+      if (!cleanup()) {
+        reject({ code: "remote_operation_failed" });
         return;
       }
-      stdout.push(chunk);
-    });
+      resolve(value);
+    };
+
+    try {
+      child = childProcess.spawn("npx", ["--yes", CLI_PACKAGE, ...args], {
+        cwd: request.workspace,
+        env: environment,
+        shell: false,
+        stdio: ["ignore", stdoutFile, "pipe"],
+      });
+    } catch {
+      rejectOnce("remote_operation_failed");
+      return;
+    }
+    children.add(child);
+
+    let terminationRequested = false;
+    const requestTermination = (code) => {
+      processFailure = code;
+      if (terminationRequested) return;
+      terminationRequested = true;
+      try { child.kill("SIGTERM"); } catch {}
+      forceTimer = setTimeout(() => {
+        try { child.kill("SIGKILL"); } catch {}
+      }, 1_000);
+      closeTimer = setTimeout(() => rejectOnce(code), 2_000);
+    };
+    timeout = setTimeout(() => {
+      requestTermination("remote_operation_failed");
+    }, timeoutMs);
+    if (typeof timeout.unref === "function") timeout.unref();
+    const inspectOutput = () => {
+      try {
+        if (fileSystem.fstatSync(stdoutFile).size > MAX_OUTPUT_BYTES) {
+          outputExceeded = true;
+          requestTermination("output_limit_exceeded");
+        }
+      } catch {
+        requestTermination("remote_operation_failed");
+      }
+    };
+    outputTimer = setInterval(inspectOutput, 10);
+    if (typeof outputTimer.unref === "function") outputTimer.unref();
     child.stderr.on("data", (chunk) => {
       stderrBytes += chunk.length;
       if (stderrBytes > MAX_OUTPUT_BYTES) {
         outputExceeded = true;
-        child.kill("SIGTERM");
+        requestTermination("output_limit_exceeded");
       }
     });
     child.once("error", (error) => {
-      clearTimeout(timeout);
-      children.delete(child);
-      reject({ code: error && error.code === "ENOENT" ? "remote_runtime_unavailable" : "remote_operation_failed" });
+      processFailure = error && error.code === "ENOENT"
+        ? "remote_runtime_unavailable"
+        : "remote_operation_failed";
     });
     child.once("close", (exitCode) => {
-      clearTimeout(timeout);
-      children.delete(child);
-      if (outputExceeded) reject({ code: "output_limit_exceeded" });
-      else if (exitCode !== 0) reject({ code: "remote_operation_failed" });
-      else resolve({ exitCode: exitCode === null ? 1 : exitCode, stdout: Buffer.concat(stdout).toString("utf8") });
+      let stdoutSize;
+      try {
+        stdoutSize = fileSystem.fstatSync(stdoutFile).size;
+      } catch {
+        rejectOnce("remote_operation_failed");
+        return;
+      }
+      if (stdoutSize > MAX_OUTPUT_BYTES) outputExceeded = true;
+      if (outputExceeded) {
+        rejectOnce("output_limit_exceeded");
+        return;
+      }
+      if (processFailure !== undefined) {
+        rejectOnce(processFailure);
+        return;
+      }
+      if (exitCode !== 0) {
+        rejectOnce("remote_operation_failed");
+        return;
+      }
+      const stdout = Buffer.alloc(stdoutSize);
+      let offset = 0;
+      while (offset < stdoutSize) {
+        const bytesRead = fileSystem.readSync(
+          stdoutFile,
+          stdout,
+          offset,
+          stdoutSize - offset,
+          offset,
+        );
+        if (bytesRead === 0) break;
+        offset += bytesRead;
+      }
+      if (offset !== stdoutSize) {
+        rejectOnce("remote_operation_failed");
+        return;
+      }
+      resolveOnce({
+        exitCode: exitCode === null ? 1 : exitCode,
+        stdout: stdout.toString("utf8"),
+      });
     });
   });
 
