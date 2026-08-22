@@ -7,15 +7,15 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: unsigned-candidates-${{ github.workflow }}-${{ github.ref }}
+  group: unsigned-candidates-${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
 
 permissions:
   contents: read
 
 jobs:
-  candidate:
-    name: Candidate ${{ matrix.platform }} ${{ matrix.architecture }}
+  package:
+    name: Package ${{ matrix.platform }} ${{ matrix.architecture }}
     permissions:
       contents: read
     runs-on: ${{ matrix.runner }}
@@ -50,8 +50,8 @@ jobs:
         run: npm ci
       - name: Typecheck candidate generator
         run: npm run typecheck
-      - name: Test candidate contract
-        run: npm test -- tests/release-candidate.test.ts tests/release-candidate-workflow.test.ts
+      - name: Test release contracts
+        run: npm test -- tests/release-candidate.test.ts tests/release-integrity.test.ts tests/release-candidate-workflow.test.ts
       - if: matrix.platform == 'linux'
         name: Install official Linux maker prerequisites
         run: sudo apt-get install --no-install-recommends --yes fakeroot rpm
@@ -66,11 +66,319 @@ jobs:
           --workflow-event "${{ github.event_name }}"
           --workflow-run-attempt "${{ github.run_attempt }}"
           --workflow-run-id "${{ github.run_id }}"
-      - name: Retain manifest evidence
+      - id: identity
+        name: Identify candidate package
+        run: >-
+          node scripts/release/release-integrity-cli.mjs identify
+          --architecture "${{ matrix.architecture }}"
+          --candidate-root "release-candidates"
+          --package-lock "package-lock.json"
+          --platform "${{ matrix.platform }}"
+          --repository "${{ github.repository }}"
+          --source-commit "${{ github.sha }}"
+          --workflow-event "${{ github.event_name }}"
+          --workflow-name "${{ github.workflow }}"
+          --workflow-run-attempt "${{ github.run_attempt }}"
+          --workflow-run-id "${{ github.run_id }}"
+      - if: github.event_name != 'workflow_dispatch'
+        name: Retain manifest evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           compression-level: 0
           if-no-files-found: error
-          name: unsigned-candidate-${{ matrix.platform }}-${{ matrix.architecture }}-manifest
-          path: release-candidates/**/candidate-manifest-v1.*
+          name: unsigned-package-manifest-${{ steps.identity.outputs.manifest-digest }}
+          path: ${{ steps.identity.outputs.candidate-directory }}/candidate-manifest-v1.*
           retention-days: 7
+      - if: github.event_name == 'workflow_dispatch'
+        name: Exchange digest-addressed candidate
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          compression-level: 0
+          if-no-files-found: error
+          include-hidden-files: false
+          name: unsigned-package-${{ steps.identity.outputs.manifest-digest }}
+          path: ${{ steps.identity.outputs.candidate-directory }}/**
+          retention-days: 1
+
+  evidence:
+    name: Generate integrity evidence
+    if: github.event_name == 'workflow_dispatch'
+    needs: package
+    permissions:
+      artifact-metadata: write
+      attestations: write
+      contents: read
+      id-token: write
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    outputs:
+      candidate-set-digest: ${{ steps.finalize.outputs.candidate-set-digest }}
+      evidence-artifact-digest: ${{ steps.finalize.outputs.evidence-artifact-digest }}
+      evidence-set-digest: ${{ steps.finalize.outputs.evidence-set-digest }}
+      version: ${{ steps.finalize.outputs.version }}
+    steps:
+      - name: Check out evidence contract
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Download digest-addressed candidates
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          merge-multiple: false
+          path: candidate-inputs
+          pattern: unsigned-package-*
+      - id: generate
+        name: Generate checksums, SPDX SBOM, and identity predicate
+        run: >-
+          node scripts/release/release-integrity-cli.mjs generate
+          --candidate-root "candidate-inputs"
+          --created-at "$(date -u +'%Y-%m-%dT%H:%M:%S.000Z')"
+          --output-root "release-evidence"
+          --package-lock "package-lock.json"
+          --repository "${{ github.repository }}"
+          --source-commit "${{ github.sha }}"
+          --workflow-event "${{ github.event_name }}"
+          --workflow-name "${{ github.workflow }}"
+          --workflow-run-attempt "${{ github.run_attempt }}"
+          --workflow-run-id "${{ github.run_id }}"
+      - id: attest-provenance
+        name: Attest candidate build provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: ${{ steps.generate.outputs.subject-paths }}
+      - id: attest-sbom
+        name: Attest candidate SPDX SBOM
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          sbom-path: ${{ steps.generate.outputs.sbom-path }}
+          subject-path: ${{ steps.generate.outputs.subject-paths }}
+      - id: attest-candidate-identity
+        name: Attest candidate platform identity
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          predicate-path: ${{ steps.generate.outputs.predicate-path }}
+          predicate-type: https://github.com/oldwinter/skills-desktop/attestations/unsigned-candidate/v1
+          subject-path: ${{ steps.generate.outputs.subject-paths }}
+      - id: finalize
+        name: Seal release evidence
+        run: >-
+          node scripts/release/release-integrity-cli.mjs finalize
+          --candidate-identity-bundle "${{ steps.attest-candidate-identity.outputs.bundle-path }}"
+          --candidate-set-digest "${{ steps.generate.outputs.candidate-set-digest }}"
+          --evidence-root "release-evidence"
+          --provenance-bundle "${{ steps.attest-provenance.outputs.bundle-path }}"
+          --sbom-bundle "${{ steps.attest-sbom.outputs.bundle-path }}"
+      - name: Exchange digest-addressed evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          compression-level: 0
+          if-no-files-found: error
+          include-hidden-files: false
+          name: unsigned-evidence-${{ steps.finalize.outputs.evidence-artifact-digest }}
+          path: release-evidence/**
+          retention-days: 1
+
+  verify:
+    name: Verify exact candidate and evidence bytes
+    if: github.event_name == 'workflow_dispatch'
+    needs: evidence
+    permissions:
+      attestations: read
+      contents: read
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    outputs:
+      candidate-set-digest: ${{ steps.assemble.outputs.candidate-set-digest }}
+      evidence-artifact-digest: ${{ steps.assemble.outputs.evidence-artifact-digest }}
+      evidence-set-digest: ${{ steps.assemble.outputs.evidence-set-digest }}
+      payload-digest: ${{ steps.assemble.outputs.payload-digest }}
+      version: ${{ steps.assemble.outputs.version }}
+    steps:
+      - name: Check out verification contract
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Download digest-addressed candidates
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          merge-multiple: false
+          path: candidate-inputs
+          pattern: unsigned-package-*
+      - name: Download digest-addressed evidence
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: unsigned-evidence-${{ needs.evidence.outputs.evidence-artifact-digest }}
+          path: evidence-input
+      - name: Resolve exact attestation subjects
+        run: >-
+          node scripts/release/release-integrity-cli.mjs subjects
+          --candidate-root "candidate-inputs"
+          --output-path "${{ runner.temp }}/candidate-subjects.json"
+          --package-lock "package-lock.json"
+          --repository "${{ github.repository }}"
+          --source-commit "${{ github.sha }}"
+          --workflow-event "${{ github.event_name }}"
+          --workflow-name "${{ github.workflow }}"
+          --workflow-run-attempt "${{ github.run_attempt }}"
+          --workflow-run-id "${{ github.run_id }}"
+      - name: Verify GitHub-hosted attestations for every candidate
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          jq -r '.subjects[].path' "${RUNNER_TEMP}/candidate-subjects.json" |
+          while IFS= read -r subject; do
+            for predicate in \
+              "https://slsa.dev/provenance/v1" \
+              "https://spdx.dev/Document/v2.3" \
+              "https://github.com/oldwinter/skills-desktop/attestations/unsigned-candidate/v1"; do
+              gh attestation verify "${subject}" \
+                --repo "${GITHUB_REPOSITORY}" \
+                --predicate-type "${predicate}" \
+                --signer-workflow "${GITHUB_REPOSITORY}/.github/workflows/release-candidates.yml" \
+                --source-digest "${GITHUB_SHA}" \
+                --source-ref "${GITHUB_REF}" \
+                --deny-self-hosted-runners >/dev/null
+            done
+          done
+      - name: Verify exact signed attestation statements
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          subject="$(jq -r '.subjects[0].path' "${RUNNER_TEMP}/candidate-subjects.json")"
+          verify_bundle() {
+            local bundle="$1"
+            local predicate="$2"
+            local output="$3"
+            gh attestation verify "${subject}" \
+              --bundle "${bundle}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --predicate-type "${predicate}" \
+              --signer-workflow "${GITHUB_REPOSITORY}/.github/workflows/release-candidates.yml" \
+              --source-digest "${GITHUB_SHA}" \
+              --source-ref "${GITHUB_REF}" \
+              --deny-self-hosted-runners \
+              --format json > "${output}"
+          }
+          verify_bundle \
+            "evidence-input/attestation-provenance.sigstore.json" \
+            "https://slsa.dev/provenance/v1" \
+            "${RUNNER_TEMP}/provenance-result.json"
+          verify_bundle \
+            "evidence-input/attestation-sbom.sigstore.json" \
+            "https://spdx.dev/Document/v2.3" \
+            "${RUNNER_TEMP}/sbom-result.json"
+          verify_bundle \
+            "evidence-input/attestation-candidate-identity.sigstore.json" \
+            "https://github.com/oldwinter/skills-desktop/attestations/unsigned-candidate/v1" \
+            "${RUNNER_TEMP}/candidate-identity-result.json"
+          node scripts/release/release-integrity-cli.mjs verify-attestation \
+            --predicate-type "https://slsa.dev/provenance/v1" \
+            --result-json "${RUNNER_TEMP}/provenance-result.json" \
+            --subjects-json "${RUNNER_TEMP}/candidate-subjects.json"
+          node scripts/release/release-integrity-cli.mjs verify-attestation \
+            --expected-predicate "evidence-input/skills-desktop-${{ needs.evidence.outputs.version }}.spdx.json" \
+            --predicate-type "https://spdx.dev/Document/v2.3" \
+            --result-json "${RUNNER_TEMP}/sbom-result.json" \
+            --subjects-json "${RUNNER_TEMP}/candidate-subjects.json"
+          node scripts/release/release-integrity-cli.mjs verify-attestation \
+            --expected-predicate "evidence-input/candidate-provenance-v1.json" \
+            --predicate-type "https://github.com/oldwinter/skills-desktop/attestations/unsigned-candidate/v1" \
+            --result-json "${RUNNER_TEMP}/candidate-identity-result.json" \
+            --subjects-json "${RUNNER_TEMP}/candidate-subjects.json"
+      - id: assemble
+        name: Assemble verified draft payload
+        run: >-
+          node scripts/release/release-integrity-cli.mjs assemble
+          --candidate-root "candidate-inputs"
+          --evidence-artifact-digest "${{ needs.evidence.outputs.evidence-artifact-digest }}"
+          --evidence-root "evidence-input"
+          --evidence-set-digest "${{ needs.evidence.outputs.evidence-set-digest }}"
+          --output-root "verified-draft"
+          --package-lock "package-lock.json"
+          --repository "${{ github.repository }}"
+          --signer-workflow "${{ github.repository }}/.github/workflows/release-candidates.yml"
+          --source-commit "${{ github.sha }}"
+          --source-ref "${{ github.ref }}"
+          --verified-at "$(date -u +'%Y-%m-%dT%H:%M:%S.000Z')"
+          --workflow-event "${{ github.event_name }}"
+          --workflow-name "${{ github.workflow }}"
+          --workflow-run-attempt "${{ github.run_attempt }}"
+          --workflow-run-id "${{ github.run_id }}"
+      - name: Exchange verified draft payload
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          compression-level: 0
+          if-no-files-found: error
+          include-hidden-files: false
+          name: verified-draft-${{ steps.assemble.outputs.payload-digest }}
+          path: verified-draft/**
+          retention-days: 1
+
+  draft-assembly:
+    name: Assemble private GitHub draft
+    if: github.event_name == 'workflow_dispatch'
+    needs: verify
+    permissions:
+      contents: write
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      draft-state: ${{ steps.verify-release.outputs.draft-state }}
+      draft-tag: ${{ steps.verify-release.outputs.draft-tag }}
+      draft-url: ${{ steps.verify-release.outputs.draft-url }}
+    steps:
+      - name: Check out draft contract
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Download verified draft payload
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: verified-draft-${{ needs.verify.outputs.payload-digest }}
+          path: verified-input
+      - name: Reverify payload before GitHub upload
+        run: >-
+          node scripts/release/release-integrity-cli.mjs preflight-draft
+          --payload-digest "${{ needs.verify.outputs.payload-digest }}"
+          --payload-root "verified-input"
+      - id: notes
+        name: Write private draft notes
+        run: >-
+          node scripts/release/release-integrity-cli.mjs notes
+          --candidate-set-digest "${{ needs.verify.outputs.candidate-set-digest }}"
+          --evidence-set-digest "${{ needs.verify.outputs.evidence-set-digest }}"
+          --output-path "${{ runner.temp }}/draft-release-notes.md"
+          --payload-digest "${{ needs.verify.outputs.payload-digest }}"
+          --repository "${{ github.repository }}"
+          --source-commit "${{ github.sha }}"
+          --version "${{ needs.verify.outputs.version }}"
+          --workflow-run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+      - name: Create unpublished prerelease draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release create "${{ steps.notes.outputs.release-tag }}"
+          verified-input/*
+          --repo "${{ github.repository }}"
+          --target "${{ github.sha }}"
+          --title "${{ steps.notes.outputs.release-name }}"
+          --notes-file "${{ runner.temp }}/draft-release-notes.md"
+          --draft --prerelease --latest=false
+      - name: Read back private draft state
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" > "${RUNNER_TEMP}/releases.json"
+      - id: verify-release
+        name: Verify exact GitHub draft assets
+        run: >-
+          node scripts/release/release-integrity-cli.mjs verify-release
+          --payload-digest "${{ needs.verify.outputs.payload-digest }}"
+          --payload-root "verified-input"
+          --release-list-json "${{ runner.temp }}/releases.json"
+          --repository "${{ github.repository }}"
+          --source-commit "${{ github.sha }}"
+          --version "${{ needs.verify.outputs.version }}"
