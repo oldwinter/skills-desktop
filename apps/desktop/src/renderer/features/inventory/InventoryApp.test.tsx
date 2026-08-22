@@ -1199,10 +1199,10 @@ describe("Local Target Inventory shell", () => {
     ).toBeDisabled();
   });
 
-  it("creates an SSH Target through the structured Targets editor", async () => {
+  it("keeps the Targets editor Local-only for V1", async () => {
     const createTarget = vi.fn(async () => ({
       ok: true as const,
-      value: { operationId: "created-ssh-target" },
+      value: { operationId: "created-local-target" },
     }));
     const client = {
       ...clientFor({
@@ -1226,29 +1226,32 @@ describe("Local Target Inventory shell", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Targets" }));
     fireEvent.click(screen.getByRole("button", { name: "New Target" }));
-    fireEvent.click(screen.getByRole("button", { name: "SSH" }));
+    expect(screen.queryByRole("button", { name: "SSH" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Local" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByText(/V1 is Local-only/i)).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Display label"), {
-      target: { value: "Build host" },
+      target: { value: "Local workspace" },
     });
     fireEvent.change(screen.getByLabelText("Canonical workspace"), {
-      target: { value: "/srv/skills" },
-    });
-    fireEvent.change(screen.getByLabelText("OpenSSH connection reference"), {
-      target: { value: "build-host" },
+      target: { value: "/work/other" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Save Target" }));
 
     await waitFor(() =>
       expect(createTarget).toHaveBeenCalledWith({
-        connectionReference: "build-host",
+        connectionReference: null,
         harness: "Codex",
-        kind: "ssh",
-        label: "Build host",
-        workspace: "/srv/skills",
+        kind: "local",
+        label: "Local workspace",
+        workspace: "/work/other",
       }),
     );
     expect(await screen.findByText("Target created")).toBeInTheDocument();
   });
+
 
   it("requests isolated host trust review from a trust-required SSH state", async () => {
     const requestHostTrustReview = vi.fn(async () => ({
