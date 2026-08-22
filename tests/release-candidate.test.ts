@@ -68,6 +68,23 @@ const linuxManifestInput = () => {
 };
 
 describe("unsigned release candidate contract", () => {
+  it("provides the package metadata required by native makers", async () => {
+    const desktopPackage = JSON.parse(
+      await readFile(
+        new URL("../apps/desktop/package.json", import.meta.url),
+        "utf8",
+      ),
+    );
+
+    expect(desktopPackage).toMatchObject({
+      description:
+        "Cross-platform desktop client for inspecting and managing agent Skills.",
+      name: "@skills-desktop/desktop",
+      productName: "Skills Desktop",
+      version: "0.1.0",
+    });
+  });
+
   it.each([
     {
       architecture: "arm64",

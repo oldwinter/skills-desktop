@@ -1,6 +1,7 @@
 {
   "name": "@skills-desktop/desktop",
   "productName": "Skills Desktop",
+  "description": "Cross-platform desktop client for inspecting and managing agent Skills.",
   "version": "0.1.0",
   "private": true,
   "type": "module",
