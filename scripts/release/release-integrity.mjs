@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { COPYFILE_EXCL, createReadStream } from "node:fs";
+import { constants, createReadStream } from "node:fs";
 import {
   copyFile,
   mkdir,
@@ -10,6 +10,8 @@ import {
 } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
+
+const { COPYFILE_EXCL } = constants;
 
 const sha256Pattern = /^[a-f0-9]{64}$/;
 const commitPattern = /^[a-f0-9]{40}$/;
@@ -289,7 +291,11 @@ function digestInventory(files) {
   return createHash("sha256").update(checksumInventory(files)).digest("hex");
 }
 
-async function readCandidatePackage(path, expected) {
+async function readCandidatePackage(
+  path,
+  expected,
+  { requireDigestAddress = true } = {},
+) {
   const entries = await readdir(path, { withFileTypes: true });
   if (entries.some((entry) => !entry.isFile())) {
     fail("Release candidate packages may contain only regular files.");
@@ -298,7 +304,10 @@ async function readCandidatePackage(path, expected) {
   const manifestName = "candidate-manifest-v1.json";
   const manifestBytes = await readFile(join(path, manifestName));
   const manifestDigest = createHash("sha256").update(manifestBytes).digest("hex");
-  if (basename(path) !== `unsigned-package-${manifestDigest}`) {
+  if (
+    requireDigestAddress &&
+    basename(path) !== `unsigned-package-${manifestDigest}`
+  ) {
     fail("Release candidate package is not addressed by its manifest digest.");
   }
   const checksumName = "candidate-manifest-v1.sha256";
@@ -427,6 +436,7 @@ export async function identifyCandidatePackage({
   const candidatePackage = await readCandidatePackage(
     candidateDirectory,
     expected,
+    { requireDigestAddress: false },
   );
   const candidateSet = {
     artifacts: candidatePackage.artifacts,
@@ -439,6 +449,12 @@ export async function identifyCandidatePackage({
     candidatePackage.manifest.architecture !== expectedArchitecture
   ) {
     fail("Package job candidate target does not match its matrix identity.");
+  }
+  if (
+    basename(candidateDirectory) !==
+    `skills-desktop-${candidatePackage.manifest.version}-${expectedPlatform}-${expectedArchitecture}`
+  ) {
+    fail("Package job candidate directory identity is invalid.");
   }
   return {
     architecture: candidatePackage.manifest.architecture,

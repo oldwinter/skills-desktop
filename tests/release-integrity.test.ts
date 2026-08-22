@@ -4,6 +4,7 @@ import {
   mkdir,
   readFile,
   readdir,
+  rename,
   rm,
   stat,
   writeFile,
@@ -29,6 +30,7 @@ import {
   draftReleaseTag,
   finalizeReleaseEvidence,
   generateReleaseEvidence,
+  identifyCandidatePackage,
   verifyGitHubDraftRelease,
 } from "../scripts/release/release-integrity.mjs";
 
@@ -168,6 +170,55 @@ async function firstCandidateArtifact(candidateRoot: string) {
 }
 
 describe("release integrity evidence contract", () => {
+  it("identifies the maker's unhashed staging directory before artifact upload", async () => {
+    const root = await mkdtemp(join(tmpdir(), "skills-release-integrity-"));
+    try {
+      const { packageLockPath, sha256: lockfileSha256 } =
+        await writePackageLock(root);
+      const candidateRoot = await writeCandidateSet(root, lockfileSha256);
+      const packageRoot = join(root, "package-output");
+      await mkdir(packageRoot);
+      let sourceDirectory: string | undefined;
+      for (const directoryName of await readdir(candidateRoot)) {
+        const directory = join(candidateRoot, directoryName);
+        const manifest = JSON.parse(
+          await readFile(
+            join(directory, "candidate-manifest-v1.json"),
+            "utf8",
+          ),
+        );
+        if (manifest.platform === "linux") {
+          sourceDirectory = directory;
+          break;
+        }
+      }
+      expect(sourceDirectory).toBeDefined();
+      const stagingDirectory = join(
+        packageRoot,
+        "skills-desktop-0.1.0-linux-x64",
+      );
+      await rename(sourceDirectory!, stagingDirectory);
+
+      const result = await identifyCandidatePackage({
+        candidateRoot: packageRoot,
+        expected: releaseContext,
+        expectedArchitecture: "x64",
+        expectedPlatform: "linux",
+        packageLockPath,
+      });
+
+      expect(result).toMatchObject({
+        architecture: "x64",
+        candidateDirectory: stagingDirectory,
+        manifestDigest: expect.stringMatching(/^[a-f0-9]{64}$/),
+        platform: "linux",
+        version: "0.1.0",
+      });
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+
   it("binds the exact candidate set to checksums, SPDX packages, and release identity", async () => {
     const root = await mkdtemp(join(tmpdir(), "skills-release-integrity-"));
     try {

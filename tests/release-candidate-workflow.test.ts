@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { readdir, readFile } from "node:fs/promises";
 
 import { parse } from "yaml";
@@ -6,6 +7,25 @@ import { describe, expect, it } from "vitest";
 const pinnedAction = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+@[a-f0-9]{40}$/;
 
 describe("unsigned candidate workflow contract", () => {
+  it("loads the release integrity CLI with Node's native ESM loader", () => {
+    const result = spawnSync(
+      process.execPath,
+      [
+        new URL(
+          "../scripts/release/release-integrity-cli.mjs",
+          import.meta.url,
+        ).pathname,
+      ],
+      { encoding: "utf8" },
+    );
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(
+      "Unknown release integrity command: undefined",
+    );
+    expect(result.stderr).not.toContain("SyntaxError");
+  });
+
   it("keeps package, evidence, verification, and private draft authority distinct", async () => {
     const source = await readFile(
       new URL("../.github/workflows/release-candidates.yml", import.meta.url),
