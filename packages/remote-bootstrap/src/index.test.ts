@@ -2,6 +2,7 @@ import {
   chmod,
   mkdtemp,
   readFile,
+  readdir,
   realpath,
   rm,
   writeFile,
@@ -112,13 +113,17 @@ describe("fixed Remote Bootstrap", () => {
       await writeFile(
         executable,
         `#!/usr/bin/env node
-const { appendFileSync } = require("node:fs");
+const { appendFileSync, fstatSync } = require("node:fs");
 const { join } = require("node:path");
-appendFileSync(join(process.env.HOME, "invocations.ndjson"), JSON.stringify({ args: process.argv.slice(2), cwd: process.cwd() }) + "\\n");
+appendFileSync(join(process.env.HOME, "invocations.ndjson"), JSON.stringify({ args: process.argv.slice(2), cwd: process.cwd(), stdoutIsFile: fstatSync(1).isFile(), stdoutMode: (fstatSync(1).mode & 0o777).toString(8) }) + "\\n");
 const operation = process.argv.slice(2).slice(2).join(" ");
 if (operation === "--version") process.stdout.write("1.5.23\\n");
 else if (operation === "list --json") process.stdout.write(JSON.stringify([{ name: "project-skill", path: "/private/project", scope: "project", agents: ["Codex"], source: null, sourceType: null, sourceUrl: null }]));
-else if (operation === "list --global --json") process.stdout.write(JSON.stringify([{ name: "global-skill", path: "/private/global", scope: "global", agents: ["Codex"], source: null, sourceType: null, sourceUrl: null }]));
+else if (operation === "list --global --json") {
+  const entries = Array.from({ length: 160 }, (_, index) => ({ name: "global-skill-" + index, path: "/private/global/" + index + "/" + "x".repeat(512), scope: "global", agents: ["Codex"], source: null, sourceType: null, sourceUrl: null }));
+  process.stdout.write(JSON.stringify(entries));
+  process.exit(0);
+}
 else process.exitCode = 2;
 `,
         "utf8",
@@ -142,6 +147,7 @@ else process.exitCode = 2;
         {
           HOME: directory,
           PATH: `${directory}${delimiter}${process.env.PATH ?? ""}`,
+          TMP: directory,
         },
       );
 
@@ -161,6 +167,18 @@ else process.exitCode = 2;
           },
         ],
       });
+      if (!decoded.ok)
+        throw new Error("Remote inventory Wire decoding failed.");
+      const inventoryFrame = decoded.value.find(
+        (frame) => frame.type === "inventory",
+      );
+      if (inventoryFrame?.type !== "inventory") {
+        throw new Error("Remote inventory frame is missing.");
+      }
+      expect(
+        Buffer.byteLength(inventoryFrame.globalJson, "utf8"),
+      ).toBeGreaterThan(64 * 1_024);
+      expect(JSON.parse(inventoryFrame.globalJson)).toHaveLength(160);
       expect(
         (await readFile(invocationLog, "utf8"))
           .trim()
@@ -170,16 +188,27 @@ else process.exitCode = 2;
         {
           args: ["--yes", "skills@1.5.23", "--version"],
           cwd: canonicalWorkspace,
+          stdoutIsFile: true,
+          stdoutMode: "600",
         },
         {
           args: ["--yes", "skills@1.5.23", "list", "--json"],
           cwd: canonicalWorkspace,
+          stdoutIsFile: true,
+          stdoutMode: "600",
         },
         {
           args: ["--yes", "skills@1.5.23", "list", "--global", "--json"],
           cwd: canonicalWorkspace,
+          stdoutIsFile: true,
+          stdoutMode: "600",
         },
       ]);
+      expect(
+        (await readdir(directory)).filter((name) =>
+          name.startsWith("skills-desktop-remote-output-"),
+        ),
+      ).toEqual([]);
       expect(REMOTE_BOOTSTRAP_COMMAND).not.toContain(workspace);
       await expect(
         readFile(join(directory, "should-not-exist"), "utf8"),
