@@ -12,10 +12,14 @@ the pinned `skills@1.5.23` CLI dialect. It restores only an allowlisted last
 complete Snapshot, always marked stale. Read [`CONTEXT.md`](CONTEXT.md) and the
 accepted records in [`docs/adr/`](docs/adr/) before changing product behavior.
 
-V1 acceptance is Local-only: a reliable local tracer, buildable unsigned
-candidates, and docs that match reality. Signed public release remains gated on
-#22/#27. SSH Target, remote-bootstrap, and cross-machine reconciliation are out
-of V1 scope / next.
+V1 acceptance is Local-only: a reliable local tracer, reproducible unsigned
+candidates, and docs that match reality. Public
+[Unsigned Developer Previews](docs/unsigned-developer-preview.md) are available
+through [GitHub Releases](https://github.com/oldwinter/skills-desktop/releases)
+with checksums, an SPDX SBOM, attestations, and manual installation guidance.
+They remain prereleases, are never latest, and do not enter automatic update
+feeds. A signed stable release remains gated on #22/#27. SSH Target,
+remote-bootstrap, and cross-machine reconciliation are out of V1 scope / next.
 
 The prototype was imported from SimplexAI Agent-First Control Plane commit
 `e4c5cb0f41a1944b369fbe20da72af456f806d2f`. It is evidence, not the production
@@ -56,12 +60,18 @@ next-scope work; it is not part of the V1 public commitment. Production skill
 discovery and mutation must keep using argument-array invocations of the pinned
 `npx skills` package.
 
-## Unsigned Native Candidates
+## Unsigned Developer Previews And Local Candidates
 
-Issue #23 candidates are local or internal evidence only. They have no signing
-identity or publication authority, and the stable/public release gate remains
-closed. Candidate generation requires a clean tracked tree and must run on the
-target operating system. Linux additionally requires `fakeroot` and `rpmbuild`.
+Unsigned Developer Previews are public early-access prereleases, not stable
+releases. They have no Apple or Windows publisher trust. Verify the exact
+downloaded bytes before following the platform-owned override and local-signing
+steps in the [installation guide](docs/unsigned-developer-preview.md). Paid
+signing, notarization, and stable publication remain deferred under #22/#27.
+
+Local candidate generation remains available for development evidence. These
+local builds have no publication authority, require a clean tracked tree, and
+must run on the target operating system. Linux additionally requires `fakeroot`
+and `rpmbuild`.
 
 ```bash
 npm run candidate:build -- \
@@ -78,8 +88,9 @@ npm run candidate:build -- \
 Use `darwin` with `arm64` or `x64`, or `win32` with `x64`, on the
 corresponding native host. Each immutable candidate directory contains only
 the ADR-defined Forge outputs, `candidate-manifest-v1.json`, and its SHA-256
-sidecar. The cross-platform workflow retains only manifest evidence; it never
-uploads unsigned installers from this public repository.
+sidecar. Public preview publication is a separate manual workflow on `main`:
+it attests and verifies the exact candidate bytes, stages a private draft,
+reverifies the uploaded assets, and only then publishes a GitHub prerelease.
 
 ## Run The Prototype
 
