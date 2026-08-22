@@ -801,13 +801,37 @@ try {
       `Malicious preload payload was not rejected: ${JSON.stringify(maliciousPayload)}`,
     );
   }
-  const subframeBoundary = await first.page.evaluate(`(() => {
+  const subframeBoundary = await first.page.evaluate(`(async () => {
     const frame = document.createElement("iframe");
-    frame.srcdoc = "<p>untrusted frame</p>";
-    document.body.append(frame);
-    const bridgeType = typeof frame.contentWindow?.skillsDesktop;
-    frame.remove();
-    return bridgeType;
+    let handleLoad;
+    let loadTimeout;
+    const frameLoaded = new Promise((resolveLoad, rejectLoad) => {
+      handleLoad = () => {
+        clearTimeout(loadTimeout);
+        resolveLoad();
+      };
+      frame.addEventListener("load", handleLoad, { once: true });
+      loadTimeout = setTimeout(
+        () =>
+          rejectLoad(
+            new Error("Timed out waiting for hostile subframe to load."),
+          ),
+        5_000,
+      );
+    });
+    try {
+      frame.srcdoc = "<p>untrusted frame</p>";
+      document.body.append(frame);
+      await frameLoaded;
+      if (frame.contentWindow === null) {
+        throw new Error("Loaded hostile subframe has no content window.");
+      }
+      return typeof frame.contentWindow.skillsDesktop;
+    } finally {
+      clearTimeout(loadTimeout);
+      frame.removeEventListener("load", handleLoad);
+      frame.remove();
+    }
   })()`);
   if (subframeBoundary !== "undefined") {
     throw new Error(
