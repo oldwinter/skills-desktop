@@ -59,13 +59,7 @@ function childExitError(subject, phase, outcome) {
 
 async function waitForFileValue(
   path,
-  {
-    parse,
-    signal,
-    timeoutMessage,
-    timeoutMs,
-    unreadableMessage,
-  },
+  { parse, signal, timeoutMessage, timeoutMs, unreadableMessage },
 ) {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
@@ -389,7 +383,8 @@ exec /usr/bin/ssh -F '${join(userSshDirectory, "config")}' "$@"
         signal: readiness.signal,
         timeoutMessage: "Packaged disposable sshd did not become ready.",
         timeoutMs: 10_000,
-        unreadableMessage: "Packaged disposable sshd readiness could not be read.",
+        unreadableMessage:
+          "Packaged disposable sshd readiness could not be read.",
       }).then(() => ({ kind: "ready" })),
       daemonExit.then((exit) => ({ exit, kind: "exit" })),
     ]);
@@ -768,8 +763,14 @@ try {
   );
   collectionReviewPage.close();
   const collectionInvocation = `--yes skills@1.5.23 add https://github.com/vercel-labs/skills/archive/435076e78988e1e6ec40d00b0b1d76bdbbc5419a.tar.gz --skill find-skills --agent codex --yes`;
-  if (!(await readFile(invocationLog, "utf8")).split("\n").includes(collectionInvocation)) {
-    throw new Error("Official Collection did not execute the exact pinned npx skills plan.");
+  if (
+    !(await readFile(invocationLog, "utf8"))
+      .split("\n")
+      .includes(collectionInvocation)
+  ) {
+    throw new Error(
+      "Official Collection did not execute the exact pinned npx skills plan.",
+    );
   }
   const collectionLaunch = first;
   await collectionLaunch.close();
@@ -783,7 +784,9 @@ try {
       document.body?.textContent?.includes("Fresh evidence")`,
     "Official Collection postflight restart",
   );
-  console.log("packaged smoke: approved Official Collection executed and restored");
+  console.log(
+    "packaged smoke: approved Official Collection executed and restored",
+  );
   if (
     /SECRET_PROJECT_PATH|SECRET_HOME_PATH|SECRET_TOKEN|SECRET_RAW_STDERR/.test(
       rendererBoundary.text,
@@ -1044,7 +1047,9 @@ try {
       document.querySelector(".header-status")?.textContent?.includes("Fresh evidence") === true`,
     "second Local Target Fresh Inventory",
   );
-  const collectionInvocationsBeforeMany = (await readFile(invocationLog, "utf8"))
+  const collectionInvocationsBeforeMany = (
+    await readFile(invocationLog, "utf8")
+  )
     .split("\n")
     .filter((invocation) => invocation === collectionInvocation).length;
   await first.page.evaluate(`(() => {
@@ -1121,6 +1126,16 @@ try {
       document.body?.textContent?.includes("completed / content-unverified")`,
     "packaged aggregate Collection postflight",
   );
+  const aggregateCollectionText = await first.page.evaluate(
+    `document.body?.textContent ?? ""`,
+  );
+  if (
+    /SECRET_PROJECT_PATH|SECRET_HOME_PATH|SECRET_TOKEN|SECRET_RAW_STDERR/.test(
+      aggregateCollectionText,
+    )
+  ) {
+    throw new Error("Aggregate Collection exposed process-only data.");
+  }
   await multiCollectionReviewPage.disconnect();
   const collectionInvocationsAfterMany = (await readFile(invocationLog, "utf8"))
     .split("\n")
@@ -1141,7 +1156,9 @@ try {
       document.querySelector(".header-status")?.textContent?.includes("Fresh evidence") === true`,
     "aggregate Collection postflight restart",
   );
-  console.log("packaged smoke: aggregate Local Collection executed sequentially");
+  console.log(
+    "packaged smoke: aggregate Local Collection executed sequentially",
+  );
   const invocationsBeforeComparison = (await readFile(invocationLog, "utf8"))
     .trim()
     .split("\n").length;

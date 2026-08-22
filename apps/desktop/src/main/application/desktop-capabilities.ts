@@ -497,7 +497,11 @@ export function createDesktopCapabilities(
       }
     }
     for (const [planId, plan] of collectionPlans) {
-      if (!plan.preparedIds.some((preparedId) => invalidatedPreparedIds.has(preparedId)))
+      if (
+        !plan.preparedIds.some((preparedId) =>
+          invalidatedPreparedIds.has(preparedId),
+        )
+      )
         continue;
       collectionPlans.delete(planId);
       if (currentCollectionPlan?.projection.id === planId) {
@@ -524,7 +528,8 @@ export function createDesktopCapabilities(
     if (currentCollectionPlan === plan) currentCollectionPlan = undefined;
     rejectPendingReviews(
       (review) =>
-        review.collectionPlan === plan || plan.preparedIds.includes(review.prepared.id),
+        review.collectionPlan === plan ||
+        plan.preparedIds.includes(review.prepared.id),
     );
   };
 
@@ -689,16 +694,23 @@ export function createDesktopCapabilities(
   };
 
   const rejectReviewState = (review: TrustedReview) => {
-    const reviewedTargetId = review.prepared.targetId;
-    const reviewedMutation =
-      reviewedTargetId === target.id
-        ? mutationState
-        : (mutationStates.get(reviewedTargetId) ?? emptyMutationState());
-    publishMutationForTarget(reviewedTargetId, {
-      ...reviewedMutation,
-      activeOperationId: null,
-      phase: "planned",
-    });
+    const reviewedTargetIds =
+      review.collectionPlan?.projection.schemaVersion === 2
+        ? review.collectionPlan.projection.children.map(
+            ({ target: childTarget }) => childTarget.id,
+          )
+        : [review.prepared.targetId];
+    for (const reviewedTargetId of reviewedTargetIds) {
+      const reviewedMutation =
+        reviewedTargetId === target.id
+          ? mutationState
+          : (mutationStates.get(reviewedTargetId) ?? emptyMutationState());
+      publishMutationForTarget(reviewedTargetId, {
+        ...reviewedMutation,
+        activeOperationId: null,
+        phase: "planned",
+      });
+    }
   };
 
   const runPreparation = (
@@ -1172,8 +1184,11 @@ export function createDesktopCapabilities(
         candidate.manifest.status === "active" &&
         candidate.receipt.status === "approved",
     );
-    const { id: _planId, reviewDigest: _reviewDigest, ...reviewEvidence } =
-      projection;
+    const {
+      id: _planId,
+      reviewDigest: _reviewDigest,
+      ...reviewEvidence
+    } = projection;
     const children = projection.children.map((child, index) => {
       const preparedId = plan.preparedIds[index];
       const prepared =
@@ -1230,7 +1245,15 @@ export function createDesktopCapabilities(
           status: release?.manifest.status,
         }) ||
       children.some(
-        ({ assessment, child, definition, inventory, mutation, prepared, session }) =>
+        ({
+          assessment,
+          child,
+          definition,
+          inventory,
+          mutation,
+          prepared,
+          session,
+        }) =>
           definition === undefined ||
           session === undefined ||
           prepared === undefined ||
@@ -1292,11 +1315,13 @@ export function createDesktopCapabilities(
       }
       collectionAcknowledgements = nextAcknowledgements;
 
-      const confirmedChildren = children.map(({ child, prepared, session }) => ({
-        child,
-        prepared: prepared!,
-        session: session!,
-      }));
+      const confirmedChildren = children.map(
+        ({ child, prepared, session }) => ({
+          child,
+          prepared: prepared!,
+          session: session!,
+        }),
+      );
       for (const preparedId of plan.preparedIds) {
         preparedMutations.delete(preparedId);
         preparedDependencies.delete(preparedId);
@@ -1363,7 +1388,7 @@ export function createDesktopCapabilities(
           controller,
         );
         const succeeded = result.ok && mutationState.phase === "succeeded";
-        const childError = succeeded
+        const observedChildError = succeeded
           ? null
           : (mutationState.lastError ??
             (result.ok
@@ -1374,7 +1399,36 @@ export function createDesktopCapabilities(
                   false,
                 )
               : result.error));
+        const childError =
+          observedChildError !== null &&
+          mutationState.phase === "reconciliation-required"
+            ? { ...observedChildError, effects: "possible" as const }
+            : observedChildError;
         const childOutcome = mutationState.outcome;
+        const childEffects =
+          childOutcome?.effects.status ??
+          (mutationState.phase === "reconciliation-required"
+            ? "possible"
+            : null);
+        const postflightAssessment =
+          childOutcome !== null && inventoryState.freshness === "fresh"
+            ? projectOfficialCollections({
+                catalog: officialCollectionCatalog,
+                inventory: inventoryState,
+                platform,
+                target: projectTarget(definition),
+              })
+                .releases.find(
+                  (candidate) =>
+                    candidate.collectionId === projection.collectionId &&
+                    candidate.releaseNumber === projection.releaseNumber &&
+                    candidate.manifestDigest === projection.manifestDigest,
+                )
+                ?.assessments.find(
+                  (assessment) =>
+                    assessment.scope === confirmedChild.child.scope,
+                )
+            : undefined;
         execution = {
           ...execution,
           children: execution.children.map((child, childIndex) => {
@@ -1383,11 +1437,28 @@ export function createDesktopCapabilities(
                 ...child,
                 error: childError,
                 outcome: childOutcome,
-                skills: child.skills.map((skill) => ({
-                  ...skill,
-                  effects: childOutcome?.effects.status ?? null,
-                  status: succeeded ? "completed" : "failed",
-                })),
+                skills: child.skills.map((skill) => {
+                  const skillAssessment = postflightAssessment?.entries.find(
+                    ({ name }) => name === skill.name,
+                  );
+                  const skillEffects =
+                    skillAssessment?.status === "unchanged"
+                      ? "verified"
+                      : skillAssessment?.status === "present-content-unknown"
+                        ? "content-unverified"
+                        : skillAssessment === undefined
+                          ? childEffects
+                          : "not-observed";
+                  const skillSucceeded =
+                    childOutcome?.process.disposition === "completed" &&
+                    (skillEffects === "verified" ||
+                      skillEffects === "content-unverified");
+                  return {
+                    ...skill,
+                    effects: skillEffects,
+                    status: skillSucceeded ? "completed" : "failed",
+                  };
+                }),
                 status: succeeded
                   ? "completed"
                   : mutationState.phase === "reconciliation-required"
@@ -1411,7 +1482,12 @@ export function createDesktopCapabilities(
         };
         publishCollectionExecution(execution);
         if (!succeeded) {
-          for (const { child } of confirmedChildren) {
+          for (
+            let childIndex = 0;
+            childIndex < confirmedChildren.length;
+            childIndex += 1
+          ) {
+            const { child } = confirmedChildren[childIndex]!;
             const childInventory = inventoryForTarget(child.target.id);
             const staleInventory: PublicInventoryState = {
               ...childInventory,
@@ -1419,6 +1495,26 @@ export function createDesktopCapabilities(
             };
             inventoryStates.set(child.target.id, staleInventory);
             freshTargetSessions.delete(child.target.id);
+            if (childIndex > index) {
+              const stoppedMutation =
+                child.target.id === target.id
+                  ? mutationState
+                  : (mutationStates.get(child.target.id) ??
+                    emptyMutationState());
+              mutationStates.set(child.target.id, {
+                ...stoppedMutation,
+                activeOperationId: null,
+                lastError: publicError(
+                  "process_failed",
+                  "Collection execution stopped before this Target was mutated.",
+                  "collection",
+                  false,
+                ),
+                outcome: null,
+                phase: "failed",
+                reconciliationDeadline: null,
+              });
+            }
             if (child.target.id === target.id) {
               inventoryState = structuredClone(staleInventory);
               freshTargetSession = undefined;
@@ -1432,7 +1528,8 @@ export function createDesktopCapabilities(
       publishCollectionExecution(execution);
       return { ok: true, value: { operationId } };
     } finally {
-      for (const { child } of children) reservedTargetIds.delete(child.target.id);
+      for (const { child } of children)
+        reservedTargetIds.delete(child.target.id);
     }
   };
 
@@ -2016,10 +2113,7 @@ export function createDesktopCapabilities(
                 ),
               );
             }
-            if (
-              existing !== undefined &&
-              reservedTargetIds.has(existing.id)
-            ) {
+            if (existing !== undefined && reservedTargetIds.has(existing.id)) {
               return requestFailure(
                 publicError(
                   "mutation_conflict",
@@ -2434,9 +2528,7 @@ export function createDesktopCapabilities(
                 },
               ],
               releaseEvidence: {
-                compatibility: structuredClone(
-                  release.manifest.compatibility,
-                ),
+                compatibility: structuredClone(release.manifest.compatibility),
                 receipt: structuredClone(release.receipt),
                 status: release.manifest.status,
               },
@@ -2598,7 +2690,9 @@ export function createDesktopCapabilities(
               discardCollectionPlan(currentCollectionPlan);
             }
             const preparation: ActivePreparation = {
-              dependentTargetIds: plannedChildren.map(({ target }) => target.id),
+              dependentTargetIds: plannedChildren.map(
+                ({ target }) => target.id,
+              ),
               invalidated: false,
               ownerEndpointId: endpointState.endpointId,
               promise: undefined,
@@ -2661,7 +2755,16 @@ export function createDesktopCapabilities(
                   "id" | "reviewDigest"
                 > = {
                   children: preparedChildren.map(
-                    ({ assessment, prepared, request: childRequest, session, target: childTarget }, index) => ({
+                    (
+                      {
+                        assessment,
+                        prepared,
+                        request: childRequest,
+                        session,
+                        target: childTarget,
+                      },
+                      index,
+                    ) => ({
                       assessmentDigest: digestCanonicalJson(assessment),
                       bindingDigest: digestCanonicalJson(session.binding),
                       commandPlan: projectCommandPlan(prepared.commandPlan),
@@ -2681,7 +2784,10 @@ export function createDesktopCapabilities(
                   expiresAt,
                   manifestDigest: request.manifestDigest,
                   order: preparedChildren.map(
-                    ({ request: childRequest, target: childTarget }, index) => ({
+                    (
+                      { request: childRequest, target: childTarget },
+                      index,
+                    ) => ({
                       names: childRequest.selections.map(({ name }) => name),
                       position: index + 1,
                       scope: childRequest.scope,
@@ -2712,7 +2818,10 @@ export function createDesktopCapabilities(
                     reviewDigest: digestCanonicalJson(evidence),
                   },
                 };
-                for (const { prepared, target: childTarget } of preparedChildren) {
+                for (const {
+                  prepared,
+                  target: childTarget,
+                } of preparedChildren) {
                   preparedMutations.set(prepared.id, prepared);
                   preparedDependencies.set(
                     prepared.id,
@@ -2736,7 +2845,9 @@ export function createDesktopCapabilities(
                 currentCollectionPlan = plan;
                 collectionPlans.set(planId, plan);
                 if (mutationStates.has(target.id)) {
-                  mutationState = structuredClone(mutationStates.get(target.id)!);
+                  mutationState = structuredClone(
+                    mutationStates.get(target.id)!,
+                  );
                 }
                 publish({ ...inventoryState });
                 return { ok: true, value: { operationId: planId } };
@@ -2760,7 +2871,7 @@ export function createDesktopCapabilities(
               plan === undefined ||
               plan !== currentCollectionPlan ||
               prepared === undefined ||
-              clock().getTime() >= Date.parse(prepared.expiresAt)
+              clock().getTime() >= Date.parse(plan.projection.expiresAt)
             ) {
               if (plan !== undefined) discardCollectionPlan(plan);
               const error = publicError(
@@ -2803,11 +2914,24 @@ export function createDesktopCapabilities(
               purpose: "execute",
             });
             pruneReviews();
-            publishMutation({
-              ...mutationState,
-              lastError: null,
-              phase: "reviewing",
-            });
+            const reviewTargetIds =
+              plan.projection.schemaVersion === 2
+                ? plan.projection.children.map(
+                    ({ target: childTarget }) => childTarget.id,
+                  )
+                : [plan.projection.targetId];
+            for (const reviewTargetId of reviewTargetIds) {
+              const reviewMutation =
+                reviewTargetId === target.id
+                  ? mutationState
+                  : (mutationStates.get(reviewTargetId) ??
+                    emptyMutationState());
+              publishMutationForTarget(reviewTargetId, {
+                ...reviewMutation,
+                lastError: null,
+                phase: "reviewing",
+              });
+            }
             options.onReviewRequested?.(reviewId);
             return { ok: true, value: { operationId: reviewId } };
           }

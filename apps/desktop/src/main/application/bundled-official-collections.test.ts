@@ -203,6 +203,73 @@ describe("bundled Official Collection catalog", () => {
     });
   });
 
+  it("fails SSH platform compatibility closed without verified remote OS evidence", () => {
+    const release = BUNDLED_OFFICIAL_COLLECTION_CATALOG.releases[0]!;
+    const catalogForPlatforms = (
+      platforms: readonly ("darwin" | "linux" | "win32")[],
+    ) => {
+      const manifest = {
+        ...release.manifest,
+        compatibility: {
+          ...release.manifest.compatibility,
+          platforms,
+          requiredCapabilities: ["local", "ssh"] as const,
+        },
+      };
+      const manifestDigest = digestCanonicalJson(manifest);
+      return validateOfficialCollectionCatalog({
+        releases: [
+          {
+            manifest,
+            manifestDigest,
+            receipt: {
+              ...release.receipt,
+              manifestDigest,
+            },
+          },
+        ],
+        schemaVersion: 1,
+      });
+    };
+    const target = {
+      connectionReference: "build-host",
+      generation: 1,
+      harness: "Codex",
+      id: "00000000-0000-4000-8000-000000000002",
+      kind: "ssh" as const,
+      label: "Build host",
+      workspace: "/srv/skills",
+      workspaceLabel: "skills",
+    };
+    const inventory = {
+      activeOperationId: null,
+      cliVersion: "1.5.23" as const,
+      entries: [],
+      freshness: "fresh" as const,
+      lastError: null,
+      observedAt: "2026-08-22T06:00:00.000Z",
+      persistenceWarning: null,
+      phase: "ready" as const,
+    };
+
+    expect(
+      projectOfficialCollections({
+        catalog: catalogForPlatforms(["linux"]),
+        inventory,
+        platform: "linux",
+        target,
+      }).releases[0]!.assessments[0]!.compatibility,
+    ).toBe("incompatible");
+    expect(
+      projectOfficialCollections({
+        catalog: catalogForPlatforms(["darwin", "linux", "win32"]),
+        inventory,
+        platform: "linux",
+        target,
+      }).releases[0]!.assessments[0]!.compatibility,
+    ).toBe("compatible");
+  });
+
   it("keeps prior-release removals inspectable and never selectable", () => {
     const firstManifest = {
       ...BUNDLED_OFFICIAL_COLLECTION_CATALOG.releases[0]!.manifest,

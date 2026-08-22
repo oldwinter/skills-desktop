@@ -116,7 +116,11 @@ export function CollectionsView({
     ) {
       statusHeadingRef.current?.focus();
     }
-  }, [collections?.execution?.id, collections?.plan?.id]);
+  }, [
+    collections?.execution?.id,
+    collections?.execution?.phase,
+    collections?.plan?.id,
+  ]);
 
   const releaseFor = (targetState: TargetState) =>
     targetState.collections?.releases.find(
@@ -162,7 +166,9 @@ export function CollectionsView({
   const selectedTargets = targetStates.flatMap((targetState) => {
     const input = inputs[targetState.target.id];
     if (input === undefined || !input.included) return [];
-    return [{ input, selections: selectionsFor(targetState, input), targetState }];
+    return [
+      { input, selections: selectionsFor(targetState, input), targetState },
+    ];
   });
   const canPrepare =
     !busy &&
@@ -171,7 +177,8 @@ export function CollectionsView({
     selectedTargets.length > 0 &&
     selectedTargets.every(
       ({ input, selections, targetState }) =>
-        selections.length > 0 && targetBlockers(targetState, input).length === 0,
+        selections.length > 0 &&
+        targetBlockers(targetState, input).length === 0,
     );
 
   const updateInput = (
@@ -230,6 +237,17 @@ export function CollectionsView({
     }
   };
 
+  const refresh = async (targetId: string) => {
+    setBusy(true);
+    try {
+      const result = await client.refreshInventory(targetId);
+      if (result.ok) setError(undefined);
+      else setError(result.error);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   if (collections === undefined || collections.releases.length === 0) {
     return (
       <main className="collections-workspace">
@@ -271,7 +289,10 @@ export function CollectionsView({
               value={release === undefined ? "" : releaseKey(release)}
             >
               {collections.releases.map((candidate) => (
-                <option key={releaseKey(candidate)} value={releaseKey(candidate)}>
+                <option
+                  key={releaseKey(candidate)}
+                  value={releaseKey(candidate)}
+                >
                   {candidate.title} / release {candidate.releaseNumber}
                 </option>
               ))}
@@ -289,7 +310,11 @@ export function CollectionsView({
         </div>
 
         {release?.blockers.map((blocker) => (
-          <div className="state-banner state-banner--warning" key={blocker} role="status">
+          <div
+            className="state-banner state-banner--warning"
+            key={blocker}
+            role="status"
+          >
             <AlertCircle aria-hidden="true" size={16} />
             <span>{blocker}</span>
           </div>
@@ -326,13 +351,17 @@ export function CollectionsView({
               {execution.children.map((child) => (
                 <li key={`${child.position}:${child.target.id}`}>
                   <div className="collection-progress-heading">
-                    <strong>{child.position}. {child.target.label}</strong>
+                    <strong>
+                      {child.position}. {child.target.label}
+                    </strong>
                     <span>{child.status}</span>
                   </div>
                   <ul>
                     {child.skills.map((skill) => (
                       <li key={`${skill.mode}:${skill.name}`}>
-                        <span>{skill.name} / {skill.mode}</span>
+                        <span>
+                          {skill.name} / {skill.mode}
+                        </span>
                         <span>
                           {skill.status}
                           {skill.effects === null ? "" : ` / ${skill.effects}`}
@@ -341,7 +370,9 @@ export function CollectionsView({
                     ))}
                   </ul>
                   {child.error === null ? null : (
-                    <p className="collection-child-error">{child.error.message}</p>
+                    <p className="collection-child-error">
+                      {child.error.message}
+                    </p>
                   )}
                   {child.status === "reconciliation-required" ? (
                     <button
@@ -353,6 +384,18 @@ export function CollectionsView({
                       <RotateCcw aria-hidden="true" size={15} />
                       Reconcile {child.target.label}
                     </button>
+                  ) : execution.phase === "stopped" &&
+                    child.status !== "pending" &&
+                    child.status !== "running" ? (
+                    <button
+                      className="text-button"
+                      disabled={busy}
+                      onClick={() => void refresh(child.target.id)}
+                      type="button"
+                    >
+                      <RotateCcw aria-hidden="true" size={15} />
+                      Refresh {child.target.label}
+                    </button>
                   ) : null}
                 </li>
               ))}
@@ -362,22 +405,36 @@ export function CollectionsView({
 
         <div className="collection-machine-list">
           {targetStates.map((targetState) => {
-            const input = inputs[targetState.target.id] ??
+            const input =
+              inputs[targetState.target.id] ??
               inputFor(targetState.target.id, snapshot.target.id);
             const assessment = assessmentFor(targetState, input.scope);
             const blockers = targetBlockers(targetState, input);
             const targetRelease = releaseFor(targetState);
             const included = input.included;
-            const locked = busy || plan !== null || execution?.phase === "running";
-            const TargetIcon = targetState.target.kind === "ssh" ? Server : Laptop;
+            const inventoryFreshness =
+              assessment?.inventoryFreshness ?? targetState.inventory.freshness;
+            const inventoryFreshnessLabel =
+              inventoryFreshness === "fresh"
+                ? "Fresh inventory"
+                : inventoryFreshness === "stale"
+                  ? "Stale inventory"
+                  : "No inventory evidence";
+            const locked =
+              busy || plan !== null || execution?.phase === "running";
+            const TargetIcon =
+              targetState.target.kind === "ssh" ? Server : Laptop;
             return (
-              <section className="collection-machine" key={targetState.target.id}>
+              <section
+                className="collection-machine"
+                key={targetState.target.id}
+              >
                 <header>
                   <label className="collection-machine-toggle">
                     <input
                       aria-label={`Include ${targetState.target.label}`}
                       checked={included}
-                      disabled={locked || blockers.length > 0}
+                      disabled={locked}
                       onChange={(event) => {
                         const included = event.currentTarget.checked;
                         updateInput(targetState.target.id, (current) => ({
@@ -390,7 +447,11 @@ export function CollectionsView({
                     <TargetIcon aria-hidden="true" size={17} />
                     <span>
                       <strong>{targetState.target.label}</strong>
-                      <small>{targetState.target.kind === "ssh" ? "SSH" : "Local"} / {targetState.target.harness}</small>
+                      <small>
+                        {targetState.target.kind === "ssh" ? "SSH" : "Local"} /{" "}
+                        {targetState.target.harness}
+                      </small>
+                      <small>{inventoryFreshnessLabel}</small>
                     </span>
                   </label>
                   <label className="collection-scope-select">
@@ -414,13 +475,16 @@ export function CollectionsView({
                 </header>
                 {blockers.length === 0 ? null : (
                   <ul className="collection-target-blockers">
-                    {blockers.map((blocker) => <li key={blocker}>{blocker}</li>)}
+                    {blockers.map((blocker) => (
+                      <li key={blocker}>{blocker}</li>
+                    ))}
                   </ul>
                 )}
                 <div className="collection-table-wrap">
                   <table className="collection-table">
                     <caption className="sr-only">
-                      Official Collection assessment for {targetState.target.label}
+                      Official Collection assessment for{" "}
+                      {targetState.target.label}
                     </caption>
                     <thead>
                       <tr>
@@ -433,36 +497,57 @@ export function CollectionsView({
                     <tbody>
                       {(assessment?.entries ?? []).map((entry) => {
                         const mode = entry.selectionModes[0];
-                        const selectionLabel = targetStates.length === 1
-                          ? `Select ${entry.name}`
-                          : `Select ${entry.name} on ${targetState.target.label}`;
+                        const selectionLabel =
+                          targetStates.length === 1
+                            ? `Select ${entry.name}`
+                            : `Select ${entry.name} on ${targetState.target.label}`;
                         return (
                           <tr key={`${input.scope}:${entry.name}`}>
                             <td data-label="Select">
                               <input
                                 aria-label={selectionLabel}
-                                checked={input.selected[entry.name] !== undefined}
-                                disabled={locked || !included || !targetRelease?.executable || !entry.selectable || mode === undefined}
+                                checked={
+                                  input.selected[entry.name] !== undefined
+                                }
+                                disabled={
+                                  locked ||
+                                  !included ||
+                                  !targetRelease?.executable ||
+                                  !entry.selectable ||
+                                  mode === undefined
+                                }
                                 onChange={(event) => {
                                   const checked = event.currentTarget.checked;
-                                  updateInput(targetState.target.id, (current) => {
-                                    const selected = { ...current.selected };
-                                    if (!checked) delete selected[entry.name];
-                                    else if (mode !== undefined) selected[entry.name] = mode;
-                                    return { ...current, selected };
-                                  });
+                                  updateInput(
+                                    targetState.target.id,
+                                    (current) => {
+                                      const selected = { ...current.selected };
+                                      if (!checked) delete selected[entry.name];
+                                      else if (mode !== undefined)
+                                        selected[entry.name] = mode;
+                                      return { ...current, selected };
+                                    },
+                                  );
                                 }}
                                 type="checkbox"
                               />
                             </td>
-                            <td data-label="Skill"><strong>{entry.name}</strong></td>
+                            <td data-label="Skill">
+                              <strong>{entry.name}</strong>
+                            </td>
                             <td data-label="Assessment">
-                              <span className={`collection-status collection-status--${entry.status}`}>
+                              <span
+                                className={`collection-status collection-status--${entry.status}`}
+                              >
                                 {statusLabels[entry.status]}
                               </span>
                             </td>
                             <td data-label="Action">
-                              {mode === undefined ? "Not selectable" : mode === "add" ? "Add" : "Reapply"}
+                              {mode === undefined
+                                ? "Not selectable"
+                                : mode === "add"
+                                  ? "Add"
+                                  : "Reapply"}
                             </td>
                           </tr>
                         );
@@ -476,38 +561,80 @@ export function CollectionsView({
         </div>
       </main>
 
-      <aside className="inspector collection-inspector" aria-label="Official Collection details">
+      <aside
+        className="inspector collection-inspector"
+        aria-label="Official Collection details"
+      >
         {release === undefined ? null : (
           <>
             <header className="inspector-heading">
               <LibraryBig aria-hidden="true" size={18} />
-              <div><p>{release.collectionId}</p><h2>{release.title}</h2></div>
+              <div>
+                <p>{release.collectionId}</p>
+                <h2>{release.title}</h2>
+              </div>
             </header>
             <p className="collection-description">{release.description}</p>
             <dl className="evidence-list">
-              <div><dt>Status</dt><dd>{release.status}</dd></div>
-              <div><dt>Independent review</dt><dd>{release.receipt.status}</dd></div>
-              <div><dt>Pinned source</dt><dd><code>{release.source.repository}</code></dd></div>
-              <div><dt>Reviewed revision</dt><dd><code>{release.source.reviewedRevision}</code></dd></div>
-              <div><dt>Manifest digest</dt><dd><code>{release.manifestDigest}</code></dd></div>
-              <div><dt>Targets selected</dt><dd>{selectedTargets.length}</dd></div>
+              <div>
+                <dt>Status</dt>
+                <dd>{release.status}</dd>
+              </div>
+              <div>
+                <dt>Independent review</dt>
+                <dd>{release.receipt.status}</dd>
+              </div>
+              <div>
+                <dt>Pinned source</dt>
+                <dd>
+                  <code>{release.source.repository}</code>
+                </dd>
+              </div>
+              <div>
+                <dt>Reviewed revision</dt>
+                <dd>
+                  <code>{release.source.reviewedRevision}</code>
+                </dd>
+              </div>
+              <div>
+                <dt>Manifest digest</dt>
+                <dd>
+                  <code>{release.manifestDigest}</code>
+                </dd>
+              </div>
+              <div>
+                <dt>Targets selected</dt>
+                <dd>{selectedTargets.length}</dd>
+              </div>
             </dl>
             {plan === null ? null : (
               <section className="collection-plan-summary">
                 <header>
                   <CheckCircle2 aria-hidden="true" size={16} />
-                  <h3 ref={statusHeadingRef} tabIndex={-1}>Collection Plan</h3>
+                  <h3 ref={statusHeadingRef} tabIndex={-1}>
+                    Collection Plan
+                  </h3>
                 </header>
                 <p>Sequential, non-transactional</p>
                 <ol>
                   {plan.order.map((child) => (
                     <li key={`${child.position}:${child.targetId}`}>
-                      {child.position}. {child.names.join(", ")} / {"scope" in child ? child.scope : plan.schemaVersion === 1 ? plan.scope : "project"}
+                      {child.position}. {child.names.join(", ")} /{" "}
+                      {"scope" in child
+                        ? child.scope
+                        : plan.schemaVersion === 1
+                          ? plan.scope
+                          : "project"}
                     </li>
                   ))}
                 </ol>
                 <code>{plan.reviewDigest}</code>
-                <button className="text-button text-button--primary" disabled={busy} onClick={() => void requestReview()} type="button">
+                <button
+                  className="text-button text-button--primary"
+                  disabled={busy}
+                  onClick={() => void requestReview()}
+                  type="button"
+                >
                   <ShieldCheck aria-hidden="true" size={15} />
                   Open Trusted Review
                 </button>

@@ -228,12 +228,18 @@ function isCompatible(input: {
   readonly target: TargetDefinition;
 }) {
   const { compatibility } = input.release.manifest;
+  const platformCompatible =
+    input.target.kind === "ssh"
+      ? (["darwin", "linux", "win32"] as const).every((platform) =>
+          compatibility.platforms.includes(platform),
+        )
+      : compatibility.platforms.includes(
+          input.platform as "darwin" | "linux" | "win32",
+        );
   return (
     compatibility.requiredCapabilities.includes(input.target.kind) &&
     compatibility.harnesses.includes(input.target.harness) &&
-    compatibility.platforms.includes(
-      input.platform as "darwin" | "linux" | "win32",
-    ) &&
+    platformCompatible &&
     input.inventory.cliVersion === compatibility.cliVersion
   );
 }

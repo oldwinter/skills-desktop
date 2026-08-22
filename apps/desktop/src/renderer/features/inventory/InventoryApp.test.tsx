@@ -489,6 +489,7 @@ describe("Local Target Inventory shell", () => {
     );
 
     fireEvent.click(await screen.findByRole("button", { name: "Collections" }));
+    expect(screen.getAllByText("Fresh inventory")).toHaveLength(2);
     fireEvent.click(
       screen.getByRole("checkbox", {
         name: "Select find-skills on This device",
@@ -523,6 +524,25 @@ describe("Local Target Inventory shell", () => {
         ],
       }),
     );
+  });
+
+  it("allows an initially included incompatible Target to be excluded", async () => {
+    const incompatible = structuredClone(collectionSnapshot);
+    incompatible.collections!.releases[0]!.executable = false;
+    incompatible.collections!.releases[0]!.assessments.forEach((assessment) => {
+      assessment.compatibility = "incompatible";
+      assessment.inventoryFreshness = "stale";
+    });
+    render(<InventoryApp client={clientFor(incompatible)} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Collections" }));
+    const include = screen.getByRole("checkbox", {
+      name: "Include This device",
+    });
+    expect(include).toBeChecked();
+    expect(include).toBeEnabled();
+    fireEvent.click(include);
+    expect(include).not.toBeChecked();
   });
 
   it("shows non-transactional stopped progress and routes recovery to the affected Target", async () => {
@@ -603,9 +623,17 @@ describe("Local Target Inventory shell", () => {
       ok: true as const,
       value: { operationId: `reconcile:${targetId}` },
     }));
+    const refreshInventory = vi.fn(async (targetId: string) => ({
+      ok: true as const,
+      value: { operationId: `refresh:${targetId}` },
+    }));
     render(
       <InventoryApp
-        client={{ ...clientFor(stoppedSnapshot), reconcileMutation }}
+        client={{
+          ...clientFor(stoppedSnapshot),
+          reconcileMutation,
+          refreshInventory,
+        }}
       />,
     );
 
@@ -620,9 +648,18 @@ describe("Local Target Inventory shell", () => {
     expect(screen.getByText("stopped / possible")).toBeInTheDocument();
 
     fireEvent.click(
+      screen.getByRole("button", { name: "Refresh This device" }),
+    );
+    await waitFor(() =>
+      expect(refreshInventory).toHaveBeenCalledWith(snapshot.target.id),
+    );
+
+    fireEvent.click(
       screen.getByRole("button", { name: "Reconcile Second local" }),
     );
-    await waitFor(() => expect(reconcileMutation).toHaveBeenCalledWith(otherTarget.id));
+    await waitFor(() =>
+      expect(reconcileMutation).toHaveBeenCalledWith(otherTarget.id),
+    );
   });
 
   it("uses the selected Target's Collection assessment", async () => {
