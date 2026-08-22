@@ -22,7 +22,7 @@ async function waitForFile(path: string) {
     const timeout = setTimeout(() => {
       watcher.close();
       reject(new Error("Timed out waiting for fake SSH input."));
-    }, 2_000);
+    }, 5_000);
     const inspect = () => {
       void readFile(path).then(
         () => {

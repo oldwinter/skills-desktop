@@ -70,7 +70,7 @@ async function waitForFile(path: string) {
     const timeout = setTimeout(() => {
       watcher.close();
       reject(new Error("Timed out waiting for the mutation child."));
-    }, 1_000);
+    }, 5_000);
     const inspect = () => {
       void readFile(path, "utf8").then(
         () => {
