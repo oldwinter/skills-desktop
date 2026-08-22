@@ -7,14 +7,25 @@ const desktopPackage = JSON.parse(
   readFileSync(new URL("package.json", import.meta.url), "utf8"),
 ) as { readonly version: string };
 
+const PACKAGED_RUNTIME_ROOTS = [
+  "/dist/main",
+  "/dist/preload",
+  "/dist/renderer",
+  "/dist/review-renderer",
+] as const;
+
 export function shouldIgnorePackagerPath(filePath: string): boolean {
   const normalized = filePath.replaceAll("\\", "/");
-  return !(
+  if (
     normalized === "" ||
     normalized === "/" ||
     normalized === "/package.json" ||
-    normalized === "/dist" ||
-    normalized.startsWith("/dist/")
+    normalized === "/dist"
+  ) {
+    return false;
+  }
+  return !PACKAGED_RUNTIME_ROOTS.some(
+    (root) => normalized === root || normalized.startsWith(`${root}/`),
   );
 }
 

@@ -200,11 +200,12 @@ describe("unsigned release candidate contract", () => {
     expect(
       [
         "/.env",
+        "/dist/private.env",
         "/notes.txt",
         "/src/main/index.ts",
         "/node_modules/example/index.js",
       ].map(shouldIgnorePackagerPath),
-    ).toEqual([true, true, true, true]);
+    ).toEqual([true, true, true, true, true]);
   });
 
   it.each([

@@ -111,6 +111,8 @@ async function main() {
     ...process.env,
     CSC_IDENTITY_AUTO_DISCOVERY: "false",
   };
+  const desktopDistDirectory = join(repositoryRoot, "apps/desktop/dist");
+  await rm(desktopDistDirectory, { force: true, recursive: true });
   await runNpm(
     ["run", "build", "--workspace", "@skills-desktop/skills-runtime"],
     candidateEnvironment,
@@ -137,7 +139,6 @@ async function main() {
     throw new Error("Remote Bootstrap build digest does not bind its program.");
   }
 
-  const desktopDistDirectory = join(repositoryRoot, "apps/desktop/dist");
   const buildOutputs = await collectBuildOutputEvidence({
     desktopDistDirectory,
     remoteBootstrapProgram: bootstrap.REMOTE_BOOTSTRAP_PROGRAM,
