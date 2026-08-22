@@ -26,7 +26,9 @@ describe("Electron release diagnostics exporter", () => {
         title: "Export Release Diagnostics",
       });
       await expect(readFile(path, "utf8")).resolves.toBe(source);
-      expect((await stat(path)).mode & 0o777).toBe(0o600);
+      if (process.platform !== "win32") {
+        expect((await stat(path)).mode & 0o777).toBe(0o600);
+      }
     } finally {
       await rm(directory, { force: true, recursive: true });
     }

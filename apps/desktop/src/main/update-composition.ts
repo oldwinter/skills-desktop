@@ -60,7 +60,6 @@ export async function createElectronUpdateComposition(input: {
         "updates",
         "deferred-restart-v1.json",
       ),
-      platform: input.platform,
     }),
     diagnosticsExporter: input.diagnosticsExporter,
     id: newId,
