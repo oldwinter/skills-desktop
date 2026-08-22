@@ -163,6 +163,14 @@ describe("unsigned release candidate contract", () => {
       productName: "Skills Desktop",
       version: "0.1.0",
     });
+    const squirrelMaker = Array.isArray(forgeConfig.makers)
+      ? forgeConfig.makers.find(
+          (maker) => maker.name === "@electron-forge/maker-squirrel",
+        )
+      : undefined;
+    expect(squirrelMaker).toMatchObject({
+      config: { authors: "Skills Desktop maintainers" },
+    });
     const linuxMakers = Array.isArray(forgeConfig.makers)
       ? forgeConfig.makers.filter((maker) =>
           ["@electron-forge/maker-deb", "@electron-forge/maker-rpm"].includes(

@@ -36,6 +36,7 @@ const config: ForgeConfig = {
     {
       name: "@electron-forge/maker-squirrel",
       config: {
+        authors: "Skills Desktop maintainers",
         name: "skills_desktop",
         noDelta: true,
         noMsi: true,
