@@ -391,7 +391,10 @@ describe("Local SkillsProcess inventory contract", () => {
 
     const failure = await runner
       .run({
-        args: ["-e", 'console.log("x".repeat(128 * 1024)); process.exit(0);'],
+        args: [
+          "-e",
+          'process.stdout.write("x".repeat(128 * 1024)); setInterval(() => undefined, 1000);',
+        ],
         cwd: process.cwd(),
         env: { PATH: process.env.PATH ?? "" },
         executable: process.execPath,
