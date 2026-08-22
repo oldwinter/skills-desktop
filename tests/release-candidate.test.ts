@@ -104,6 +104,11 @@ describe("unsigned release candidate contract", () => {
         }),
       ),
     );
+    expect(
+      linuxMakers.find(
+        (maker) => maker.name === "@electron-forge/maker-rpm",
+      ),
+    ).toMatchObject({ config: { options: { license: "Proprietary" } } });
   });
 
   it.each([

@@ -39,6 +39,7 @@ const config: ForgeConfig = {
         options: {
           bin: "skills-desktop",
           homepage: "https://github.com/oldwinter/skills-desktop",
+          license: "Proprietary",
           name: "skills-desktop",
         },
       },
