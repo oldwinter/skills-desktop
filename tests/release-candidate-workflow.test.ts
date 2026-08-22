@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { readdir, readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 
 import { parse } from "yaml";
 import { describe, expect, it } from "vitest";
@@ -11,10 +12,12 @@ describe("unsigned candidate workflow contract", () => {
     const result = spawnSync(
       process.execPath,
       [
-        new URL(
-          "../scripts/release/release-integrity-cli.mjs",
-          import.meta.url,
-        ).pathname,
+        fileURLToPath(
+          new URL(
+            "../scripts/release/release-integrity-cli.mjs",
+            import.meta.url,
+          ),
+        ),
       ],
       { encoding: "utf8" },
     );
