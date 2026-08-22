@@ -719,6 +719,10 @@ try {
     if (!(button instanceof HTMLButtonElement)) throw new Error("Inventory navigation is unavailable.");
     button.click();
   })()`);
+  await first.page.waitFor(
+    `document.querySelector("h1")?.textContent === "Inventory"`,
+    "Inventory navigation after About",
+  );
   await first.page.evaluate(`(() => {
     const button = document.querySelector('button[aria-label="Collections"]');
     if (!(button instanceof HTMLButtonElement)) throw new Error("Collections navigation is unavailable.");
