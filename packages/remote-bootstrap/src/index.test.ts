@@ -1,4 +1,11 @@
-import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  mkdtemp,
+  readFile,
+  realpath,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { watch } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
@@ -121,6 +128,7 @@ else process.exitCode = 2;
       await import("node:fs/promises").then(({ mkdir }) =>
         mkdir(workspace, { recursive: true }),
       );
+      const canonicalWorkspace = await realpath(workspace);
 
       const outcome = await runBootstrap(
         encodeWireFrame({
@@ -161,15 +169,15 @@ else process.exitCode = 2;
       ).toEqual([
         {
           args: ["--yes", "skills@1.5.23", "--version"],
-          cwd: workspace,
+          cwd: canonicalWorkspace,
         },
         {
           args: ["--yes", "skills@1.5.23", "list", "--json"],
-          cwd: workspace,
+          cwd: canonicalWorkspace,
         },
         {
           args: ["--yes", "skills@1.5.23", "list", "--global", "--json"],
-          cwd: workspace,
+          cwd: canonicalWorkspace,
         },
       ]);
       expect(REMOTE_BOOTSTRAP_COMMAND).not.toContain(workspace);

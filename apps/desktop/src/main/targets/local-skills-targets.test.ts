@@ -1,3 +1,5 @@
+import { normalize } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import type { SkillsProcess } from "../adapters/local-skills-process.js";
@@ -152,7 +154,7 @@ describe("Local SkillsTargets identity", () => {
         target: {
           generation: 1,
           id: "00000000-0000-4000-8000-000000000017",
-          workspace: "/work/real",
+          workspace: normalize("/work/real"),
           workspaceLabel: "real",
         },
       },
@@ -172,7 +174,7 @@ describe("Local SkillsTargets identity", () => {
       ok: true,
       value: {
         executionChanged: true,
-        target: { generation: 2, workspace: "/work/next" },
+        target: { generation: 2, workspace: normalize("/work/next") },
       },
     });
   });

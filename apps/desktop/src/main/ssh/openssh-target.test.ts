@@ -9,6 +9,7 @@ import {
   createMemoryHostTrustStore,
   createOpenSshHostKeyProbe,
   createOpenSshTargetAccess,
+  quoteOpenSshConfigValue,
   type OpenSshToolInvocation,
   type OpenSshToolRunner,
 } from "./openssh-target.js";
@@ -112,7 +113,7 @@ describe("OpenSSH Effective Target Binding and host trust", () => {
         "ClearAllForwardings=yes",
         "StrictHostKeyChecking=accept-new",
         "PreferredAuthentications=none",
-        `UserKnownHostsFile="${capturePath}"`,
+        `UserKnownHostsFile=${quoteOpenSshConfigValue(capturePath)}`,
         "probe-target",
       ]),
       executable: "ssh",
@@ -218,7 +219,6 @@ describe("OpenSSH Effective Target Binding and host trust", () => {
     const records = createJsonRecoveryRecords({
       directory,
       id: () => "trust-write",
-      platform: "linux",
     });
     const store = createRecoveryHostTrustStore({ path, records });
     const firstAccess = createOpenSshTargetAccess({

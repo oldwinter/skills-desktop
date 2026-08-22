@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { normalize } from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
@@ -1122,7 +1123,10 @@ describe("DesktopCapabilities inventory role-session contract", () => {
         freshness: "stale",
         lastError: { code: "stale_inventory", phase: "target" },
       },
-      target: { generation: 2, workspace: "/work/skills-desktop-next" },
+      target: {
+        generation: 2,
+        workspace: normalize("/work/skills-desktop-next"),
+      },
     });
 
     const restarted = createDesktopCapabilities({
@@ -1331,7 +1335,7 @@ describe("DesktopCapabilities inventory role-session contract", () => {
     await expect(update).resolves.toMatchObject({ ok: true });
     await expect(session.snapshot()).resolves.toMatchObject({
       inventory: { freshness: "none" },
-      target: { generation: 2, workspace: "/work/changed-first" },
+      target: { generation: 2, workspace: normalize("/work/changed-first") },
     });
   });
 
@@ -1617,7 +1621,7 @@ describe("DesktopCapabilities inventory role-session contract", () => {
         id: () => createdTargetId,
         initialTarget: target,
         legacyIdFor(definition) {
-          return definition.workspace === legacyWorkspace
+          return definition.workspace === normalize(legacyWorkspace)
             ? legacyTargetId
             : undefined;
         },
@@ -1738,7 +1742,7 @@ describe("DesktopCapabilities inventory role-session contract", () => {
         id: () => "unused-target-id",
         initialTarget: target,
         legacyIdFor(definition) {
-          return definition.workspace === legacyWorkspace
+          return definition.workspace === normalize(legacyWorkspace)
             ? legacyTargetId
             : undefined;
         },

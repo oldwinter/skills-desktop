@@ -676,7 +676,6 @@ describe("RecoveryRecords Target Definition contract", () => {
     const records = createJsonRecoveryRecords({
       directory,
       id: () => "target-write",
-      platform: "linux",
     });
 
     await expect(
@@ -699,7 +698,6 @@ describe("RecoveryRecords Target Definition contract", () => {
     const restored = await createJsonRecoveryRecords({
       directory,
       id: () => "target-restore",
-      platform: "linux",
     }).restore();
     expect(restored.targetDefinitions).toEqual([
       {
@@ -747,7 +745,6 @@ describe("RecoveryRecords Target Definition contract", () => {
     const restored = await createJsonRecoveryRecords({
       directory,
       id: () => "target-migration",
-      platform: "linux",
     }).restore();
 
     expect(restored.targetDefinitions).toEqual(
@@ -795,7 +792,6 @@ describe("RecoveryRecords Target Definition contract", () => {
     const restored = await createJsonRecoveryRecords({
       directory,
       id: () => "target-v2-migration",
-      platform: "linux",
     }).restore();
 
     expect(restored.targetDefinitions).toEqual([
@@ -824,7 +820,6 @@ describe("RecoveryRecords Target Definition contract", () => {
     const records = createJsonRecoveryRecords({
       directory,
       id: () => "newer-target-schema",
-      platform: "linux",
     });
 
     await expect(records.restore()).resolves.toMatchObject({
@@ -853,7 +848,6 @@ describe("RecoveryRecords Target Definition contract", () => {
     const records = createJsonRecoveryRecords({
       directory,
       id: () => "corrupt-targets",
-      platform: "linux",
     });
 
     await expect(records.restore()).resolves.toMatchObject({
@@ -867,7 +861,6 @@ describe("RecoveryRecords Target Definition contract", () => {
     const restarted = createJsonRecoveryRecords({
       directory,
       id: () => "corrupt-targets-restart",
-      platform: "linux",
     });
     await expect(restarted.restore()).resolves.toMatchObject({
       failures: [{ code: "corrupt_store", store: "targetDefinitions" }],
@@ -1079,7 +1072,6 @@ describe("RecoveryRecords Mutation Guard contract", () => {
     const records = createJsonRecoveryRecords({
       directory,
       id: () => "host-trust-write",
-      platform: "linux",
     });
 
     expect(
@@ -1113,7 +1105,6 @@ describe("RecoveryRecords Mutation Guard contract", () => {
     const records = createJsonRecoveryRecords({
       directory,
       id: () => "host-trust-corrupt",
-      platform: "linux",
     });
 
     expect((await records.restore()).failures).toContainEqual({
