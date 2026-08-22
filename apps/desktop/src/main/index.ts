@@ -13,6 +13,7 @@ import {
   WORKSPACE_URL,
 } from "./adapters/electron-security.js";
 import { registerDesktopIpc } from "./adapters/electron-ipc.js";
+import { onWindowClosed } from "./adapters/electron-window-lifecycle.js";
 import { createCompositionRoot } from "./composition-root.js";
 
 protocol.registerSchemesAsPrivileged([
@@ -75,8 +76,8 @@ if (!app.requestSingleInstanceLock()) {
           },
         );
         window.once("ready-to-show", () => window.show());
-        window.once("closed", () => {
-          desktopIpc.detach(window.webContents.id);
+        onWindowClosed(window, (webContentsId) => {
+          desktopIpc.detach(webContentsId);
           if (workspaceWindow === window) workspaceWindow = undefined;
         });
         void window.loadURL(WORKSPACE_URL);
@@ -108,8 +109,8 @@ if (!app.requestSingleInstanceLock()) {
           },
         );
         window.once("ready-to-show", () => window.show());
-        window.once("closed", () => {
-          desktopIpc.detach(window.webContents.id);
+        onWindowClosed(window, (webContentsId) => {
+          desktopIpc.detach(webContentsId);
           if (reviewWindow === window) reviewWindow = undefined;
         });
         void window.loadURL(REVIEW_URL);
