@@ -8,7 +8,7 @@ import {
 } from "./official-collections.js";
 
 describe("bundled Official Collection catalog", () => {
-  it("has a canonical manifest digest and remains non-executable pending independent review", () => {
+  it("binds the independent approval to the immutable bundled release", () => {
     const catalog = validateOfficialCollectionCatalog(
       BUNDLED_OFFICIAL_COLLECTION_CATALOG,
     );
@@ -36,13 +36,30 @@ describe("bundled Official Collection catalog", () => {
         },
       }).releases[0],
     ).toMatchObject({
-      blockers: ["Independent review is pending."],
-      executable: false,
+      blockers: [],
+      collectionId: "skills-desktop-starter",
+      executable: true,
       manifestDigest:
         "sha256:182b299da81e6d96be674e473646328ca0032eeb8f189de3e9235a5fc8ae2a8a",
-      receipt: { status: "pending" },
+      receipt: {
+        author: "skills-desktop maintainers",
+        manifestDigest:
+          "sha256:182b299da81e6d96be674e473646328ca0032eeb8f189de3e9235a5fc8ae2a8a",
+        reviewLocation:
+          "https://github.com/oldwinter/skills-desktop/issues/20#issuecomment-5376882542",
+        reviewPolicy: "official-collection-v1",
+        reviewedAt: "2026-08-22T00:51:04Z",
+        reviewer: "oldwinter",
+        schemaVersion: 1,
+        status: "approved",
+      },
+      releaseNumber: 1,
+      skills: ["find-skills"],
       source: {
+        repository: "vercel-labs/skills",
+        repositoryUrl: "https://github.com/vercel-labs/skills",
         reviewedRevision: "435076e78988e1e6ec40d00b0b1d76bdbbc5419a",
+        sourceType: "github",
       },
     });
   });

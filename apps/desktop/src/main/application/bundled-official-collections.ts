@@ -32,12 +32,13 @@ export const BUNDLED_OFFICIAL_COLLECTION_CATALOG = {
         author: "skills-desktop maintainers",
         manifestDigest:
           "sha256:182b299da81e6d96be674e473646328ca0032eeb8f189de3e9235a5fc8ae2a8a",
-        reviewLocation: null,
+        reviewLocation:
+          "https://github.com/oldwinter/skills-desktop/issues/20#issuecomment-5376882542",
         reviewPolicy: "official-collection-v1",
-        reviewedAt: null,
-        reviewer: null,
+        reviewedAt: "2026-08-22T00:51:04Z",
+        reviewer: "oldwinter",
         schemaVersion: 1,
-        status: "pending",
+        status: "approved",
       },
     },
   ],

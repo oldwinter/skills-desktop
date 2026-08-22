@@ -344,6 +344,15 @@ const globalEntry = {
   sourceType: null,
   sourceUrl: null,
 };
+const collectionEntry = {
+  agents: ["Codex"],
+  name: "find-skills",
+  path: "/SECRET_PROJECT_PATH/.agents/skills/find-skills",
+  scope: "project",
+  source: null,
+  sourceType: null,
+  sourceUrl: null,
+};
 
 await Promise.all([
   mkdir(binDirectory, { recursive: true }),
@@ -373,6 +382,21 @@ if (args.at(-1) === "--version") {
   const agentIndex = args.indexOf("--agent");
   const names = args.slice(removeIndex + 1, agentIndex);
   writeFileSync(statePath, JSON.stringify(current.filter(({ name }) => !names.includes(name))));
+} else if (args.includes("add")) {
+  const statePath = join(process.env.HOME, "project-inventory.json");
+  const current = JSON.parse(readFileSync(statePath, "utf8"));
+  const skillIndex = args.indexOf("--skill");
+  const agentIndex = args.indexOf("--agent");
+  const names = args.slice(skillIndex + 1, agentIndex);
+  const entry = ${JSON.stringify(collectionEntry)};
+  writeFileSync(
+    statePath,
+    JSON.stringify(
+      names.includes(entry.name) && !current.some(({ name }) => name === entry.name)
+        ? [...current, entry]
+        : current,
+    ),
+  );
 } else if (args.join(" ").endsWith("list --json")) {
   process.stdout.write(readFileSync(join(process.env.HOME, "project-inventory.json"), "utf8"));
 } else if (args.join(" ").endsWith("list --global --json")) {
@@ -527,30 +551,124 @@ try {
   })()`);
   await first.page.waitFor(
     `document.body?.textContent?.includes("Skills Desktop Starter") &&
-      document.body?.textContent?.includes("Independent review is pending.") &&
+      document.body?.textContent?.includes("approved") &&
+      document.body?.textContent?.includes("sha256:182b299da81e6d96be674e473646328ca0032eeb8f189de3e9235a5fc8ae2a8a") &&
       document.body?.textContent?.includes("435076e78988e1e6ec40d00b0b1d76bdbbc5419a")`,
     "bundled Official Collection evidence",
   );
-  const collectionBoundary = await first.page.evaluate(`({
-    prepareDisabled: [...document.querySelectorAll("button")].find(
-      (button) => button.textContent?.includes("Prepare plan"),
-    )?.disabled,
-    text: document.body.textContent ?? "",
-  })`);
+  const collectionBoundary = await first.page.evaluate(`(async () => {
+    const snapshot = await window.skillsDesktop.getSnapshot();
+    return {
+      prepareDisabled: [...document.querySelectorAll("button")].find(
+        (button) => button.textContent?.includes("Prepare plan"),
+      )?.disabled,
+      receipt: snapshot.ok
+        ? snapshot.value.collections?.releases[0]?.receipt
+        : undefined,
+      selectionDisabled: document.querySelector(
+        'input[aria-label="Select find-skills"]',
+      )?.disabled,
+      text: document.body.textContent ?? "",
+    };
+  })()`);
+  const expectedCollectionReceipt = {
+    author: "skills-desktop maintainers",
+    manifestDigest:
+      "sha256:182b299da81e6d96be674e473646328ca0032eeb8f189de3e9235a5fc8ae2a8a",
+    reviewLocation:
+      "https://github.com/oldwinter/skills-desktop/issues/20#issuecomment-5376882542",
+    reviewPolicy: "official-collection-v1",
+    reviewedAt: "2026-08-22T00:51:04Z",
+    reviewer: "oldwinter",
+    schemaVersion: 1,
+    status: "approved",
+  };
   if (
     collectionBoundary.prepareDisabled !== true ||
+    collectionBoundary.selectionDisabled !== false ||
+    JSON.stringify(collectionBoundary.receipt) !==
+      JSON.stringify(expectedCollectionReceipt) ||
     !collectionBoundary.text.includes("vercel-labs/skills")
   ) {
     throw new Error(
-      "Pending bundled Collection became executable or lost pinned evidence.",
+      "Approved bundled Collection lost receipt, planning, or pinned evidence.",
     );
   }
   await first.page.evaluate(`(() => {
-    const button = document.querySelector('button[aria-label="Inventory"]');
-    if (!(button instanceof HTMLButtonElement)) throw new Error("Inventory navigation is unavailable.");
+    const selection = document.querySelector('input[aria-label="Select find-skills"]');
+    if (!(selection instanceof HTMLInputElement)) throw new Error("Collection selection is unavailable.");
+    selection.click();
+  })()`);
+  await first.page.waitFor(
+    `[...document.querySelectorAll("button")].find(
+      (button) => button.textContent?.includes("Prepare plan"),
+    )?.disabled === false`,
+    "approved Official Collection planning",
+  );
+  await first.page.evaluate(`(() => {
+    const button = [...document.querySelectorAll("button")].find(
+      (candidate) => candidate.textContent?.includes("Prepare plan"),
+    );
+    if (!(button instanceof HTMLButtonElement)) throw new Error("Collection planning is unavailable.");
     button.click();
   })()`);
-  console.log("packaged smoke: pending Official Collection inspected");
+  await first.page.waitFor(
+    `document.body?.textContent?.includes("Collection Plan") &&
+      document.body?.textContent?.includes("Open Trusted Review")`,
+    "pinned Official Collection plan",
+  );
+  await first.page.evaluate(`(() => {
+    const button = [...document.querySelectorAll("button")].find(
+      (candidate) => candidate.textContent?.includes("Open Trusted Review"),
+    );
+    if (!(button instanceof HTMLButtonElement)) throw new Error("Collection Trusted Review is unavailable.");
+    button.click();
+  })()`);
+  const collectionReviewPage = await first.connectPage(
+    "skills-desktop://review/index.html",
+  );
+  await collectionReviewPage.waitFor(
+    `document.body?.textContent?.includes("Review Official Collection") &&
+      document.body?.textContent?.includes("oldwinter") &&
+      document.body?.textContent?.includes("2026-08-22T00:51:04Z") &&
+      document.body?.textContent?.includes("official-collection-v1") &&
+      document.body?.textContent?.includes("issues/20#issuecomment-5376882542") &&
+      document.body?.textContent?.includes("435076e78988e1e6ec40d00b0b1d76bdbbc5419a") &&
+      document.body?.textContent?.includes("archive/435076e78988e1e6ec40d00b0b1d76bdbbc5419a.tar.gz --skill find-skills --agent codex --yes")`,
+    "Official Collection Trusted Review projection",
+  );
+  await collectionReviewPage.evaluate(`(() => {
+    const button = document.querySelector('button[aria-label="Approve Official Collection plan"]');
+    if (!(button instanceof HTMLButtonElement)) throw new Error("Collection approval is unavailable.");
+    button.click();
+  })()`);
+  await collectionReviewPage.waitFor(
+    `document.body?.textContent?.includes("Mutation started")`,
+    "Official Collection child execution",
+  );
+  await first.page.waitFor(
+    `document.body?.textContent?.includes("Present, content unknown") &&
+      !document.body?.textContent?.includes("Collection Plan")`,
+    "Official Collection postflight assessment",
+  );
+  collectionReviewPage.close();
+  const collectionInvocation = `--yes skills@1.5.23 add https://github.com/vercel-labs/skills/archive/435076e78988e1e6ec40d00b0b1d76bdbbc5419a.tar.gz --skill find-skills --agent codex --yes`;
+  if (!(await readFile(invocationLog, "utf8")).split("\n").includes(collectionInvocation)) {
+    throw new Error("Official Collection did not execute the exact pinned npx skills plan.");
+  }
+  const collectionLaunch = first;
+  await collectionLaunch.close();
+  if (collectionLaunch.errors.length > 0) {
+    throw new Error(collectionLaunch.errors.join("\n"));
+  }
+  first = await launch();
+  await first.page.waitFor(
+    `document.body?.textContent?.includes("find-skills") &&
+      document.body?.textContent?.includes("packaged-project-skill") &&
+      document.body?.textContent?.includes("Fresh evidence")`,
+    "Official Collection postflight restart",
+  );
+  console.log("packaged smoke: approved Official Collection executed and restored");
   if (
     /SECRET_PROJECT_PATH|SECRET_HOME_PATH|SECRET_TOKEN|SECRET_RAW_STDERR/.test(
       rendererBoundary.text,
@@ -1001,7 +1119,7 @@ try {
   const versionChecks = invocations.filter(
     (line) => line === "--yes skills@1.5.23 --version",
   );
-  if (versionChecks.length !== 5) {
+  if (versionChecks.length !== 6) {
     throw new Error(
       `Expected one version check per opened Target Adapter, got ${versionChecks.length}.`,
     );
