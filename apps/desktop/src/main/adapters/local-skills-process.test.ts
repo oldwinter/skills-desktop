@@ -570,8 +570,6 @@ writeFileSync(process.argv[2], String(child.pid));
 setInterval(() => undefined, 1000);
 `,
       );
-      const changes = watch(directory);
-      const iterator = changes[Symbol.asyncIterator]();
       const controller = new AbortController();
       let descendantPid: number | undefined;
 
@@ -593,20 +591,22 @@ setInterval(() => undefined, 1000);
           timeoutMs: 10_000,
           windowsHide: true,
         });
-        while (descendantPid === undefined) {
-          await iterator.next();
-          descendantPid = await readFile(pidPath, "utf8").then(
-            (value) => Number(value),
-            () => undefined,
-          );
-        }
+        descendantPid = await vi.waitFor(
+          async () => {
+            const pid = Number(await readFile(pidPath, "utf8"));
+            if (!Number.isSafeInteger(pid) || pid <= 0) {
+              throw new Error("The descendant PID file is not complete.");
+            }
+            return pid;
+          },
+          { interval: 25, timeout: 2_000 },
+        );
 
         controller.abort();
 
         await expect(pending).resolves.toMatchObject({ exitCode: 1 });
         expect(() => process.kill(descendantPid!, 0)).toThrow();
       } finally {
-        await iterator.return?.();
         if (descendantPid !== undefined) {
           try {
             process.kill(descendantPid, "SIGKILL");
