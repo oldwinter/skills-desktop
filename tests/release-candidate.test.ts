@@ -17,6 +17,7 @@ import forgeConfig, {
 import {
   assertPublicReleaseEligible,
   assertUnsignedCandidateEnvironment,
+  assertUnsignedPreviewEligible,
   candidateArtifactPlan,
   collectBuildOutputEvidence,
   createCandidateManifest,
@@ -305,7 +306,7 @@ describe("unsigned release candidate contract", () => {
       ],
       buildInputs: shared.buildInputs,
       buildOutputs: shared.buildOutputs,
-      candidateUse: "local-or-internal-only",
+      candidateUse: "unsigned-preview-only",
       platform: "linux",
       schemaVersion: 1,
       signingStatus: "unsigned",
@@ -324,12 +325,13 @@ describe("unsigned release candidate contract", () => {
     { architecture: "x64", platform: "darwin" },
     { architecture: "x64", platform: "win32" },
   ] as const)(
-    "rejects unsigned $platform/$architecture from every public path",
+    "allows unsigned $platform/$architecture only on the preview path",
     (target) => {
       const manifest = createCandidateManifest(manifestInputForTarget(target));
 
+      expect(assertUnsignedPreviewEligible(manifest)).toEqual(manifest);
       expect(() => assertPublicReleaseEligible(manifest)).toThrowError(
-        "Stable publication is unavailable: signing and provider enrollment are deferred.",
+        "Stable publication is unavailable for unsigned developer previews.",
       );
       expect(() =>
         assertPublicReleaseEligible({
@@ -338,8 +340,14 @@ describe("unsigned release candidate contract", () => {
           signingStatus: "signed",
         }),
       ).toThrowError(
-        "Stable publication is unavailable: signing and provider enrollment are deferred.",
+        "Stable publication is unavailable for unsigned developer previews.",
       );
+      expect(() =>
+        assertUnsignedPreviewEligible({
+          ...manifest,
+          candidateUse: "public-stable",
+        }),
+      ).toThrowError("Unsigned developer preview manifest is invalid.");
     },
   );
 

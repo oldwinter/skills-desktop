@@ -1,5 +1,11 @@
 # Ship signed platform artifacts through gated releases
 
+> **Amended by ADR 0013:** This record remains authoritative for Stable
+> Releases. ADR 0013 creates a separate, explicitly non-stable Unsigned
+> Developer Preview surface and narrowly supersedes this record's former ban on
+> every public unsigned artifact. A preview does not satisfy, weaken, or bypass
+> any signing, update, approval, or publication requirement below.
+
 V1 distributes native desktop artifacts directly from GitHub Releases rather
 than through platform stores or Linux package repositories. Each supported
 platform keeps its own packaging, signing, and update authority; a shared
@@ -17,7 +23,9 @@ Windows ships `x64` only through Squirrel.Windows: a signed installer EXE, the
 full NuGet package, and its `RELEASES` metadata. V1 does not ship MSIX, enter the
 Microsoft Store, or claim native Windows ARM64 support. Early SmartScreen
 reputation warnings are an accepted limitation, not a reason to publish an
-unsigned installer.
+unsigned Stable Release. ADR 0013 separately permits an attested unsigned
+developer pre-release with explicit manual-install warnings and no stable-feed
+authority.
 
 Linux ships `x64` DEB and RPM files for manual installation and upgrade. V1
 does not operate APT or DNF repositories, implement a Linux in-application
@@ -93,7 +101,9 @@ Signing is the preferred authority when the organization and release region
 are eligible. Otherwise, release is blocked until maintainers provision an OV
 certificate backed by an appropriate hardware or managed signing service. The
 signing provider is hidden behind the release workflow boundary; unsigned
-public Windows releases are not a fallback.
+public Windows Stable Releases are not a fallback. ADR 0013's Unsigned
+Developer Preview is a separate pre-release classification and cannot be
+promoted in place.
 
 Every final platform artifact has a published SHA-256 checksum, an SPDX SBOM,
 and a GitHub artifact attestation binding its bytes to the repository, workflow,

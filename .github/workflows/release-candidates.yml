@@ -5,6 +5,12 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      publish_preview:
+        description: Publish the verified draft as an unsigned developer preview
+        required: true
+        default: false
+        type: boolean
 
 concurrency:
   group: unsigned-candidates-${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
@@ -320,7 +326,7 @@ jobs:
           retention-days: 1
 
   draft-assembly:
-    name: Assemble private GitHub draft
+    name: Stage unsigned developer preview draft
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
     needs: verify
     permissions:
@@ -347,7 +353,7 @@ jobs:
           --payload-digest "${{ needs.verify.outputs.payload-digest }}"
           --payload-root "verified-input"
       - id: notes
-        name: Write private draft notes
+        name: Write unsigned preview notes
         run: >-
           node scripts/release/release-integrity-cli.mjs notes
           --candidate-set-digest "${{ needs.verify.outputs.candidate-set-digest }}"
@@ -358,7 +364,7 @@ jobs:
           --source-commit "${{ github.sha }}"
           --version "${{ needs.verify.outputs.version }}"
           --workflow-run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-      - name: Create unpublished prerelease draft
+      - name: Create unpublished preview draft
         env:
           GH_TOKEN: ${{ github.token }}
         run: >-
@@ -377,9 +383,83 @@ jobs:
         name: Verify exact GitHub draft assets
         run: >-
           node scripts/release/release-integrity-cli.mjs verify-release
+          --candidate-set-digest "${{ needs.verify.outputs.candidate-set-digest }}"
+          --evidence-set-digest "${{ needs.verify.outputs.evidence-set-digest }}"
           --payload-digest "${{ needs.verify.outputs.payload-digest }}"
           --payload-root "verified-input"
           --release-list-json "${{ runner.temp }}/releases.json"
           --repository "${{ github.repository }}"
           --source-commit "${{ github.sha }}"
           --version "${{ needs.verify.outputs.version }}"
+          --workflow-run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+  publish-preview:
+    name: Publish unsigned developer preview
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/main' &&
+      inputs.publish_preview == true
+    needs: [verify, draft-assembly]
+    permissions:
+      contents: write
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      preview-state: ${{ steps.verify-preview.outputs.preview-state }}
+      preview-tag: ${{ steps.verify-preview.outputs.preview-tag }}
+      preview-url: ${{ steps.verify-preview.outputs.preview-url }}
+    steps:
+      - name: Check out preview contract
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Download exact staged payload
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: verified-draft-${{ needs.verify.outputs.payload-digest }}
+          path: verified-input
+      - name: Reverify payload before publication
+        run: >-
+          node scripts/release/release-integrity-cli.mjs preflight-draft
+          --payload-digest "${{ needs.verify.outputs.payload-digest }}"
+          --payload-root "verified-input"
+      - name: Read back staged draft state
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" > "${RUNNER_TEMP}/draft-releases.json"
+      - name: Verify staged GitHub draft assets
+        run: >-
+          node scripts/release/release-integrity-cli.mjs verify-release
+          --candidate-set-digest "${{ needs.verify.outputs.candidate-set-digest }}"
+          --evidence-set-digest "${{ needs.verify.outputs.evidence-set-digest }}"
+          --payload-digest "${{ needs.verify.outputs.payload-digest }}"
+          --payload-root "verified-input"
+          --release-list-json "${{ runner.temp }}/draft-releases.json"
+          --repository "${{ github.repository }}"
+          --source-commit "${{ github.sha }}"
+          --version "${{ needs.verify.outputs.version }}"
+          --workflow-run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+      - name: Publish staged preview without changing assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release edit "${{ needs.draft-assembly.outputs.draft-tag }}"
+          --repo "${{ github.repository }}"
+          --draft=false --prerelease --latest=false
+      - name: Read back public preview state
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" > "${RUNNER_TEMP}/releases.json"
+      - id: verify-preview
+        name: Verify exact public preview assets
+        run: >-
+          node scripts/release/release-integrity-cli.mjs verify-preview-release
+          --candidate-set-digest "${{ needs.verify.outputs.candidate-set-digest }}"
+          --evidence-set-digest "${{ needs.verify.outputs.evidence-set-digest }}"
+          --payload-digest "${{ needs.verify.outputs.payload-digest }}"
+          --payload-root "verified-input"
+          --release-list-json "${{ runner.temp }}/releases.json"
+          --repository "${{ github.repository }}"
+          --source-commit "${{ github.sha }}"
+          --version "${{ needs.verify.outputs.version }}"
+          --workflow-run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"

@@ -256,7 +256,7 @@ export function createCandidateManifest(input) {
     artifacts,
     buildInputs: parsed.buildInputs,
     buildOutputs,
-    candidateUse: "local-or-internal-only",
+    candidateUse: "unsigned-preview-only",
     platform: parsed.platform,
     schemaVersion: 1,
     signingStatus: "unsigned",
@@ -271,10 +271,21 @@ export function serializeCandidateManifest(manifest) {
 }
 
 export function assertPublicReleaseEligible(_manifest) {
-  // Issue #23 has no signing identity, provider enrollment, or publication authority.
+  // Unsigned previews never acquire stable publication authority.
   throw new Error(
-    "Stable publication is unavailable: signing and provider enrollment are deferred.",
+    "Stable publication is unavailable for unsigned developer previews.",
   );
+}
+
+export function assertUnsignedPreviewEligible(manifest) {
+  if (
+    manifest?.schemaVersion !== 1 ||
+    manifest?.candidateUse !== "unsigned-preview-only" ||
+    manifest?.signingStatus !== "unsigned"
+  ) {
+    throw new Error("Unsigned developer preview manifest is invalid.");
+  }
+  return manifest;
 }
 
 export function assertUnsignedCandidateEnvironment(environment) {

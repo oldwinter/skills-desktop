@@ -203,6 +203,18 @@ release evidence, assessments, and exact per-Target Command Plans. Its aggregate
 confirmation authorizes only the bound single-use child Confirmed Mutations and
 does not make their execution transactional.
 
+**Unsigned Developer Preview**: A public GitHub pre-release containing exact
+unsigned candidate bytes, checksums, an SPDX SBOM, GitHub artifact attestations,
+and source identity. It is an early-access distribution surface, not a Stable
+Release, carries no Apple or Windows publisher trust, is never marked latest,
+and is excluded from automatic update feeds. Users verify the downloaded bytes
+before following explicit platform-owned manual installation or override steps.
+
+**Stable Release**: The signed, notarized, independently approved publication
+defined by ADR 0011. Deferring paid signing prerequisites does not weaken its
+acceptance criteria or allow an Unsigned Developer Preview to be promoted in
+place.
+
 ## Non-Negotiable Boundaries
 
 - `npx skills` remains authoritative for list, add, remove, and update.
@@ -219,6 +231,9 @@ does not make their execution transactional.
 - Secrets, SSH credentials, and raw customer data are never persisted in logs.
 - The prototype is preserved for interaction evidence but is not promoted into
   production code unchanged.
+- Public unsigned artifacts are labelled only as Unsigned Developer Previews.
+  They remain prereleases, never activate automatic updates, and never claim
+  platform signing, notarization, publisher identity, or Stable Release status.
 
 ## Open Decisions
 
