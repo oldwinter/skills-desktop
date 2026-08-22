@@ -1,10 +1,19 @@
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  mkdtemp,
+  mkdir,
+  readFile,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import forgeConfig from "../apps/desktop/forge.config.js";
+import forgeConfig, {
+  shouldIgnorePackagerPath,
+} from "../apps/desktop/forge.config.js";
 import {
   assertPublicReleaseEligible,
   assertUnsignedCandidateEnvironment,
@@ -68,6 +77,76 @@ const linuxManifestInput = () => {
   } as const;
 };
 
+const manifestInputForTarget = ({
+  architecture,
+  platform,
+}: {
+  readonly architecture: "arm64" | "x64";
+  readonly platform: "darwin" | "linux" | "win32";
+}) => {
+  const input = linuxManifestInput();
+  return {
+    ...input,
+    architecture,
+    artifacts: candidateArtifactPlan({
+      architecture,
+      platform,
+      version: input.version,
+    }).map((artifact, index) => ({
+      ...artifact,
+      sha256: ["a", "b", "c"][index]!.repeat(64),
+      sizeBytes: index + 1,
+    })),
+    platform,
+  };
+};
+
+const invalidManifestCases: readonly [
+  string,
+  (input: ReturnType<typeof linuxManifestInput>) => unknown,
+][] = [
+  ["unknown manifest field", (input) => ({ ...input, extra: true })],
+  [
+    "invalid artifact digest",
+    (input) => ({
+      ...input,
+      artifacts: [
+        { ...input.artifacts[0], sha256: "invalid" },
+        input.artifacts[1],
+      ],
+    }),
+  ],
+  [
+    "invalid source commit",
+    (input) => ({
+      ...input,
+      source: { ...input.source, commit: "short" },
+    }),
+  ],
+  ["mutable version", (input) => ({ ...input, version: "0.1.0-beta.1" })],
+  [
+    "duplicate artifact entry",
+    (input) => ({
+      ...input,
+      artifacts: [input.artifacts[0], input.artifacts[0]],
+    }),
+  ],
+  [
+    "missing artifact entry",
+    (input) => ({ ...input, artifacts: input.artifacts.slice(0, 1) }),
+  ],
+  [
+    "duplicate build output",
+    (input) => ({
+      ...input,
+      buildOutputs: [
+        input.buildOutputs[0],
+        ...input.buildOutputs.slice(0, -1),
+      ],
+    }),
+  ],
+];
+
 describe("unsigned release candidate contract", () => {
   it("provides the package metadata required by native makers", async () => {
     const desktopPackage = JSON.parse(
@@ -109,6 +188,23 @@ describe("unsigned release candidate contract", () => {
         (maker) => maker.name === "@electron-forge/maker-rpm",
       ),
     ).toMatchObject({ config: { options: { license: "Proprietary" } } });
+    expect(
+      [
+        "",
+        "/",
+        "/dist",
+        "/dist/main/index.js",
+        "/package.json",
+      ].map(shouldIgnorePackagerPath),
+    ).toEqual([false, false, false, false, false]);
+    expect(
+      [
+        "/.env",
+        "/notes.txt",
+        "/src/main/index.ts",
+        "/node_modules/example/index.js",
+      ].map(shouldIgnorePackagerPath),
+    ).toEqual([true, true, true, true]);
   });
 
   it.each([
@@ -214,21 +310,56 @@ describe("unsigned release candidate contract", () => {
     expect(createCandidateManifest(shared)).toEqual(manifest);
   });
 
-  it("fails every stable or public publication attempt closed", () => {
-    const manifest = createCandidateManifest(linuxManifestInput());
+  it.each([
+    { architecture: "arm64", platform: "darwin" },
+    { architecture: "x64", platform: "darwin" },
+    { architecture: "x64", platform: "win32" },
+  ] as const)(
+    "rejects unsigned $platform/$architecture from every public path",
+    (target) => {
+      const manifest = createCandidateManifest(manifestInputForTarget(target));
 
-    expect(() => assertPublicReleaseEligible(manifest)).toThrowError(
-      "Stable publication is unavailable: signing and provider enrollment are deferred.",
-    );
+      expect(() => assertPublicReleaseEligible(manifest)).toThrowError(
+        "Stable publication is unavailable: signing and provider enrollment are deferred.",
+      );
+      expect(() =>
+        assertPublicReleaseEligible({
+          ...manifest,
+          candidateUse: "public-stable",
+          signingStatus: "signed",
+        }),
+      ).toThrowError(
+        "Stable publication is unavailable: signing and provider enrollment are deferred.",
+      );
+    },
+  );
+
+  it.each(invalidManifestCases)(
+    "rejects %s manifest evidence",
+    (_name, mutate) => {
+      expect(() =>
+        createCandidateManifest(mutate(linuxManifestInput())),
+      ).toThrow();
+    },
+  );
+
+  it("rejects unsupported targets and malformed CLI input", () => {
     expect(() =>
-      assertPublicReleaseEligible({
-        ...manifest,
-        candidateUse: "public-stable",
-        signingStatus: "signed",
+      candidateArtifactPlan({
+        architecture: "arm64",
+        platform: "linux",
+        version: "0.1.0",
       }),
-    ).toThrowError(
-      "Stable publication is unavailable: signing and provider enrollment are deferred.",
-    );
+    ).toThrow("Unsupported release candidate target.");
+    expect(() => parseCandidateArguments(["--platform", "linux"])).toThrow();
+    expect(() =>
+      parseCandidateArguments([
+        "--platform",
+        "linux",
+        "--platform",
+        "linux",
+      ]),
+    ).toThrow("Duplicate release candidate argument: --platform");
   });
 
   it("rejects signing and publication credentials without disclosing them", () => {
@@ -308,6 +439,56 @@ describe("unsigned release candidate contract", () => {
           version: "0.1.0",
         }),
       ).rejects.toThrow("Release candidate directories are immutable.");
+    } finally {
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("rejects linked, unexpected, and empty maker artifacts", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "skills-candidate-bad-"));
+    const makeDirectory = join(directory, "make");
+    try {
+      await mkdir(makeDirectory, { recursive: true });
+      await writeFile(join(makeDirectory, "first.deb"), "deb");
+      await writeFile(join(makeDirectory, "second.deb"), "extra");
+      await writeFile(join(makeDirectory, "candidate.rpm"), "rpm");
+      await expect(
+        stageCandidateArtifacts({
+          architecture: "x64",
+          candidateDirectory: join(directory, "unexpected"),
+          makeDirectory,
+          platform: "linux",
+          version: "0.1.0",
+        }),
+      ).rejects.toThrow("Forge did not emit the exact release artifact set.");
+
+      await rm(join(makeDirectory, "second.deb"));
+      await writeFile(join(makeDirectory, "candidate.rpm"), "");
+      await expect(
+        stageCandidateArtifacts({
+          architecture: "x64",
+          candidateDirectory: join(directory, "empty"),
+          makeDirectory,
+          platform: "linux",
+          version: "0.1.0",
+        }),
+      ).rejects.toThrow("Forge emitted an empty release artifact.");
+
+      await rm(join(makeDirectory, "candidate.rpm"));
+      await symlink(
+        join(makeDirectory, "first.deb"),
+        join(makeDirectory, "linked.rpm"),
+        "file",
+      );
+      await expect(
+        stageCandidateArtifacts({
+          architecture: "x64",
+          candidateDirectory: join(directory, "linked"),
+          makeDirectory,
+          platform: "linux",
+          version: "0.1.0",
+        }),
+      ).rejects.toThrow("Release maker outputs cannot contain symbolic links.");
     } finally {
       await rm(directory, { force: true, recursive: true });
     }

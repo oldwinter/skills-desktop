@@ -100,7 +100,7 @@ async function main() {
   }
   const trackedChanges = await run(
     "git",
-    ["status", "--short", "--untracked-files=no"],
+    ["status", "--short", "--untracked-files=all"],
     { capture: true },
   );
   if (trackedChanges !== "") {

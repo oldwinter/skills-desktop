@@ -7,6 +7,17 @@ const desktopPackage = JSON.parse(
   readFileSync(new URL("package.json", import.meta.url), "utf8"),
 ) as { readonly version: string };
 
+export function shouldIgnorePackagerPath(filePath: string): boolean {
+  const normalized = filePath.replaceAll("\\", "/");
+  return !(
+    normalized === "" ||
+    normalized === "/" ||
+    normalized === "/package.json" ||
+    normalized === "/dist" ||
+    normalized.startsWith("/dist/")
+  );
+}
+
 const config: ForgeConfig = {
   makers: [
     { name: "@electron-forge/maker-dmg", config: {}, platforms: ["darwin"] },
@@ -50,13 +61,7 @@ const config: ForgeConfig = {
     appBundleId: "dev.skillsdesktop.app",
     asar: true,
     executableName: "skills-desktop",
-    ignore: [
-      /^\/src($|\/)/,
-      /^\/node_modules($|\/)/,
-      /^\/forge\.config\.ts$/,
-      /^\/tsconfig\.json$/,
-      /^\/vite\..*\.ts$/,
-    ],
+    ignore: shouldIgnorePackagerPath,
     name: "Skills Desktop",
     prune: false,
   },

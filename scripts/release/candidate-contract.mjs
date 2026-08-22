@@ -7,15 +7,57 @@ import {
   rm,
   stat,
 } from "node:fs/promises";
-import { basename, dirname, extname, join, relative, sep } from "node:path";
+import { basename, dirname, join, relative, sep } from "node:path";
 
 import { z } from "zod";
 
-const SUPPORTED_TARGETS = new Set([
-  "darwin/arm64",
-  "darwin/x64",
-  "linux/x64",
-  "win32/x64",
+const artifactDefinitions = {
+  "linux-deb": {
+    fileName: ({ stem }) => `${stem}.deb`,
+    sourceFilePattern: /\.deb$/,
+  },
+  "linux-rpm": {
+    fileName: ({ stem }) => `${stem}.rpm`,
+    sourceFilePattern: /\.rpm$/,
+  },
+  "macos-dmg": {
+    fileName: ({ stem }) => `${stem}.dmg`,
+    sourceFilePattern: /\.dmg$/,
+  },
+  "macos-update-zip": {
+    fileName: ({ stem }) => `${stem}.zip`,
+    sourceFilePattern: /\.zip$/,
+  },
+  "windows-full-nuget": {
+    fileName: ({ version }) => `skills_desktop-${version}-full.nupkg`,
+    sourceFilePattern: /-full\.nupkg$/,
+  },
+  "windows-releases-metadata": {
+    fileName: () => "RELEASES",
+    sourceFilePattern: /^RELEASES$/,
+  },
+  "windows-squirrel-installer": {
+    fileName: ({ stem }) => `${stem}-setup.exe`,
+    sourceFilePattern: /\.exe$/,
+  },
+};
+const targetArtifactKinds = new Map([
+  ["darwin/arm64", ["macos-dmg", "macos-update-zip"]],
+  ["darwin/x64", ["macos-dmg", "macos-update-zip"]],
+  ["linux/x64", ["linux-deb", "linux-rpm"]],
+  [
+    "win32/x64",
+    [
+      "windows-squirrel-installer",
+      "windows-full-nuget",
+      "windows-releases-metadata",
+    ],
+  ],
+]);
+const platformMakerArtifactPatterns = new Map([
+  ["darwin", /\.(dmg|zip)$/],
+  ["linux", /\.(deb|rpm)$/],
+  ["win32", /\.(exe|msi|nupkg)$|^releases(?:\.json)?$/],
 ]);
 
 const sha256Schema = z.string().regex(/^[a-f0-9]{64}$/);
@@ -137,7 +179,8 @@ const candidateArgumentsSchema = z
   .strict();
 
 export function candidateArtifactPlan({ architecture, platform, version }) {
-  if (!SUPPORTED_TARGETS.has(`${platform}/${architecture}`)) {
+  const artifactKinds = targetArtifactKinds.get(`${platform}/${architecture}`);
+  if (artifactKinds === undefined) {
     throw new Error("Unsupported release candidate target.");
   }
   if (!/^\d+\.\d+\.\d+$/.test(version)) {
@@ -145,29 +188,10 @@ export function candidateArtifactPlan({ architecture, platform, version }) {
   }
 
   const stem = `skills-desktop-${version}-${platform}-${architecture}`;
-  if (platform === "darwin") {
-    return [
-      { fileName: `${stem}.dmg`, kind: "macos-dmg" },
-      { fileName: `${stem}.zip`, kind: "macos-update-zip" },
-    ];
-  }
-  if (platform === "win32") {
-    return [
-      {
-        fileName: `${stem}-setup.exe`,
-        kind: "windows-squirrel-installer",
-      },
-      {
-        fileName: `skills_desktop-${version}-full.nupkg`,
-        kind: "windows-full-nuget",
-      },
-      { fileName: "RELEASES", kind: "windows-releases-metadata" },
-    ];
-  }
-  return [
-    { fileName: `${stem}.deb`, kind: "linux-deb" },
-    { fileName: `${stem}.rpm`, kind: "linux-rpm" },
-  ];
+  return artifactKinds.map((kind) => ({
+    fileName: artifactDefinitions[kind].fileName({ stem, version }),
+    kind,
+  }));
 }
 
 export function parseCandidateArguments(argv) {
@@ -282,40 +306,12 @@ async function listMakerFiles(directory) {
 }
 
 function isPlatformArtifact(path, platform) {
-  const extension = extname(path).toLocaleLowerCase("en-US");
-  if (platform === "darwin") {
-    return extension === ".dmg" || extension === ".zip";
-  }
-  if (platform === "win32") {
-    return (
-      extension === ".exe" ||
-      extension === ".msi" ||
-      extension === ".nupkg" ||
-      basename(path) === "RELEASES" ||
-      basename(path) === "RELEASES.json"
-    );
-  }
-  return extension === ".deb" || extension === ".rpm";
+  const pattern = platformMakerArtifactPatterns.get(platform);
+  return pattern?.test(basename(path).toLocaleLowerCase("en-US")) ?? false;
 }
 
 function sourceMatchesKind(path, kind) {
-  const fileName = basename(path);
-  switch (kind) {
-    case "linux-deb":
-      return fileName.endsWith(".deb");
-    case "linux-rpm":
-      return fileName.endsWith(".rpm");
-    case "macos-dmg":
-      return fileName.endsWith(".dmg");
-    case "macos-update-zip":
-      return fileName.endsWith(".zip");
-    case "windows-full-nuget":
-      return fileName.endsWith("-full.nupkg");
-    case "windows-releases-metadata":
-      return fileName === "RELEASES";
-    case "windows-squirrel-installer":
-      return fileName.endsWith(".exe");
-  }
+  return artifactDefinitions[kind].sourceFilePattern.test(basename(path));
 }
 
 async function digestFile(path) {

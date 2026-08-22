@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 
 import { parse } from "yaml";
 import { describe, expect, it } from "vitest";
@@ -58,5 +58,30 @@ describe("unsigned candidate workflow contract", () => {
     expect(source).not.toMatch(/id-token:\s*write/);
     expect(source).not.toMatch(/environment:\s*(release-signing|production-release)/);
     expect(source).not.toMatch(/\b(CSC_LINK|APPLE_API_KEY|WIN_CSC_LINK|GH_TOKEN)\b/);
+
+    const workflowDirectory = new URL("../.github/workflows/", import.meta.url);
+    const allWorkflowSources = await Promise.all(
+      (await readdir(workflowDirectory)).map((fileName) =>
+        readFile(new URL(fileName, workflowDirectory), "utf8"),
+      ),
+    );
+    const rootPackage = JSON.parse(
+      await readFile(new URL("../package.json", import.meta.url), "utf8"),
+    );
+    const publicCommands = [
+      /\bgh\s+release\s+(create|upload|edit)\b/i,
+      /\belectron-forge\s+publish\b/i,
+      /\bnpm\s+publish\b/i,
+      /softprops\/action-gh-release/i,
+    ];
+    const publicationSurfaces = [
+      ...allWorkflowSources,
+      ...Object.values(rootPackage.scripts),
+    ];
+    for (const candidate of publicationSurfaces) {
+      expect(publicCommands.some((pattern) => pattern.test(candidate))).toBe(
+        false,
+      );
+    }
   });
 });
