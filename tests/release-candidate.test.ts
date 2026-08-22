@@ -12,6 +12,10 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import forgeConfig, {
+  APP_ICON_BASE_PATH,
+  APP_ICON_ICNS_PATH,
+  APP_ICON_ICO_PATH,
+  APP_ICON_PNG_PATH,
   shouldIgnorePackagerPath,
 } from "../apps/desktop/forge.config.js";
 import {
@@ -170,7 +174,20 @@ describe("unsigned release candidate contract", () => {
         )
       : undefined;
     expect(squirrelMaker).toMatchObject({
-      config: { authors: "Skills Desktop maintainers" },
+      config: {
+        authors: "Skills Desktop maintainers",
+        iconUrl:
+          "https://raw.githubusercontent.com/oldwinter/skills-desktop/main/apps/desktop/assets/app-icon.ico",
+        setupIcon: APP_ICON_ICO_PATH,
+      },
+    });
+    const dmgMaker = Array.isArray(forgeConfig.makers)
+      ? forgeConfig.makers.find(
+          (maker) => maker.name === "@electron-forge/maker-dmg",
+        )
+      : undefined;
+    expect(dmgMaker).toMatchObject({
+      config: { icon: APP_ICON_ICNS_PATH },
     });
     const linuxMakers = Array.isArray(forgeConfig.makers)
       ? forgeConfig.makers.filter((maker) =>
@@ -186,6 +203,7 @@ describe("unsigned release candidate contract", () => {
           config: expect.objectContaining({
             options: expect.objectContaining({
               bin: "skills-desktop",
+              icon: APP_ICON_PNG_PATH,
               name: "skills-desktop",
             }),
           }),
@@ -197,6 +215,20 @@ describe("unsigned release candidate contract", () => {
         (maker) => maker.name === "@electron-forge/maker-rpm",
       ),
     ).toMatchObject({ config: { options: { license: "Proprietary" } } });
+    expect(forgeConfig.packagerConfig).toMatchObject({
+      extraResource: APP_ICON_PNG_PATH,
+      icon: APP_ICON_BASE_PATH,
+    });
+    const [pngIcon, icnsIcon, icoIcon] = await Promise.all([
+      readFile(APP_ICON_PNG_PATH),
+      readFile(APP_ICON_ICNS_PATH),
+      readFile(APP_ICON_ICO_PATH),
+    ]);
+    expect([...pngIcon.subarray(0, 8)]).toEqual([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+    ]);
+    expect(icnsIcon.subarray(0, 4).toString("ascii")).toBe("icns");
+    expect([...icoIcon.subarray(0, 4)]).toEqual([0, 0, 1, 0]);
     expect(
       [
         "",

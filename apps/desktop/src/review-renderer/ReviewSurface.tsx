@@ -41,6 +41,7 @@ export function ReviewSurface({ client }: { readonly client: ReviewBridge }) {
       );
     } else setSettledMessage("Review rejected");
     setSnapshot({ decision, schemaVersion: 1, status: "settled" });
+    if (decision === "reject") window.close();
   };
 
   if (error !== undefined) {
@@ -219,7 +220,10 @@ export function ReviewSurface({ client }: { readonly client: ReviewBridge }) {
               <dd>{collectionPlan.expiresAt}</dd>
             </div>
           </dl>
-          <section className="review-plan" aria-labelledby="review-plan-heading">
+          <section
+            className="review-plan"
+            aria-labelledby="review-plan-heading"
+          >
             <h2 id="review-plan-heading">Stable child order</h2>
             <ol className="review-child-list">
               {collectionPlan.children.map((child) => (
@@ -333,7 +337,10 @@ export function ReviewSurface({ client }: { readonly client: ReviewBridge }) {
               {collectionPlan.releaseEvidence.compatibility.platforms.join(
                 ", ",
               )}{" "}
-              / {collectionPlan.releaseEvidence.compatibility.harnesses.join(", ")}
+              /{" "}
+              {collectionPlan.releaseEvidence.compatibility.harnesses.join(
+                ", ",
+              )}
             </dd>
           </div>
           <div>

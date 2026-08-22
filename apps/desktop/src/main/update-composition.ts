@@ -26,6 +26,7 @@ export async function createElectronUpdateComposition(input: {
   };
   readonly id?: () => string;
   readonly platform: NodeJS.Platform;
+  readonly releaseChannel: "stable" | "unsigned-preview";
   readonly prepareRestart?: () => Promise<void>;
   readonly restartSafety?: () => {
     readonly guardReasons: readonly RestartGuardReason[];
@@ -50,6 +51,7 @@ export async function createElectronUpdateComposition(input: {
       architecture: input.architecture,
       isPackaged: input.app.isPackaged,
       platform: input.platform,
+      releaseChannel: input.releaseChannel,
       version: input.app.getVersion(),
     },
     clock: { now },

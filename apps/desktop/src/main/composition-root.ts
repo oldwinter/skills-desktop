@@ -112,6 +112,7 @@ export async function createCompositionRoot(options?: {
     autoUpdater,
     diagnosticsExporter: createElectronReleaseDiagnosticsExporter({ dialog }),
     platform: process.platform,
+    releaseChannel: "unsigned-preview",
     restartSafety: () => capabilities.restartSafety(),
   });
   return { capabilities, updates };

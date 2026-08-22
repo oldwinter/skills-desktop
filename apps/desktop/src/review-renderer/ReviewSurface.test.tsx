@@ -15,7 +15,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ReviewBridge } from "../contracts/review.js";
 import { ReviewSurface } from "./ReviewSurface.js";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
 
 describe("Trusted Review surface", () => {
   it("shows the immutable Official Collection evidence before approval", async () => {
@@ -206,9 +209,7 @@ describe("Trusted Review surface", () => {
                     position: 1,
                     preparedDigest: "4".repeat(64),
                     scope: "project" as const,
-                    selections: [
-                      { mode: "add" as const, name: "find-skills" },
-                    ],
+                    selections: [{ mode: "add" as const, name: "find-skills" }],
                     target: localTarget,
                   },
                   {
@@ -306,7 +307,9 @@ describe("Trusted Review surface", () => {
     expect(children[1]).toHaveTextContent("SSH / generation 3 / Global");
     expect(children[1]).toHaveTextContent("Pinned SSH add preview");
     expect(children[1]).toHaveTextContent("8".repeat(64));
-    expect(screen.getByText("Sequential, non-transactional")).toBeInTheDocument();
+    expect(
+      screen.getByText("Sequential, non-transactional"),
+    ).toBeInTheDocument();
 
     fireEvent.click(
       screen.getByRole("button", { name: "Approve Official Collection plan" }),
@@ -378,6 +381,58 @@ describe("Trusted Review surface", () => {
     expect(await screen.findByRole("status")).toHaveTextContent(
       "Mutation started",
     );
+  });
+
+  it("closes the dedicated window after a successful rejection", async () => {
+    const closeWindow = vi
+      .spyOn(window, "close")
+      .mockImplementation(() => undefined);
+    const reject = vi.fn(async () => ({
+      ok: true as const,
+      value: { operationId: "trust-review-rejected" },
+    }));
+    const client: ReviewBridge = {
+      async approve() {
+        return {
+          ok: true as const,
+          value: { operationId: "trust-review-approved" },
+        };
+      },
+      async getReview() {
+        return {
+          ok: true as const,
+          value: {
+            projection: {
+              algorithm: "ssh-ed25519",
+              expiresAt: "2026-08-22T10:05:00.000Z",
+              fingerprint: "SHA256:reviewed-fingerprint",
+              identity: "deploy@resolved.internal:2222",
+              reviewId: "trust-review-rejected",
+              target: {
+                connectionReference: "build-host",
+                generation: 4,
+                harness: "Codex",
+                id: "00000000-0000-4000-8000-000000000018",
+                kind: "ssh" as const,
+                label: "Build host",
+                workspace: "/srv/skills",
+                workspaceLabel: "skills",
+              },
+              trustAction: "first-use" as const,
+            },
+            schemaVersion: 1 as const,
+            status: "pending" as const,
+          },
+        };
+      },
+      reject,
+    };
+    render(<ReviewSurface client={client} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Reject" }));
+
+    await waitFor(() => expect(reject).toHaveBeenCalledWith());
+    expect(closeWindow).toHaveBeenCalledOnce();
   });
 
   it("shows a changed host key assignment and approves without receiving key authority", async () => {

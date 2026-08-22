@@ -13,6 +13,7 @@ import {
   WORKSPACE_URL,
 } from "./adapters/electron-security.js";
 import { registerDesktopIpc } from "./adapters/electron-ipc.js";
+import { onWindowClosed } from "./adapters/electron-window-lifecycle.js";
 import { createCompositionRoot } from "./composition-root.js";
 
 protocol.registerSchemesAsPrivileged([
@@ -30,6 +31,9 @@ if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   const currentDirectory = dirname(fileURLToPath(import.meta.url));
+  const appIcon = app.isPackaged
+    ? resolve(process.resourcesPath, "app-icon.png")
+    : resolve(currentDirectory, "../../assets/app-icon.png");
   let workspaceWindow: BrowserWindow | undefined;
   let reviewWindow: BrowserWindow | undefined;
 
@@ -58,6 +62,7 @@ if (!app.requestSingleInstanceLock()) {
           workspaceWindowOptions(
             resolve(currentDirectory, "../preload/workspace.cjs"),
             app.isPackaged,
+            appIcon,
           ),
         );
         secureWindow(window, WORKSPACE_URL);
@@ -71,8 +76,8 @@ if (!app.requestSingleInstanceLock()) {
           },
         );
         window.once("ready-to-show", () => window.show());
-        window.once("closed", () => {
-          desktopIpc.detach(window.webContents.id);
+        onWindowClosed(window, (webContentsId) => {
+          desktopIpc.detach(webContentsId);
           if (workspaceWindow === window) workspaceWindow = undefined;
         });
         void window.loadURL(WORKSPACE_URL);
@@ -86,6 +91,7 @@ if (!app.requestSingleInstanceLock()) {
             resolve(currentDirectory, "../preload/review.cjs"),
             app.isPackaged,
             workspaceWindow,
+            appIcon,
           ),
         );
         secureWindow(window, REVIEW_URL);
@@ -103,8 +109,8 @@ if (!app.requestSingleInstanceLock()) {
           },
         );
         window.once("ready-to-show", () => window.show());
-        window.once("closed", () => {
-          desktopIpc.detach(window.webContents.id);
+        onWindowClosed(window, (webContentsId) => {
+          desktopIpc.detach(webContentsId);
           if (reviewWindow === window) reviewWindow = undefined;
         });
         void window.loadURL(REVIEW_URL);

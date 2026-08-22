@@ -7,7 +7,14 @@ import {
 
 describe("workspace BrowserWindow security contract", () => {
   it("enables isolation and sandboxing while denying Node and webviews", () => {
-    expect(workspaceWindowOptions("/app/preload/workspace.cjs", true)).toMatchObject({
+    expect(
+      workspaceWindowOptions(
+        "/app/preload/workspace.cjs",
+        true,
+        "/app/resources/app-icon.png",
+      ),
+    ).toMatchObject({
+      icon: "/app/resources/app-icon.png",
       minWidth: 360,
       webPreferences: {
         contextIsolation: true,
@@ -28,8 +35,14 @@ describe("workspace BrowserWindow security contract", () => {
     const parent = { id: "workspace-window" } as never;
 
     expect(
-      reviewWindowOptions("/app/preload/review.cjs", true, parent),
+      reviewWindowOptions(
+        "/app/preload/review.cjs",
+        true,
+        parent,
+        "/app/resources/app-icon.png",
+      ),
     ).toMatchObject({
+      icon: "/app/resources/app-icon.png",
       minWidth: 360,
       modal: true,
       parent,

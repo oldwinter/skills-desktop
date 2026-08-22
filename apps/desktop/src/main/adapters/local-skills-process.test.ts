@@ -3,6 +3,7 @@ import {
   copyFile,
   mkdir,
   mkdtemp,
+  readdir,
   readFile,
   rm,
   watch,
@@ -344,6 +345,72 @@ describe("Local SkillsProcess inventory contract", () => {
       message: "Process tree termination could not be confirmed.",
       started: true,
       termination: "unknown",
+    });
+  });
+
+  it("captures large stdout completely when a child exits without draining its pipe", async () => {
+    const output = JSON.stringify({ payload: "x".repeat(128 * 1_024) });
+    const temporaryDirectory = await mkdtemp(
+      join(tmpdir(), "skills-desktop-capture-test-"),
+    );
+    const runner = createSpawnProcessRunner({
+      platform: process.platform,
+      temporaryDirectory,
+    });
+
+    try {
+      const result = await runner.run({
+        args: [
+          "-e",
+          'const { fstatSync } = require("node:fs"); console.error((fstatSync(1).mode & 0o777).toString(8)); console.log(JSON.stringify({ payload: "x".repeat(128 * 1024) })); process.exit(0);',
+        ],
+        cwd: process.cwd(),
+        env: { PATH: process.env.PATH ?? "" },
+        executable: process.execPath,
+        maxOutputBytes: 1024 * 1024,
+        shell: false,
+        signal: new AbortController().signal,
+        timeoutMs: 10_000,
+        windowsHide: true,
+      });
+
+      expect(result.exitCode).toBe(0);
+      if (process.platform !== "win32") expect(result.stderr).toBe("600\n");
+      expect(Buffer.byteLength(result.stdout, "utf8")).toBe(
+        Buffer.byteLength(output, "utf8") + 1,
+      );
+      expect(JSON.parse(result.stdout)).toEqual(JSON.parse(output));
+      expect(await readdir(temporaryDirectory)).toEqual([]);
+    } finally {
+      await rm(temporaryDirectory, { force: true, recursive: true });
+    }
+  });
+
+  it("rejects file-backed stdout above the configured byte limit", async () => {
+    const runner = createSpawnProcessRunner({ platform: process.platform });
+
+    const failure = await runner
+      .run({
+        args: [
+          "-e",
+          'process.stdout.write("x".repeat(128 * 1024)); setInterval(() => undefined, 1000);',
+        ],
+        cwd: process.cwd(),
+        env: { PATH: process.env.PATH ?? "" },
+        executable: process.execPath,
+        maxOutputBytes: 1_024,
+        shell: false,
+        signal: new AbortController().signal,
+        timeoutMs: 10_000,
+        windowsHide: true,
+      })
+      .catch((error: unknown) => error);
+
+    expect(failure).toMatchObject({
+      disposition: "failed",
+      message: "Process output exceeded its byte limit.",
+      started: true,
+      termination: "known",
     });
   });
 
