@@ -921,107 +921,17 @@ try {
     label: "Packaged SSH",
     workspace: ${JSON.stringify(workspace)},
   })`);
-  if (!createdSsh.ok) {
-    throw new Error(
-      `Packaged SSH Target creation failed: ${JSON.stringify(createdSsh)}`,
-    );
-  }
-  const sshTargetId = await first.page.evaluate(
-    `window.skillsDesktop.getSnapshot().then((result) => result.value.targets.find(({ target }) => target.connectionReference === "packaged-ssh")?.target.id)`,
-  );
-  if (typeof sshTargetId !== "string") {
-    throw new Error("Packaged SSH Target identity is unavailable.");
-  }
-  const untrustedRefresh = await first.page.evaluate(
-    `window.skillsDesktop.refreshInventory(${JSON.stringify(sshTargetId)})`,
-  );
   if (
-    untrustedRefresh.ok ||
-    untrustedRefresh.error?.code !== "host_trust_required"
+    createdSsh.ok ||
+    createdSsh.error?.code !== "invalid_request" ||
+    !String(createdSsh.error?.message ?? "").includes("V1 Local")
   ) {
     throw new Error(
-      `Packaged first-use trust was not required: ${JSON.stringify(untrustedRefresh)}`,
+      `Packaged V1 must reject SSH Target creation: ${JSON.stringify(createdSsh)}`,
     );
   }
-  const requestedHostReview = await first.page.evaluate(
-    `window.skillsDesktop.requestHostTrustReview(${JSON.stringify(sshTargetId)})`,
-  );
-  if (!requestedHostReview.ok) {
-    throw new Error(
-      `Packaged host review could not open: ${JSON.stringify(requestedHostReview)}`,
-    );
-  }
-  const hostReviewPage = await first.connectPage(
-    "skills-desktop://review/index.html",
-  );
-  await hostReviewPage.waitFor(
-    `document.body?.textContent?.includes("Review host key") &&
-      document.body?.textContent?.includes("SHA-256 fingerprint")`,
-    "packaged host-key Trusted Review",
-  );
-  await hostReviewPage.evaluate(`(() => {
-    const approve = document.querySelector('button[aria-label="Trust host key"]');
-    if (!(approve instanceof HTMLButtonElement)) throw new Error("Host trust approval is unavailable.");
-    approve.click();
-  })()`);
-  await hostReviewPage.waitFor(
-    `document.body?.textContent?.includes("Host trust confirmed")`,
-    "packaged host trust confirmation",
-  );
-  await hostReviewPage.disconnect();
-  await first.page.send("Page.bringToFront");
-  const remoteRefresh = await first.page.evaluate(
-    `window.skillsDesktop.refreshInventory(${JSON.stringify(sshTargetId)})`,
-  );
-  if (!remoteRefresh.ok) {
-    throw new Error(
-      `Packaged SSH refresh failed: ${JSON.stringify(remoteRefresh)}`,
-    );
-  }
-  await first.page.evaluate(`(() => {
-    const targets = document.querySelector('button[aria-label="Targets"]');
-    if (!(targets instanceof HTMLButtonElement)) throw new Error("Targets navigation is unavailable.");
-    targets.click();
-  })()`);
-  await first.page.waitFor(
-    `document.querySelector(".targets-workspace") !== null`,
-    "Targets workspace for packaged SSH",
-  );
-  await first.page.evaluate(`(() => {
-    const target = [...document.querySelectorAll(".target-row")].find(
-      (candidate) => candidate.textContent?.includes("Packaged SSH"),
-    );
-    if (!(target instanceof HTMLButtonElement)) throw new Error("Packaged SSH Target is unavailable.");
-    target.click();
-  })()`);
-  await first.page.waitFor(
-    `document.querySelector(".header-target")?.textContent?.includes("Packaged SSH") === true &&
-      document.body?.textContent?.includes("packaged-project-skill") &&
-      document.body?.textContent?.includes("Fresh evidence")`,
-    "packaged SSH Inventory",
-  );
-  const ordinarySshText = await first.page.evaluate("document.body.innerText");
-  if (
-    ordinarySshText.includes("127.0.0.1") ||
-    ordinarySshText.includes("client_ed25519") ||
-    ordinarySshText.includes(String(sshServer.port))
-  ) {
-    throw new Error(
-      "Effective SSH identity escaped the packaged workspace boundary.",
-    );
-  }
-  console.log("packaged smoke: SSH trust and remote Inventory verified");
-  const sshLaunch = first;
-  await sshLaunch.close();
-  if (sshLaunch.errors.length > 0) throw new Error(sshLaunch.errors.join("\n"));
-  first = await launch();
-  await first.page.waitFor(
-    `document.body?.textContent?.includes("packaged-project-skill") &&
-      document.body?.textContent?.includes("packaged-global-skill") &&
-      document.body?.textContent?.includes("Fresh evidence")`,
-    "fresh Inventory after packaged SSH restart",
-  );
-  console.log("packaged smoke: post-SSH restart opened");
+  console.log("packaged smoke: V1 rejected SSH Target creation");
+
 
   await first.page.evaluate(`(() => {
     const targets = [...document.querySelectorAll("button")].find(
@@ -1043,7 +953,7 @@ try {
   })()`);
   await first.page.waitFor(
     `document.querySelector(".header-target")?.textContent?.includes("This device") === true`,
-    "primary Target restoration after SSH",
+    "primary Target restoration",
   );
   await first.page.evaluate(`(() => {
     const targets = [...document.querySelectorAll("button")].find(
@@ -1054,7 +964,7 @@ try {
   })()`);
   await first.page.waitFor(
     `document.querySelector(".targets-workspace") !== null`,
-    "Targets workspace after SSH",
+    "Targets workspace for second Local",
   );
   await first.page.evaluate(`(() => {
     const button = [...document.querySelectorAll("button")].find(
@@ -1448,7 +1358,7 @@ try {
   const versionChecks = invocations.filter(
     (line) => line === "--yes skills@1.5.23 --version",
   );
-  if (versionChecks.length !== 7) {
+  if (versionChecks.length !== 5) {
     throw new Error(
       `Expected one version check per opened Target Adapter, got ${versionChecks.length}.`,
     );
@@ -1467,13 +1377,10 @@ try {
   );
   if (
     targetDocument.schemaVersion !== 3 ||
-    targetDocument.targets.length !== 3 ||
-    targetDocument.targets
-      .filter(({ kind }) => kind === "local")
-      .some(({ executionBindingDigest }) => executionBindingDigest !== null) ||
-    !targetDocument.targets.some(
-      ({ executionBindingDigest, kind }) =>
-        kind === "ssh" && /^[a-f0-9]{64}$/.test(executionBindingDigest),
+    targetDocument.targets.length !== 2 ||
+    targetDocument.targets.some(({ kind }) => kind !== "local") ||
+    targetDocument.targets.some(
+      ({ executionBindingDigest }) => executionBindingDigest !== null,
     )
   ) {
     throw new Error("Packaged Target Definitions were not durably restored.");
