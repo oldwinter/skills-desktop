@@ -6,9 +6,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const fixture = vi.hoisted(() => ({
   capabilitiesOptions: undefined as
-    | { readonly skillsTargets: { readonly primaryTarget: unknown } }
-    | undefined,
+    { readonly skillsTargets: { readonly primaryTarget: unknown } } | undefined,
   home: "",
+  updateOptions: undefined as { readonly releaseChannel?: string } | undefined,
   userData: "",
 }));
 
@@ -24,7 +24,9 @@ vi.mock("electron", () => ({
 
 vi.mock("./application/desktop-capabilities.js", () => ({
   createDesktopCapabilities: vi.fn(
-    (options: { readonly skillsTargets: { readonly primaryTarget: unknown } }) => {
+    (options: {
+      readonly skillsTargets: { readonly primaryTarget: unknown };
+    }) => {
       fixture.capabilitiesOptions = options;
       return {
         initialize: vi.fn(async () => undefined),
@@ -35,7 +37,12 @@ vi.mock("./application/desktop-capabilities.js", () => ({
 }));
 
 vi.mock("./update-composition.js", () => ({
-  createElectronUpdateComposition: vi.fn(async () => ({})),
+  createElectronUpdateComposition: vi.fn(
+    async (options: { readonly releaseChannel?: string }) => {
+      fixture.updateOptions = options;
+      return {};
+    },
+  ),
 }));
 
 import { createCompositionRoot } from "./composition-root.js";
@@ -47,6 +54,7 @@ describe("desktop composition workspace selection", () => {
     vi.restoreAllMocks();
     getPath.mockClear();
     fixture.capabilitiesOptions = undefined;
+    fixture.updateOptions = undefined;
     if (originalWorkspace === undefined) {
       delete process.env.SKILLS_DESKTOP_WORKSPACE;
     } else {
@@ -70,6 +78,9 @@ describe("desktop composition workspace selection", () => {
         workspaceLabel: basename(directory),
       });
       expect(getPath).toHaveBeenCalledWith("home");
+      expect(fixture.updateOptions).toMatchObject({
+        releaseChannel: "unsigned-preview",
+      });
     } finally {
       await rm(directory, { force: true, recursive: true });
     }

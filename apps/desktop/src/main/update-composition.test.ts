@@ -46,6 +46,7 @@ describe("packaged Electron update composition", () => {
           },
           id: () => "00000000-0000-4000-8000-000000000025",
           platform,
+          releaseChannel: "stable",
           restartSafety: () => ({ guardReasons: [] }),
           schedule(delayMs, action) {
             scheduled.push({ action, delayMs });
@@ -100,6 +101,51 @@ describe("packaged Electron update composition", () => {
           updates.requestRestart("00000000-0000-4000-8000-000000000025"),
         ).resolves.toBe("started");
         expect(updater.quitAndInstall).toHaveBeenCalledTimes(1);
+        updates.dispose();
+      } finally {
+        await rm(userData, { force: true, recursive: true });
+      }
+    },
+  );
+
+  it.each([
+    ["darwin", "arm64"],
+    ["win32", "x64"],
+  ] as const)(
+    "keeps an unsigned %s/%s preview out of the automatic updater",
+    async (platform, architecture) => {
+      const userData = await mkdtemp(
+        join(tmpdir(), "skills-update-preview-composition-"),
+      );
+      const updater = new EventEmitter() as EventEmitter & {
+        checkForUpdates: ReturnType<typeof vi.fn>;
+        quitAndInstall: ReturnType<typeof vi.fn>;
+        setFeedURL: ReturnType<typeof vi.fn>;
+      };
+      updater.checkForUpdates = vi.fn();
+      updater.quitAndInstall = vi.fn();
+      updater.setFeedURL = vi.fn();
+
+      try {
+        const updates = await createElectronUpdateComposition({
+          app: {
+            getPath: () => userData,
+            getVersion: () => "0.1.0",
+            isPackaged: true,
+          },
+          architecture,
+          autoUpdater: updater as never,
+          platform,
+          releaseChannel: "unsigned-preview",
+          schedule: vi.fn(() => () => undefined),
+        });
+
+        expect(updates.getSnapshot()).toMatchObject({
+          policy: { mode: "manual" },
+          state: { kind: "manual" },
+        });
+        expect(updater.setFeedURL).not.toHaveBeenCalled();
+        expect(updater.checkForUpdates).not.toHaveBeenCalled();
         updates.dispose();
       } finally {
         await rm(userData, { force: true, recursive: true });

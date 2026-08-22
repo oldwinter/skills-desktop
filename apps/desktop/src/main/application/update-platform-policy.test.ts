@@ -15,8 +15,7 @@ describe("update platform guidance", () => {
       message:
         "Download a newer package from GitHub Releases and install it manually.",
       mode: "manual",
-      releasePageUrl:
-        "https://github.com/oldwinter/skills-desktop/releases",
+      releasePageUrl: "https://github.com/oldwinter/skills-desktop/releases",
     });
   });
 
@@ -38,6 +37,29 @@ describe("update platform guidance", () => {
         channel: "stable",
         feedUrl: `https://update.electronjs.org/oldwinter/skills-desktop/${platform}-${architecture}/0.1.0`,
         mode: "automatic",
+      });
+    },
+  );
+
+  it.each([
+    { architecture: "arm64", platform: "darwin" },
+    { architecture: "x64", platform: "win32" },
+  ] as const)(
+    "keeps an unsigned $platform/$architecture preview on manual upgrades",
+    ({ architecture, platform }) => {
+      expect(
+        selectUpdatePlatformPolicy({
+          architecture,
+          isPackaged: true,
+          platform,
+          releaseChannel: "unsigned-preview",
+          version: "0.1.0",
+        }),
+      ).toEqual({
+        message:
+          "Download a newer package from GitHub Releases and install it manually.",
+        mode: "manual",
+        releasePageUrl: "https://github.com/oldwinter/skills-desktop/releases",
       });
     },
   );

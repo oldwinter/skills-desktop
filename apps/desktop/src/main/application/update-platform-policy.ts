@@ -8,6 +8,7 @@ export interface UpdateApplicationIdentity {
   readonly architecture: string;
   readonly isPackaged: boolean;
   readonly platform: NodeJS.Platform;
+  readonly releaseChannel?: "stable" | "unsigned-preview";
   readonly version: string;
 }
 
@@ -30,7 +31,11 @@ export type UpdatePlatformPolicy =
 export function selectUpdatePlatformPolicy(
   application: UpdateApplicationIdentity,
 ): UpdatePlatformPolicy {
-  if (application.platform === "linux") {
+  if (
+    application.platform === "linux" ||
+    (application.isPackaged &&
+      application.releaseChannel === "unsigned-preview")
+  ) {
     return {
       message: ABOUT_MANUAL_UPDATE_MESSAGE,
       mode: "manual",
@@ -41,8 +46,7 @@ export function selectUpdatePlatformPolicy(
     application.isPackaged &&
     ((application.platform === "darwin" &&
       ["arm64", "x64"].includes(application.architecture)) ||
-      (application.platform === "win32" &&
-        application.architecture === "x64"));
+      (application.platform === "win32" && application.architecture === "x64"));
   if (supportsAutomaticUpdates) {
     return {
       channel: "stable",
