@@ -1,6 +1,16 @@
 import { spawn } from "node:child_process";
+import {
+  closeSync,
+  fstatSync,
+  mkdtempSync,
+  openSync,
+  readSync,
+  rmSync,
+  unlinkSync,
+} from "node:fs";
 import { access } from "node:fs/promises";
-import { win32 } from "node:path";
+import { tmpdir } from "node:os";
+import { join, win32 } from "node:path";
 
 import {
   CLI_PACKAGE,
@@ -90,6 +100,7 @@ export interface SpawnProcessRunnerOptions {
   readonly cancellationGraceMs?: number;
   readonly killWindowsTree?: (pid: number) => Promise<void>;
   readonly platform: NodeJS.Platform;
+  readonly temporaryDirectory?: string;
   readonly windowsTreeTerminationTimeoutMs?: number;
 }
 
@@ -104,12 +115,7 @@ function processBoundaryError(
   started = false,
   termination: ProcessBoundaryError["termination"] = "known",
 ) {
-  return new ProcessBoundaryError(
-    message,
-    disposition,
-    started,
-    termination,
-  );
+  return new ProcessBoundaryError(message, disposition, started, termination);
 }
 
 export async function resolveWindowsNpxCommand(
@@ -205,23 +211,56 @@ export function createSpawnProcessRunner(
         );
       }
 
-      return new Promise((resolve, reject) => {
+      let captureDirectory: string | undefined;
+      let stdoutFile: number | undefined;
+      try {
+        captureDirectory = mkdtempSync(
+          join(
+            options.temporaryDirectory ?? tmpdir(),
+            "skills-desktop-process-",
+          ),
+        );
+        const stdoutPath = join(captureDirectory, "stdout");
+        stdoutFile = openSync(stdoutPath, "wx+", 0o600);
+        if (options.platform !== "win32") unlinkSync(stdoutPath);
+      } catch {
+        if (stdoutFile !== undefined) {
+          try {
+            closeSync(stdoutFile);
+          } catch {
+            // The descriptor may already be closed after a preparation failure.
+          }
+        }
+        if (captureDirectory !== undefined) {
+          try {
+            rmSync(captureDirectory, { force: true, recursive: true });
+          } catch {
+            // The bounded public failure below intentionally hides filesystem details.
+          }
+        }
+        return Promise.reject(
+          processBoundaryError("Process output capture could not be prepared."),
+        );
+      }
+
+      let processStarted = false;
+      const pending = new Promise<ProcessResult>((resolve, reject) => {
         const child = spawn(invocation.executable, invocation.args, {
           cwd: invocation.cwd,
           detached: options.platform !== "win32",
           env: invocation.env,
           shell: invocation.shell,
-          stdio: ["ignore", "pipe", "pipe"],
+          stdio: ["ignore", stdoutFile, "pipe"],
           windowsHide: invocation.windowsHide,
           windowsVerbatimArguments: false,
         });
-        const stdout: Buffer[] = [];
+        processStarted = child.pid !== undefined;
         const stderr: Buffer[] = [];
-        let stdoutBytes = 0;
         let stderrBytes = 0;
         let boundaryFailure: ProcessBoundaryError | undefined;
         let closeTimer: NodeJS.Timeout | undefined;
         let forceTimer: NodeJS.Timeout | undefined;
+        let outputTimer: NodeJS.Timeout | undefined;
         let settled = false;
         let timeout: NodeJS.Timeout | undefined;
         let windowsTreeTermination: Promise<Error | undefined> | undefined;
@@ -230,6 +269,7 @@ export function createSpawnProcessRunner(
           if (timeout !== undefined) clearTimeout(timeout);
           if (forceTimer !== undefined) clearTimeout(forceTimer);
           if (closeTimer !== undefined) clearTimeout(closeTimer);
+          if (outputTimer !== undefined) clearInterval(outputTimer);
           invocation.signal.removeEventListener("abort", onAbort);
         };
 
@@ -240,14 +280,14 @@ export function createSpawnProcessRunner(
           reject(error);
         };
 
-        const resolveOnce = (exitCode: number | null) => {
+        const resolveOnce = (exitCode: number | null, stdout: Buffer) => {
           if (settled) return;
           settled = true;
           cleanup();
           resolve({
             exitCode: exitCode ?? 1,
             stderr: Buffer.concat(stderr).toString("utf8"),
-            stdout: Buffer.concat(stdout).toString("utf8"),
+            stdout: stdout.toString("utf8"),
           });
         };
 
@@ -343,34 +383,56 @@ export function createSpawnProcessRunner(
         }, invocation.timeoutMs);
         timeout.unref();
 
-        const collect = (
-          destination: Buffer[],
-          chunk: Buffer,
-          stream: "stderr" | "stdout",
-        ) => {
-          if (stream === "stdout") stdoutBytes += chunk.byteLength;
-          else stderrBytes += chunk.byteLength;
-          if (
-            stdoutBytes > invocation.maxOutputBytes ||
-            stderrBytes > invocation.maxOutputBytes
-          ) {
-            boundaryFailure = processBoundaryError(
-              "Process output exceeded its byte limit.",
-              "failed",
-              true,
-            );
-            terminateTree();
-            return;
+        const inspectOutputSize = () => {
+          if (settled) return;
+          try {
+            if (
+              fstatSync(stdoutFile).size > invocation.maxOutputBytes &&
+              boundaryFailure === undefined
+            ) {
+              boundaryFailure = processBoundaryError(
+                "Process output exceeded its byte limit.",
+                "failed",
+                true,
+              );
+              terminateTree();
+            }
+          } catch {
+            if (boundaryFailure === undefined) {
+              boundaryFailure = processBoundaryError(
+                "Process output capture failed.",
+                "failed",
+                true,
+              );
+              terminateTree();
+            }
           }
-          destination.push(chunk);
         };
+        outputTimer = setInterval(inspectOutputSize, 10);
+        outputTimer.unref();
 
-        child.stdout.on("data", (chunk: Buffer) =>
-          collect(stdout, chunk, "stdout"),
-        );
-        child.stderr.on("data", (chunk: Buffer) =>
-          collect(stderr, chunk, "stderr"),
-        );
+        if (child.stderr === null) {
+          boundaryFailure = processBoundaryError(
+            "Process output capture failed.",
+            "failed",
+            true,
+          );
+          terminateTree();
+        } else {
+          child.stderr.on("data", (chunk: Buffer) => {
+            stderrBytes += chunk.byteLength;
+            if (stderrBytes > invocation.maxOutputBytes) {
+              boundaryFailure = processBoundaryError(
+                "Process output exceeded its byte limit.",
+                "failed",
+                true,
+              );
+              terminateTree();
+              return;
+            }
+            stderr.push(chunk);
+          });
+        }
         child.once("error", (error) => {
           boundaryFailure = processBoundaryError(
             (error as NodeJS.ErrnoException).code === "ENOENT"
@@ -387,13 +449,85 @@ export function createSpawnProcessRunner(
               rejectOnce(terminationFailure);
               return;
             }
+            let stdoutSize: number;
+            try {
+              stdoutSize = fstatSync(stdoutFile).size;
+            } catch {
+              rejectOnce(
+                processBoundaryError(
+                  "Process output capture failed.",
+                  "failed",
+                  true,
+                ),
+              );
+              return;
+            }
+            if (stdoutSize > invocation.maxOutputBytes) {
+              boundaryFailure ??= processBoundaryError(
+                "Process output exceeded its byte limit.",
+                "failed",
+                true,
+              );
+            }
             if (boundaryFailure !== undefined) {
               rejectOnce(boundaryFailure);
               return;
             }
-            resolveOnce(exitCode);
-          })();
+            const stdout = Buffer.alloc(stdoutSize);
+            let offset = 0;
+            while (offset < stdoutSize) {
+              const bytesRead = readSync(
+                stdoutFile,
+                stdout,
+                offset,
+                stdoutSize - offset,
+                offset,
+              );
+              if (bytesRead === 0) break;
+              offset += bytesRead;
+            }
+            if (offset !== stdoutSize) {
+              rejectOnce(
+                processBoundaryError(
+                  "Process output capture failed.",
+                  "failed",
+                  true,
+                ),
+              );
+              return;
+            }
+            resolveOnce(exitCode, stdout);
+          })().catch(() => {
+            rejectOnce(
+              processBoundaryError(
+                "Process output capture failed.",
+                "failed",
+                true,
+              ),
+            );
+          });
         });
+      });
+
+      return pending.finally(() => {
+        let cleanupFailed = false;
+        try {
+          closeSync(stdoutFile);
+        } catch {
+          cleanupFailed = true;
+        }
+        try {
+          rmSync(captureDirectory, { force: true, recursive: true });
+        } catch {
+          cleanupFailed = true;
+        }
+        if (cleanupFailed) {
+          throw processBoundaryError(
+            "Temporary process output could not be removed.",
+            "failed",
+            processStarted,
+          );
+        }
       });
     },
   };
@@ -401,10 +535,7 @@ export function createSpawnProcessRunner(
 
 function observationFailure(
   code:
-    | "cancelled"
-    | "cli_incompatible"
-    | "mutation_conflict"
-    | "process_failed",
+    "cancelled" | "cli_incompatible" | "mutation_conflict" | "process_failed",
   message: string,
   phase: "observe" | "version",
   retryable: boolean,
@@ -666,7 +797,9 @@ export function createLocalSkillsProcess(
           "The mutation confirmation does not match the Prepared Mutation.",
         );
       }
-      if (options.clock().getTime() >= Date.parse(privatePlan.prepared.expiresAt)) {
+      if (
+        options.clock().getTime() >= Date.parse(privatePlan.prepared.expiresAt)
+      ) {
         return mutationExecutionFailure(
           "confirmation_expired",
           "The Prepared Mutation has expired.",
@@ -708,10 +841,9 @@ export function createLocalSkillsProcess(
             const boundary =
               error instanceof ProcessBoundaryError ? error : undefined;
             processOutcome = {
-              disposition:
-                signal.aborted
-                  ? "cancelled"
-                  : (boundary?.disposition ?? "failed"),
+              disposition: signal.aborted
+                ? "cancelled"
+                : (boundary?.disposition ?? "failed"),
               exitCode: null,
               termination: boundary?.termination ?? "unknown",
             };
