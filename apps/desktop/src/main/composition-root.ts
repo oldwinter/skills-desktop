@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { realpath } from "node:fs/promises";
-import { basename, resolve } from "node:path";
+import { resolve } from "node:path";
 
 import { app, autoUpdater, dialog } from "electron";
 
@@ -23,13 +23,20 @@ import {
   createOpenSshToolRunner,
 } from "./ssh/openssh-target.js";
 import { createLocalSkillsTargets } from "./targets/local-skills-targets.js";
+import { isLocalWorkspaceRoot } from "./targets/workspace-path.js";
 import { createElectronUpdateComposition } from "./update-composition.js";
 
 export async function createCompositionRoot(options?: {
   readonly onReviewRequested?: (reviewId: string) => void;
 }) {
+  const configuredWorkspace = process.env.SKILLS_DESKTOP_WORKSPACE;
+  const launchWorkspace = process.cwd();
   const requestedWorkspace =
-    process.env.SKILLS_DESKTOP_WORKSPACE ?? process.cwd();
+    configuredWorkspace !== undefined && configuredWorkspace.length > 0
+      ? configuredWorkspace
+      : isLocalWorkspaceRoot(launchWorkspace)
+        ? app.getPath("home")
+        : launchWorkspace;
   const workspace = await realpath(resolve(requestedWorkspace));
   const runner = createSpawnProcessRunner({ platform: process.platform });
   const userData = app.getPath("userData");
@@ -88,7 +95,6 @@ export async function createCompositionRoot(options?: {
     },
     sshAccess,
     workspace,
-    workspaceLabel: basename(workspace),
   });
   const capabilities = createDesktopCapabilities({
     clock: () => new Date(),

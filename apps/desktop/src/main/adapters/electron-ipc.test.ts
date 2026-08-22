@@ -265,6 +265,97 @@ describe("Electron IPC sender authorization", () => {
     });
   });
 
+  it("returns safe actionable diagnostics for an invalid saved workspace", async () => {
+    const handlers = new Map<
+      string,
+      (event: never, ...args: unknown[]) => unknown
+    >();
+    const ipcMain = {
+      handle(
+        channel: string,
+        handler: (event: never, ...args: unknown[]) => unknown,
+      ) {
+        handlers.set(channel, handler);
+      },
+      removeHandler: vi.fn(),
+    };
+    const session = {
+      request: vi.fn(),
+      snapshot: vi.fn(async () => ({
+        eventSequence: 0,
+        inventory: {
+          activeOperationId: null,
+          cliVersion: null,
+          entries: [],
+          freshness: "none",
+          lastError: null,
+          observedAt: null,
+          persistenceWarning: null,
+          phase: "ready",
+        },
+        mutation: {
+          activeOperationId: null,
+          commandPlan: null,
+          lastError: null,
+          outcome: null,
+          phase: "idle",
+          reconciliationDeadline: null,
+        },
+        schemaVersion: 1,
+        sessionEpoch: "epoch-1",
+        stateRevision: 0,
+        target: {
+          connectionReference: null,
+          generation: 1,
+          harness: "Codex",
+          id: "00000000-0000-4000-8000-000000000001",
+          kind: "local",
+          label: "This device",
+          workspace: "/",
+          workspaceLabel: "",
+        },
+      })),
+      teardown: vi.fn(),
+    };
+    const registration = registerDesktopIpc({
+      capabilities: { attach: vi.fn(() => session) } as never,
+      ipcMain: ipcMain as never,
+      newEpoch: () => "epoch-1",
+      updates: {
+        exportDiagnostics: vi.fn(async () => "cancelled" as const),
+        getSnapshot: vi.fn(),
+        requestCheck: vi.fn(async () => undefined),
+        requestRestart: vi.fn(async () => "stale" as const),
+        subscribe: vi.fn(() => () => undefined),
+      },
+    });
+    const mainFrame = { url: "skills-desktop://workspace/index.html" };
+    const webContents = {
+      id: 17,
+      isDestroyed: () => false,
+      mainFrame,
+      send: vi.fn(),
+    };
+    registration.attach(webContents as never, "workspace", mainFrame.url);
+
+    await expect(
+      handlers.get("workspace:snapshot:get")!({
+        sender: webContents,
+        senderFrame: mainFrame,
+      } as never),
+    ).resolves.toEqual({
+      error: {
+        code: "target_unavailable",
+        effects: "none",
+        message:
+          "The saved workspace is invalid. Choose a workspace in Targets.",
+        phase: "snapshot",
+        retryable: false,
+      },
+      ok: false,
+    });
+  });
+
   it("grants only the workspace main frame versioned About read and check intents", async () => {
     const handlers = new Map<
       string,

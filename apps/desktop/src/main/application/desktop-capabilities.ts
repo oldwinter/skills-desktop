@@ -1,4 +1,4 @@
-import { basename, posix } from "node:path";
+import { posix } from "node:path";
 
 import type { Result } from "@skills-desktop/skills-runtime";
 
@@ -37,6 +37,10 @@ import type {
   TargetDefinition,
   TargetSession,
 } from "../targets/skills-targets.js";
+import {
+  isLocalWorkspaceRoot,
+  localWorkspaceLabel,
+} from "../targets/workspace-path.js";
 import type { HostTrustChallenge } from "../ssh/openssh-target.js";
 import { compareTargetInventories } from "./comparison.js";
 import {
@@ -262,8 +266,41 @@ function targetFromDurable(target: DurableTargetDefinition): TargetDefinition {
     workspaceLabel:
       target.kind === "ssh"
         ? posix.basename(target.workspace) || target.workspace
-        : basename(target.workspace),
+        : localWorkspaceLabel(target.workspace),
   };
+}
+
+function repairPersistedRootWorkspaces(
+  definitions: readonly TargetDefinition[],
+  startupTarget: TargetDefinition,
+): {
+  readonly changed: boolean;
+  readonly definitions: readonly TargetDefinition[];
+} {
+  if (
+    startupTarget.kind !== "local" ||
+    isLocalWorkspaceRoot(startupTarget.workspace)
+  ) {
+    return { changed: false, definitions };
+  }
+  let changed = false;
+  const repaired = definitions.map((definition) => {
+    if (
+      definition.kind !== "local" ||
+      !isLocalWorkspaceRoot(definition.workspace)
+    ) {
+      return definition;
+    }
+    changed = true;
+    return {
+      ...definition,
+      executionBindingDigest: null,
+      generation: definition.generation + 1,
+      workspace: startupTarget.workspace,
+      workspaceLabel: localWorkspaceLabel(startupTarget.workspace),
+    };
+  });
+  return { changed, definitions: repaired };
 }
 
 function emptyInventoryState(): PublicInventoryState {
@@ -308,7 +345,8 @@ export function createDesktopCapabilities(
   const platform = options.platform ?? process.platform;
   let officialCollectionCatalog: OfficialCollectionCatalog =
     EMPTY_OFFICIAL_COLLECTION_CATALOG;
-  let target = options.skillsTargets.primaryTarget;
+  const startupTarget = options.skillsTargets.primaryTarget;
+  let target = startupTarget;
   const targetDefinitions = () => options.skillsTargets.definitions;
   const guardedTargetIds = new Set<string>();
   const reservedTargetIds = new Set<string>();
@@ -3484,13 +3522,43 @@ export function createDesktopCapabilities(
         ["mutationGuards", "targetDefinitions"].includes(failure.store),
       );
       targetAuthorityUnavailable = targetStoreFailed;
+      const restoredLegacyTargetIds = new Map<string, string>();
       if (restored.targetDefinitions.length > 0) {
-        options.skillsTargets.replaceDefinitions(
-          restored.targetDefinitions.map(targetFromDurable),
+        const restoredTargets =
+          restored.targetDefinitions.map(targetFromDurable);
+        for (const definition of restoredTargets) {
+          const legacyTargetId = options.skillsTargets.legacyIdFor(definition);
+          if (legacyTargetId !== undefined) {
+            restoredLegacyTargetIds.set(definition.id, legacyTargetId);
+          }
+        }
+        const repairedTargets = repairPersistedRootWorkspaces(
+          restoredTargets,
+          startupTarget,
         );
-        target =
-          targetDefinitions().find(({ id }) => id === target.id) ??
-          targetDefinitions()[0]!;
+        if (repairedTargets.changed && !targetAuthorityUnavailable) {
+          const committed = await options.recoveryRecords.commit({
+            targets: repairedTargets.definitions.map(durableTarget),
+            type: "targets.replace",
+          });
+          if (!committed.ok) {
+            recoveryUncertain = true;
+            targetAuthorityUnavailable = true;
+            inventoryState = {
+              ...inventoryState,
+              lastError: committed.error,
+              phase: "error",
+            };
+          }
+        }
+        if (!targetAuthorityUnavailable) {
+          options.skillsTargets.replaceDefinitions(
+            repairedTargets.definitions,
+          );
+          target =
+            targetDefinitions().find(({ id }) => id === target.id) ??
+            targetDefinitions()[0]!;
+        }
       } else if (!targetStoreFailed) {
         const committed = await options.recoveryRecords.commit({
           targets: [durableTarget(target)],
@@ -3519,7 +3587,9 @@ export function createDesktopCapabilities(
       }
       if (!targetAuthorityUnavailable) {
         for (const definition of targetDefinitions()) {
-          const legacyTargetId = options.skillsTargets.legacyIdFor(definition);
+          const legacyTargetId =
+            restoredLegacyTargetIds.get(definition.id) ??
+            options.skillsTargets.legacyIdFor(definition);
           if (
             legacyTargetId === undefined ||
             legacyTargetId === definition.id ||

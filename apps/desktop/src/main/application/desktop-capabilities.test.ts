@@ -10,7 +10,10 @@ import {
   type RecoveryRecords,
 } from "../persistence/recovery-records.js";
 import type { SkillsProcess } from "../adapters/local-skills-process.js";
-import { createSkillsTargetsCatalog } from "../targets/local-skills-targets.js";
+import {
+  createLocalSkillsTargets,
+  createSkillsTargetsCatalog,
+} from "../targets/local-skills-targets.js";
 import type { OpenSshTargetAccess } from "../ssh/openssh-target.js";
 import {
   createDesktopCapabilities,
@@ -257,6 +260,90 @@ async function createHostTrustRoleFixture(options?: {
 }
 
 describe("DesktopCapabilities inventory role-session contract", () => {
+  it("repairs a persisted filesystem-root Target to the safe startup workspace", async () => {
+    const legacyRootTargetId = `local-codex-${createHash("sha256")
+      .update("/")
+      .digest("hex")
+      .slice(0, 24)}`;
+    const records = createMemoryRecoveryRecords(
+      [
+        {
+          cliVersion: freshInventory.cliVersion,
+          entries: freshInventory.entries.map((entry) => ({
+            agents: [...entry.agents],
+            contentFingerprint: { ...entry.contentFingerprint },
+            declaredSource: { ...entry.declaredSource },
+            name: entry.name,
+            revision: { ...entry.revision },
+            scope: entry.scope,
+          })),
+          generation: 1,
+          observedAt: freshInventory.observedAt,
+          targetId: legacyRootTargetId,
+        },
+      ],
+      [],
+      [
+        {
+          connectionReference: null,
+          generation: 1,
+          harness: target.harness,
+          id: target.id,
+          kind: "local",
+          label: target.label,
+          workspace: "/",
+        },
+      ],
+    );
+    const capabilities = createDesktopCapabilities({
+      id: () => "unused-id",
+      recoveryRecords: records,
+      skillsTargets: createLocalSkillsTargets({
+        id: () => target.id,
+        processFor: () => ({
+          ...mutationNotExercised,
+          async observeInventory() {
+            return { ok: true, value: freshInventory };
+          },
+        }),
+        workspace: target.workspace,
+      }),
+    });
+
+    await capabilities.initialize();
+    const session = capabilities.attach(
+      {
+        endpointId: "workspace-root-repair",
+        role: "workspace",
+        sessionEpoch: "epoch-root-repair",
+      },
+      () => undefined,
+    );
+
+    await expect(session.snapshot()).resolves.toMatchObject({
+      inventory: {
+        entries: [{ name: "tdd" }],
+        freshness: "stale",
+        lastError: { code: "stale_inventory" },
+      },
+      target: {
+        generation: 2,
+        workspace: target.workspace,
+        workspaceLabel: target.workspaceLabel,
+      },
+    });
+    await expect(records.restore()).resolves.toMatchObject({
+      inventorySnapshots: [{ targetId: target.id }],
+      targetDefinitions: [
+        {
+          generation: 2,
+          id: target.id,
+          workspace: target.workspace,
+        },
+      ],
+    });
+  });
+
   it("restores stale evidence and publishes an ordered, bounded Fresh Inventory", async () => {
     const restoredRecords = createMemoryRecoveryRecords([
       {

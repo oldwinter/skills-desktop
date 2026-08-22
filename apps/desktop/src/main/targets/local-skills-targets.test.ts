@@ -48,6 +48,19 @@ const process: SkillsProcess = {
 };
 
 describe("Local SkillsTargets identity", () => {
+  it("never exposes an empty label for a filesystem-root workspace", () => {
+    const catalog = createLocalSkillsTargets({
+      id: () => "00000000-0000-4000-8000-00000000000f",
+      processFor: () => process,
+      workspace: "/",
+    });
+
+    expect(catalog.primaryTarget).toMatchObject({
+      workspace: "/",
+      workspaceLabel: "/",
+    });
+  });
+
   it("uses generated stable identity and opens each restored Local definition with a frozen binding", async () => {
     const bindings: unknown[] = [];
     const first = createLocalSkillsTargets({
@@ -57,7 +70,6 @@ describe("Local SkillsTargets identity", () => {
         return process;
       },
       workspace: "/work/alpha",
-      workspaceLabel: "alpha",
     });
 
     expect(first.primaryTarget.id).toBe("00000000-0000-4000-8000-00000000000f");

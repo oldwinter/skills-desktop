@@ -1,4 +1,5 @@
 import type { IpcMain, IpcMainInvokeEvent, WebContents } from "electron";
+import { ZodError } from "zod";
 
 import {
   aboutDiagnosticsExportRequestSchema,
@@ -72,6 +73,30 @@ function internalFailure(): WorkspaceRequestResult {
     retryable: true,
   };
   return { error, ok: false };
+}
+
+function snapshotFailure(error: unknown): WorkspaceRequestResult {
+  const invalidWorkspace =
+    error instanceof ZodError &&
+    error.issues.some((issue) => {
+      const root = issue.path[0];
+      const field = issue.path.at(-1);
+      return (
+        (root === "target" || root === "targets") &&
+        (field === "workspace" || field === "workspaceLabel")
+      );
+    });
+  if (!invalidWorkspace) return internalFailure();
+  return {
+    error: {
+      code: "target_unavailable",
+      effects: "none",
+      message: "The saved workspace is invalid. Choose a workspace in Targets.",
+      phase: "snapshot",
+      retryable: false,
+    },
+    ok: false,
+  };
 }
 
 function authorizationFailure(): WorkspaceRequestResult {
@@ -271,8 +296,8 @@ export function registerDesktopIpc(input: {
         ok: true,
         value: workspaceSnapshotSchema.parse(await endpoint.session.snapshot()),
       });
-    } catch {
-      return workspaceSnapshotResultSchema.parse(internalFailure());
+    } catch (error) {
+      return workspaceSnapshotResultSchema.parse(snapshotFailure(error));
     }
   });
   input.ipcMain.handle(CHANNELS.refresh, async (event, targetId: unknown) => {

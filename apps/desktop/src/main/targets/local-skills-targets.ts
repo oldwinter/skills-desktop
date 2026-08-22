@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { basename, isAbsolute, normalize, posix } from "node:path";
+import { isAbsolute, normalize, posix } from "node:path";
 
 import { z } from "zod";
 
@@ -14,6 +14,7 @@ import type {
   TargetDefinition,
   TargetDefinitionProposal,
 } from "./skills-targets.js";
+import { localWorkspaceLabel } from "./workspace-path.js";
 
 const uuidSchema = z.string().uuid();
 
@@ -81,7 +82,7 @@ async function canonicalTargetDraft(
       workspaceLabel:
         draft.kind === "ssh"
           ? posix.basename(workspace) || workspace
-          : basename(workspace),
+          : localWorkspaceLabel(workspace),
     },
   };
 }
@@ -372,7 +373,6 @@ export function createLocalSkillsTargets(input: {
   readonly processFor: (binding: EffectiveTargetBinding) => SkillsProcess;
   readonly sshAccess?: OpenSshTargetAccess;
   readonly workspace: string;
-  readonly workspaceLabel: string;
 }): SkillsTargets {
   const target: TargetDefinition = {
     connectionReference: null,
@@ -382,7 +382,7 @@ export function createLocalSkillsTargets(input: {
     kind: "local",
     label: "This device",
     workspace: input.workspace,
-    workspaceLabel: input.workspaceLabel,
+    workspaceLabel: localWorkspaceLabel(input.workspace),
   };
   return createSkillsTargetsCatalog({
     canonicalizeLocalWorkspace: input.canonicalizeLocalWorkspace,
