@@ -362,7 +362,7 @@ describe("Local SkillsProcess inventory contract", () => {
       const result = await runner.run({
         args: [
           "-e",
-          `const { fstatSync } = require("node:fs"); console.error((fstatSync(1).mode & 0o777).toString(8)); console.log(${JSON.stringify(output)}); process.exit(0);`,
+          'const { fstatSync } = require("node:fs"); console.error((fstatSync(1).mode & 0o777).toString(8)); console.log(JSON.stringify({ payload: "x".repeat(128 * 1024) })); process.exit(0);',
         ],
         cwd: process.cwd(),
         env: { PATH: process.env.PATH ?? "" },
@@ -391,10 +391,7 @@ describe("Local SkillsProcess inventory contract", () => {
 
     const failure = await runner
       .run({
-        args: [
-          "-e",
-          `console.log("${"x".repeat(128 * 1_024)}"); process.exit(0);`,
-        ],
+        args: ["-e", 'console.log("x".repeat(128 * 1024)); process.exit(0);'],
         cwd: process.cwd(),
         env: { PATH: process.env.PATH ?? "" },
         executable: process.execPath,
