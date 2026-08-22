@@ -1,7 +1,8 @@
 # Skills Desktop
 
 Cross-platform desktop client for inspecting and managing Skills through the
-existing `npx skills` CLI, locally and on explicitly configured SSH targets.
+existing `npx skills` CLI on the Local Target. V1 ships Local Target only;
+SSH Target support is next-scope.
 
 ## Status
 
@@ -11,6 +12,11 @@ the pinned `skills@1.5.23` CLI dialect. It restores only an allowlisted last
 complete Snapshot, always marked stale. Read [`CONTEXT.md`](CONTEXT.md) and the
 accepted records in [`docs/adr/`](docs/adr/) before changing product behavior.
 
+V1 acceptance is Local-only: a reliable local tracer, buildable unsigned
+candidates, and docs that match reality. Signed public release remains gated on
+#22/#27. SSH Target, remote-bootstrap, and cross-machine reconciliation are out
+of V1 scope / next.
+
 The prototype was imported from SimplexAI Agent-First Control Plane commit
 `e4c5cb0f41a1944b369fbe20da72af456f806d2f`. It is evidence, not the production
 foundation.
@@ -19,7 +25,8 @@ foundation.
 
 - Delegate skill discovery and mutations to `npx skills`; do not build another
   skill installer or scan skill directories independently.
-- Support local targets first, then the same target contract over SSH.
+- V1 supports Local Target only. SSH Target is next-scope and is not marketed
+  or accepted as V1.
 - Compare presence, source, harness coverage, and a content revision only when
   one is available. Do not invent semantic versions.
 - Generate a command plan before every mutation and require explicit user
@@ -44,8 +51,10 @@ exercise fresh observation, redaction, restart, and stale recovery without
 reading or changing developer inventory.
 
 The production workspaces are `apps/desktop`, `packages/skills-runtime`, and
-`packages/remote-bootstrap`. Production skill discovery and mutation must keep
-using argument-array invocations of the pinned `npx skills` package.
+`packages/remote-bootstrap`. `packages/remote-bootstrap` is retained for
+next-scope work; it is not part of the V1 public commitment. Production skill
+discovery and mutation must keep using argument-array invocations of the pinned
+`npx skills` package.
 
 ## Unsigned Native Candidates
 
