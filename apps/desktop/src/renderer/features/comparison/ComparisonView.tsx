@@ -483,6 +483,7 @@ export function ComparisonView({
             <div className="empty-state" role="status">
               <CircleHelp aria-hidden="true" size={22} />
               <h2>No comparison selected</h2>
+              <p>Click Compare to build the aligned skill table.</p>
             </div>
           ) : comparison.rows.length === 0 ? (
             <div className="empty-state" role="status">

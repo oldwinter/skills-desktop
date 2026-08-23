@@ -1681,6 +1681,32 @@ describe("Local Target Inventory shell", () => {
     );
   });
 
+  it("shows next-step copy on Inspector and Comparison empty states (#78)", async () => {
+    const { unmount } = render(
+      <InventoryApp
+        client={clientFor({
+          ...snapshot,
+          inventory: {
+            ...snapshot.inventory,
+            entries: [],
+            freshness: "fresh",
+          },
+        })}
+      />,
+    );
+
+    expect(
+      await screen.findByText("Select a skill in the table to inspect evidence."),
+    ).toBeInTheDocument();
+    unmount();
+
+    render(<InventoryApp client={clientFor(snapshot)} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Comparison" }));
+    expect(
+      screen.getByText("Click Compare to build the aligned skill table."),
+    ).toBeInTheDocument();
+  });
+
   it("keeps the Targets editor Local-only for V1", async () => {
     const createTarget = vi.fn(async () => ({
       ok: true as const,
