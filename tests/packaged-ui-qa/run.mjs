@@ -1,3 +1,4 @@
+import { persistFailureArtifacts } from "./artifacts.mjs";
 import { createPackagedQaFixture, resolvePackagedExecutable } from "./fixture.mjs";
 import { packagedUiQaHelp, runPackagedUiQa } from "./scenarios.mjs";
 
@@ -28,6 +29,11 @@ try {
 } catch (error) {
   process.stderr.write(`${error instanceof Error ? error.stack : error}\n`);
   process.exitCode = 1;
+  await persistFailureArtifacts(
+    fixture,
+    error,
+    process.env.SKILLS_DESKTOP_QA_ARTIFACTS,
+  );
 } finally {
   await cleanup();
 }

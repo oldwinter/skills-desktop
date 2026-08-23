@@ -33,6 +33,8 @@ Linux one-shot:
 npm run qa:packaged-ui:linux
 ```
 
+Protected `main` runs the same runner on Linux x64, macOS arm64/x64, and Windows x64 via `.github/workflows/packaged-ui-qa.yml`. Failures upload only redacted logs from `SKILLS_DESKTOP_QA_ARTIFACTS`.
+
 Print commands without launching:
 
 ```bash
