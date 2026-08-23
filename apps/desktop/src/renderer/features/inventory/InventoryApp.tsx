@@ -253,6 +253,7 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
           mutation: selectedTargetState.mutation,
           target: selectedTargetState.target,
         };
+  const inventory = snapshot?.inventory;
 
   useEffect(() => {
     let active = true;
@@ -315,9 +316,9 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
   }, [bootstrapAttempt, client]);
 
   const filteredEntries = useMemo(() => {
-    if (snapshot === undefined) return [];
+    if (inventory === undefined) return [];
     const normalizedQuery = query.trim().toLocaleLowerCase();
-    return snapshot.inventory.entries.filter((entry) => {
+    return inventory.entries.filter((entry) => {
       const matchesScope = scope === "all" || entry.scope === scope;
       const searchable = [
         entry.name,
@@ -333,10 +334,10 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
         (normalizedQuery === "" || searchable.includes(normalizedQuery))
       );
     });
-  }, [query, scope, snapshot]);
+  }, [inventory, query, scope]);
 
   const selected = useMemo(() => {
-    const entries = snapshot?.inventory.entries ?? [];
+    const entries = inventory?.entries ?? [];
     return (
       entries.find(
         (entry) =>
@@ -344,7 +345,7 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
           entry.scope === selectedIdentity.scope,
       ) ?? entries[0]
     );
-  }, [selectedIdentity, snapshot]);
+  }, [inventory, selectedIdentity]);
 
   if (snapshot === undefined) {
     if (bootstrapError !== undefined) {

@@ -51,6 +51,8 @@ export const USER_FACING_ERROR_FALLBACK =
 export function userFacingErrorMessage(
   error: UserFacingErrorLike | null | undefined,
 ): string {
-  if (error == null) return USER_FACING_ERROR_FALLBACK;
+  if (error === null || error === undefined) {
+    return USER_FACING_ERROR_FALLBACK;
+  }
   return USER_FACING_BY_CODE[error.code] ?? USER_FACING_ERROR_FALLBACK;
 }

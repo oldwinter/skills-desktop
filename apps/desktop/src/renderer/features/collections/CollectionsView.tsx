@@ -113,6 +113,9 @@ export function CollectionsView({
         ]),
       ),
     );
+    // targetKey captures the Target identity and generation changes that reset
+    // inputs without resetting them for unrelated Snapshot updates.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [releaseSelection, snapshot.target.id, targetKey]);
 
   useEffect(() => {
@@ -122,11 +125,7 @@ export function CollectionsView({
     ) {
       statusHeadingRef.current?.focus();
     }
-  }, [
-    collections?.execution?.id,
-    collections?.execution?.phase,
-    collections?.plan?.id,
-  ]);
+  }, [collections]);
 
   const releaseFor = (targetState: TargetState) =>
     targetState.collections?.releases.find(
