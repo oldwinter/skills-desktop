@@ -493,7 +493,7 @@ describe("Wire request validators", () => {
     expect(framed.byteLength).toBeGreaterThan(4);
     const payload = decodeSingleWireFramePayload(framed, 1024);
     expect(payload).toBeDefined();
-    expect(JSON.parse(Buffer.from(payload!).toString("utf8"))).toEqual({
+    expect(JSON.parse(new TextDecoder().decode(payload!))).toEqual({
       emoji: "🙂",
       cjk: "技能",
     });
