@@ -1696,7 +1696,12 @@ describe("Local Target Inventory shell", () => {
     );
 
     expect(
-      await screen.findByText("Select a skill in the table to inspect evidence."),
+      await screen.findByRole("heading", { name: "No skills to inspect" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Refresh this Target, or install a skill via npx skills.",
+      ),
     ).toBeInTheDocument();
     unmount();
 

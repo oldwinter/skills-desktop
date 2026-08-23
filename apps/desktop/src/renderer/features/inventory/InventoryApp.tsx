@@ -936,8 +936,12 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
               {selected === undefined ? (
                 <div className="inspector-empty">
                   <CircleHelp aria-hidden="true" size={22} />
-                  <h2>No skill selected</h2>
-                  <p>Select a skill in the table to inspect evidence.</p>
+                  <h2>No skills to inspect</h2>
+                  <p>
+                    {(inventory?.entries.length ?? 0) === 0
+                      ? "Refresh this Target, or install a skill via npx skills."
+                      : "Select a skill in the table to inspect evidence."}
+                  </p>
                 </div>
               ) : (
                 <>
