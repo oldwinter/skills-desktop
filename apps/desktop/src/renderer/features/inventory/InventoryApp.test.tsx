@@ -1453,6 +1453,60 @@ describe("Local Target Inventory shell", () => {
     ).not.toBeDisabled();
   });
 
+
+  it("explains stale freshness blocked mutation controls with Refresh next step (#70)", async () => {
+    const refreshInventory = vi.fn(async () => ({
+      ok: true as const,
+      value: { operationId: "refresh-stale-1" },
+    }));
+    render(
+      <InventoryApp
+        client={{
+          ...clientFor({
+            ...snapshot,
+            inventory: {
+              ...snapshot.inventory,
+              freshness: "stale",
+            },
+          }),
+          refreshInventory,
+        }}
+      />,
+    );
+
+    fireEvent.click(
+      (
+        await screen.findAllByRole("button", {
+          name: "Case-Sensitive-Skill",
+        })
+      )[0]!,
+    );
+
+    const reason = "需要先刷新 inventory 证据";
+    expect(
+      document.getElementById("inventory-mutation-blocked-reason"),
+    ).toHaveTextContent(reason);
+    expect(screen.getByRole("button", { name: "Refresh" })).toHaveAttribute(
+      "id",
+      "inventory-refresh-cta",
+    );
+
+    const prepareUpdate = screen.getByRole("button", { name: "Prepare update" });
+    const prepareAdd = screen.getByRole("button", { name: "Prepare add" });
+    expect(prepareUpdate).toBeDisabled();
+    expect(prepareAdd).toBeDisabled();
+    expect(prepareUpdate).toHaveAttribute("title", reason);
+    expect(prepareUpdate).toHaveAttribute(
+      "aria-describedby",
+      "inventory-mutation-blocked-reason inventory-refresh-cta",
+    );
+    expect(prepareAdd).toHaveAttribute(
+      "aria-describedby",
+      "inventory-mutation-blocked-reason inventory-refresh-cta",
+    );
+    expect(screen.getByText(reason)).toBeInTheDocument();
+  });
+
   it("presents SSH transport loss as an accessible offline state", async () => {
     render(
       <InventoryApp
