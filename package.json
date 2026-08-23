@@ -21,6 +21,7 @@
     "typecheck": "tsc -b --pretty false",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
     "check:imports": "node scripts/check-imports.mjs",
     "verify": "npm run typecheck && npm run lint && npm run check:imports && npm test && npm run build",
     "smoke:cli": "vitest run --config vitest.smoke.config.ts tests/real-cli.smoke.test.ts",
