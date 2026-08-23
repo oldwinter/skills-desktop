@@ -800,7 +800,11 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                     value={query}
                   />
                 </label>
-                <div className="segmented-control" aria-label="Inventory scope">
+                <div
+                  className="segmented-control"
+                  aria-label="Inventory scope"
+                  role="group"
+                >
                   {(["all", "project", "global"] as const).map((value) => (
                     <button
                       aria-pressed={scope === value}
@@ -1045,6 +1049,7 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                 <div
                   className="segmented-control segmented-control--compact"
                   aria-label="Add scope"
+                  role="group"
                 >
                   {(["project", "global"] as const).map((value) => (
                     <button
