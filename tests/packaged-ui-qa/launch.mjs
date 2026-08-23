@@ -12,6 +12,21 @@ const DEFAULT_STOP_TIMEOUT_MS = 3_000;
 const DEFAULT_WINDOWS_TREE_TIMEOUT_MS = DEFAULT_STOP_TIMEOUT_MS;
 export const EXPECTED_URL = "skills-desktop://workspace/index.html";
 
+export function packagedElectronArguments(
+  port,
+  userData,
+  {
+    disableChromiumSandbox = process.env
+      .SKILLS_DESKTOP_QA_DISABLE_CHROMIUM_SANDBOX === "1",
+  } = {},
+) {
+  return [
+    `--remote-debugging-port=${port}`,
+    `--user-data-dir=${userData}`,
+    ...(disableChromiumSandbox ? ["--no-sandbox"] : []),
+  ];
+}
+
 export async function findAvailablePort() {
   const server = createServer();
   await new Promise((resolve, reject) => {
@@ -230,7 +245,7 @@ export async function launchPackagedElectron({
   delete environment.ELECTRON_RUN_AS_NODE;
   const child = spawn(
     executable,
-    [`--remote-debugging-port=${port}`, `--user-data-dir=${fixture.userData}`],
+    packagedElectronArguments(port, fixture.userData),
     {
       cwd: fixture.workspace,
       detached: process.platform !== "win32",

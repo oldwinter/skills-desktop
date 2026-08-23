@@ -56,19 +56,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          profile_path=""
-          cleanup() {
-            status=$?
-            if [[ -n "${profile_path}" ]]; then
-              sudo apparmor_parser --skip-cache --remove "$profile_path" || true
-              rm -f "$profile_path"
-            fi
-            exit "$status"
-          }
-          trap cleanup EXIT
           case "${{ matrix.platform }}" in
             linux)
               executable="$GITHUB_WORKSPACE/apps/desktop/out/Skills Desktop-linux-${{ matrix.architecture }}/skills-desktop"
+              export SKILLS_DESKTOP_QA_DISABLE_CHROMIUM_SANDBOX=1
               ;;
             darwin)
               executable="$GITHUB_WORKSPACE/apps/desktop/out/Skills Desktop-darwin-${{ matrix.architecture }}/Skills Desktop.app/Contents/MacOS/skills-desktop"
@@ -79,16 +70,6 @@ jobs:
           esac
           export SKILLS_DESKTOP_PACKAGED_EXECUTABLE="$(node -e "console.log(require('node:fs').realpathSync(process.argv[1]))" "$executable")"
           if [[ "${{ matrix.platform }}" == "linux" ]]; then
-            profile_path="$(mktemp "$RUNNER_TEMP/skills-desktop-apparmor.XXXXXX")"
-            cat >"$profile_path" <<EOF
-          abi <abi/4.0>,
-          include <tunables/global>
-
-          profile skills-desktop-ui-qa "$SKILLS_DESKTOP_PACKAGED_EXECUTABLE" flags=(unconfined) {
-            userns,
-          }
-          EOF
-            sudo apparmor_parser --skip-cache --replace "$profile_path"
             xvfb-run -a node tests/packaged-ui-qa/run.mjs
           else
             node tests/packaged-ui-qa/run.mjs

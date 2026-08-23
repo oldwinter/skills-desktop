@@ -22,6 +22,8 @@ describe("packaged UI QA workflow contract", () => {
     expect(workflow.permissions).toEqual({ contents: "read" });
     expect(source).not.toContain("sshd");
     expect(source).not.toContain("smoke:ssh");
+    expect(source).not.toContain("sudo");
+    expect(source).not.toContain("apparmor_parser");
 
     const job = workflow.jobs["packaged-ui-qa"];
     expect(job.if).toBe(
@@ -58,8 +60,8 @@ describe("packaged UI QA workflow contract", () => {
     expect(source).toContain("SKILLS_DESKTOP_PACKAGED_EXECUTABLE");
     expect(source).toContain("SKILLS_DESKTOP_QA_ARTIFACTS");
     expect(source).toContain("SKILLS_DESKTOP_QA_ARCH");
+    expect(source).toContain("SKILLS_DESKTOP_QA_DISABLE_CHROMIUM_SANDBOX=1");
     expect(source).toContain("Contents/MacOS/skills-desktop");
-    expect(source).toContain("trap cleanup EXIT");
     const qaStep = job.steps.find(
       (step: { env?: Record<string, string>; run?: string }) =>
         typeof step.run === "string" &&

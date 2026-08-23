@@ -6,7 +6,7 @@ Isolated Local-only packaged Electron UI/UX suite for issue #85.
 
 The runner creates one disposable root and never reads developer skill state:
 
-- `HOME`, `XDG_CONFIG_HOME`, `XDG_CACHE_HOME`, and Electron `--user-data-dir`
+- `HOME`, platform profile/config/cache/temp directories, and Electron `--user-data-dir`
 - a unique loopback CDP port and session name
 - a stub `npx` on `PATH` that serves fixture inventory
 - a pinned `axe-core` source; an unavailable dependency fails the run closed
@@ -29,13 +29,15 @@ On a headed desktop, `npm run qa:packaged-ui` is enough. On CI or a machine with
 xvfb-run -a npm run qa:packaged-ui
 ```
 
-Linux one-shot:
+Linux one-shot (the UI-semantic harness disables Chromium sandboxing so it also runs on AppArmor hosts that deny unprivileged user namespaces):
 
 ```bash
 npm run qa:packaged-ui:linux
 ```
 
 Protected `main` runs the same runner on Linux x64, macOS arm64/x64, and Windows x64 via `.github/workflows/packaged-ui-qa.yml`. Failures upload only redacted logs from `SKILLS_DESKTOP_QA_ARTIFACTS`.
+
+The Linux sandbox override is confined to this QA launcher. Electron fuse, BrowserWindow, preload, and navigation security remain independently enforced by the production security tests; this suite does not qualify sandbox policy or signed installation.
 
 Print commands without launching:
 

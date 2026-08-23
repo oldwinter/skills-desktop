@@ -359,10 +359,23 @@ export async function runPackagedUiQa({
     if (reviewAfterTab !== "Approve mutation") {
       throw new Error(`Review tab order failed at ${reviewAfterTab}`);
     }
+    await reviewPage.dispatchKey("Tab");
+    const reviewAfterWrap = await reviewPage.evaluate(
+      `document.activeElement?.getAttribute("aria-label") ?? document.activeElement?.textContent?.trim() ?? ""`,
+    );
+    if (reviewAfterWrap !== "Reject") {
+      throw new Error(`Review focus did not wrap at ${reviewAfterWrap}`);
+    }
+    await reviewPage.dispatchKey("Tab", "Tab", { modifiers: 8 });
+    const reviewAfterReverseWrap = await reviewPage.evaluate(
+      `document.activeElement?.getAttribute("aria-label") ?? document.activeElement?.textContent?.trim() ?? ""`,
+    );
+    if (reviewAfterReverseWrap !== "Approve mutation") {
+      throw new Error(
+        `Review reverse focus did not wrap at ${reviewAfterReverseWrap}`,
+      );
+    }
     await scanWithAxe(reviewPage, axeSource, "review");
-    await reviewPage.evaluate(`(() => {
-      document.querySelector("button.review-button")?.focus();
-    })()`);
     await reviewPage.dispatchKey("Enter").catch((error) => {
       if (!(error instanceof CdpDisconnectedError)) throw error;
     });
@@ -380,6 +393,10 @@ export async function runPackagedUiQa({
         "Workspace focus was not restored after Trusted Review closed.",
       );
     }
+    await page.waitFor(
+      `document.body?.textContent?.includes("completed / verified") === true`,
+      "confirmed mutation outcome",
+    );
 
     await fixture.setProcessMode("empty");
     await clickNamedButton(page, "Refresh inventory");
@@ -407,6 +424,11 @@ export async function runPackagedUiQa({
     ) {
       throw new Error(
         `Fixture CLI invocation was not recorded: ${JSON.stringify(invocations)}`,
+      );
+    }
+    if (!invocations.some((args) => args.includes("update"))) {
+      throw new Error(
+        `Confirmed mutation invocation was not recorded: ${JSON.stringify(invocations)}`,
       );
     }
 

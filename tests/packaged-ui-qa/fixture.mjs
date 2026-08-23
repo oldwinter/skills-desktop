@@ -92,6 +92,7 @@ export async function createPackagedQaFixture({
   const workspace = join(root, "workspace");
   const config = join(root, "config");
   const cache = join(root, "cache");
+  const temporary = join(root, "tmp");
   const bin = join(root, "bin");
   const artifacts = join(root, "artifacts");
   const userData = join(config, "Skills Desktop");
@@ -100,9 +101,20 @@ export async function createPackagedQaFixture({
   const modePath = join(home, "process-mode");
   const invocationLog = join(home, "invocations.log");
   await Promise.all(
-    [home, workspace, config, cache, bin, artifacts, recovery, userData].map(
-      (path) => mkdir(path, { recursive: true }),
-    ),
+    [
+      home,
+      workspace,
+      config,
+      cache,
+      temporary,
+      bin,
+      artifacts,
+      recovery,
+      userData,
+      ...(platform === "win32"
+        ? [join(config, "Roaming"), join(config, "Local")]
+        : []),
+    ].map((path) => mkdir(path, { recursive: true })),
   );
   await writeFile(
     inventoryPath,
@@ -136,15 +148,13 @@ if (args.at(-1) === "--version") {
   process.stdout.write(mode === "empty" ? "[]" : JSON.stringify(JSON.parse(fs.readFileSync(statePath, "utf8")).global));
 } else if (args.includes("list")) {
   process.stdout.write(mode === "empty" ? "[]" : JSON.stringify(JSON.parse(fs.readFileSync(statePath, "utf8")).project));
+} else if (args.includes("update")) {
+  process.stdout.write("");
 } else {
   process.exitCode = 2;
 }
 `;
-  await writeFile(
-    npxProgram,
-    qaNpxSource,
-    { mode: 0o700 },
-  );
+  await writeFile(npxProgram, qaNpxSource, { mode: 0o700 });
   if (platform === "win32") {
     await mkdir(dirname(windowsNpxCli), { recursive: true });
     await copyFile(process.execPath, windowsNode);
@@ -174,11 +184,6 @@ if (args.at(-1) === "--version") {
       "USERNAME",
       "SystemRoot",
       "ComSpec",
-      "APPDATA",
-      "LOCALAPPDATA",
-      "USERPROFILE",
-      "TEMP",
-      "TMP",
       "PATHEXT",
     ].flatMap((name) => (process.env[name] ? [[name, process.env[name]]] : [])),
   );
@@ -188,8 +193,18 @@ if (args.at(-1) === "--version") {
     NPM_CONFIG_CACHE: cache,
     PATH: `${bin}${platform === "win32" ? ";" : ":"}${process.env.PATH ?? ""}`,
     SKILLS_DESKTOP_WORKSPACE: workspace,
+    TMPDIR: temporary,
     XDG_CACHE_HOME: cache,
     XDG_CONFIG_HOME: config,
+    ...(platform === "win32"
+      ? {
+          APPDATA: join(config, "Roaming"),
+          LOCALAPPDATA: join(config, "Local"),
+          TEMP: temporary,
+          TMP: temporary,
+          USERPROFILE: home,
+        }
+      : {}),
   };
   let cleaned = false;
   return {
@@ -203,6 +218,7 @@ if (args.at(-1) === "--version") {
     inventoryPath,
     recovery,
     root,
+    temporary,
     userData,
     workspace,
     async readInventory() {
@@ -212,7 +228,10 @@ if (args.at(-1) === "--version") {
       const value = await readFile(invocationLog, "utf8");
       return value.trim() === ""
         ? []
-        : value.trim().split("\n").map((line) => JSON.parse(line));
+        : value
+            .trim()
+            .split("\n")
+            .map((line) => JSON.parse(line));
     },
     async readProcessMode() {
       return (await readFile(modePath, "utf8")).trim();

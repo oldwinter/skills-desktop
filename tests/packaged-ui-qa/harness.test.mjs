@@ -25,6 +25,7 @@ import {
 import {
   findAvailablePort,
   launchPackagedElectron,
+  packagedElectronArguments,
   stopChild,
   terminateWindowsProcessTree,
 } from "./launch.mjs";
@@ -149,6 +150,40 @@ describe("packaged UI QA CDP seam", () => {
     await expect(response).resolves.toEqual({ enabled: true });
     expect(socket.sent[0].id).toBe(1);
   });
+
+  it("sends activation text and keyboard modifiers through CDP", async () => {
+    const socket = new FakeSocket();
+    const page = new CdpPage(socket, { requestTimeoutMs: 100 });
+    const enter = page.dispatchKey("Enter");
+
+    expect(socket.sent[0].params).toMatchObject({
+      key: "Enter",
+      modifiers: 0,
+      text: "\r",
+      type: "keyDown",
+      unmodifiedText: "\r",
+    });
+    socket.respond(1, {});
+    await new Promise((resolve) => queueMicrotask(resolve));
+    expect(socket.sent[1].params).toMatchObject({
+      key: "Enter",
+      modifiers: 0,
+      type: "keyUp",
+    });
+    socket.respond(2, {});
+    await enter;
+
+    const reverseTab = page.dispatchKey("Tab", "Tab", { modifiers: 8 });
+    expect(socket.sent[2].params).toMatchObject({
+      key: "Tab",
+      modifiers: 8,
+      type: "keyDown",
+    });
+    socket.respond(3, {});
+    await new Promise((resolve) => queueMicrotask(resolve));
+    socket.respond(4, {});
+    await reverseTab;
+  });
 });
 
 describe("packaged UI QA fixture seam", () => {
@@ -174,6 +209,7 @@ describe("packaged UI QA fixture seam", () => {
     );
     expect(fixture.environment.XDG_CONFIG_HOME).toBe(fixture.config);
     expect(fixture.environment.XDG_CACHE_HOME).toBe(fixture.cache);
+    expect(fixture.environment.TMPDIR).toBe(fixture.temporary);
   });
 
   it("treats an explicit root as a parent and preserves caller-owned siblings", async () => {
@@ -267,6 +303,11 @@ describe("packaged UI QA fixture seam", () => {
     await expect(access(`${fixture.bin}/npm.cmd`)).resolves.toBeUndefined();
     await expect(access(`${fixture.bin}/npx.cmd`)).resolves.toBeUndefined();
     expect(fixture.environment.PATH?.split(";")[0]).toBe(fixture.bin);
+    expect(fixture.environment.APPDATA).toBe(`${fixture.config}/Roaming`);
+    expect(fixture.environment.LOCALAPPDATA).toBe(`${fixture.config}/Local`);
+    expect(fixture.environment.USERPROFILE).toBe(fixture.home);
+    expect(fixture.environment.TEMP).toBe(fixture.temporary);
+    expect(fixture.environment.TMP).toBe(fixture.temporary);
   });
 
   it("fails when the packaged QA runtime architecture does not match", () => {
@@ -278,6 +319,26 @@ describe("packaged UI QA fixture seam", () => {
 });
 
 describe("packaged Electron launcher seam", () => {
+  it("adds the Linux QA sandbox override only when explicitly requested", () => {
+    expect(
+      packagedElectronArguments(9222, "/owned/user-data", {
+        disableChromiumSandbox: false,
+      }),
+    ).toEqual([
+      "--remote-debugging-port=9222",
+      "--user-data-dir=/owned/user-data",
+    ]);
+    expect(
+      packagedElectronArguments(9222, "/owned/user-data", {
+        disableChromiumSandbox: true,
+      }),
+    ).toEqual([
+      "--remote-debugging-port=9222",
+      "--user-data-dir=/owned/user-data",
+      "--no-sandbox",
+    ]);
+  });
+
   it("allocates loopback-only ports", async () => {
     const port = await findAvailablePort();
     expect(port).toBeGreaterThan(0);
@@ -423,7 +484,7 @@ describe("packaged UI QA scenario contract", () => {
     );
     await writeFile(
       `${fixture.artifacts}/electron.stderr.log`,
-      "Authorization: Bearer secret-value\nAPI_KEY=another-secret\nAWS_SECRET_ACCESS_KEY=env-secret\n",
+      'Authorization: Bearer secret-value\nAPI_KEY=another-secret\nAWS_SECRET_ACCESS_KEY=env-secret\npassword="my secret value"\npath=C:\\Users\\Alice Smith\\repo\n',
     );
     const destination = await mkdtemp(join(tmpdir(), "skills-desktop-qa-art-"));
     fixtures.push({
@@ -453,6 +514,8 @@ describe("packaged UI QA scenario contract", () => {
     expect(artifact).not.toContain("another-secret");
     expect(artifact).not.toContain("env-secret");
     expect(artifact).not.toContain("error-secret");
+    expect(artifact).not.toContain("secret value");
+    expect(artifact).not.toContain("Alice Smith");
   });
 
   it("pins the axe-core runtime used by the packaged scan", async () => {

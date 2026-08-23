@@ -25,15 +25,13 @@ const handleSigterm = () => interrupt(143, "SIGTERM");
 process.once("SIGINT", handleSigint);
 process.once("SIGTERM", handleSigterm);
 
+let completedResult;
 try {
-  const result = await runPackagedUiQa({
+  completedResult = await runPackagedUiQa({
     executable: resolvePackagedExecutable(),
     fixture,
     signal: controller.signal,
   });
-  process.stdout.write(
-    `packaged UI QA passed: ${result.scenarios.join(", ")}\n`,
-  );
 } catch (error) {
   process.stderr.write(
     `${redactFailureText(error instanceof Error ? error.stack : error)}\n`,
@@ -55,4 +53,10 @@ try {
     );
     process.exitCode = 1;
   }
+}
+
+if (completedResult !== undefined && process.exitCode === undefined) {
+  process.stdout.write(
+    `packaged UI QA passed: ${completedResult.scenarios.join(", ")}\n`,
+  );
 }

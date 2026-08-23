@@ -255,7 +255,7 @@ export class CdpPage {
     });
   }
 
-  async dispatchKey(key, code = key) {
+  async dispatchKey(key, code = key, { modifiers = 0 } = {}) {
     const virtualKeyCodes = {
       ArrowDown: 40,
       ArrowLeft: 37,
@@ -268,15 +268,19 @@ export class CdpPage {
     };
     const windowsVirtualKeyCode =
       key.length === 1 ? key.toUpperCase().charCodeAt(0) : virtualKeyCodes[key];
+    const text = key === "Enter" ? "\r" : key === "Space" ? " " : undefined;
     await this.send("Input.dispatchKeyEvent", {
       code,
       key,
+      modifiers,
+      ...(text === undefined ? {} : { text, unmodifiedText: text }),
       type: "keyDown",
       windowsVirtualKeyCode,
     });
     await this.send("Input.dispatchKeyEvent", {
       code,
       key,
+      modifiers,
       type: "keyUp",
       windowsVirtualKeyCode,
     });

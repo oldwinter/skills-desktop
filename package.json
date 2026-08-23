@@ -29,7 +29,7 @@
     "package:linux": "npm run build && npm exec --workspace @skills-desktop/desktop electron-forge package -- --platform=linux --arch=x64",
     "smoke:packaged": "npm run package:linux && xvfb-run -a node tests/packaged-electron.smoke.mjs",
     "qa:packaged-ui": "node tests/packaged-ui-qa/run.mjs",
-    "qa:packaged-ui:linux": "npm run package:linux && xvfb-run -a node tests/packaged-ui-qa/run.mjs",
+    "qa:packaged-ui:linux": "npm run package:linux && SKILLS_DESKTOP_QA_DISABLE_CHROMIUM_SANDBOX=1 xvfb-run -a node tests/packaged-ui-qa/run.mjs",
     "lint:biome": "npx --yes @biomejs/biome@1.9.4 check apps/desktop/src"
   },
   "devDependencies": {

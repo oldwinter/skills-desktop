@@ -2,10 +2,10 @@ import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 const SECRET_VALUE_PATTERN =
-  /((?:["']?[A-Za-z0-9_-]*(?:authorization|token|secret|password|passwd|api[_-]?key|access[_-]?key|client[_-]?secret)[A-Za-z0-9_-]*["']?\s*[:=]\s*["']?))(?:Bearer\s+)?[^\s,;}"']+/gi;
+  /((?:["']?[A-Za-z0-9_-]*(?:authorization|token|secret|password|passwd|api[_-]?key|access[_-]?key|client[_-]?secret)[A-Za-z0-9_-]*["']?\s*[:=]\s*))(?:(?:"[^"\r\n]*")|(?:'[^'\r\n]*')|(?:Bearer\s+[^\s,;}]+)|(?:[^\s,;}]+))/gi;
 const URL_PATTERN = /\b[A-Za-z][A-Za-z0-9+.-]*:\/\/[^\s"'<>]+/gi;
-const WINDOWS_PATH_PATTERN = /(?:[A-Za-z]:[\\/][^\s"'<>]+|\\\\[^\s"'<>]+)/g;
-const POSIX_PATH_PATTERN = /\/(?:[^\s"'<>/]+\/)+[^\s"'<>]*/g;
+const WINDOWS_PATH_PATTERN = /(?:[A-Za-z]:[\\/]|\\\\)[^\r\n,;}]+/g;
+const POSIX_PATH_PATTERN = /\/(?:[^\s"'<>/]+\/)+[^\r\n,;}]+/g;
 
 export function redactFailureText(value) {
   return String(value)
