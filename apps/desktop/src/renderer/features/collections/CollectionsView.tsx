@@ -457,7 +457,7 @@ export function CollectionsView({
                       }}
                       title={
                         targetState.target.kind === "ssh"
-                          ? "SSH Targets are next-scope and outside V1 Local Collections"
+                          ? "SSH · 未在 V1 开放，不能纳入 Collections 变更"
                           : undefined
                       }
                       type="checkbox"
@@ -467,7 +467,7 @@ export function CollectionsView({
                       <strong>{targetState.target.label}</strong>
                       <small>
                         {targetState.target.kind === "ssh"
-                          ? "SSH · next-scope"
+                          ? "SSH · 未在 V1 开放"
                           : "Local"}{" "}
                         / {targetState.target.harness}
                       </small>

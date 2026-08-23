@@ -556,7 +556,7 @@ describe("Local Target Inventory shell", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Collections" }));
     expect(screen.getAllByText("Fresh inventory")).toHaveLength(2);
-    expect(screen.getByText(/SSH · next-scope/)).toBeInTheDocument();
+    expect(screen.getByText(/SSH · 未在 V1 开放/)).toBeInTheDocument();
     const sshInclude = screen.getByRole("checkbox", {
       name: "Include Build host",
     });
@@ -1005,11 +1005,11 @@ describe("Local Target Inventory shell", () => {
 
   it("selects and swaps paired Targets in the dimensioned Comparison view", async () => {
     const rightTarget = {
-      connectionReference: "build-host",
+      connectionReference: null,
       generation: 2,
       harness: "Codex",
       id: "00000000-0000-4000-8000-00000000000a",
-      kind: "ssh" as const,
+      kind: "local" as const,
       label: "Build host",
       workspace: "/srv/skills-desktop",
       workspaceLabel: "skills-desktop",
@@ -1245,6 +1245,136 @@ describe("Local Target Inventory shell", () => {
     expect(await screen.findByText("Target created")).toBeInTheDocument();
   });
 
+
+  it("marks SSH Targets as 未开放 in the left rail and blocks Inventory mutations", async () => {
+    const sshTarget = {
+      connectionReference: "build-host",
+      generation: 2,
+      harness: "Codex",
+      id: "00000000-0000-4000-8000-00000000000a",
+      kind: "ssh" as const,
+      label: "Build host",
+      workspace: "/srv/skills-desktop",
+      workspaceLabel: "skills-desktop",
+    };
+    const localTarget = {
+      ...snapshot.target,
+      connectionReference: null,
+      workspace: "/work/skills-desktop",
+    };
+    render(
+      <InventoryApp
+        client={clientFor({
+          ...snapshot,
+          targets: [
+            {
+              deletionBlocked: false,
+              inventory: snapshot.inventory,
+              mutation: snapshot.mutation,
+              target: localTarget,
+            },
+            {
+              deletionBlocked: false,
+              inventory: snapshot.inventory,
+              mutation: snapshot.mutation,
+              target: sshTarget,
+            },
+          ],
+        })}
+      />,
+    );
+
+    expect(await screen.findByText("未开放")).toBeInTheDocument();
+    expect(screen.getByText(/SSH · 未在 V1 开放/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Build host/i }));
+
+    expect(
+      await screen.findByText(/SSH · 未在 V1 开放。远程 Target 当前仅可查看/),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Project scope" }));
+    const updateScope = screen.getByRole("button", { name: "Update scope" });
+    expect(updateScope).toBeDisabled();
+    expect(updateScope).toHaveAttribute("title", "SSH · 未在 V1 开放");
+    expect(screen.getByRole("button", { name: "Prepare add" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Prepare add" })).toHaveAttribute(
+      "title",
+      "SSH · 未在 V1 开放",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Case-Sensitive-Skill" }));
+    expect(screen.getByRole("button", { name: "Prepare update" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Prepare removal" })).toBeDisabled();
+  });
+
+  it("disables SSH Targets as Comparison sides", async () => {
+    const sshTarget = {
+      connectionReference: "build-host",
+      generation: 2,
+      harness: "Codex",
+      id: "00000000-0000-4000-8000-00000000000a",
+      kind: "ssh" as const,
+      label: "Build host",
+      workspace: "/srv/skills-desktop",
+      workspaceLabel: "skills-desktop",
+    };
+    const otherLocal = {
+      connectionReference: null,
+      generation: 1,
+      harness: "Codex",
+      id: "00000000-0000-4000-8000-00000000000b",
+      kind: "local" as const,
+      label: "Other device",
+      workspace: "/work/other",
+      workspaceLabel: "other",
+    };
+    render(
+      <InventoryApp
+        client={clientFor({
+          ...snapshot,
+          targets: [
+            {
+              deletionBlocked: false,
+              inventory: snapshot.inventory,
+              mutation: snapshot.mutation,
+              target: {
+                ...snapshot.target,
+                connectionReference: null,
+                workspace: "/work/skills-desktop",
+              },
+            },
+            {
+              deletionBlocked: false,
+              inventory: snapshot.inventory,
+              mutation: snapshot.mutation,
+              target: otherLocal,
+            },
+            {
+              deletionBlocked: false,
+              inventory: snapshot.inventory,
+              mutation: snapshot.mutation,
+              target: sshTarget,
+            },
+          ],
+        })}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Comparison" }));
+    const left = screen.getByLabelText("Left Target");
+    const right = screen.getByLabelText("Right Target");
+    const sshOption = within(left).getByRole("option", {
+      name: /Build host · SSH · 未在 V1 开放/,
+    });
+    expect(sshOption).toBeDisabled();
+    expect(
+      within(right).getByRole("option", {
+        name: /Build host · SSH · 未在 V1 开放/,
+      }),
+    ).toBeDisabled();
+    expect(left).not.toHaveValue(sshTarget.id);
+    expect(right).not.toHaveValue(sshTarget.id);
+  });
 
   it("requests isolated host trust review from a trust-required SSH state", async () => {
     const requestHostTrustReview = vi.fn(async () => ({

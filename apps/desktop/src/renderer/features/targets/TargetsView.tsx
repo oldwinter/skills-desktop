@@ -144,7 +144,7 @@ export function TargetsView({
               <dl>
                 <div>
                   <dt>Kind</dt>
-                  <dd>{state.target.kind === "local" ? "Local" : "SSH · next-scope"}</dd>
+                  <dd>{state.target.kind === "local" ? "Local" : "SSH · 未在 V1 开放"}</dd>
                 </div>
                 <div>
                   <dt>Harness</dt>
@@ -224,8 +224,7 @@ export function TargetsView({
             <div className="state-banner state-banner--loading" role="status">
               <Server aria-hidden="true" size={16} />
               <span>
-                SSH targets are next-scope and outside the V1 Local
-                commitment.
+                SSH · 未在 V1 开放。现有 SSH Target 仅只读可见，不能作为变更工作区。
               </span>
             </div>
           ) : null}
@@ -233,7 +232,7 @@ export function TargetsView({
             <legend>Target kind</legend>
             {draft.kind === "ssh" ? (
               <p className="target-kind-readonly">
-                Kind: SSH (next-scope, not V1)
+                Kind: SSH · 未在 V1 开放
               </p>
             ) : (
               <div className="segmented-control segmented-control--compact">
@@ -301,7 +300,7 @@ export function TargetsView({
             disabled={draft.kind === "ssh"}
             title={
               draft.kind === "ssh"
-                ? "SSH Targets are next-scope and cannot be saved in V1"
+                ? "SSH · 未在 V1 开放，无法在 V1 保存"
                 : undefined
             }
             type="submit"

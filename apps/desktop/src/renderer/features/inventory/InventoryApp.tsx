@@ -374,7 +374,12 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
   const globalCount = snapshot.inventory.entries.length - projectCount;
   const isFiltered = query.trim() !== "" || scope !== "all";
   const activeOperationId = snapshot.inventory.activeOperationId;
+  const sshUnavailable = snapshot.target.kind === "ssh";
+  const mutationBlockedReason = sshUnavailable
+    ? "SSH · 未在 V1 开放"
+    : undefined;
   const mutationBlocked =
+    sshUnavailable ||
     snapshot.inventory.freshness !== "fresh" ||
     snapshot.mutation.phase === "reconciliation-required" ||
     snapshot.mutation.phase === "running";
@@ -536,6 +541,11 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                   setSelectedTargetId(state.target.id);
                   setView("inventory");
                 }}
+                title={
+                  state.target.kind === "ssh"
+                    ? "SSH · 未在 V1 开放"
+                    : undefined
+                }
                 type="button"
               >
                 {state.target.kind === "local" ? (
@@ -544,8 +554,19 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                   <Server aria-hidden="true" size={16} />
                 )}
                 <span>
-                  <strong>{state.target.label}</strong>
-                  <small>{state.target.workspaceLabel}</small>
+                  <strong>
+                    {state.target.label}
+                    {state.target.kind === "ssh" ? (
+                      <span className="scope-badge target-unavailable-badge">
+                        未开放
+                      </span>
+                    ) : null}
+                  </strong>
+                  <small>
+                    {state.target.kind === "ssh"
+                      ? "SSH · 未在 V1 开放"
+                      : state.target.workspaceLabel}
+                  </small>
                 </span>
               </button>
             ))}
@@ -625,6 +646,18 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
               </section>
 
               <InventoryStatus snapshot={snapshot} />
+              {sshUnavailable ? (
+                <div
+                  className="state-banner state-banner--warning"
+                  role="status"
+                >
+                  <Server aria-hidden="true" size={16} />
+                  <span>
+                    SSH · 未在 V1 开放。远程 Target 当前仅可查看，不能作为变更工作区。
+                  </span>
+                  <strong>未开放</strong>
+                </div>
+              ) : null}
               {snapshot.inventory.lastError?.code === "host_trust_required" ||
               snapshot.inventory.lastError?.code === "host_key_changed" ? (
                 <div
@@ -723,6 +756,7 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                   className="text-button"
                   disabled={scope === "all" || mutationBlocked}
                   onClick={() => void prepareUpdateAll()}
+                  title={mutationBlockedReason}
                   type="button"
                 >
                   <RefreshCw aria-hidden="true" size={15} />
@@ -890,6 +924,7 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                       className="text-button"
                       disabled={mutationBlocked}
                       onClick={() => void prepareSelected("update")}
+                      title={mutationBlockedReason}
                       type="button"
                     >
                       <RefreshCw aria-hidden="true" size={15} />
@@ -899,6 +934,7 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                       className="text-button text-button--danger"
                       disabled={mutationBlocked}
                       onClick={() => void prepareSelected("remove")}
+                      title={mutationBlockedReason}
                       type="button"
                     >
                       <Trash2 aria-hidden="true" size={15} />
@@ -953,6 +989,7 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                 <button
                   className="text-button"
                   disabled={mutationBlocked}
+                  title={mutationBlockedReason}
                   type="submit"
                 >
                   <PackagePlus aria-hidden="true" size={15} />

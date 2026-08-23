@@ -76,22 +76,31 @@ export function ComparisonView({
   readonly snapshot: WorkspaceSnapshot;
   readonly targets: readonly TargetState[];
 }) {
-  const [leftTargetId, setLeftTargetId] = useState(targets[0]?.target.id ?? "");
+  const plannableTargets = useMemo(
+    () => targets.filter(({ target }) => target.kind !== "ssh"),
+    [targets],
+  );
+  const [leftTargetId, setLeftTargetId] = useState(
+    () => plannableTargets[0]?.target.id ?? "",
+  );
   const [rightTargetId, setRightTargetId] = useState(
-    targets[1]?.target.id ?? targets[0]?.target.id ?? "",
+    () =>
+      plannableTargets[1]?.target.id ?? plannableTargets[0]?.target.id ?? "",
   );
   const [selectedKey, setSelectedKey] = useState<string>();
   const [error, setError] = useState<RendererError>();
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    if (!targets.some(({ target }) => target.id === leftTargetId)) {
-      setLeftTargetId(targets[0]?.target.id ?? "");
+    if (!plannableTargets.some(({ target }) => target.id === leftTargetId)) {
+      setLeftTargetId(plannableTargets[0]?.target.id ?? "");
     }
-    if (!targets.some(({ target }) => target.id === rightTargetId)) {
-      setRightTargetId(targets[1]?.target.id ?? targets[0]?.target.id ?? "");
+    if (!plannableTargets.some(({ target }) => target.id === rightTargetId)) {
+      setRightTargetId(
+        plannableTargets[1]?.target.id ?? plannableTargets[0]?.target.id ?? "",
+      );
     }
-  }, [leftTargetId, rightTargetId, targets]);
+  }, [leftTargetId, plannableTargets, rightTargetId]);
 
   const comparison =
     snapshot.comparison?.leftTargetId === leftTargetId &&
@@ -138,8 +147,10 @@ export function ComparisonView({
     comparison?.leftFreshness === "fresh" &&
     comparison.rightFreshness === "fresh";
   const leftMutationEligible =
+    leftTarget?.target.kind !== "ssh" &&
     leftTarget?.mutation.phase !== "reconciliation-required";
   const rightMutationEligible =
+    rightTarget?.target.kind !== "ssh" &&
     rightTarget?.mutation.phase !== "reconciliation-required";
   const leftEligible =
     comparisonFresh &&
@@ -163,7 +174,7 @@ export function ComparisonView({
           <div>
             <h1>Comparison</h1>
             <p>
-              {targets.length < 2
+              {plannableTargets.length < 2
                 ? "Needs a second Local Target"
                 : `${comparison?.rows.length ?? 0} aligned skill keys`}
             </p>
@@ -174,16 +185,21 @@ export function ComparisonView({
           <label>
             <span>Left Target</span>
             <select
+              aria-label="Left Target"
               onChange={(event) => setLeftTargetId(event.currentTarget.value)}
               value={leftTargetId}
             >
               {targets.map(({ target }) => (
                 <option
-                  disabled={target.id === rightTargetId}
+                  disabled={
+                    target.kind === "ssh" || target.id === rightTargetId
+                  }
                   key={target.id}
                   value={target.id}
                 >
-                  {target.label}
+                  {target.kind === "ssh"
+                    ? `${target.label} · SSH · 未在 V1 开放`
+                    : target.label}
                 </option>
               ))}
             </select>
@@ -205,16 +221,21 @@ export function ComparisonView({
           <label>
             <span>Right Target</span>
             <select
+              aria-label="Right Target"
               onChange={(event) => setRightTargetId(event.currentTarget.value)}
               value={rightTargetId}
             >
               {targets.map(({ target }) => (
                 <option
-                  disabled={target.id === leftTargetId}
+                  disabled={
+                    target.kind === "ssh" || target.id === leftTargetId
+                  }
                   key={target.id}
                   value={target.id}
                 >
-                  {target.label}
+                  {target.kind === "ssh"
+                    ? `${target.label} · SSH · 未在 V1 开放`
+                    : target.label}
                 </option>
               ))}
             </select>
@@ -222,7 +243,11 @@ export function ComparisonView({
           <button
             className="text-button text-button--primary"
             disabled={
-              busy || leftTargetId === rightTargetId || targets.length < 2
+              busy ||
+              leftTargetId === rightTargetId ||
+              plannableTargets.length < 2 ||
+              leftTargetId === "" ||
+              rightTargetId === ""
             }
             onClick={() => void openComparison()}
             type="button"
@@ -232,12 +257,11 @@ export function ComparisonView({
           </button>
         </div>
 
-        {targets.length < 2 ? (
+        {plannableTargets.length < 2 ? (
           <div className="state-banner state-banner--loading" role="status">
             <CircleHelp aria-hidden="true" size={16} />
             <span>
-              Comparison needs two Local Targets. Add another Target under
-              Targets, then return here to compare inventories.
+              Comparison needs two Local Targets. SSH · 未在 V1 开放，不能作为可规划对比侧。Add another Local Target under Targets, then return here to compare inventories.
             </span>
           </div>
         ) : null}
