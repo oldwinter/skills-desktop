@@ -433,23 +433,33 @@ export function CollectionsView({
                   <label className="collection-machine-toggle">
                     <input
                       aria-label={`Include ${targetState.target.label}`}
-                      checked={included}
-                      disabled={locked}
+                      checked={
+                        targetState.target.kind === "ssh" ? false : included
+                      }
+                      disabled={locked || targetState.target.kind === "ssh"}
                       onChange={(event) => {
+                        if (targetState.target.kind === "ssh") return;
                         const included = event.currentTarget.checked;
                         updateInput(targetState.target.id, (current) => ({
                           ...current,
                           included,
                         }));
                       }}
+                      title={
+                        targetState.target.kind === "ssh"
+                          ? "SSH Targets are next-scope and outside V1 Local Collections"
+                          : undefined
+                      }
                       type="checkbox"
                     />
                     <TargetIcon aria-hidden="true" size={17} />
                     <span>
                       <strong>{targetState.target.label}</strong>
                       <small>
-                        {targetState.target.kind === "ssh" ? "SSH" : "Local"} /{" "}
-                        {targetState.target.harness}
+                        {targetState.target.kind === "ssh"
+                          ? "SSH · next-scope"
+                          : "Local"}{" "}
+                        / {targetState.target.harness}
                       </small>
                       <small>{inventoryFreshnessLabel}</small>
                     </span>
