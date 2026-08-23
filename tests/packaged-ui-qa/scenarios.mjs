@@ -4,7 +4,10 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { CdpDisconnectedError, CdpPage } from "./cdp.mjs";
-import { createPackagedQaFixture, resolvePackagedExecutable } from "./fixture.mjs";
+import {
+  createPackagedQaFixture,
+  resolvePackagedExecutable,
+} from "./fixture.mjs";
 import { launchPackagedElectron } from "./launch.mjs";
 
 export const PACKAGED_UI_QA_SCENARIOS = [
@@ -93,13 +96,24 @@ async function waitForTargetGone(port, expectedUrl, timeoutMs = 5_000) {
     if (remaining <= 0) {
       throw new Error(`Timed out waiting for ${expectedUrl} to close.`);
     }
-    const targets = await fetch(`http://127.0.0.1:${port}/json/list`, {
-      signal: AbortSignal.timeout(Math.min(remaining, 1_000)),
-    })
-      .then((response) => response.json())
-      .catch(() => []);
+    let targets;
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/json/list`, {
+        signal: AbortSignal.timeout(Math.min(remaining, 1_000)),
+      });
+      if (!response.ok)
+        throw new Error(`CDP target list failed: ${response.status}`);
+      targets = await response.json();
+    } catch {
+      await new Promise((resolve) =>
+        setTimeout(resolve, Math.min(50, remaining)),
+      );
+      continue;
+    }
     if (!targets.some(({ url }) => url === expectedUrl)) return;
-    await new Promise((resolve) => setTimeout(resolve, Math.min(50, remaining)));
+    await new Promise((resolve) =>
+      setTimeout(resolve, Math.min(50, remaining)),
+    );
   }
 }
 
@@ -110,12 +124,27 @@ function rendererErrors(workspacePage, reviewPage) {
   ];
 }
 
+function appendFailures(prior, failures) {
+  if (failures.length === 0) return prior;
+  const causes = prior === undefined ? failures : [prior, ...failures];
+  return new Error(
+    causes
+      .map((failure) =>
+        failure instanceof Error ? failure.message : String(failure),
+      )
+      .join("\n"),
+    { cause: new AggregateError(causes, "Packaged UI QA failures") },
+  );
+}
+
 export async function runPackagedUiQa({
   executable = resolvePackagedExecutable(),
   fixture: providedFixture,
 } = {}) {
   if (providedFixture === undefined && executable === undefined) {
-    throw new Error("A fixture-owned root is required to launch packaged Electron.");
+    throw new Error(
+      "A fixture-owned root is required to launch packaged Electron.",
+    );
   }
   const fixture = providedFixture ?? (await createPackagedQaFixture());
   const ownedFixture = providedFixture === undefined;
@@ -224,16 +253,21 @@ export async function runPackagedUiQa({
       semantics.heading !== "Inventory" ||
       semantics.refresh !== true
     ) {
-      throw new Error(`Screen-reader semantics failed: ${JSON.stringify(semantics)}`);
+      throw new Error(
+        `Screen-reader semantics failed: ${JSON.stringify(semantics)}`,
+      );
     }
 
-    await page.setViewportSize(800, 820);
+    await page.setViewportSize(420, 820);
     const narrow = await page.evaluate(`({
       documentWidth: document.documentElement.scrollWidth,
       viewportWidth: window.innerWidth,
       chooser: document.querySelector("label.inventory-target-chooser, [aria-label='Target summary']") !== null,
     })`);
-    if (narrow.documentWidth > narrow.viewportWidth || narrow.chooser !== true) {
+    if (
+      narrow.documentWidth > narrow.viewportWidth ||
+      narrow.chooser !== true
+    ) {
       throw new Error(`Narrow layout failed: ${JSON.stringify(narrow)}`);
     }
 
@@ -271,7 +305,9 @@ export async function runPackagedUiQa({
       reduced.scrollBehavior !== "auto" ||
       reduced.offenders.length > 0
     ) {
-      throw new Error(`Reduced-motion styles failed: ${JSON.stringify(reduced)}`);
+      throw new Error(
+        `Reduced-motion styles failed: ${JSON.stringify(reduced)}`,
+      );
     }
 
     await clickNamedButton(page, "Prepare update", { focus: true });
@@ -305,7 +341,9 @@ export async function runPackagedUiQa({
       JSON.stringify(reviewFocus.names) !==
         JSON.stringify(["Reject", "Approve mutation"])
     ) {
-      throw new Error(`Review focus containment failed: ${JSON.stringify(reviewFocus)}`);
+      throw new Error(
+        `Review focus containment failed: ${JSON.stringify(reviewFocus)}`,
+      );
     }
     await reviewPage.dispatchKey("Tab");
     const reviewAfterTab = await reviewPage.evaluate(
@@ -326,7 +364,9 @@ export async function runPackagedUiQa({
       `document.activeElement?.textContent?.includes("Open Trusted Review") === true`,
     );
     if (restored !== true) {
-      throw new Error("Workspace focus was not restored after Trusted Review closed.");
+      throw new Error(
+        "Workspace focus was not restored after Trusted Review closed.",
+      );
     }
 
     await fixture.setProcessMode("empty");
@@ -353,7 +393,9 @@ export async function runPackagedUiQa({
           args.includes("list"),
       )
     ) {
-      throw new Error(`Fixture CLI invocation was not recorded: ${JSON.stringify(invocations)}`);
+      throw new Error(
+        `Fixture CLI invocation was not recorded: ${JSON.stringify(invocations)}`,
+      );
     }
 
     result = {
@@ -364,26 +406,40 @@ export async function runPackagedUiQa({
   } catch (error) {
     scenarioFailure = error;
   } finally {
+    const finalizationFailures = [];
     const reviewErrors = reviewPage?.errors ?? [];
-    await reviewPage?.disconnect().catch(() => undefined);
-    await session?.close().catch(() => undefined);
-    if (ownedFixture) await fixture.cleanup();
-    if (session !== undefined) {
-      const errors = rendererErrors(session.page, { errors: reviewErrors });
-      if (errors.length > 0) {
-        const consoleFailure = `Renderer console failures:\n${errors.join("\n")}`;
-        const prior =
-          scenarioFailure instanceof Error
-            ? scenarioFailure.message
-            : scenarioFailure === undefined
-              ? ""
-              : String(scenarioFailure);
-        scenarioFailure = new Error(
-          prior === "" ? consoleFailure : `${prior}\n${consoleFailure}`,
-          { cause: scenarioFailure },
+    try {
+      await reviewPage?.disconnect();
+    } catch (error) {
+      finalizationFailures.push(
+        new Error("Trusted Review CDP cleanup failed.", { cause: error }),
+      );
+    }
+    try {
+      await session?.close();
+    } catch (error) {
+      finalizationFailures.push(
+        new Error("Packaged Electron cleanup failed.", { cause: error }),
+      );
+    }
+    if (ownedFixture) {
+      try {
+        await fixture.cleanup();
+      } catch (error) {
+        finalizationFailures.push(
+          new Error("Packaged UI fixture cleanup failed.", { cause: error }),
         );
       }
     }
+    if (session !== undefined) {
+      const errors = rendererErrors(session.page, { errors: reviewErrors });
+      if (errors.length > 0) {
+        finalizationFailures.push(
+          new Error(`Renderer console failures:\n${errors.join("\n")}`),
+        );
+      }
+    }
+    scenarioFailure = appendFailures(scenarioFailure, finalizationFailures);
   }
   if (scenarioFailure !== undefined) throw scenarioFailure;
   return result;

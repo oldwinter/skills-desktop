@@ -24,7 +24,9 @@ describe("packaged UI QA workflow contract", () => {
     expect(source).not.toContain("smoke:ssh");
 
     const job = workflow.jobs["packaged-ui-qa"];
-    expect(job.if).toBe("github.ref == 'refs/heads/main'");
+    expect(job.if).toBe(
+      "github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'",
+    );
     expect(
       job.strategy.matrix.include.map(
         (entry: { architecture: string; platform: string }) =>
