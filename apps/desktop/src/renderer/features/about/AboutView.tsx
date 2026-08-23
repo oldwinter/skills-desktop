@@ -14,7 +14,6 @@ import type {
   AboutUpdateSnapshot,
   RestartGuardReason,
 } from "../../../contracts/about.js";
-import { userFacingErrorMessage } from "../../../contracts/user-facing-error.js";
 import { UserFacingErrorCopy } from "../../UserFacingErrorCopy.js";
 
 type AboutActionError = Extract<AboutUpdateResult, { ok: false }>["error"];
@@ -50,7 +49,7 @@ function automaticStatus(snapshot: AboutUpdateSnapshot) {
     case "error":
       return {
         heading: "Update check failed",
-        message: userFacingErrorMessage(snapshot.state.error),
+        message: "",
       };
     case "manual":
     case "unavailable":
@@ -193,7 +192,11 @@ export function AboutView({ client }: { readonly client: AboutBridge }) {
                   {automaticStatus(snapshot)?.heading}
                 </h2>
               </div>
-              <p>{automaticStatus(snapshot)?.message}</p>
+              {snapshot.state.kind === "error" ? (
+                <UserFacingErrorCopy error={snapshot.state.error} />
+              ) : (
+                <p>{automaticStatus(snapshot)?.message}</p>
+              )}
               {snapshot.schemaVersion === 2 && restartCandidate !== null ? (
                 <div className="about-restart-control">
                   <p className="about-candidate">
