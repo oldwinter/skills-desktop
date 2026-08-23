@@ -300,6 +300,39 @@ describe("Local Target Inventory shell", () => {
     expect(screen.getByText("Revision unknown")).toBeInTheDocument();
   });
 
+  it("exposes Inventory and Add scopes as named groups with ordered pressed buttons", async () => {
+    render(<InventoryApp client={clientFor(snapshot)} />);
+
+    const inventoryScope = await screen.findByRole("group", {
+      name: "Inventory scope",
+    });
+    const addScope = screen.getByRole("group", { name: "Add scope" });
+    const inventoryButtons = within(inventoryScope).getAllByRole("button");
+    const addButtons = within(addScope).getAllByRole("button");
+
+    expect(inventoryButtons.map((button) => button.textContent)).toEqual([
+      "All scopes",
+      "Project scope",
+      "Global scope",
+    ]);
+    expect(inventoryButtons.map((button) => button.getAttribute("aria-pressed"))).toEqual([
+      "true",
+      "false",
+      "false",
+    ]);
+    expect(addButtons.map((button) => button.textContent)).toEqual([
+      "Project scope",
+      "Global scope",
+    ]);
+    expect(addButtons.map((button) => button.getAttribute("aria-pressed"))).toEqual([
+      "true",
+      "false",
+    ]);
+
+    expect(inventoryButtons.every((button) => button.tabIndex === 0)).toBe(true);
+    expect(addButtons.every((button) => button.tabIndex === 0)).toBe(true);
+  });
+
   it("shows a bounded opening error returned by the IPC boundary", async () => {
     const client: DesktopBridge = {
       ...clientFor(snapshot),

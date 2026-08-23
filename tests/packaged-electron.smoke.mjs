@@ -614,6 +614,47 @@ try {
   );
   console.log("packaged smoke: fresh inventory rendered");
 
+  const scopeSemantics = await first.page.evaluate(`(() => {
+    const readGroup = (label) => {
+      const groups = [...document.querySelectorAll('[role="group"]')].filter(
+        (candidate) => candidate.getAttribute("aria-label") === label,
+      );
+      if (groups.length !== 1) {
+        throw new Error(
+          "Expected one named " + label + " group, found " + groups.length + ".",
+        );
+      }
+      const buttons = [...groups[0].querySelectorAll("button")];
+      return {
+        labels: buttons.map((button) => button.textContent?.trim()),
+        pressed: buttons.map((button) => button.getAttribute("aria-pressed")),
+        tabIndices: buttons.map((button) => button.tabIndex),
+      };
+    };
+    return {
+      add: readGroup("Add scope"),
+      inventory: readGroup("Inventory scope"),
+    };
+  })()`);
+  const expectedScopeSemantics = {
+    add: {
+      labels: ["Project scope", "Global scope"],
+      pressed: ["true", "false"],
+      tabIndices: [0, 0],
+    },
+    inventory: {
+      labels: ["All scopes", "Project scope", "Global scope"],
+      pressed: ["true", "false", "false"],
+      tabIndices: [0, 0, 0],
+    },
+  };
+  if (JSON.stringify(scopeSemantics) !== JSON.stringify(expectedScopeSemantics)) {
+    throw new Error(
+      `Packaged scope group semantics failed: ${JSON.stringify(scopeSemantics)}`,
+    );
+  }
+  console.log("packaged smoke: scope group semantics verified");
+
   const rendererBoundary = await first.page.evaluate(`({
     aboutBridgeKeys: Object.keys(window.skillsDesktop.about).sort(),
     bridgeKeys: Object.keys(window.skillsDesktop).sort(),
