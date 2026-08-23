@@ -291,8 +291,9 @@ export function ComparisonView({
           <div className="state-banner state-banner--loading" role="status">
             <CircleHelp aria-hidden="true" size={16} />
             <span>
-              Comparison needs two Local Targets. SSH · 未在 V1
-              开放，不能作为可规划对比侧。
+              {targets.some(({ target }) => target.kind === "ssh")
+                ? "Comparison needs two Local Targets. SSH · 未在 V1 开放，不能作为可规划对比侧。Add another Local Target under Targets, then return here to compare inventories."
+                : "Comparison needs two Local Targets. Add another Local Target under Targets, then return here to compare inventories."}
             </span>
           </div>
         ) : null}
