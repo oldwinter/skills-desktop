@@ -56,9 +56,14 @@ function targetStatesFor(snapshot: WorkspaceSnapshot): TargetState[] {
   );
 }
 
-function inputFor(targetId: string, activeTargetId: string): TargetInput {
+function inputFor(
+  targetId: string,
+  activeTargetId: string,
+  kind: TargetState["target"]["kind"],
+): TargetInput {
   return {
-    included: targetId === activeTargetId,
+    // V1 Local-only: SSH Targets stay visible but never included in Collections.
+    included: kind !== "ssh" && targetId === activeTargetId,
     scope: "project",
     selected: {},
   };
@@ -85,7 +90,7 @@ export function CollectionsView({
     Object.fromEntries(
       targetStates.map(({ target }) => [
         target.id,
-        inputFor(target.id, snapshot.target.id),
+        inputFor(target.id, snapshot.target.id, target.kind),
       ]),
     ),
   );
@@ -103,7 +108,7 @@ export function CollectionsView({
       Object.fromEntries(
         targetStates.map(({ target }) => [
           target.id,
-          inputFor(target.id, snapshot.target.id),
+          inputFor(target.id, snapshot.target.id, target.kind),
         ]),
       ),
     );
@@ -166,6 +171,7 @@ export function CollectionsView({
   const selectedTargets = targetStates.flatMap((targetState) => {
     const input = inputs[targetState.target.id];
     if (input === undefined || !input.included) return [];
+    if (targetState.target.kind === "ssh") return [];
     return [
       { input, selections: selectionsFor(targetState, input), targetState },
     ];
@@ -407,7 +413,7 @@ export function CollectionsView({
           {targetStates.map((targetState) => {
             const input =
               inputs[targetState.target.id] ??
-              inputFor(targetState.target.id, snapshot.target.id);
+              inputFor(targetState.target.id, snapshot.target.id, targetState.target.kind);
             const assessment = assessmentFor(targetState, input.scope);
             const blockers = targetBlockers(targetState, input);
             const targetRelease = releaseFor(targetState);
@@ -433,23 +439,33 @@ export function CollectionsView({
                   <label className="collection-machine-toggle">
                     <input
                       aria-label={`Include ${targetState.target.label}`}
-                      checked={included}
-                      disabled={locked}
+                      checked={
+                        targetState.target.kind === "ssh" ? false : included
+                      }
+                      disabled={locked || targetState.target.kind === "ssh"}
                       onChange={(event) => {
+                        if (targetState.target.kind === "ssh") return;
                         const included = event.currentTarget.checked;
                         updateInput(targetState.target.id, (current) => ({
                           ...current,
                           included,
                         }));
                       }}
+                      title={
+                        targetState.target.kind === "ssh"
+                          ? "SSH Targets are next-scope and outside V1 Local Collections"
+                          : undefined
+                      }
                       type="checkbox"
                     />
                     <TargetIcon aria-hidden="true" size={17} />
                     <span>
                       <strong>{targetState.target.label}</strong>
                       <small>
-                        {targetState.target.kind === "ssh" ? "SSH" : "Local"} /{" "}
-                        {targetState.target.harness}
+                        {targetState.target.kind === "ssh"
+                          ? "SSH · next-scope"
+                          : "Local"}{" "}
+                        / {targetState.target.harness}
                       </small>
                       <small>{inventoryFreshnessLabel}</small>
                     </span>
