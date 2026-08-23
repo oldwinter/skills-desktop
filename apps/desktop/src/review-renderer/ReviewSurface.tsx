@@ -24,8 +24,9 @@ function formatReviewInstant(iso: string): string {
 function ReviewInstant({
   value,
 }: {
-  readonly value: string;
+  readonly value: string | null;
 }) {
+  if (value === null) return <span>Not reviewed yet</span>;
   return <time dateTime={value}>{formatReviewInstant(value)}</time>;
 }
 
