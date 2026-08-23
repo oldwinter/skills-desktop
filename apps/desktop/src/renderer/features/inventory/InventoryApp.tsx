@@ -739,8 +739,7 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                 >
                   <ShieldCheck aria-hidden="true" size={16} />
                   <span>
-                    Host identity review · 未在 V1 开放。V1 Local-only 不能进入
-                    host-key Trusted Review。
+                    主机身份复核 · 未在 V1 开放。当前版本不能启动该复核。
                   </span>
                 </div>
               ) : null}
