@@ -3254,7 +3254,7 @@ export function createDesktopCapabilities(
               return requestFailure(
                 publicError(
                   "invalid_request",
-                  "SSH Targets are next-scope and outside the V1 Local commitment.",
+                  "主机身份复核未在 V1 开放。",
                   "target",
                   false,
                 ),
