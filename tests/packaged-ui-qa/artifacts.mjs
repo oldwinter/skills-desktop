@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 const SECRET_VALUE_PATTERN =
@@ -18,10 +18,13 @@ export function redactFailureText(value) {
 export async function persistFailureArtifacts(fixture, error, destination) {
   if (typeof destination !== "string" || destination.length === 0) return false;
   await mkdir(destination, { recursive: true });
+  const errorPath = join(destination, "error.txt");
   await writeFile(
-    join(destination, "error.txt"),
+    errorPath,
     `${redactFailureText(error instanceof Error ? error.stack : String(error))}\n`,
+    { mode: 0o600 },
   );
+  await chmod(errorPath, 0o600);
   for (const name of ["electron.stdout.log", "electron.stderr.log"]) {
     await readFile(join(fixture.artifacts, name), "utf8")
       .then((contents) =>

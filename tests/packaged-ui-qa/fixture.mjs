@@ -85,8 +85,9 @@ export async function createPackagedQaFixture({
   root: requestedRoot,
   platform = process.platform,
 } = {}) {
-  const root =
-    requestedRoot ?? (await mkdtemp(join(tmpdir(), "skills-desktop-ui-qa-")));
+  const parentRoot = requestedRoot ?? tmpdir();
+  await mkdir(parentRoot, { recursive: true });
+  const root = await mkdtemp(join(parentRoot, "skills-desktop-ui-qa-"));
   const home = join(root, "home");
   const workspace = join(root, "workspace");
   const config = join(root, "config");

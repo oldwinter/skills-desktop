@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { createWriteStream } from "node:fs";
 import { access, mkdir } from "node:fs/promises";
 import { createServer } from "node:net";
@@ -9,6 +9,7 @@ import { resolvePackagedExecutable } from "./fixture.mjs";
 
 const DEFAULT_CONNECT_TIMEOUT_MS = 30_000;
 const DEFAULT_STOP_TIMEOUT_MS = 3_000;
+const DEFAULT_WINDOWS_TREE_TIMEOUT_MS = DEFAULT_STOP_TIMEOUT_MS;
 export const EXPECTED_URL = "skills-desktop://workspace/index.html";
 
 export async function findAvailablePort() {
@@ -72,10 +73,67 @@ async function waitForTarget(port, expectedUrl, childExit, timeoutMs) {
   }
 }
 
-async function stopChild(child, childExit) {
+export function terminateWindowsProcessTree(
+  pid,
+  {
+    execFileImpl = execFile,
+    timeoutMs = DEFAULT_WINDOWS_TREE_TIMEOUT_MS,
+  } = {},
+) {
+  if (!Number.isSafeInteger(pid) || pid <= 0) {
+    return Promise.reject(new Error("A valid process id is required."));
+  }
+  const termination = new Promise((resolve, reject) => {
+    try {
+      execFileImpl(
+        "taskkill.exe",
+        ["/pid", String(pid), "/t", "/f"],
+        {
+          shell: false,
+          timeout: timeoutMs,
+          windowsHide: true,
+        },
+        (error) => {
+          if (error === null || error === undefined) resolve();
+          else reject(error);
+        },
+      );
+    } catch (error) {
+      reject(error);
+    }
+  });
+  return Promise.race([
+    termination,
+    delay(timeoutMs).then(() => {
+      throw new Error(
+        `Windows process-tree termination timed out for PID ${pid}.`,
+      );
+    }),
+  ]);
+}
+
+export async function stopChild(
+  child,
+  childExit,
+  {
+    platform = process.platform,
+    killWindowsTree = terminateWindowsProcessTree,
+    stopTimeoutMs = DEFAULT_STOP_TIMEOUT_MS,
+    treeTerminationTimeoutMs = DEFAULT_WINDOWS_TREE_TIMEOUT_MS,
+  } = {},
+) {
   if (child.exitCode === null && child.signalCode === null) {
     try {
-      if (process.platform === "win32" || child.pid === undefined) {
+      if (platform === "win32" && child.pid !== undefined) {
+        await Promise.race([
+          Promise.resolve().then(() => killWindowsTree(child.pid)),
+          delay(treeTerminationTimeoutMs).then(() => {
+            throw new Error(
+              `Windows process-tree termination timed out for PID ${child.pid}.`,
+            );
+          }),
+        ]);
+      } else if (child.pid === undefined) {
         child.kill("SIGTERM");
       } else process.kill(-child.pid, "SIGTERM");
     } catch (error) {
@@ -84,18 +142,27 @@ async function stopChild(child, childExit) {
   }
   const stopped = await Promise.race([
     childExit.then(() => true),
-    delay(DEFAULT_STOP_TIMEOUT_MS).then(() => false),
+    delay(stopTimeoutMs).then(() => false),
   ]);
   if (stopped || child.exitCode !== null || child.signalCode !== null) return;
 
   try {
-    if (process.platform === "win32" || child.pid === undefined) {
+    if (platform === "win32" && child.pid !== undefined) {
+      await Promise.race([
+        Promise.resolve().then(() => killWindowsTree(child.pid)),
+        delay(treeTerminationTimeoutMs).then(() => {
+          throw new Error(
+            `Windows process-tree termination timed out for PID ${child.pid}.`,
+          );
+        }),
+      ]);
+    } else if (child.pid === undefined) {
       child.kill("SIGKILL");
     } else process.kill(-child.pid, "SIGKILL");
   } catch (error) {
     if (error?.code !== "ESRCH") throw error;
   }
-  await Promise.race([childExit, delay(DEFAULT_STOP_TIMEOUT_MS)]);
+  await Promise.race([childExit, delay(stopTimeoutMs)]);
 }
 
 export async function launchPackagedElectron({

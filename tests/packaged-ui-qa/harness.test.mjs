@@ -1,11 +1,18 @@
 import { afterEach, describe, expect, it } from "vitest";
-
 import {
   CdpDisconnectedError,
   CdpPage,
   CdpRequestTimeoutError,
 } from "./cdp.mjs";
-import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  access,
+  chmod,
+  mkdtemp,
+  readFile,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -15,7 +22,12 @@ import {
   createPackagedQaFixture,
   resolvePackagedExecutable,
 } from "./fixture.mjs";
-import { findAvailablePort, launchPackagedElectron } from "./launch.mjs";
+import {
+  findAvailablePort,
+  launchPackagedElectron,
+  stopChild,
+  terminateWindowsProcessTree,
+} from "./launch.mjs";
 import {
   PACKAGED_UI_QA_SCENARIOS,
   requireAxeSource,
@@ -146,6 +158,26 @@ describe("packaged UI QA fixture seam", () => {
     expect(fixture.environment.XDG_CACHE_HOME).toBe(fixture.cache);
   });
 
+  it("treats an explicit root as a parent and preserves caller-owned siblings", async () => {
+    const parent = await mkdtemp(join(tmpdir(), "skills-desktop-ui-qa-parent-"));
+    const callerFile = join(parent, "caller-sentinel.txt");
+    const siblingFile = join(parent, "sibling.txt");
+    await writeFile(callerFile, "keep caller file");
+    await writeFile(siblingFile, "keep sibling file");
+
+    const fixture = await createPackagedQaFixture({ root: parent });
+    fixtures.push(fixture);
+    fixtures.push({ cleanup: () => rm(parent, { force: true, recursive: true }) });
+
+    expect(fixture.root).not.toBe(parent);
+    expect(fixture.root.startsWith(`${parent}/`)).toBe(true);
+    await fixture.cleanup();
+
+    await expect(access(fixture.root)).rejects.toThrow();
+    await expect(readFile(callerFile, "utf8")).resolves.toBe("keep caller file");
+    await expect(readFile(siblingFile, "utf8")).resolves.toBe("keep sibling file");
+  });
+
   it("provides deterministic inventory and controllable process failures", async () => {
     const fixture = await createPackagedQaFixture();
     fixtures.push(fixture);
@@ -233,6 +265,69 @@ describe("packaged Electron launcher seam", () => {
       }),
     ).rejects.toThrow(/fixture/i);
   });
+
+  it("stops a Windows process tree through the injected terminator", async () => {
+    const directKills = [];
+    const treeKills = [];
+    const child = {
+      exitCode: null,
+      kill: (signal) => directKills.push(signal),
+      pid: 4242,
+      signalCode: null,
+    };
+
+    await stopChild(child, Promise.resolve({ kind: "exit", code: 0 }), {
+      killWindowsTree: async (pid) => treeKills.push(pid),
+      platform: "win32",
+      stopTimeoutMs: 20,
+      treeTerminationTimeoutMs: 20,
+    });
+
+    expect(treeKills).toEqual([4242]);
+    expect(directKills).toEqual([]);
+  });
+
+  it("bounds a hanging Windows process-tree terminator", async () => {
+    const child = {
+      exitCode: null,
+      kill: () => {
+        throw new Error("direct child termination is not allowed");
+      },
+      pid: 4343,
+      signalCode: null,
+    };
+    const startedAt = Date.now();
+
+    await expect(
+      stopChild(child, new Promise(() => {}), {
+        killWindowsTree: () => new Promise(() => {}),
+        platform: "win32",
+        stopTimeoutMs: 20,
+        treeTerminationTimeoutMs: 20,
+      }),
+    ).rejects.toThrow(/timed out/i);
+    expect(Date.now() - startedAt).toBeLessThan(500);
+  });
+
+  it("invokes taskkill with an argument-array process-tree contract", async () => {
+    const calls = [];
+    const completion = terminateWindowsProcessTree(4444, {
+      execFileImpl: (command, args, options, callback) => {
+        calls.push({ args, command, options });
+        queueMicrotask(() => callback(null));
+      },
+      timeoutMs: 20,
+    });
+
+    await completion;
+    expect(calls).toEqual([
+      {
+        args: ["/pid", "4444", "/t", "/f"],
+        command: "taskkill.exe",
+        options: expect.objectContaining({ shell: false }),
+      },
+    ]);
+  });
 });
 
 describe("packaged UI QA scenario contract", () => {
@@ -266,6 +361,8 @@ describe("packaged UI QA scenario contract", () => {
     );
     const destination = await mkdtemp(join(tmpdir(), "skills-desktop-qa-art-"));
     fixtures.push({ cleanup: () => rm(destination, { force: true, recursive: true }) });
+    await writeFile(`${destination}/error.txt`, "stale artifact");
+    await chmod(`${destination}/error.txt`, 0o666);
     await persistFailureArtifacts(
       fixture,
       new Error(
@@ -273,6 +370,7 @@ describe("packaged UI QA scenario contract", () => {
       ),
       destination,
     );
+    expect((await stat(`${destination}/error.txt`)).mode & 0o777).toBe(0o600);
     const artifact = await Promise.all(
       ["error.txt", "electron.stdout.log", "electron.stderr.log"].map(
         (name) => readFile(join(destination, name), "utf8"),
