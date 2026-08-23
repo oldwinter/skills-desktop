@@ -162,7 +162,11 @@ export function ComparisonView({
         <section className="page-heading">
           <div>
             <h1>Comparison</h1>
-            <p>{comparison?.rows.length ?? 0} aligned skill keys</p>
+            <p>
+              {targets.length < 2
+                ? "Needs a second Local Target"
+                : `${comparison?.rows.length ?? 0} aligned skill keys`}
+            </p>
           </div>
         </section>
 
@@ -227,6 +231,16 @@ export function ComparisonView({
             Compare
           </button>
         </div>
+
+        {targets.length < 2 ? (
+          <div className="state-banner state-banner--loading" role="status">
+            <CircleHelp aria-hidden="true" size={16} />
+            <span>
+              Comparison needs two Local Targets. Add another Target under
+              Targets, then return here to compare inventories.
+            </span>
+          </div>
+        ) : null}
 
         {error !== undefined ? (
           <div className="state-banner state-banner--danger" role="alert">
