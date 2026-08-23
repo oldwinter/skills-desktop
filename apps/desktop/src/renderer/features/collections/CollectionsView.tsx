@@ -413,7 +413,7 @@ export function CollectionsView({
           {targetStates.map((targetState) => {
             const input =
               inputs[targetState.target.id] ??
-              inputFor(targetState.target.id, snapshot.target.id);
+              inputFor(targetState.target.id, snapshot.target.id, targetState.target.kind);
             const assessment = assessmentFor(targetState, input.scope);
             const blockers = targetBlockers(targetState, input);
             const targetRelease = releaseFor(targetState);
