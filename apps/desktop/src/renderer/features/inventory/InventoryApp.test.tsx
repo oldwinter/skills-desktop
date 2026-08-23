@@ -1378,6 +1378,34 @@ describe("Local Target Inventory shell", () => {
     ).toBeDisabled();
   });
 
+  it("humanizes Targets list pills and hides Generation by default (#74)", async () => {
+    render(
+      <InventoryApp
+        client={clientFor({
+          ...snapshot,
+          targets: [
+            {
+              deletionBlocked: true,
+              inventory: snapshot.inventory,
+              mutation: snapshot.mutation,
+              target: {
+                ...snapshot.target,
+                connectionReference: null,
+                workspace: "/work/skills-desktop",
+              },
+            },
+          ],
+        })}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Targets" }));
+    expect(screen.getByText("Fresh")).toBeInTheDocument();
+    expect(screen.queryByText("Generation")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText("Advanced"));
+    expect(screen.getByText("Generation")).toBeInTheDocument();
+  });
+
   it("keeps the Targets editor Local-only for V1", async () => {
     const createTarget = vi.fn(async () => ({
       ok: true as const,
