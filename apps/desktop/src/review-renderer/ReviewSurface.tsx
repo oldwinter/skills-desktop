@@ -8,6 +8,28 @@ import type { RendererError } from "../contracts/workspace.js";
 function scopeLabel(scope: "global" | "project") {
   return scope === "project" ? "Project" : "Global";
 }
+function formatReviewInstant(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  try {
+    return new Intl.DateTimeFormat(undefined, {
+      dateStyle: "medium",
+      timeStyle: "short",
+    }).format(date);
+  } catch {
+    return iso;
+  }
+}
+
+function ReviewInstant({
+  value,
+}: {
+  readonly value: string | null;
+}) {
+  if (value === null) return <span>Not reviewed yet</span>;
+  return <time dateTime={value}>{formatReviewInstant(value)}</time>;
+}
+
 
 export function ReviewSurface({ client }: { readonly client: ReviewBridge }) {
   const [snapshot, setSnapshot] = useState<ReviewSnapshot>();
@@ -204,7 +226,7 @@ export function ReviewSurface({ client }: { readonly client: ReviewBridge }) {
             </div>
             <div>
               <dt>Reviewed at</dt>
-              <dd>{collectionPlan.releaseEvidence.receipt.reviewedAt}</dd>
+              <dd><ReviewInstant value={collectionPlan.releaseEvidence.receipt.reviewedAt} /></dd>
             </div>
             <div>
               <dt>Review policy</dt>
@@ -214,19 +236,24 @@ export function ReviewSurface({ client }: { readonly client: ReviewBridge }) {
               <dt>Review location</dt>
               <dd>{collectionPlan.releaseEvidence.receipt.reviewLocation}</dd>
             </div>
-            <div className="review-facts__wide">
-              <dt>Manifest digest</dt>
-              <dd>{collectionPlan.manifestDigest}</dd>
-            </div>
-            <div className="review-facts__wide">
-              <dt>Review digest</dt>
-              <dd>{collectionPlan.reviewDigest}</dd>
-            </div>
             <div>
               <dt>Expires</dt>
-              <dd>{collectionPlan.expiresAt}</dd>
+              <dd><ReviewInstant value={collectionPlan.expiresAt} /></dd>
             </div>
           </dl>
+          <details className="review-digest-details">
+            <summary>详情</summary>
+            <dl className="review-facts">
+              <div className="review-facts__wide">
+                <dt>Manifest digest</dt>
+                <dd>{collectionPlan.manifestDigest}</dd>
+              </div>
+              <div className="review-facts__wide">
+                <dt>Review digest</dt>
+                <dd>{collectionPlan.reviewDigest}</dd>
+              </div>
+            </dl>
+          </details>
           <section
             className="review-plan"
             aria-labelledby="review-plan-heading"
@@ -250,24 +277,27 @@ export function ReviewSurface({ client }: { readonly client: ReviewBridge }) {
                       .join(", ")}
                   </p>
                   <code>{child.commandPlan.preview}</code>
-                  <dl className="review-child-evidence">
-                    <div>
-                      <dt>Binding</dt>
-                      <dd>{child.bindingDigest}</dd>
-                    </div>
-                    <div>
-                      <dt>Inventory</dt>
-                      <dd>{child.inventoryDigest}</dd>
-                    </div>
-                    <div>
-                      <dt>Assessment</dt>
-                      <dd>{child.assessmentDigest}</dd>
-                    </div>
-                    <div>
-                      <dt>Prepared child</dt>
-                      <dd>{child.preparedDigest}</dd>
-                    </div>
-                  </dl>
+                  <details className="review-digest-details">
+                    <summary>详情</summary>
+                    <dl className="review-child-evidence">
+                      <div>
+                        <dt>Binding</dt>
+                        <dd>{child.bindingDigest}</dd>
+                      </div>
+                      <div>
+                        <dt>Inventory</dt>
+                        <dd>{child.inventoryDigest}</dd>
+                      </div>
+                      <div>
+                        <dt>Assessment</dt>
+                        <dd>{child.assessmentDigest}</dd>
+                      </div>
+                      <div>
+                        <dt>Prepared child</dt>
+                        <dd>{child.preparedDigest}</dd>
+                      </div>
+                    </dl>
+                  </details>
                 </li>
               ))}
             </ol>
@@ -360,7 +390,7 @@ export function ReviewSurface({ client }: { readonly client: ReviewBridge }) {
           </div>
           <div>
             <dt>Reviewed at</dt>
-            <dd>{collectionPlan.releaseEvidence.receipt.reviewedAt}</dd>
+            <dd><ReviewInstant value={collectionPlan.releaseEvidence.receipt.reviewedAt} /></dd>
           </div>
           <div>
             <dt>Review policy</dt>
@@ -378,26 +408,6 @@ export function ReviewSurface({ client }: { readonly client: ReviewBridge }) {
                 .join(", ")}
             </dd>
           </div>
-          <div className="review-facts__wide">
-            <dt>Manifest digest</dt>
-            <dd>{collectionPlan.manifestDigest}</dd>
-          </div>
-          <div className="review-facts__wide">
-            <dt>Review digest</dt>
-            <dd>{collectionPlan.reviewDigest}</dd>
-          </div>
-          <div className="review-facts__wide">
-            <dt>Assessment digest</dt>
-            <dd>{collectionPlan.assessmentDigest}</dd>
-          </div>
-          <div className="review-facts__wide">
-            <dt>Inventory digest</dt>
-            <dd>{collectionPlan.inventoryDigest}</dd>
-          </div>
-          <div className="review-facts__wide">
-            <dt>Child prepared digest</dt>
-            <dd>{collectionPlan.childPreparedDigest}</dd>
-          </div>
           <div>
             <dt>Execution order</dt>
             <dd>
@@ -406,9 +416,34 @@ export function ReviewSurface({ client }: { readonly client: ReviewBridge }) {
           </div>
           <div>
             <dt>Expires</dt>
-            <dd>{collectionPlan.expiresAt}</dd>
+            <dd><ReviewInstant value={collectionPlan.expiresAt} /></dd>
           </div>
         </dl>
+        <details className="review-digest-details">
+          <summary>详情</summary>
+          <dl className="review-facts">
+            <div className="review-facts__wide">
+              <dt>Manifest digest</dt>
+              <dd>{collectionPlan.manifestDigest}</dd>
+            </div>
+            <div className="review-facts__wide">
+              <dt>Review digest</dt>
+              <dd>{collectionPlan.reviewDigest}</dd>
+            </div>
+            <div className="review-facts__wide">
+              <dt>Assessment digest</dt>
+              <dd>{collectionPlan.assessmentDigest}</dd>
+            </div>
+            <div className="review-facts__wide">
+              <dt>Inventory digest</dt>
+              <dd>{collectionPlan.inventoryDigest}</dd>
+            </div>
+            <div className="review-facts__wide">
+              <dt>Child prepared digest</dt>
+              <dd>{collectionPlan.childPreparedDigest}</dd>
+            </div>
+          </dl>
+        </details>
         <section className="review-plan" aria-labelledby="review-plan-heading">
           <h2 id="review-plan-heading">Child Command Plan</h2>
           <code>{collectionPlan.childCommandPlan.preview}</code>

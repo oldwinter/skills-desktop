@@ -55,3 +55,8 @@ h1, h2, p, dl, dd { margin: 0; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }
+
+.review-digest-details { margin-top: 12px; color: var(--muted); font-size: 12px; }
+.review-digest-details summary { cursor: pointer; user-select: none; color: var(--muted); }
+.review-digest-details .review-facts,
+.review-digest-details .review-child-evidence { margin-top: 8px; }

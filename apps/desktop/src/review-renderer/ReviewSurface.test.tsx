@@ -132,6 +132,8 @@ describe("Trusted Review surface", () => {
     ).toBeInTheDocument();
     expect(screen.getByText(`sha256:${"a".repeat(64)}`)).toBeInTheDocument();
     expect(screen.getByText(`sha256:${"e".repeat(64)}`)).toBeInTheDocument();
+    expect(screen.getByText("详情")).toBeInTheDocument();
+    expect(screen.queryByText("2026-08-22T05:00:00.000Z")).not.toBeInTheDocument();
     expect(screen.getByText("Collection author")).toBeInTheDocument();
     expect(screen.getByText("Reviewer B")).toBeInTheDocument();
     expect(

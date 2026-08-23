@@ -859,7 +859,7 @@ try {
   await collectionReviewPage.waitFor(
     `document.body?.textContent?.includes("Review Official Collection") &&
       document.body?.textContent?.includes("oldwinter") &&
-      document.body?.textContent?.includes("2026-08-22T00:51:04Z") &&
+      !!document.querySelector('time[datetime="2026-08-22T00:51:04Z"]') &&
       document.body?.textContent?.includes("official-collection-v1") &&
       document.body?.textContent?.includes("issues/20#issuecomment-5376882542") &&
       document.body?.textContent?.includes("435076e78988e1e6ec40d00b0b1d76bdbbc5419a") &&
