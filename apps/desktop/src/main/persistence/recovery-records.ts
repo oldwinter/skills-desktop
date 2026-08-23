@@ -25,6 +25,7 @@ const HOST_TRUST_STORE_NAME = "hostTrustRecords" as const;
 const COLLECTION_STORE_NAME = "collectionAcknowledgements" as const;
 const DOCUMENT_NAME = "inventory-snapshots.json";
 const GUARD_DOCUMENT_NAME = "mutation-guards.json";
+const GUARD_FAILURE_MARKER_NAME = "mutation-guards.failure.json";
 const TARGET_DOCUMENT_NAME = "target-definitions.json";
 const TARGET_FAILURE_MARKER_NAME = "target-definitions.failure.json";
 const HOST_TRUST_DOCUMENT_NAME = "known_hosts";
@@ -264,6 +265,14 @@ const legacyV2TargetDocumentSchema = z
   })
   .strict();
 
+const guardFailureMarkerSchema = z
+  .object({
+    failure: z.enum(["corrupt_store", "migration_failed"]),
+    kind: z.literal("mutation-guards-failure"),
+    schemaVersion: z.literal(1),
+  })
+  .strict();
+
 const targetFailureMarkerSchema = z
   .object({
     failure: z.enum(["corrupt_store", "migration_failed"]),
@@ -369,6 +378,10 @@ export type DurableChange =
       readonly type: "guard.clear";
     }
   | {
+      readonly remainingGuards: readonly MutationGuard[];
+      readonly type: "guards.clear-corruption";
+    }
+  | {
       readonly targets: readonly DurableTargetDefinition[];
       readonly type: "targets.replace";
     }
@@ -459,6 +472,7 @@ export function createNodeRecoveryFileSystem(): RecoveryFileSystem {
 
 type CurrentDocument = z.infer<typeof currentDocumentSchema>;
 type GuardDocument = z.infer<typeof guardDocumentSchema>;
+type GuardFailureMarker = z.infer<typeof guardFailureMarkerSchema>;
 type TargetDocument = z.infer<typeof targetDocumentSchema>;
 type TargetFailureMarker = z.infer<typeof targetFailureMarkerSchema>;
 type CollectionDocument = z.infer<typeof collectionDocumentSchema>;
@@ -624,6 +638,11 @@ export function createMemoryRecoveryRecords(
         mutationGuards = mutationGuards.filter(
           ({ targetId }) => targetId !== change.targetId,
         );
+      } else if (change.type === "guards.clear-corruption") {
+        return commitFailure(
+          "persist_failed",
+          "No Mutation Guard corruption marker is present.",
+        );
       } else if (change.type === "targets.replace") {
         const parsed = z
           .array(targetDefinitionSchema)
@@ -723,6 +742,10 @@ export function createJsonRecoveryRecords(
 ): RecoveryRecords {
   const documentPath = join(options.directory, DOCUMENT_NAME);
   const guardDocumentPath = join(options.directory, GUARD_DOCUMENT_NAME);
+  const guardFailureMarkerPath = join(
+    options.directory,
+    GUARD_FAILURE_MARKER_NAME,
+  );
   const targetDocumentPath = join(options.directory, TARGET_DOCUMENT_NAME);
   const targetFailureMarkerPath = join(
     options.directory,
@@ -838,6 +861,7 @@ export function createJsonRecoveryRecords(
     nextDocument:
       | CurrentDocument
       | GuardDocument
+      | GuardFailureMarker
       | TargetDocument
       | TargetFailureMarker
       | CollectionDocument
@@ -954,12 +978,59 @@ export function createJsonRecoveryRecords(
       `mutation-guards.quarantine-${options.id()}.json`,
     );
     await fileSystem.rename(guardDocumentPath, quarantinePath);
+    return quarantinePath;
+  };
+
+  const quarantineAndMarkGuards = async (
+    failure: GuardFailureMarker["failure"],
+  ) => {
+    const quarantinePath = await quarantineGuards().catch(() => undefined);
+    try {
+      await writeDocument(
+        {
+          failure,
+          kind: "mutation-guards-failure",
+          schemaVersion: 1,
+        },
+        GUARD_FAILURE_MARKER_NAME,
+        guardFailureMarkerPath,
+      );
+    } catch (error) {
+      if (quarantinePath !== undefined) {
+        await fileSystem
+          .rename(quarantinePath, guardDocumentPath)
+          .catch(() => undefined);
+      }
+      throw error;
+    }
   };
 
   const loadGuards = async () => {
     if (guardsLoaded) return;
     guardsLoaded = true;
     guardFailures = [];
+
+    try {
+      const rawMarker = await fileSystem.readFile(
+        guardFailureMarkerPath,
+        "utf8",
+      );
+      const marker = guardFailureMarkerSchema.safeParse(JSON.parse(rawMarker));
+      guardWriteBlocked = true;
+      guardFailures = [
+        {
+          code: marker.success ? marker.data.failure : "corrupt_store",
+          store: GUARD_STORE_NAME,
+        },
+      ];
+      return;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        guardWriteBlocked = true;
+        guardFailures = [{ code: "corrupt_store", store: GUARD_STORE_NAME }];
+        return;
+      }
+    }
 
     let raw: string;
     try {
@@ -975,11 +1046,8 @@ export function createJsonRecoveryRecords(
     try {
       decoded = JSON.parse(raw);
     } catch {
-      const quarantined = await quarantineGuards().then(
-        () => true,
-        () => false,
-      );
-      guardWriteBlocked = !quarantined;
+      await quarantineAndMarkGuards("corrupt_store").catch(() => undefined);
+      guardWriteBlocked = true;
       guardFailures = [{ code: "corrupt_store", store: GUARD_STORE_NAME }];
       return;
     }
@@ -1004,11 +1072,8 @@ export function createJsonRecoveryRecords(
 
     const legacy = legacyGuardDocumentSchema.safeParse(decoded);
     if (!legacy.success) {
-      const quarantined = await quarantineGuards().then(
-        () => true,
-        () => false,
-      );
-      guardWriteBlocked = !quarantined;
+      await quarantineAndMarkGuards("corrupt_store").catch(() => undefined);
+      guardWriteBlocked = true;
       guardFailures = [{ code: "corrupt_store", store: GUARD_STORE_NAME }];
       return;
     }
@@ -1570,6 +1635,66 @@ export function createJsonRecoveryRecords(
             return commitFailure(
               "persist_failed",
               "Target Definitions could not be saved.",
+            );
+          }
+        }
+
+        if (change.type === "guards.clear-corruption") {
+          await loadGuards();
+          if (guardUnsupportedSchema) {
+            return commitFailure(
+              "unsupported_schema",
+              "Mutation Guard data was written by a newer unsupported application version.",
+            );
+          }
+          try {
+            await fileSystem.readFile(guardFailureMarkerPath, "utf8");
+          } catch {
+            return commitFailure(
+              "persist_failed",
+              "No Mutation Guard corruption marker is present.",
+            );
+          }
+          const remainingGuards = z
+            .array(mutationGuardSchema)
+            .max(1_000)
+            .safeParse(change.remainingGuards);
+          if (!remainingGuards.success) {
+            return commitFailure(
+              "persist_failed",
+              "Remaining Mutation Guard data did not pass durable validation.",
+            );
+          }
+          const nextGuardDocument = guardDocumentSchema.safeParse({
+            guards: remainingGuards.data,
+            kind: "mutation-guards",
+            legacyGuards: [],
+            schemaVersion: CURRENT_GUARD_SCHEMA_VERSION,
+          });
+          if (!nextGuardDocument.success) {
+            return commitFailure(
+              "persist_failed",
+              "Remaining Mutation Guard data did not pass durable validation.",
+            );
+          }
+          try {
+            if (remainingGuards.data.length > 0) {
+              await writeDocument(
+                nextGuardDocument.data,
+                GUARD_DOCUMENT_NAME,
+                guardDocumentPath,
+              );
+            }
+            await fileSystem.unlink(guardFailureMarkerPath);
+            guardDocument = nextGuardDocument.data;
+            pendingLegacyGuards = undefined;
+            guardWriteBlocked = false;
+            guardFailures = [];
+            return { ok: true, value: undefined };
+          } catch {
+            return commitFailure(
+              "persist_failed",
+              "The Mutation Guard corruption marker could not be cleared.",
             );
           }
         }
