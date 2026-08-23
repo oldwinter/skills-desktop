@@ -2628,6 +2628,24 @@ export function createDesktopCapabilities(
 
           if (parsed.data.type === "collection.prepare-many") {
             const request = parsed.data;
+            if (options.v1LocalOnlyTargets === true) {
+              const sshRequested = request.targets.some((child) => {
+                const selected = targetDefinitions().find(
+                  ({ id }) => id === child.targetId,
+                );
+                return selected?.kind === "ssh";
+              });
+              if (sshRequested) {
+                return requestFailure(
+                  publicError(
+                    "invalid_request",
+                    "SSH Targets are next-scope and outside the V1 Local commitment.",
+                    "target",
+                    false,
+                  ),
+                );
+              }
+            }
             const release = officialCollectionCatalog.releases.find(
               (candidate) =>
                 candidate.manifest.collectionId === request.collectionId &&
