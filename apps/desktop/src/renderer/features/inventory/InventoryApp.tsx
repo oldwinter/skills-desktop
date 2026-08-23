@@ -383,12 +383,32 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
   const mutationBlockedReason = sshUnavailable
     ? "SSH · 未在 V1 开放，无法准备变更"
     : snapshot.inventory.freshness !== "fresh"
-      ? "Fresh inventory evidence is required before preparing mutations"
+      ? "需要先刷新 inventory 证据"
       : snapshot.mutation.phase === "reconciliation-required"
-        ? "Reconciliation is required before preparing mutations"
+        ? "需要先完成 reconciliation"
         : snapshot.mutation.phase === "running"
-          ? "A mutation is already running"
+          ? "变更进行中，请等待"
           : undefined;
+  const mutationBlockedDescribedBy = sshUnavailable
+    ? "inventory-ssh-unavailable-reason"
+    : mutationBlocked
+      ? [
+          "inventory-mutation-blocked-reason",
+          snapshot.inventory.freshness !== "fresh"
+            ? "inventory-refresh-cta"
+            : snapshot.mutation.phase === "reconciliation-required"
+              ? "inventory-reconcile-cta"
+              : undefined,
+        ]
+          .filter((id): id is string => id !== undefined)
+          .join(" ")
+      : undefined;
+  const showRefreshMutationCta =
+    !sshUnavailable && snapshot.inventory.freshness !== "fresh";
+  const showReconcileMutationCta =
+    !sshUnavailable &&
+    snapshot.inventory.freshness === "fresh" &&
+    snapshot.mutation.phase === "reconciliation-required";
   const prepareSelected = async (type: "remove" | "update") => {
     if (sshUnavailable || selected === undefined) return;
     const result = await client.prepareMutation(snapshot.target.id, {
@@ -690,7 +710,7 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                       "This Target requires reconciliation."}
                   </span>
                   <button
-                    className="text-button"
+                    className="text-button text-button--primary"
                     onClick={() => void reconcileMutation()}
                     type="button"
                   >
@@ -760,13 +780,7 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                 </div>
                 <button
                   aria-describedby={
-                    scope === "all"
-                      ? undefined
-                      : sshUnavailable
-                        ? "inventory-ssh-unavailable-reason"
-                        : mutationBlocked
-                          ? "inventory-mutation-blocked-reason"
-                          : undefined
+                    scope === "all" ? undefined : mutationBlockedDescribedBy
                   }
                   className="text-button"
                   disabled={scope === "all" || mutationBlocked}
@@ -781,6 +795,30 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                   <RefreshCw aria-hidden="true" size={15} />
                   Update scope
                 </button>
+                {showRefreshMutationCta ? (
+                  <button
+                    className="text-button text-button--primary"
+                    id="inventory-refresh-cta"
+                    onClick={() =>
+                      void client.refreshInventory(snapshot.target.id)
+                    }
+                    type="button"
+                  >
+                    <RefreshCw aria-hidden="true" size={15} />
+                    Refresh
+                  </button>
+                ) : null}
+                {showReconcileMutationCta ? (
+                  <button
+                    className="text-button text-button--primary"
+                    id="inventory-reconcile-cta"
+                    onClick={() => void reconcileMutation()}
+                    type="button"
+                  >
+                    <RefreshCw aria-hidden="true" size={15} />
+                    Reconcile
+                  </button>
+                ) : null}
               </div>
 
               <div className="inventory-table-wrap">
@@ -940,13 +978,7 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                   </dl>
                   <div className="inspector-actions">
                     <button
-                      aria-describedby={
-                        sshUnavailable
-                          ? "inventory-ssh-unavailable-reason"
-                          : mutationBlocked
-                            ? "inventory-mutation-blocked-reason"
-                            : undefined
-                      }
+                      aria-describedby={mutationBlockedDescribedBy}
                       className="text-button"
                       disabled={mutationBlocked}
                       onClick={() => void prepareSelected("update")}
@@ -957,13 +989,7 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                       Prepare update
                     </button>
                     <button
-                      aria-describedby={
-                        sshUnavailable
-                          ? "inventory-ssh-unavailable-reason"
-                          : mutationBlocked
-                            ? "inventory-mutation-blocked-reason"
-                            : undefined
-                      }
+                      aria-describedby={mutationBlockedDescribedBy}
                       className="text-button text-button--danger"
                       disabled={mutationBlocked}
                       onClick={() => void prepareSelected("remove")}
@@ -1020,13 +1046,7 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                   ))}
                 </div>
                 <button
-                  aria-describedby={
-                    sshUnavailable
-                      ? "inventory-ssh-unavailable-reason"
-                      : mutationBlocked
-                        ? "inventory-mutation-blocked-reason"
-                        : undefined
-                  }
+                  aria-describedby={mutationBlockedDescribedBy}
                   className="text-button"
                   disabled={mutationBlocked}
                   title={mutationBlockedReason}
