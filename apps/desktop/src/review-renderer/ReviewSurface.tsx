@@ -37,7 +37,7 @@ export function ReviewSurface({ client }: { readonly client: ReviewBridge }) {
   const [pendingDecision, setPendingDecision] = useState<
     "approve" | "reject"
   >();
-  const [settledMessage, setSettledMessage] = useState("Review rejected");
+  const [settledMessage, setSettledMessage] = useState<string>();
 
   useEffect(() => {
     void client.getReview().then((result) => {
@@ -106,9 +106,24 @@ export function ReviewSurface({ client }: { readonly client: ReviewBridge }) {
   if (snapshot.status === "settled") {
     return (
       <main className="review-surface">
-        <div className="review-settled" role="status">
-          <Check aria-hidden="true" size={20} />
-          {settledMessage}
+        <div className="review-settled">
+          <span className="review-settled__message" role="status">
+            <Check aria-hidden="true" size={20} />
+            {settledMessage ??
+              (snapshot.decision === "approve"
+                ? "Review approved"
+                : "Review rejected")}
+          </span>
+          <button
+            aria-label="Close review"
+            autoFocus
+            className="review-button"
+            onClick={() => window.close()}
+            type="button"
+          >
+            <X aria-hidden="true" size={16} />
+            Close
+          </button>
         </div>
       </main>
     );
@@ -151,6 +166,7 @@ export function ReviewSurface({ client }: { readonly client: ReviewBridge }) {
         </dl>
         <div className="review-actions">
           <button
+            autoFocus
             className="review-button"
             disabled={pendingDecision !== undefined}
             onClick={() => void decide("reject")}
@@ -304,6 +320,7 @@ export function ReviewSurface({ client }: { readonly client: ReviewBridge }) {
           </section>
           <div className="review-actions">
             <button
+              autoFocus
               className="review-button"
               disabled={pendingDecision !== undefined}
               onClick={() => void decide("reject")}
@@ -450,6 +467,7 @@ export function ReviewSurface({ client }: { readonly client: ReviewBridge }) {
         </section>
         <div className="review-actions">
           <button
+            autoFocus
             className="review-button"
             disabled={pendingDecision !== undefined}
             onClick={() => void decide("reject")}
@@ -522,6 +540,7 @@ export function ReviewSurface({ client }: { readonly client: ReviewBridge }) {
 
       <div className="review-actions">
         <button
+          autoFocus
           className="review-button"
           disabled={pendingDecision !== undefined}
           onClick={() => void decide("reject")}

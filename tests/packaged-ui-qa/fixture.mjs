@@ -148,6 +148,13 @@ if (args.at(-1) === "--version") {
   process.stdout.write(mode === "empty" ? "[]" : JSON.stringify(JSON.parse(fs.readFileSync(statePath, "utf8")).global));
 } else if (args.includes("list")) {
   process.stdout.write(mode === "empty" ? "[]" : JSON.stringify(JSON.parse(fs.readFileSync(statePath, "utf8")).project));
+} else if (args.includes("remove")) {
+  const state = JSON.parse(fs.readFileSync(statePath, "utf8"));
+  const name = args[args.indexOf("remove") + 1];
+  const scope = args.includes("--global") ? "global" : "project";
+  state[scope] = state[scope].filter((entry) => entry.name !== name);
+  fs.writeFileSync(statePath, JSON.stringify(state));
+  process.stdout.write("");
 } else if (args.includes("update")) {
   process.stdout.write("");
 } else {

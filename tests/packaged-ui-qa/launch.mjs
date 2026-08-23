@@ -2,6 +2,7 @@ import { execFile, spawn } from "node:child_process";
 import { createWriteStream } from "node:fs";
 import { access, mkdir } from "node:fs/promises";
 import { createServer } from "node:net";
+import { finished } from "node:stream/promises";
 import { setTimeout as delay } from "node:timers/promises";
 
 import { CdpPage } from "./cdp.mjs";
@@ -12,19 +13,37 @@ const DEFAULT_STOP_TIMEOUT_MS = 3_000;
 const DEFAULT_WINDOWS_TREE_TIMEOUT_MS = DEFAULT_STOP_TIMEOUT_MS;
 export const EXPECTED_URL = "skills-desktop://workspace/index.html";
 
-export function packagedElectronArguments(
-  port,
-  userData,
-  {
-    disableChromiumSandbox = process.env
-      .SKILLS_DESKTOP_QA_DISABLE_CHROMIUM_SANDBOX === "1",
-  } = {},
-) {
-  return [
-    `--remote-debugging-port=${port}`,
-    `--user-data-dir=${userData}`,
-    ...(disableChromiumSandbox ? ["--no-sandbox"] : []),
-  ];
+function isPosixProcessGroupAlive(pid) {
+  try {
+    process.kill(-pid, 0);
+    return true;
+  } catch (error) {
+    if (error?.code === "ESRCH") return false;
+    throw error;
+  }
+}
+
+async function waitForPosixProcessGroupExit(pid, timeoutMs, isAlive) {
+  const deadline = Date.now() + timeoutMs;
+  while (isAlive(pid)) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) return false;
+    await delay(Math.min(25, remaining));
+  }
+  return true;
+}
+
+async function closeOutputStreams(child, stdout, stderr) {
+  child.stdout?.unpipe(stdout);
+  child.stderr?.unpipe(stderr);
+  child.stdout?.destroy();
+  child.stderr?.destroy();
+  stdout.end();
+  stderr.end();
+  const results = await Promise.allSettled([finished(stdout), finished(stderr)]);
+  return results.flatMap((result) =>
+    result.status === "rejected" ? [result.reason] : [],
+  );
 }
 
 export async function findAvailablePort() {
@@ -143,49 +162,90 @@ export async function stopChild(
   child,
   childExit,
   {
-    platform = process.platform,
     killWindowsTree = terminateWindowsProcessTree,
+    platform = process.platform,
+    posixProcessGroupAlive = isPosixProcessGroupAlive,
+    signalPosixProcessGroup = (pid, signal) => process.kill(-pid, signal),
     stopTimeoutMs = DEFAULT_STOP_TIMEOUT_MS,
     treeTerminationTimeoutMs = DEFAULT_WINDOWS_TREE_TIMEOUT_MS,
   } = {},
 ) {
-  let windowsTreeWasForced = false;
-  if (child.exitCode === null && child.signalCode === null) {
+  if (platform === "win32") {
+    const childPid =
+      Number.isSafeInteger(child.pid) && child.pid > 0
+        ? child.pid
+        : undefined;
+    if (childPid !== undefined) {
+      await Promise.race([
+        Promise.resolve().then(() => killWindowsTree(childPid)),
+        delay(treeTerminationTimeoutMs).then(() => {
+          throw new Error(
+            `Windows process-tree termination timed out for PID ${childPid}.`,
+          );
+        }),
+      ]);
+    } else if (child.exitCode === null && child.signalCode === null) {
+      child.kill("SIGTERM");
+    } else return;
+
+    if (child.exitCode !== null || child.signalCode !== null) return;
+    const stopped = await Promise.race([
+      childExit.then(() => true),
+      delay(stopTimeoutMs).then(() => false),
+    ]);
+    if (stopped || child.exitCode !== null || child.signalCode !== null) return;
+    throw new Error(
+      `Windows process tree did not exit after forced termination for PID ${childPid}.`,
+    );
+  }
+
+  if (child.pid !== undefined) {
     try {
-      if (platform === "win32" && child.pid !== undefined) {
-        windowsTreeWasForced = true;
-        await Promise.race([
-          Promise.resolve().then(() => killWindowsTree(child.pid)),
-          childExit,
-          delay(treeTerminationTimeoutMs).then(() => {
-            throw new Error(
-              `Windows process-tree termination timed out for PID ${child.pid}.`,
-            );
-          }),
-        ]);
-      } else if (child.pid === undefined) {
-        child.kill("SIGTERM");
-      } else process.kill(-child.pid, "SIGTERM");
+      signalPosixProcessGroup(child.pid, "SIGTERM");
     } catch (error) {
       if (error?.code !== "ESRCH") throw error;
     }
+    if (
+      await waitForPosixProcessGroupExit(
+        child.pid,
+        stopTimeoutMs,
+        posixProcessGroupAlive,
+      )
+    ) {
+      return;
+    }
+    try {
+      signalPosixProcessGroup(child.pid, "SIGKILL");
+    } catch (error) {
+      if (error?.code !== "ESRCH") throw error;
+    }
+    if (
+      !(await waitForPosixProcessGroupExit(
+        child.pid,
+        stopTimeoutMs,
+        posixProcessGroupAlive,
+      ))
+    ) {
+      throw new Error(
+        "Packaged Electron process group did not exit after forced termination.",
+      );
+    }
+    return;
+  }
+
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  try {
+    child.kill("SIGTERM");
+  } catch (error) {
+    if (error?.code !== "ESRCH") throw error;
   }
   const stopped = await Promise.race([
     childExit.then(() => true),
     delay(stopTimeoutMs).then(() => false),
   ]);
   if (stopped || child.exitCode !== null || child.signalCode !== null) return;
-
-  if (windowsTreeWasForced) {
-    throw new Error(
-      `Windows process tree did not exit after forced termination for PID ${child.pid}.`,
-    );
-  }
-
   try {
-    if (child.pid === undefined) {
-      child.kill("SIGKILL");
-    } else process.kill(-child.pid, "SIGKILL");
+    child.kill("SIGKILL");
   } catch (error) {
     if (error?.code !== "ESRCH") throw error;
   }
@@ -245,7 +305,7 @@ export async function launchPackagedElectron({
   delete environment.ELECTRON_RUN_AS_NODE;
   const child = spawn(
     executable,
-    packagedElectronArguments(port, fixture.userData),
+    [`--remote-debugging-port=${port}`, `--user-data-dir=${fixture.userData}`],
     {
       cwd: fixture.workspace,
       detached: process.platform !== "win32",
@@ -277,27 +337,38 @@ export async function launchPackagedElectron({
       port,
       sessionName,
       async close() {
-        await page.disconnect().catch(() => undefined);
+        const failures = [];
+        try {
+          await page.disconnect();
+        } catch (error) {
+          failures.push(error);
+        }
         try {
           await stopChild(child, childExit);
-        } finally {
-          stdout.end();
-          stderr.end();
+        } catch (error) {
+          failures.push(error);
+        }
+        failures.push(...(await closeOutputStreams(child, stdout, stderr)));
+        if (failures.length === 1) throw failures[0];
+        if (failures.length > 1) {
+          throw new AggregateError(
+            failures,
+            "Packaged Electron session cleanup failed.",
+          );
         }
       },
     };
   } catch (error) {
-    let cleanupError;
+    const cleanupFailures = [];
     try {
       await stopChild(child, childExit);
     } catch (failure) {
-      cleanupError = failure;
+      cleanupFailures.push(failure);
     }
-    stdout.destroy();
-    stderr.destroy();
-    if (cleanupError !== undefined) {
+    cleanupFailures.push(...(await closeOutputStreams(child, stdout, stderr)));
+    if (cleanupFailures.length > 0) {
       throw new AggregateError(
-        [error, cleanupError],
+        [error, ...cleanupFailures],
         "Packaged Electron launch and cleanup both failed.",
       );
     }

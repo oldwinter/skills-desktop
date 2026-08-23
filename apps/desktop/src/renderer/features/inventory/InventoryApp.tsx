@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
   Boxes,
@@ -227,6 +227,8 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
   const [addScope, setAddScope] = useState<"global" | "project">("project");
   const [view, setView] = useState<WorkspaceView>("inventory");
   const [selectedTargetId, setSelectedTargetId] = useState<string>();
+  const mutationOutcomeRef = useRef<HTMLParagraphElement>(null);
+  const reviewReturnFocusRef = useRef<HTMLButtonElement | null>(null);
   const targetStates =
     baseSnapshot?.targets ??
     (baseSnapshot === undefined
@@ -314,6 +316,46 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
       unsubscribe();
     };
   }, [bootstrapAttempt, client]);
+
+  useEffect(() => {
+    const restoreReviewFocus = () => {
+      const opener = reviewReturnFocusRef.current;
+      if (opener === null) return;
+      if (opener.isConnected && !opener.disabled) {
+        reviewReturnFocusRef.current = null;
+        opener.focus();
+        return;
+      }
+      if (snapshot?.mutation.phase === "reviewing") return;
+      reviewReturnFocusRef.current = null;
+      const target =
+        mutationOutcomeRef.current ??
+        document.querySelector<HTMLButtonElement>(
+          'button[aria-label="Inventory"]',
+        );
+      target?.focus();
+    };
+    window.addEventListener("focus", restoreReviewFocus);
+    return () => window.removeEventListener("focus", restoreReviewFocus);
+  }, [snapshot?.mutation.phase]);
+
+  useEffect(() => {
+    if (snapshot?.mutation.phase !== "planned") return;
+    const opener = reviewReturnFocusRef.current;
+    if (opener?.isConnected && !opener.disabled) {
+      reviewReturnFocusRef.current = null;
+      opener.focus();
+      return;
+    }
+    if (opener === null) return;
+    reviewReturnFocusRef.current = null;
+    const target =
+      mutationOutcomeRef.current ??
+      document.querySelector<HTMLButtonElement>(
+        'button[aria-label="Inventory"]',
+      );
+    target?.focus();
+  }, [snapshot?.mutation.phase]);
 
   const filteredEntries = useMemo(() => {
     if (inventory === undefined) return [];
@@ -451,11 +493,15 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
       setPreparedMutationId(result.value.operationId);
     } else setActionError(result.error);
   };
-  const requestReview = async () => {
+  const requestReview = async (returnFocus: HTMLButtonElement) => {
     if (preparedMutationId === undefined) return;
+    reviewReturnFocusRef.current = returnFocus;
     const result = await client.requestReview(preparedMutationId);
     if (result.ok) setActionError(undefined);
-    else setActionError(result.error);
+    else {
+      reviewReturnFocusRef.current = null;
+      setActionError(result.error);
+    }
   };
   const reconcileMutation = async () => {
     const result = await client.reconcileMutation(snapshot.target.id);
@@ -1128,14 +1174,21 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                         preparedMutationId === undefined ||
                         snapshot.mutation.phase !== "planned"
                       }
-                      onClick={() => void requestReview()}
+                      onClick={(event) =>
+                        void requestReview(event.currentTarget)
+                      }
                       type="button"
                     >
                       <ShieldCheck aria-hidden="true" size={15} />
                       Open Trusted Review
                     </button>
                   ) : (
-                    <p className="mutation-outcome" role="status">
+                    <p
+                      className="mutation-outcome"
+                      ref={mutationOutcomeRef}
+                      role="status"
+                      tabIndex={-1}
+                    >
                       {snapshot.mutation.outcome.process.disposition} /{" "}
                       {snapshot.mutation.outcome.effects.status}
                     </p>

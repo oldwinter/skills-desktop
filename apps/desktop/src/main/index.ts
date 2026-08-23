@@ -87,11 +87,12 @@ if (!app.requestSingleInstanceLock()) {
 
       presentReview = (reviewId) => {
         if (reviewWindow !== undefined) reviewWindow.close();
+        const ownerWindow = workspaceWindow;
         const window = new BrowserWindow(
           reviewWindowOptions(
             resolve(currentDirectory, "../preload/review.cjs"),
             app.isPackaged,
-            workspaceWindow,
+            ownerWindow,
             appIcon,
           ),
         );
@@ -115,6 +116,9 @@ if (!app.requestSingleInstanceLock()) {
         onWindowClosed(window, (webContentsId) => {
           desktopIpc.detach(webContentsId);
           if (reviewWindow === window) reviewWindow = undefined;
+          if (ownerWindow !== undefined && !ownerWindow.isDestroyed()) {
+            ownerWindow.focus();
+          }
         });
         void window.loadURL(REVIEW_URL);
         reviewWindow = window;

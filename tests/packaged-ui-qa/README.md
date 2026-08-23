@@ -29,15 +29,15 @@ On a headed desktop, `npm run qa:packaged-ui` is enough. On CI or a machine with
 xvfb-run -a npm run qa:packaged-ui
 ```
 
-Linux one-shot (the UI-semantic harness disables Chromium sandboxing so it also runs on AppArmor hosts that deny unprivileged user namespaces):
+Linux one-shot:
 
 ```bash
 npm run qa:packaged-ui:linux
 ```
 
-Protected `main` runs the same runner on Linux x64, macOS arm64/x64, and Windows x64 via `.github/workflows/packaged-ui-qa.yml`. Failures upload only redacted logs from `SKILLS_DESKTOP_QA_ARTIFACTS`.
+Protected `main` runs the same runner on hosted Ubuntu x64, macOS arm64/x64, and Windows x64 via `.github/workflows/packaged-ui-qa.yml`, preserving the packaged Chromium sandbox posture. On Ubuntu 24.04, the workflow installs an executable-scoped AppArmor `userns` profile and removes both the loaded profile and its temporary file on success, failure, or interruption. Local AppArmor hosts need equivalent privilege or preconfiguration; the runner intentionally never passes `--no-sandbox`.
 
-The Linux sandbox override is confined to this QA launcher. Electron fuse, BrowserWindow, preload, and navigation security remain independently enforced by the production security tests; this suite does not qualify sandbox policy or signed installation.
+Failures upload only `failure.json`, a mode-`0600` receipt containing allowlisted stage and check codes, error class, platform, architecture, and schema version. Raw exception text and Electron output stay in the disposable fixture and are never uploaded.
 
 Print commands without launching:
 

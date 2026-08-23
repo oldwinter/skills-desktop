@@ -46,6 +46,14 @@ function rejectOnAbort(signal) {
   };
 }
 
+export function cdpTargetMatches(target, expectedUrl, expectedTitle) {
+  return (
+    target?.type === "page" &&
+    (expectedUrl === undefined || target.url === expectedUrl) &&
+    (expectedTitle === undefined || target.title === expectedTitle)
+  );
+}
+
 export class CdpPage {
   constructor(socket, options = {}) {
     this.errors = [];
@@ -97,9 +105,8 @@ export class CdpPage {
         throwIfAborted(options.signal);
         return [];
       });
-      target = listTargets.find(
-        ({ type, url }) =>
-          type === "page" && (expectedUrl === undefined || url === expectedUrl),
+      target = listTargets.find((candidate) =>
+        cdpTargetMatches(candidate, expectedUrl, options.expectedTitle),
       );
       if (target === undefined) {
         await new Promise((resolve) => setTimeout(resolve, 50));
@@ -185,7 +192,7 @@ export class CdpPage {
     this.pending.clear();
   }
 
-  send(method, params = {}) {
+  send(method, params = {}, { timeoutMs = this.requestTimeoutMs } = {}) {
     if (this.closed || this.socket.readyState !== 1) {
       return Promise.reject(new CdpDisconnectedError());
     }
@@ -193,8 +200,8 @@ export class CdpPage {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
-        reject(new CdpRequestTimeoutError(method, this.requestTimeoutMs));
-      }, this.requestTimeoutMs);
+        reject(new CdpRequestTimeoutError(method, timeoutMs));
+      }, timeoutMs);
       timer.unref?.();
       this.pending.set(id, { reject, resolve, timer });
       try {
@@ -216,21 +223,31 @@ export class CdpPage {
       this.#disconnect();
       return;
     }
-    await Promise.race([
-      new Promise((resolve) => {
-        this.socket.addEventListener("close", resolve, { once: true });
-        this.socket.close();
-      }),
-      timeoutPromise(timeoutMs, "CDP connection did not close."),
-    ]);
+    try {
+      await Promise.race([
+        new Promise((resolve) => {
+          this.socket.addEventListener("close", resolve, { once: true });
+          this.socket.close();
+        }),
+        timeoutPromise(timeoutMs, "CDP connection did not close."),
+      ]);
+    } catch (error) {
+      this.#disconnect();
+      throw error;
+    }
+    this.#disconnect();
   }
 
-  async evaluate(expression) {
-    const response = await this.send("Runtime.evaluate", {
-      awaitPromise: true,
-      expression,
-      returnByValue: true,
-    });
+  async evaluate(expression, options) {
+    const response = await this.send(
+      "Runtime.evaluate",
+      {
+        awaitPromise: true,
+        expression,
+        returnByValue: true,
+      },
+      options,
+    );
     if (response.exceptionDetails !== undefined) {
       throw new Error(
         response.exceptionDetails.exception?.description ??
@@ -287,26 +304,29 @@ export class CdpPage {
   }
 
   async waitFor(expression, label, timeoutMs = 30_000) {
-    await this.evaluate(`(() => new Promise((resolve, reject) => {
-      const check = () => {
-        if (${expression}) {
+    await this.evaluate(
+      `(() => new Promise((resolve, reject) => {
+        const check = () => {
+          if (${expression}) {
+            observer.disconnect();
+            clearTimeout(timeout);
+            resolve(true);
+          }
+        };
+        const observer = new MutationObserver(check);
+        const timeout = setTimeout(() => {
           observer.disconnect();
-          clearTimeout(timeout);
-          resolve(true);
-        }
-      };
-      const observer = new MutationObserver(check);
-      const timeout = setTimeout(() => {
-        observer.disconnect();
-        reject(new Error(${JSON.stringify(`Timed out waiting for ${label}.`)}));
-      }, ${timeoutMs});
-      observer.observe(document, {
-        attributes: true,
-        characterData: true,
-        childList: true,
-        subtree: true,
-      });
-      check();
-    }))()`);
+          reject(new Error(${JSON.stringify(`Timed out waiting for ${label}.`)}));
+        }, ${timeoutMs});
+        observer.observe(document, {
+          attributes: true,
+          characterData: true,
+          childList: true,
+          subtree: true,
+        });
+        check();
+      }))()`,
+      { timeoutMs: timeoutMs + 1_000 },
+    );
   }
 }

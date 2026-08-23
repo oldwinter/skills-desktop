@@ -21,6 +21,38 @@ afterEach(() => {
 });
 
 describe("Trusted Review surface", () => {
+  it("shows a persisted approved decision with an explicit close action", async () => {
+    const closeWindow = vi
+      .spyOn(window, "close")
+      .mockImplementation(() => undefined);
+    const client: ReviewBridge = {
+      async approve() {
+        return { ok: true, value: { operationId: "settled-review" } };
+      },
+      async getReview() {
+        return {
+          ok: true,
+          value: {
+            decision: "approve",
+            schemaVersion: 1,
+            status: "settled",
+          },
+        };
+      },
+      async reject() {
+        return { ok: true, value: { operationId: "settled-review" } };
+      },
+    };
+
+    render(<ReviewSurface client={client} />);
+
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "Review approved",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Close review" }));
+    expect(closeWindow).toHaveBeenCalledOnce();
+  });
+
   it("shows the immutable Official Collection evidence before approval", async () => {
     const approve = vi.fn(async () => ({
       ok: true as const,
@@ -320,6 +352,9 @@ describe("Trusted Review surface", () => {
   });
 
   it("shows its immutable assignment and decides without renderer-supplied authority", async () => {
+    const closeWindow = vi
+      .spyOn(window, "close")
+      .mockImplementation(() => undefined);
     const approve = vi.fn(async () => ({
       ok: true as const,
       value: { operationId: "mutation-1" },
@@ -370,6 +405,8 @@ describe("Trusted Review surface", () => {
     expect(
       await screen.findByRole("heading", { name: "Review removal" }),
     ).toBeInTheDocument();
+    const rejectButton = screen.getByRole("button", { name: "Reject" });
+    expect(rejectButton).toHaveFocus();
     expect(screen.getByText("tdd")).toBeInTheDocument();
     expect(screen.getByText("This device")).toBeInTheDocument();
     expect(screen.getByText("Project")).toBeInTheDocument();
@@ -383,6 +420,10 @@ describe("Trusted Review surface", () => {
     expect(await screen.findByRole("status")).toHaveTextContent(
       "Mutation started",
     );
+    const closeButton = screen.getByRole("button", { name: "Close review" });
+    expect(closeButton).toHaveFocus();
+    fireEvent.click(closeButton);
+    expect(closeWindow).toHaveBeenCalledOnce();
   });
 
   it("closes the dedicated window after a successful rejection", async () => {

@@ -157,16 +157,24 @@ export async function runPackagedUiQa({
   const ownedFixture = providedFixture === undefined;
   let session;
   let reviewPage;
+  const reviewErrors = [];
   let scenarioFailure;
+  let failureCheck = "unknown";
+  let failureStage = "unknown";
+  let activeCheck = "executable-launch";
+  let activeStage = "launch";
   let result;
   try {
     session = await launchPackagedElectron({ executable, fixture, signal });
     const { page } = session;
+    activeCheck = "fixture-inventory";
     await page.waitFor(
       `document.body?.textContent?.includes("qa-project-skill") === true`,
       "fixture inventory",
     );
 
+    activeStage = "keyboard-workflow";
+    activeCheck = "primary-navigation-order";
     const keyboard = await page.evaluate(`(() => {
       const nav = document.querySelector('nav[aria-label="Primary"]');
       const first = nav?.querySelector("button");
@@ -204,6 +212,7 @@ export async function runPackagedUiQa({
       throw new Error(`Tab order failed: ${JSON.stringify(keyboardOrder)}`);
     }
 
+    activeCheck = "primary-navigation-activation";
     await page.evaluate(`(() => {
       document.querySelector('button[aria-label="Comparison"]')?.focus();
     })()`);
@@ -228,6 +237,8 @@ export async function runPackagedUiQa({
       throw new Error(`Focus indicator target was not reached: ${focusTarget}`);
     }
 
+    activeStage = "focus-order";
+    activeCheck = "focus-visibility";
     const focus = await page.evaluate(`(() => {
       const active = document.activeElement;
       if (!(active instanceof HTMLElement)) return { visible: false };
@@ -246,8 +257,11 @@ export async function runPackagedUiQa({
       throw new Error(`Focus visibility failed: ${JSON.stringify(focus)}`);
     }
 
+    activeStage = "axe-semantics";
+    activeCheck = "workspace-axe";
     const axeSource = await requireAxeSource();
     await scanWithAxe(page, axeSource, "workspace");
+    activeCheck = "workspace-semantics";
     const semantics = await page.evaluate(`({
       groups: [...document.querySelectorAll('[role="group"]')].map((group) =>
         group.getAttribute("aria-label"),
@@ -265,6 +279,8 @@ export async function runPackagedUiQa({
       );
     }
 
+    activeStage = "narrow-layout";
+    activeCheck = "narrow-overflow";
     await page.setViewportSize(420, 820);
     const narrow = await page.evaluate(`({
       documentWidth: document.documentElement.scrollWidth,
@@ -278,6 +294,8 @@ export async function runPackagedUiQa({
       throw new Error(`Narrow layout failed: ${JSON.stringify(narrow)}`);
     }
 
+    activeStage = "reduced-motion";
+    activeCheck = "reduced-motion";
     await page.setMediaFeature("prefers-reduced-motion", "reduce");
     const reduced = await page.evaluate(`(() => {
       const durationMs = (value) => Math.max(...value.split(",").map((part) => {
@@ -317,34 +335,52 @@ export async function runPackagedUiQa({
       );
     }
 
-    await clickNamedButton(page, "Prepare update", { focus: true });
+    activeStage = "keyboard-workflow";
+    activeCheck = "mutation-prepare";
+    await clickNamedButton(page, "Prepare removal", { focus: true });
     await page.waitFor(
       `document.body?.textContent?.includes("Open Trusted Review") === true`,
       "prepared mutation review action",
     );
-    await clickNamedButton(page, "Open Trusted Review", { focus: true });
+    activeCheck = "review-open";
+    await clickNamedButton(page, "Open Trusted Review");
     reviewPage = await CdpPage.connect(
       session.port,
       "skills-desktop://review/index.html",
-      { connectTimeoutMs: 5_000, signal },
+      {
+        connectTimeoutMs: 5_000,
+        expectedTitle: "Skills Desktop Trusted Review",
+        signal,
+      },
     );
     await reviewPage.waitFor(
       `document.body?.textContent?.includes("Trusted Review") === true`,
       "Trusted Review window",
     );
+    activeStage = "focus-order";
+    activeCheck = "review-focus-order";
+    await reviewPage.waitFor(
+      `(document.activeElement?.getAttribute("aria-label") ?? document.activeElement?.textContent?.trim() ?? "") === "Reject"`,
+      "Trusted Review initial focus",
+    );
+    activeCheck = "review-focus-order";
     const reviewFocus = await reviewPage.evaluate(`(() => {
       const focusable = [...document.querySelectorAll("button")];
       const names = focusable.map((button) =>
         button.getAttribute("aria-label") ?? button.textContent?.trim() ?? "",
       );
-      focusable[0]?.focus();
       return {
         contained: focusable.every((button) => button.closest("main.review-surface") !== null),
+        current:
+          document.activeElement?.getAttribute("aria-label") ??
+          document.activeElement?.textContent?.trim() ??
+          "",
         names,
       };
     })()`);
     if (
       reviewFocus.contained !== true ||
+      reviewFocus.current !== "Reject" ||
       JSON.stringify(reviewFocus.names) !==
         JSON.stringify(["Reject", "Approve mutation"])
     ) {
@@ -375,7 +411,87 @@ export async function runPackagedUiQa({
         `Review reverse focus did not wrap at ${reviewAfterReverseWrap}`,
       );
     }
+    activeStage = "axe-semantics";
+    activeCheck = "review-axe";
     await scanWithAxe(reviewPage, axeSource, "review");
+    reviewErrors.push(...reviewPage.errors);
+
+    activeStage = "keyboard-workflow";
+    activeCheck = "review-close";
+    await reviewPage.send("Page.close").catch((error) => {
+      if (!(error instanceof CdpDisconnectedError)) throw error;
+    });
+    await waitForTargetGone(
+      session.port,
+      "skills-desktop://review/index.html",
+      5_000,
+      signal,
+    );
+    await reviewPage.disconnect();
+    reviewPage = undefined;
+
+    activeStage = "focus-order";
+    activeCheck = "workspace-focus-restore";
+    await page.waitFor(
+      `document.hasFocus() === true &&
+        document.activeElement instanceof HTMLButtonElement &&
+        !document.activeElement.disabled &&
+        document.activeElement.textContent?.trim() === "Open Trusted Review"`,
+      "workspace focus restoration after review cancellation",
+      5_000,
+    );
+
+    activeStage = "keyboard-workflow";
+    activeCheck = "review-open";
+    await page.dispatchKey("Enter");
+    reviewPage = await CdpPage.connect(
+      session.port,
+      "skills-desktop://review/index.html",
+      {
+        connectTimeoutMs: 5_000,
+        expectedTitle: "Skills Desktop Trusted Review",
+        signal,
+      },
+    );
+    await reviewPage.waitFor(
+      `(document.activeElement?.getAttribute("aria-label") ?? document.activeElement?.textContent?.trim() ?? "") === "Reject"`,
+      "reopened Trusted Review initial focus",
+    );
+    await reviewPage.dispatchKey("Tab");
+    await reviewPage.waitFor(
+      `(document.activeElement?.getAttribute("aria-label") ?? document.activeElement?.textContent?.trim() ?? "") === "Approve mutation"`,
+      "reopened Trusted Review approval focus",
+    );
+
+    activeStage = "keyboard-workflow";
+    activeCheck = "review-approve";
+    await reviewPage.dispatchKey("Enter").catch((error) => {
+      if (!(error instanceof CdpDisconnectedError)) throw error;
+    });
+    activeCheck = "review-settled";
+    await reviewPage.waitFor(
+      `document.body?.textContent?.includes("Mutation started") === true`,
+      "approved review outcome",
+    );
+    activeCheck = "mutation-postflight";
+    await page.waitFor(
+      `document.body?.textContent?.includes("completed / verified") === true`,
+      "confirmed mutation outcome",
+    );
+    activeStage = "focus-order";
+    activeCheck = "settled-focus";
+    const settledFocus = await reviewPage.evaluate(
+      `document.activeElement?.getAttribute("aria-label") ?? ""`,
+    );
+    if (settledFocus !== "Close review") {
+      throw new Error(`Settled review focus failed at ${settledFocus}`);
+    }
+    activeStage = "axe-semantics";
+    activeCheck = "settled-axe";
+    await scanWithAxe(reviewPage, axeSource, "settled review");
+    reviewErrors.push(...reviewPage.errors);
+    activeStage = "keyboard-workflow";
+    activeCheck = "review-close";
     await reviewPage.dispatchKey("Enter").catch((error) => {
       if (!(error instanceof CdpDisconnectedError)) throw error;
     });
@@ -385,19 +501,20 @@ export async function runPackagedUiQa({
       5_000,
       signal,
     );
-    const restored = await page.evaluate(
-      `document.activeElement?.textContent?.includes("Open Trusted Review") === true`,
-    );
-    if (restored !== true) {
-      throw new Error(
-        "Workspace focus was not restored after Trusted Review closed.",
-      );
-    }
+    await reviewPage.disconnect();
+    reviewPage = undefined;
+    activeCheck = "workspace-focus-restore";
     await page.waitFor(
-      `document.body?.textContent?.includes("completed / verified") === true`,
-      "confirmed mutation outcome",
+      `document.hasFocus() === true &&
+        document.activeElement instanceof HTMLParagraphElement &&
+        document.activeElement.classList.contains("mutation-outcome") &&
+        document.activeElement.textContent?.trim() === "completed / verified"`,
+      "workspace focus restoration",
+      5_000,
     );
 
+    activeStage = "empty-state";
+    activeCheck = "empty-state-render";
     await fixture.setProcessMode("empty");
     await clickNamedButton(page, "Refresh inventory");
     await page.waitFor(
@@ -405,6 +522,8 @@ export async function runPackagedUiQa({
       "empty inventory",
     );
 
+    activeStage = "error-state";
+    activeCheck = "error-state-render";
     await fixture.setProcessMode("failure");
     await clickNamedButton(page, "Refresh inventory");
     await page.waitFor(
@@ -414,6 +533,7 @@ export async function runPackagedUiQa({
     );
 
     const invocations = await fixture.readInvocations();
+    activeCheck = "cli-list-invocation";
     if (
       !invocations.some(
         (args) =>
@@ -426,7 +546,8 @@ export async function runPackagedUiQa({
         `Fixture CLI invocation was not recorded: ${JSON.stringify(invocations)}`,
       );
     }
-    if (!invocations.some((args) => args.includes("update"))) {
+    activeCheck = "cli-remove-invocation";
+    if (!invocations.some((args) => args.includes("remove"))) {
       throw new Error(
         `Confirmed mutation invocation was not recorded: ${JSON.stringify(invocations)}`,
       );
@@ -439,12 +560,16 @@ export async function runPackagedUiQa({
     };
   } catch (error) {
     scenarioFailure = error;
+    failureCheck = activeCheck;
+    failureStage = activeStage;
   } finally {
     const finalizationFailures = [];
-    const reviewErrors = reviewPage?.errors ?? [];
+    let finalizationCheck;
+    if (reviewPage !== undefined) reviewErrors.push(...reviewPage.errors);
     try {
       await reviewPage?.disconnect();
     } catch (error) {
+      finalizationCheck ??= "session-cleanup";
       finalizationFailures.push(
         new Error("Trusted Review CDP cleanup failed.", { cause: error }),
       );
@@ -452,6 +577,7 @@ export async function runPackagedUiQa({
     try {
       await session?.close();
     } catch (error) {
+      finalizationCheck ??= "session-cleanup";
       finalizationFailures.push(
         new Error("Packaged Electron cleanup failed.", { cause: error }),
       );
@@ -460,6 +586,7 @@ export async function runPackagedUiQa({
       try {
         await fixture.cleanup();
       } catch (error) {
+        finalizationCheck ??= "fixture-cleanup";
         finalizationFailures.push(
           new Error("Packaged UI fixture cleanup failed.", { cause: error }),
         );
@@ -468,14 +595,31 @@ export async function runPackagedUiQa({
     if (session !== undefined) {
       const errors = rendererErrors(session.page, { errors: reviewErrors });
       if (errors.length > 0) {
+        if (scenarioFailure === undefined && finalizationFailures.length === 0) {
+          failureCheck = "renderer-console";
+          failureStage = "console-failures";
+        }
         finalizationFailures.push(
           new Error(`Renderer console failures:\n${errors.join("\n")}`),
         );
       }
     }
+    if (scenarioFailure === undefined && finalizationFailures.length > 0) {
+      failureCheck = finalizationCheck ?? failureCheck;
+      failureStage =
+        failureStage === "console-failures" ? failureStage : "finalization";
+    }
     scenarioFailure = appendFailures(scenarioFailure, finalizationFailures);
   }
-  if (scenarioFailure !== undefined) throw scenarioFailure;
+  if (scenarioFailure !== undefined) {
+    const failure = new Error("Packaged UI QA scenario failed.", {
+      cause: scenarioFailure,
+    });
+    failure.name = "PackagedUiQaScenarioError";
+    failure.qaCheck = failureCheck;
+    failure.qaStage = failureStage;
+    throw failure;
+  }
   return result;
 }
 

@@ -24,7 +24,7 @@ jobs:
         include:
           - architecture: x64
             platform: linux
-            runner: '["self-hosted", "Linux", "X64", "skills-desktop"]'
+            runner: '"ubuntu-24.04"'
           - architecture: arm64
             platform: darwin
             runner: '"macos-15"'
@@ -56,10 +56,29 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          profile_path=""
+          profile_loaded=0
+
+          cleanup() {
+            local cleanup_status="$1"
+            trap - EXIT INT TERM
+            if [[ "$profile_loaded" == 1 ]] && ! sudo apparmor_parser --skip-cache --remove "$profile_path"; then
+              echo "::error::Temporary AppArmor profile cleanup failed." >&2
+              cleanup_status=1
+            fi
+            if [[ -n "$profile_path" ]] && ! rm -f "$profile_path"; then
+              echo "::error::Temporary AppArmor profile file cleanup failed." >&2
+              cleanup_status=1
+            fi
+            exit "$cleanup_status"
+          }
+          trap 'cleanup "$?"' EXIT
+          trap 'exit 130' INT
+          trap 'exit 143' TERM
+
           case "${{ matrix.platform }}" in
             linux)
               executable="$GITHUB_WORKSPACE/apps/desktop/out/Skills Desktop-linux-${{ matrix.architecture }}/skills-desktop"
-              export SKILLS_DESKTOP_QA_DISABLE_CHROMIUM_SANDBOX=1
               ;;
             darwin)
               executable="$GITHUB_WORKSPACE/apps/desktop/out/Skills Desktop-darwin-${{ matrix.architecture }}/Skills Desktop.app/Contents/MacOS/skills-desktop"
@@ -70,6 +89,23 @@ jobs:
           esac
           export SKILLS_DESKTOP_PACKAGED_EXECUTABLE="$(node -e "console.log(require('node:fs').realpathSync(process.argv[1]))" "$executable")"
           if [[ "${{ matrix.platform }}" == "linux" ]]; then
+            runner_temp="${RUNNER_TEMP:?RUNNER_TEMP is required}"
+            profile_path="$(mktemp "$runner_temp/skills-desktop-ui-qa-apparmor.XXXXXX")"
+
+            # Ubuntu 24.04 requires an executable-scoped userns profile for Chromium's sandbox.
+            cat >"$profile_path" <<EOF
+          abi <abi/4.0>,
+          include <tunables/global>
+
+          profile skills-desktop-ui-qa "$SKILLS_DESKTOP_PACKAGED_EXECUTABLE" flags=(unconfined) {
+            userns,
+          }
+          EOF
+            if sudo apparmor_parser --skip-cache --replace "$profile_path"; then
+              profile_loaded=1
+            else
+              exit 1
+            fi
             xvfb-run -a node tests/packaged-ui-qa/run.mjs
           else
             node tests/packaged-ui-qa/run.mjs
@@ -79,4 +115,4 @@ jobs:
         with:
           if-no-files-found: ignore
           name: packaged-ui-qa-${{ matrix.platform }}-${{ matrix.architecture }}
-          path: ${{ runner.temp }}/packaged-ui-qa
+          path: ${{ runner.temp }}/packaged-ui-qa/failure.json

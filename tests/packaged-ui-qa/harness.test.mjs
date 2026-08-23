@@ -3,10 +3,10 @@ import {
   CdpDisconnectedError,
   CdpPage,
   CdpRequestTimeoutError,
+  cdpTargetMatches,
 } from "./cdp.mjs";
 import {
   access,
-  chmod,
   mkdtemp,
   readFile,
   rm,
@@ -16,7 +16,11 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { persistFailureArtifacts } from "./artifacts.mjs";
+import {
+  failureReceipt,
+  persistFailureArtifacts,
+  safeFailureSummary,
+} from "./artifacts.mjs";
 import {
   assertRuntimeArchitecture,
   createPackagedQaFixture,
@@ -25,7 +29,6 @@ import {
 import {
   findAvailablePort,
   launchPackagedElectron,
-  packagedElectronArguments,
   stopChild,
   terminateWindowsProcessTree,
 } from "./launch.mjs";
@@ -89,6 +92,25 @@ afterEach(async () => {
 });
 
 describe("packaged UI QA CDP seam", () => {
+  it("waits for the expected document title before attaching to a page", () => {
+    const expectedUrl = "skills-desktop://review/index.html";
+    const expectedTitle = "Skills Desktop Trusted Review";
+    expect(
+      cdpTargetMatches(
+        { title: "", type: "page", url: expectedUrl },
+        expectedUrl,
+        expectedTitle,
+      ),
+    ).toBe(false);
+    expect(
+      cdpTargetMatches(
+        { title: expectedTitle, type: "page", url: expectedUrl },
+        expectedUrl,
+        expectedTitle,
+      ),
+    ).toBe(true);
+  });
+
   it("rejects a request at its configured deadline", async () => {
     const socket = new FakeSocket();
     const page = new CdpPage(socket, { requestTimeoutMs: 20 });
@@ -97,6 +119,17 @@ describe("packaged UI QA CDP seam", () => {
       CdpRequestTimeoutError,
     );
     expect(socket.sent).toHaveLength(1);
+  });
+
+  it("lets semantic waits outlive the default CDP request timeout", async () => {
+    const socket = new FakeSocket();
+    const page = new CdpPage(socket, { requestTimeoutMs: 20 });
+    const waiting = page.waitFor("true", "delayed condition", 50);
+
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    socket.respond(1, { result: { value: true } });
+
+    await expect(waiting).resolves.toBeUndefined();
   });
 
   it("rejects pending and future requests when the browser disconnects", async () => {
@@ -139,6 +172,24 @@ describe("packaged UI QA CDP seam", () => {
       CdpDisconnectedError,
     );
     expect(socket.sent).toHaveLength(0);
+  });
+
+  it("fails closed and rejects pending work when CDP will not disconnect", async () => {
+    const socket = new FakeSocket();
+    socket.close = () => {
+      socket.readyState = 2;
+    };
+    const page = new CdpPage(socket, { requestTimeoutMs: 1_000 });
+    const pending = page.send("Runtime.enable");
+    const pendingRejection = expect(pending).rejects.toBeInstanceOf(
+      CdpDisconnectedError,
+    );
+
+    await expect(page.disconnect(20)).rejects.toThrow(/did not close/i);
+    await pendingRejection;
+    await expect(page.send("Page.enable")).rejects.toBeInstanceOf(
+      CdpDisconnectedError,
+    );
   });
 
   it("resolves a response and keeps request ids monotonic", async () => {
@@ -319,26 +370,6 @@ describe("packaged UI QA fixture seam", () => {
 });
 
 describe("packaged Electron launcher seam", () => {
-  it("adds the Linux QA sandbox override only when explicitly requested", () => {
-    expect(
-      packagedElectronArguments(9222, "/owned/user-data", {
-        disableChromiumSandbox: false,
-      }),
-    ).toEqual([
-      "--remote-debugging-port=9222",
-      "--user-data-dir=/owned/user-data",
-    ]);
-    expect(
-      packagedElectronArguments(9222, "/owned/user-data", {
-        disableChromiumSandbox: true,
-      }),
-    ).toEqual([
-      "--remote-debugging-port=9222",
-      "--user-data-dir=/owned/user-data",
-      "--no-sandbox",
-    ]);
-  });
-
   it("allocates loopback-only ports", async () => {
     const port = await findAvailablePort();
     expect(port).toBeGreaterThan(0);
@@ -371,6 +402,27 @@ describe("packaged Electron launcher seam", () => {
     });
 
     expect(treeKills).toEqual([4242]);
+    expect(directKills).toEqual([]);
+  });
+
+  it("stops a surviving Windows process tree after the direct child exits", async () => {
+    const directKills = [];
+    const treeKills = [];
+    const child = {
+      exitCode: 0,
+      kill: (signal) => directKills.push(signal),
+      pid: 4243,
+      signalCode: null,
+    };
+
+    await stopChild(child, Promise.resolve({ kind: "exit", code: 0 }), {
+      killWindowsTree: async (pid) => treeKills.push(pid),
+      platform: "win32",
+      stopTimeoutMs: 20,
+      treeTerminationTimeoutMs: 20,
+    });
+
+    expect(treeKills).toEqual([4243]);
     expect(directKills).toEqual([]);
   });
 
@@ -436,6 +488,31 @@ describe("packaged Electron launcher seam", () => {
     expect(signals).toEqual(["SIGTERM", "SIGKILL"]);
   });
 
+  it("kills a surviving POSIX process group after its direct child exits", async () => {
+    const signals = [];
+    let groupAlive = true;
+    const child = {
+      exitCode: 0,
+      kill: () => {
+        throw new Error("direct child termination is not allowed");
+      },
+      pid: 4545,
+      signalCode: null,
+    };
+
+    await stopChild(child, Promise.resolve({ code: 0, kind: "exit" }), {
+      platform: "linux",
+      posixProcessGroupAlive: () => groupAlive,
+      signalPosixProcessGroup: (_pid, signal) => {
+        signals.push(signal);
+        if (signal === "SIGKILL") groupAlive = false;
+      },
+      stopTimeoutMs: 20,
+    });
+
+    expect(signals).toEqual(["SIGTERM", "SIGKILL"]);
+  });
+
   it("invokes taskkill with an argument-array process-tree contract", async () => {
     const calls = [];
     const completion = terminateWindowsProcessTree(4444, {
@@ -454,6 +531,21 @@ describe("packaged Electron launcher seam", () => {
         options: expect.objectContaining({ shell: false }),
       },
     ]);
+  });
+
+  it("fails closed when taskkill cannot prove the process tree was removed", async () => {
+    const completion = terminateWindowsProcessTree(4445, {
+      execFileImpl: (_command, _args, _options, callback) => {
+        const error = Object.assign(
+          new Error('ERROR: The process "4445" not found.'),
+          { code: 128 },
+        );
+        queueMicrotask(() => callback(error));
+      },
+      timeoutMs: 20,
+    });
+
+    await expect(completion).rejects.toMatchObject({ code: 128 });
   });
 });
 
@@ -475,7 +567,7 @@ describe("packaged UI QA scenario contract", () => {
     expect(help).not.toContain("sshd");
   });
 
-  it("writes failure-only redacted logs to an explicit artifact directory", async () => {
+  it("writes only an allowlisted failure receipt to the artifact upload path", async () => {
     const fixture = await createPackagedQaFixture();
     fixtures.push(fixture);
     await writeFile(
@@ -491,31 +583,66 @@ describe("packaged UI QA scenario contract", () => {
       cleanup: () => rm(destination, { force: true, recursive: true }),
     });
     await writeFile(`${destination}/error.txt`, "stale artifact");
-    await chmod(`${destination}/error.txt`, 0o666);
+    const error = new Error(
+      'qa failed at /tmp/fixture and C:\\Users\\Alice with https://example.test/path, Authorization: Basic dXNlcjpwYXNz, --token unquoted-secret, and sk_live_example',
+    );
+    error.name = "PackagedUiQaScenarioError";
+    error.qaCheck = "error-state-render";
+    error.qaStage = "error-state";
     await persistFailureArtifacts(
-      fixture,
-      new Error(
-        "qa failed at /tmp/fixture with https://example.test/path and token=error-secret",
-      ),
+      error,
       destination,
     );
-    expect((await stat(`${destination}/error.txt`)).mode & 0o777).toBe(0o600);
-    const artifact = await Promise.all(
-      ["error.txt", "electron.stdout.log", "electron.stderr.log"].map((name) =>
-        readFile(join(destination, name), "utf8"),
-      ),
-    ).then((values) => values.join("\n"));
-    expect(artifact).toContain("qa failed");
-    expect(artifact).not.toContain("/Users/alice/skills-desktop");
-    expect(artifact).not.toContain("/tmp/fixture");
-    expect(artifact).not.toContain("https://example.test");
-    expect(artifact).not.toContain("top-secret");
-    expect(artifact).not.toContain("secret-value");
-    expect(artifact).not.toContain("another-secret");
-    expect(artifact).not.toContain("env-secret");
-    expect(artifact).not.toContain("error-secret");
-    expect(artifact).not.toContain("secret value");
-    expect(artifact).not.toContain("Alice Smith");
+    expect(safeFailureSummary(error)).toBe(
+      "Packaged UI QA failed during error-state/error-state-render (PackagedUiQaScenarioError).",
+    );
+    const untrusted = Object.assign(new Error("sk_live_untrusted"), {
+      name: "sk_live_class",
+      qaCheck: "sk_live_check",
+      qaStage: "sk_live_stage",
+    });
+    expect(failureReceipt(untrusted)).toMatchObject({
+      check: "unknown",
+      errorClass: "Error",
+      stage: "unknown",
+    });
+    expect(safeFailureSummary(untrusted)).toBe(
+      "Packaged UI QA failed during unknown/unknown (Error).",
+    );
+    expect((await stat(`${destination}/failure.json`)).mode & 0o777).toBe(
+      0o600,
+    );
+    const artifact = await readFile(`${destination}/failure.json`, "utf8");
+    expect(JSON.parse(artifact)).toEqual({
+      architecture: process.arch,
+      check: "error-state-render",
+      errorClass: "PackagedUiQaScenarioError",
+      platform: process.platform,
+      schemaVersion: 1,
+      stage: "error-state",
+    });
+    for (const secret of [
+      "/Users/alice/skills-desktop",
+      "/tmp/fixture",
+      "https://example.test",
+      "top-secret",
+      "secret-value",
+      "another-secret",
+      "env-secret",
+      "my secret value",
+      "Alice",
+      "dXNlcjpwYXNz",
+      "unquoted-secret",
+      "sk_live_example",
+    ]) {
+      expect(artifact).not.toContain(secret);
+    }
+    await expect(
+      access(`${destination}/electron.stdout.log`),
+    ).rejects.toThrow();
+    await expect(
+      access(`${destination}/electron.stderr.log`),
+    ).rejects.toThrow();
   });
 
   it("pins the axe-core runtime used by the packaged scan", async () => {
@@ -544,14 +671,18 @@ describe("packaged UI QA scenario contract", () => {
   });
 
   it("does not launch without a packaged executable", async () => {
-    await expect(
-      runPackagedUiQa({
-        executable: "/missing/skills-desktop",
-        fixture: await createPackagedQaFixture().then((fixture) => {
-          fixtures.push(fixture);
-          return fixture;
-        }),
+    const failure = runPackagedUiQa({
+      executable: "/missing/skills-desktop",
+      fixture: await createPackagedQaFixture().then((fixture) => {
+        fixtures.push(fixture);
+        return fixture;
       }),
-    ).rejects.toThrow(/unavailable/i);
+    });
+    await expect(failure).rejects.toMatchObject({
+      message: "Packaged UI QA scenario failed.",
+      name: "PackagedUiQaScenarioError",
+      qaCheck: "executable-launch",
+      qaStage: "launch",
+    });
   });
 });

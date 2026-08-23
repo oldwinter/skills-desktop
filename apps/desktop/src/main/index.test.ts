@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => {
     close: ReturnType<typeof vi.fn>;
     emit(event: string, ...args: unknown[]): void;
     focus: ReturnType<typeof vi.fn>;
+    isDestroyed: ReturnType<typeof vi.fn>;
     loadURL: ReturnType<typeof vi.fn>;
     once: ReturnType<typeof vi.fn>;
     show: ReturnType<typeof vi.fn>;
@@ -43,6 +44,7 @@ const mocks = vi.hoisted(() => {
 
   const createWindow = (options: unknown): WindowLike => {
     let currentUrl = "";
+    let destroyed = false;
     const windowListeners = new Map<string, Listener[]>();
     const webContentsListeners = new Map<string, Listener[]>();
     const webContents = {
@@ -59,11 +61,15 @@ const mocks = vi.hoisted(() => {
     const window: WindowLike = {
       options,
       webContents,
-      close: vi.fn(() => window.emit("closed")),
+      close: vi.fn(() => {
+        destroyed = true;
+        window.emit("closed");
+      }),
       emit(event: string, ...args: unknown[]) {
         emitListeners(windowListeners, event, args);
       },
       focus: vi.fn(),
+      isDestroyed: vi.fn(() => destroyed),
       loadURL: vi.fn(async (url: string) => {
         currentUrl = url;
       }),
@@ -404,6 +410,7 @@ describe("desktop main entrypoint", () => {
 
     mocks.reviewRequested()?.("review-2");
     expect(review?.close).toHaveBeenCalledTimes(1);
+    expect(workspace?.focus).toHaveBeenCalledTimes(3);
     expect(mocks.desktopIpc.detach).toHaveBeenCalledWith(
       review?.webContents.id,
     );
@@ -420,6 +427,7 @@ describe("desktop main entrypoint", () => {
     mocks.emitApp("second-instance");
     expect(replacement?.focus).toHaveBeenCalledTimes(1);
     (mocks.windows[2]?.close as unknown as (() => void) | undefined)?.();
+    expect(replacement?.focus).toHaveBeenCalledTimes(1);
     mocks.emitApp("window-all-closed");
     expect(mocks.app.quit).toHaveBeenCalledTimes(1);
   });

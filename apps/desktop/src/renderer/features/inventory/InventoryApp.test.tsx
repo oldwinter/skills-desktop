@@ -1338,33 +1338,34 @@ describe("Local Target Inventory shell", () => {
       ok: true as const,
       value: { operationId: "review-1" },
     }));
-    const client: DesktopBridge = {
-      ...clientFor({
-        ...snapshot,
-        mutation: {
-          activeOperationId: null,
-          commandPlan: {
-            harness: "Codex",
-            names: ["Case-Sensitive-Skill"],
-            operation: "update",
-            preview:
-              "npx skills@1.5.23 update Case-Sensitive-Skill --project --yes",
-            schemaVersion: 1,
-            scope: "project",
-            source: null,
-            targetId: "00000000-0000-4000-8000-000000000001",
-            timeoutMs: 600_000,
-          },
-          lastError: null,
-          outcome: null,
-          phase: "planned",
-          reconciliationDeadline: null,
+    const plannedSnapshot: WorkspaceSnapshot = {
+      ...snapshot,
+      mutation: {
+        activeOperationId: null,
+        commandPlan: {
+          harness: "Codex",
+          names: ["Case-Sensitive-Skill"],
+          operation: "update",
+          preview:
+            "npx skills@1.5.23 update Case-Sensitive-Skill --project --yes",
+          schemaVersion: 1,
+          scope: "project",
+          source: null,
+          targetId: "00000000-0000-4000-8000-000000000001",
+          timeoutMs: 600_000,
         },
-      }),
+        lastError: null,
+        outcome: null,
+        phase: "planned",
+        reconciliationDeadline: null,
+      },
+    };
+    const client: DesktopBridge = {
+      ...clientFor(plannedSnapshot),
       prepareMutation,
       requestReview,
     };
-    render(<InventoryApp client={client} />);
+    const { rerender } = render(<InventoryApp client={client} />);
 
     fireEvent.click(
       (
@@ -1393,11 +1394,127 @@ describe("Local Target Inventory shell", () => {
         "npx skills@1.5.23 update Case-Sensitive-Skill --project --yes",
       ),
     ).toBeInTheDocument();
-    fireEvent.click(
-      screen.getByRole("button", { name: "Open Trusted Review" }),
-    );
+    const reviewButton = screen.getByRole("button", {
+      name: "Open Trusted Review",
+    });
+    fireEvent.click(reviewButton);
     await waitFor(() =>
       expect(requestReview).toHaveBeenCalledWith("prepared-1"),
+    );
+
+    rerender(
+      <InventoryApp
+        client={clientFor({
+          ...plannedSnapshot,
+          mutation: {
+            ...plannedSnapshot.mutation,
+            outcome: {
+              effects: { status: "verified" },
+              process: {
+                disposition: "completed",
+                exitCode: 0,
+                termination: "known",
+              },
+            },
+            phase: "succeeded",
+          },
+        })}
+      />,
+    );
+    const outcome = await screen.findByText("completed / verified");
+    window.dispatchEvent(new Event("focus"));
+    await waitFor(() => expect(outcome).toHaveFocus());
+  });
+
+  it("restores the review opener after a window-close cancellation returns to planned", async () => {
+    const prepareMutation = vi.fn(async () => ({
+      ok: true as const,
+      value: { operationId: "prepared-cancel-1" },
+    }));
+    const requestReview = vi.fn(async () => ({
+      ok: true as const,
+      value: { operationId: "review-cancel-1" },
+    }));
+    const plannedSnapshot: WorkspaceSnapshot = {
+      ...snapshot,
+      mutation: {
+        activeOperationId: null,
+        commandPlan: {
+          harness: "Codex",
+          names: ["Case-Sensitive-Skill"],
+          operation: "remove",
+          preview:
+            "npx skills@1.5.23 remove Case-Sensitive-Skill --project --yes",
+          schemaVersion: 1,
+          scope: "project",
+          source: null,
+          targetId: snapshot.target.id,
+          timeoutMs: 120_000,
+        },
+        lastError: null,
+        outcome: null,
+        phase: "planned",
+        reconciliationDeadline: null,
+      },
+    };
+    const reviewingSnapshot: WorkspaceSnapshot = {
+      ...plannedSnapshot,
+      mutation: {
+        ...plannedSnapshot.mutation,
+        phase: "reviewing",
+      },
+    };
+    const { rerender } = render(
+      <InventoryApp
+        client={{
+          ...clientFor(plannedSnapshot),
+          prepareMutation,
+          requestReview,
+        }}
+      />,
+    );
+
+    fireEvent.click(
+      (
+        await screen.findAllByRole("button", {
+          name: "Case-Sensitive-Skill",
+        })
+      )[0]!,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Prepare removal" }));
+    await waitFor(() => expect(prepareMutation).toHaveBeenCalledWith(
+      snapshot.target.id,
+      {
+        names: ["Case-Sensitive-Skill"],
+        scope: "project",
+        type: "remove",
+      },
+    ));
+
+    const reviewButton = screen.getByRole("button", {
+      name: "Open Trusted Review",
+    });
+    fireEvent.click(reviewButton);
+    await waitFor(() => expect(requestReview).toHaveBeenCalledWith(
+      "prepared-cancel-1",
+    ));
+
+    rerender(<InventoryApp client={clientFor(reviewingSnapshot)} />);
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Open Trusted Review" }),
+      ).toBeDisabled(),
+    );
+    act(() => window.dispatchEvent(new Event("focus")));
+    expect(
+      screen.getByRole("button", { name: "Inventory" }),
+    ).not.toHaveFocus();
+
+    rerender(<InventoryApp client={clientFor(plannedSnapshot)} />);
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Open Trusted Review" }),
+      ).toHaveFocus(),
     );
   });
 
