@@ -39,7 +39,7 @@ function automaticStatus(snapshot: AboutUpdateSnapshot) {
     case "update-available":
       return {
         heading: "Update available",
-        message: "Electron is downloading the available update.",
+        message: "正在下载更新",
       };
     case "update-downloaded":
       return {
@@ -200,7 +200,7 @@ export function AboutView({ client }: { readonly client: AboutBridge }) {
               {snapshot.schemaVersion === 2 && restartCandidate !== null ? (
                 <div className="about-restart-control">
                   <p className="about-candidate">
-                    Candidate {restartCandidate.version}
+                    版本 {restartCandidate.version} 已就绪
                   </p>
                   {snapshot.restart.guardReasons.length > 0 ? (
                     <ul className="about-guard-reasons" aria-label="Restart guards">

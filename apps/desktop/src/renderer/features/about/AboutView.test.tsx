@@ -205,6 +205,7 @@ describe("About surface", () => {
 
     act(() => publish?.({ ...idleSnapshot, state: { kind: "update-available" } }));
     expect(screen.getByText("Update available")).toBeInTheDocument();
+    expect(screen.getByText("正在下载更新")).toBeInTheDocument();
 
     act(() => publish?.({ ...idleSnapshot, state: { kind: "update-downloaded" } }));
     expect(screen.getByText("Update ready for next launch")).toBeInTheDocument();
@@ -339,7 +340,9 @@ describe("About surface", () => {
     };
     render(<AboutView client={client} />);
 
-    expect(await screen.findByText("Candidate 0.2.0")).toBeInTheDocument();
+    expect(await screen.findByText("版本 0.2.0 已就绪")).toBeInTheDocument();
+    expect(screen.queryByText(/Candidate/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Electron/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Restart to update" }));
     await waitFor(() =>
       expect(requestRestart).toHaveBeenCalledWith(
