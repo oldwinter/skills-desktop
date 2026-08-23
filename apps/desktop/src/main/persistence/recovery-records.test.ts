@@ -1067,6 +1067,201 @@ describe("RecoveryRecords Mutation Guard contract", () => {
     ).resolves.toBe(true);
   });
 
+  it.each([
+    ["invalid JSON", "{not valid JSON"],
+    [
+      "invalid schema",
+      JSON.stringify({
+        guards: "not-an-array",
+        kind: "mutation-guards",
+        schemaVersion: 2,
+      }),
+    ],
+  ] as const)(
+    "keeps quarantined Guard %s fail-closed across restarts",
+    async (_name, source) => {
+      const directory = await temporaryDirectory();
+      await mkdir(directory, { recursive: true });
+      await writeFile(join(directory, "mutation-guards.json"), source, "utf8");
+      const records = createJsonRecoveryRecords({
+        directory,
+        id: () => "corrupt-guards",
+      });
+
+      await expect(records.restore()).resolves.toMatchObject({
+        failures: [{ code: "corrupt_store", store: "mutationGuards" }],
+        mutationGuards: [],
+      });
+      expect(await readdir(directory)).toContain(
+        "mutation-guards.quarantine-corrupt-guards.json",
+      );
+
+      const restarted = createJsonRecoveryRecords({
+        directory,
+        id: () => "corrupt-guards-restart",
+      });
+      await expect(restarted.restore()).resolves.toMatchObject({
+        failures: [{ code: "corrupt_store", store: "mutationGuards" }],
+        mutationGuards: [],
+      });
+      await expect(
+        restarted.commit({
+          deadline: "2026-08-23T10:00:00.000Z",
+          effects: "none",
+          generation: 1,
+          operationId: "mutation-after-corruption",
+          phase: "executing",
+          targetId: "00000000-0000-4000-8000-000000000001",
+          type: "guard.put",
+        }),
+      ).resolves.toMatchObject({
+        error: { code: "persist_failed" },
+        ok: false,
+      });
+      await expect(
+        restarted.commit({
+          remainingGuards: [],
+          type: "guards.clear-corruption",
+        }),
+      ).resolves.toEqual({ ok: true, value: undefined });
+      await expect(restarted.restore()).resolves.toMatchObject({
+        failures: [],
+        mutationGuards: [],
+      });
+      expect(await readdir(directory)).not.toContain(
+        "mutation-guards.failure.json",
+      );
+      await expect(
+        restarted.commit({
+          deadline: "2026-08-23T10:10:00.000Z",
+          effects: "none",
+          generation: 1,
+          operationId: "mutation-after-recovery",
+          phase: "executing",
+          targetId: "00000000-0000-4000-8000-000000000001",
+          type: "guard.put",
+        }),
+      ).resolves.toEqual({ ok: true, value: undefined });
+    },
+  );
+
+  it("does not treat Guard clear as a corruption recovery transition", async () => {
+    const directory = await temporaryDirectory();
+    await mkdir(directory, { recursive: true });
+    await writeFile(
+      join(directory, "mutation-guards.json"),
+      "{not valid JSON",
+      "utf8",
+    );
+    const records = createJsonRecoveryRecords({
+      directory,
+      id: () => "guard-clear-is-not-recovery",
+    });
+    await records.restore();
+
+    await expect(
+      records.commit({
+        targetId: "00000000-0000-4000-8000-000000000001",
+        type: "guard.clear",
+      }),
+    ).resolves.toMatchObject({
+      error: { code: "persist_failed" },
+      ok: false,
+    });
+    await expect(
+      createJsonRecoveryRecords({
+        directory,
+        id: () => "guard-clear-is-not-recovery-restart",
+      }).restore(),
+    ).resolves.toMatchObject({
+      failures: [{ code: "corrupt_store", store: "mutationGuards" }],
+    });
+  });
+
+  it("keeps remaining Targets guarded when Guard corruption is explicitly recovered", async () => {
+    const directory = await temporaryDirectory();
+    await mkdir(directory, { recursive: true });
+    await writeFile(
+      join(directory, "mutation-guards.json"),
+      "{not valid JSON",
+      "utf8",
+    );
+    const records = createJsonRecoveryRecords({
+      directory,
+      id: () => "remaining-guards",
+    });
+    await records.restore();
+
+    const remaining = {
+      deadline: "2026-08-23T18:00:00.000Z",
+      effects: "possible" as const,
+      generation: 2,
+      operationId: "remaining-guard",
+      phase: "reconciliation-required" as const,
+      targetId: "00000000-0000-4000-8000-000000000002",
+    };
+    await expect(
+      records.commit({
+        remainingGuards: [remaining],
+        type: "guards.clear-corruption",
+      }),
+    ).resolves.toEqual({ ok: true, value: undefined });
+
+    const restarted = createJsonRecoveryRecords({
+      directory,
+      id: () => "remaining-guards-restart",
+    });
+    await expect(restarted.restore()).resolves.toMatchObject({
+      failures: [],
+      mutationGuards: [remaining],
+    });
+  });
+
+  it("refuses Guard corruption recovery when no marker is present", async () => {
+    const directory = await temporaryDirectory();
+    const records = createJsonRecoveryRecords({
+      directory,
+      id: () => "no-guard-marker",
+    });
+
+    await expect(
+      records.commit({
+        remainingGuards: [],
+        type: "guards.clear-corruption",
+      }),
+    ).resolves.toMatchObject({
+      error: { code: "persist_failed" },
+      ok: false,
+    });
+  });
+
+  it("does not let Guard corruption recovery overwrite a newer schema", async () => {
+    const directory = await temporaryDirectory();
+    const path = join(directory, "mutation-guards.json");
+    const document = JSON.stringify({
+      guards: [],
+      kind: "mutation-guards",
+      schemaVersion: 99,
+    });
+    await writeFile(path, document);
+    const records = createJsonRecoveryRecords({
+      directory,
+      id: () => "newer-guard-recovery",
+    });
+    await records.restore();
+
+    await expect(
+      records.commit({
+        remainingGuards: [],
+        type: "guards.clear-corruption",
+      }),
+    ).resolves.toMatchObject({
+      error: { code: "unsupported_schema" },
+      ok: false,
+    });
+    expect(await readFile(path, "utf8")).toBe(document);
+  });
+
   it("stores exact OpenSSH host trust through the closed durable interface", async () => {
     const directory = await temporaryDirectory();
     const records = createJsonRecoveryRecords({
