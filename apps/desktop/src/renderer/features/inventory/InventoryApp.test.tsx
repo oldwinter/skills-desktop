@@ -1005,14 +1005,14 @@ describe("Local Target Inventory shell", () => {
 
   it("selects and swaps paired Targets in the dimensioned Comparison view", async () => {
     const rightTarget = {
-      connectionReference: "build-host",
+      connectionReference: null,
       generation: 2,
       harness: "Codex",
       id: "00000000-0000-4000-8000-00000000000a",
-      kind: "ssh" as const,
-      label: "Build host",
-      workspace: "/srv/skills-desktop",
-      workspaceLabel: "skills-desktop",
+      kind: "local" as const,
+      label: "Other device",
+      workspace: "/work/other",
+      workspaceLabel: "other",
     };
     const targetStates = [
       {
@@ -1295,6 +1295,162 @@ describe("Local Target Inventory shell", () => {
         "00000000-0000-4000-8000-000000000018",
       ),
     );
+  });
+
+
+  it("hard-disables Inventory mutation CTAs and shows SSH-active banner for SSH Targets", async () => {
+    const prepareMutation = vi.fn(async () => ({
+      ok: true as const,
+      value: { operationId: "prepared-ssh" },
+    }));
+    const sshTarget = {
+      connectionReference: "build-host",
+      generation: 2,
+      harness: "Codex",
+      id: "00000000-0000-4000-8000-000000000018",
+      kind: "ssh" as const,
+      label: "Build host",
+      workspace: "/srv/skills",
+      workspaceLabel: "skills",
+    };
+    render(
+      <InventoryApp
+        client={{
+          ...clientFor({
+            ...snapshot,
+            target: sshTarget,
+            targets: [
+              {
+                deletionBlocked: false,
+                inventory: snapshot.inventory,
+                mutation: snapshot.mutation,
+                target: {
+                  ...snapshot.target,
+                  connectionReference: null,
+                  workspace: "/work/skills-desktop",
+                },
+              },
+              {
+                deletionBlocked: false,
+                inventory: snapshot.inventory,
+                mutation: snapshot.mutation,
+                target: sshTarget,
+              },
+            ],
+          }),
+          prepareMutation,
+        }}
+      />,
+    );
+
+    expect(await screen.findAllByText("未开放")).not.toHaveLength(0);
+
+    fireEvent.click(screen.getByRole("button", { name: /Build host/i }));
+
+    expect(
+      await screen.findByText(/远程 Target 仅保留只读痕迹/),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("SSH 未开放")).toBeInTheDocument();
+    expect(
+      document.getElementById("inventory-ssh-unavailable-reason"),
+    ).not.toBeNull();
+
+    fireEvent.click(
+      (
+        await screen.findAllByRole("button", {
+          name: "Case-Sensitive-Skill",
+        })
+      )[0]!,
+    );
+    const prepareUpdate = screen.getByRole("button", { name: "Prepare update" });
+    const prepareRemoval = screen.getByRole("button", {
+      name: "Prepare removal",
+    });
+    const prepareAdd = screen.getByRole("button", { name: "Prepare add" });
+    expect(prepareUpdate).toBeDisabled();
+    expect(prepareRemoval).toBeDisabled();
+    expect(prepareAdd).toBeDisabled();
+    expect(prepareUpdate).toHaveAttribute(
+      "title",
+      "SSH · 未在 V1 开放，无法准备变更",
+    );
+    expect(prepareUpdate).toHaveAttribute(
+      "aria-describedby",
+      "inventory-ssh-unavailable-reason",
+    );
+    expect(prepareAdd).toHaveAttribute(
+      "aria-describedby",
+      "inventory-ssh-unavailable-reason",
+    );
+    fireEvent.click(prepareUpdate);
+    fireEvent.click(prepareRemoval);
+    expect(prepareMutation).not.toHaveBeenCalled();
+  });
+
+  it("disables SSH Targets as plannable Comparison sides", async () => {
+    const sshTarget = {
+      connectionReference: "build-host",
+      generation: 2,
+      harness: "Codex",
+      id: "00000000-0000-4000-8000-00000000000a",
+      kind: "ssh" as const,
+      label: "Build host",
+      workspace: "/srv/skills-desktop",
+      workspaceLabel: "skills-desktop",
+    };
+    const localB = {
+      connectionReference: null,
+      generation: 1,
+      harness: "Codex",
+      id: "00000000-0000-4000-8000-00000000000b",
+      kind: "local" as const,
+      label: "Second local",
+      workspace: "/work/second",
+      workspaceLabel: "second",
+    };
+    render(
+      <InventoryApp
+        client={clientFor({
+          ...snapshot,
+          targets: [
+            {
+              deletionBlocked: false,
+              inventory: snapshot.inventory,
+              mutation: snapshot.mutation,
+              target: {
+                ...snapshot.target,
+                connectionReference: null,
+                workspace: "/work/skills-desktop",
+              },
+            },
+            {
+              deletionBlocked: false,
+              inventory: snapshot.inventory,
+              mutation: snapshot.mutation,
+              target: sshTarget,
+            },
+            {
+              deletionBlocked: false,
+              inventory: snapshot.inventory,
+              mutation: snapshot.mutation,
+              target: localB,
+            },
+          ],
+        })}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Comparison" }));
+    const sshOptions = screen.getAllByRole("option", {
+      name: /Build host · 未开放/,
+    });
+    expect(sshOptions.length).toBeGreaterThan(0);
+    for (const option of sshOptions) {
+      expect(option).toBeDisabled();
+    }
+    expect(
+      screen.getByRole("button", { name: "Compare" }),
+    ).not.toBeDisabled();
   });
 
   it("presents SSH transport loss as an accessible offline state", async () => {

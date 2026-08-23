@@ -374,12 +374,23 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
   const globalCount = snapshot.inventory.entries.length - projectCount;
   const isFiltered = query.trim() !== "" || scope !== "all";
   const activeOperationId = snapshot.inventory.activeOperationId;
+  const sshUnavailable = snapshot.target.kind === "ssh";
   const mutationBlocked =
+    sshUnavailable ||
     snapshot.inventory.freshness !== "fresh" ||
     snapshot.mutation.phase === "reconciliation-required" ||
     snapshot.mutation.phase === "running";
+  const mutationBlockedReason = sshUnavailable
+    ? "SSH · 未在 V1 开放，无法准备变更"
+    : snapshot.inventory.freshness !== "fresh"
+      ? "Fresh inventory evidence is required before preparing mutations"
+      : snapshot.mutation.phase === "reconciliation-required"
+        ? "Reconciliation is required before preparing mutations"
+        : snapshot.mutation.phase === "running"
+          ? "A mutation is already running"
+          : undefined;
   const prepareSelected = async (type: "remove" | "update") => {
-    if (selected === undefined) return;
+    if (sshUnavailable || selected === undefined) return;
     const result = await client.prepareMutation(snapshot.target.id, {
       names: [selected.name],
       scope: selected.scope,
@@ -391,7 +402,7 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
     } else setActionError(result.error);
   };
   const prepareUpdateAll = async () => {
-    if (scope === "all") return;
+    if (sshUnavailable || scope === "all") return;
     const result = await client.prepareMutation(snapshot.target.id, {
       scope,
       type: "update-all",
@@ -402,6 +413,7 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
     } else setActionError(result.error);
   };
   const prepareAdd = async () => {
+    if (sshUnavailable) return;
     const result = await client.prepareMutation(snapshot.target.id, {
       names: [addName],
       scope: addScope,
@@ -547,6 +559,15 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                   <strong>{state.target.label}</strong>
                   <small>{state.target.workspaceLabel}</small>
                 </span>
+                {state.target.kind === "ssh" ? (
+                  <span
+                    aria-label="SSH 未开放"
+                    className="scope-badge"
+                    title="SSH · 未在 V1 开放"
+                  >
+                    未开放
+                  </span>
+                ) : null}
               </button>
             ))}
             <dl className="target-facts">
@@ -625,6 +646,24 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
               </section>
 
               <InventoryStatus snapshot={snapshot} />
+              {sshUnavailable ? (
+                <div
+                  className="state-banner state-banner--warning"
+                  id="inventory-ssh-unavailable-reason"
+                  role="status"
+                >
+                  <Server aria-hidden="true" size={16} />
+                  <span>
+                    SSH · 未在 V1 开放。远程 Target 仅保留只读痕迹，不能作为变更工作区。
+                  </span>
+                  <strong>未开放</strong>
+                </div>
+              ) : null}
+              {mutationBlockedReason && !sshUnavailable ? (
+                <span className="sr-only" id="inventory-mutation-blocked-reason">
+                  {mutationBlockedReason}
+                </span>
+              ) : null}
               {snapshot.inventory.lastError?.code === "host_trust_required" ||
               snapshot.inventory.lastError?.code === "host_key_changed" ? (
                 <div
@@ -720,9 +759,23 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                   ))}
                 </div>
                 <button
+                  aria-describedby={
+                    scope === "all"
+                      ? undefined
+                      : sshUnavailable
+                        ? "inventory-ssh-unavailable-reason"
+                        : mutationBlocked
+                          ? "inventory-mutation-blocked-reason"
+                          : undefined
+                  }
                   className="text-button"
                   disabled={scope === "all" || mutationBlocked}
                   onClick={() => void prepareUpdateAll()}
+                  title={
+                    scope === "all"
+                      ? "Choose project or global scope first"
+                      : mutationBlockedReason
+                  }
                   type="button"
                 >
                   <RefreshCw aria-hidden="true" size={15} />
@@ -887,18 +940,34 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                   </dl>
                   <div className="inspector-actions">
                     <button
+                      aria-describedby={
+                        sshUnavailable
+                          ? "inventory-ssh-unavailable-reason"
+                          : mutationBlocked
+                            ? "inventory-mutation-blocked-reason"
+                            : undefined
+                      }
                       className="text-button"
                       disabled={mutationBlocked}
                       onClick={() => void prepareSelected("update")}
+                      title={mutationBlockedReason}
                       type="button"
                     >
                       <RefreshCw aria-hidden="true" size={15} />
                       Prepare update
                     </button>
                     <button
+                      aria-describedby={
+                        sshUnavailable
+                          ? "inventory-ssh-unavailable-reason"
+                          : mutationBlocked
+                            ? "inventory-mutation-blocked-reason"
+                            : undefined
+                      }
                       className="text-button text-button--danger"
                       disabled={mutationBlocked}
                       onClick={() => void prepareSelected("remove")}
+                      title={mutationBlockedReason}
                       type="button"
                     >
                       <Trash2 aria-hidden="true" size={15} />
@@ -951,8 +1020,16 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                   ))}
                 </div>
                 <button
+                  aria-describedby={
+                    sshUnavailable
+                      ? "inventory-ssh-unavailable-reason"
+                      : mutationBlocked
+                        ? "inventory-mutation-blocked-reason"
+                        : undefined
+                  }
                   className="text-button"
                   disabled={mutationBlocked}
+                  title={mutationBlockedReason}
                   type="submit"
                 >
                   <PackagePlus aria-hidden="true" size={15} />
