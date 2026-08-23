@@ -338,13 +338,14 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
 
   const selected = useMemo(() => {
     const entries = inventory?.entries ?? [];
-    return (
-      entries.find(
+    if (selectedIdentity !== undefined) {
+      return entries.find(
         (entry) =>
-          entry.name === selectedIdentity?.name &&
+          entry.name === selectedIdentity.name &&
           entry.scope === selectedIdentity.scope,
-      ) ?? entries[0]
-    );
+      );
+    }
+    return entries[0];
   }, [inventory, selectedIdentity]);
 
   if (snapshot === undefined) {
@@ -936,8 +937,19 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
               {selected === undefined ? (
                 <div className="inspector-empty">
                   <CircleHelp aria-hidden="true" size={22} />
-                  <h2>No skill selected</h2>
-                  <p>Select a skill in the table to inspect evidence.</p>
+                  {(inventory?.entries.length ?? 0) === 0 ? (
+                    <>
+                      <h2>No skills to inspect</h2>
+                      <p>
+                        Refresh this Target, or install a skill via npx skills.
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <h2>No skill selected</h2>
+                      <p>Select a skill in the table to inspect evidence.</p>
+                    </>
+                  )}
                 </div>
               ) : (
                 <>
