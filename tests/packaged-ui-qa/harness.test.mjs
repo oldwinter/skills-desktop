@@ -5,6 +5,11 @@ import {
   CdpPage,
   CdpRequestTimeoutError,
 } from "./cdp.mjs";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { persistFailureArtifacts } from "./artifacts.mjs";
 import {
   createPackagedQaFixture,
   resolvePackagedExecutable,
@@ -213,6 +218,22 @@ describe("packaged UI QA scenario contract", () => {
     expect(help).toContain("npm run package:linux");
     expect(help).toContain("xvfb-run -a npm run qa:packaged-ui");
     expect(help).not.toContain("sshd");
+  });
+
+  it("writes failure-only redacted logs to an explicit artifact directory", async () => {
+    const fixture = await createPackagedQaFixture();
+    fixtures.push(fixture);
+    await fixture.cleanup();
+    const destination = await mkdtemp(join(tmpdir(), "skills-desktop-qa-art-"));
+    fixtures.push({ cleanup: () => rm(destination, { force: true, recursive: true }) });
+    await persistFailureArtifacts(
+      fixture,
+      new Error("qa failed"),
+      destination,
+    );
+    expect(await readFile(join(destination, "error.txt"), "utf8")).toContain(
+      "qa failed",
+    );
   });
 
   it("does not launch without a packaged executable", async () => {
