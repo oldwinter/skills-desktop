@@ -266,6 +266,10 @@ export function CollectionsView({
         <div className="empty-state" role="status">
           <CircleHelp aria-hidden="true" size={22} />
           <h2>No Official Collections</h2>
+          <p>
+            This build has no bundled reviewed releases. V1 Collections only
+            apply to Local Targets once a release is packaged with the app.
+          </p>
         </div>
       </main>
     );
