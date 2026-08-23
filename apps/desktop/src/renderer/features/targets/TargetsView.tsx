@@ -15,6 +15,7 @@ import type {
   WorkspaceBridge,
   WorkspaceSnapshot,
 } from "../../../contracts/workspace.js";
+import { UserFacingErrorCopy } from "../../UserFacingErrorCopy.js";
 
 type TargetState = NonNullable<WorkspaceSnapshot["targets"]>[number];
 
@@ -111,7 +112,7 @@ export function TargetsView({
         {error !== undefined ? (
           <div className="state-banner state-banner--danger" role="alert">
             <AlertCircle aria-hidden="true" size={16} />
-            <span>{error.message}</span>
+            <UserFacingErrorCopy error={error} />
           </div>
         ) : null}
         {savedMessage !== undefined ? (
@@ -174,7 +175,7 @@ export function TargetsView({
               </dl>
               {state.inventory.lastError !== null ? (
                 <p className="target-state-error" role="status">
-                  {state.inventory.lastError.message}
+                  <UserFacingErrorCopy error={state.inventory.lastError} />
                 </p>
               ) : null}
               <div className="target-item-actions">

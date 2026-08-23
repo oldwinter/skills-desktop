@@ -14,9 +14,12 @@ import type {
   AboutUpdateSnapshot,
   RestartGuardReason,
 } from "../../../contracts/about.js";
+import { UserFacingErrorCopy } from "../../UserFacingErrorCopy.js";
 
-function resultError(result: AboutUpdateResult) {
-  return result.ok ? undefined : result.error.message;
+type AboutActionError = Extract<AboutUpdateResult, { ok: false }>["error"];
+
+function resultError(result: AboutUpdateResult): AboutActionError | undefined {
+  return result.ok ? undefined : result.error;
 }
 
 function automaticStatus(snapshot: AboutUpdateSnapshot) {
@@ -44,7 +47,10 @@ function automaticStatus(snapshot: AboutUpdateSnapshot) {
         message: "The downloaded update will apply on a later normal launch.",
       };
     case "error":
-      return { heading: "Update check failed", message: snapshot.state.error.message };
+      return {
+        heading: "Update check failed",
+        message: "",
+      };
     case "manual":
     case "unavailable":
       return undefined;
@@ -61,7 +67,7 @@ const guardLabels: Record<RestartGuardReason, string> = {
 
 export function AboutView({ client }: { readonly client: AboutBridge }) {
   const [snapshot, setSnapshot] = useState<AboutUpdateSnapshot>();
-  const [error, setError] = useState<string>();
+  const [error, setError] = useState<AboutActionError>();
 
   const requestCheck = async () => {
     const result = await client.requestCheck();
@@ -82,7 +88,7 @@ export function AboutView({ client }: { readonly client: AboutBridge }) {
   const exportDiagnostics = async () => {
     const result = await client.exportDiagnostics();
     if (result.ok) setError(undefined);
-    else setError(result.error.message);
+    else setError(result.error);
   };
 
   useEffect(() => {
@@ -123,7 +129,7 @@ export function AboutView({ client }: { readonly client: AboutBridge }) {
       {error !== undefined ? (
         <div className="state-banner state-banner--danger" role="alert">
           <AlertCircle aria-hidden="true" size={16} />
-          <span>{error}</span>
+          <UserFacingErrorCopy error={error} />
         </div>
       ) : null}
 
@@ -186,7 +192,11 @@ export function AboutView({ client }: { readonly client: AboutBridge }) {
                   {automaticStatus(snapshot)?.heading}
                 </h2>
               </div>
-              <p>{automaticStatus(snapshot)?.message}</p>
+              {snapshot.state.kind === "error" ? (
+                <UserFacingErrorCopy error={snapshot.state.error} />
+              ) : (
+                <p>{automaticStatus(snapshot)?.message}</p>
+              )}
               {snapshot.schemaVersion === 2 && restartCandidate !== null ? (
                 <div className="about-restart-control">
                   <p className="about-candidate">

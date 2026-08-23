@@ -41,6 +41,10 @@ h1, h2, p, dl, dd { margin: 0; }
 .review-button:disabled { opacity: 0.55; }
 .review-loading, .review-alert, .review-settled { display: flex; min-height: 240px; align-items: center; justify-content: center; gap: 8px; color: var(--muted); font-size: 13px; text-align: center; }
 .review-alert { color: #b93832; }
+.user-facing-error { display: inline-flex; flex-direction: column; align-items: center; gap: 6px; max-width: 28rem; }
+.user-facing-error-details { color: #5f6368; font-size: 11px; text-align: left; }
+.user-facing-error-details summary { cursor: pointer; user-select: none; text-align: center; }
+.user-facing-error-details code { display: block; margin-top: 4px; white-space: pre-wrap; word-break: break-word; }
 .review-settled { color: #176b4b; }
 @media (max-width: 420px) {
   .review-surface { padding: 16px; }

@@ -18,6 +18,7 @@ import type {
   WorkspaceBridge,
   WorkspaceSnapshot,
 } from "../../../contracts/workspace.js";
+import { UserFacingErrorCopy } from "../../UserFacingErrorCopy.js";
 
 type Release = PublicCollectionsState["releases"][number];
 type TargetState = NonNullable<WorkspaceSnapshot["targets"]>[number];
@@ -332,7 +333,7 @@ export function CollectionsView({
         {error !== undefined ? (
           <div className="state-banner state-banner--danger" role="alert">
             <AlertCircle aria-hidden="true" size={16} />
-            <span>{error.message}</span>
+            <UserFacingErrorCopy error={error} />
           </div>
         ) : null}
 
@@ -381,7 +382,7 @@ export function CollectionsView({
                   </ul>
                   {child.error === null ? null : (
                     <p className="collection-child-error">
-                      {child.error.message}
+                      <UserFacingErrorCopy error={child.error} />
                     </p>
                   )}
                   {child.status === "reconciliation-required" ? (
