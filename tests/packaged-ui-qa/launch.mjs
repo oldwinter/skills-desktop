@@ -45,9 +45,11 @@ function observeExit(child) {
   });
 }
 
-async function waitForTarget(port, expectedUrl, childExit, timeoutMs) {
+async function waitForTarget(port, expectedUrl, childExit, timeoutMs, signal) {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
+    if (signal?.aborted)
+      throw new Error("Packaged Electron launch was interrupted.");
     const remaining = deadline - Date.now();
     if (remaining <= 0) {
       throw new Error("Packaged Electron did not publish a CDP page in time.");
@@ -55,11 +57,22 @@ async function waitForTarget(port, expectedUrl, childExit, timeoutMs) {
     const exit = await Promise.race([
       childExit.then((value) => value),
       fetch(`http://127.0.0.1:${port}/json/list`, {
-        signal: AbortSignal.timeout(Math.min(remaining, 1_000)),
+        signal:
+          signal === undefined
+            ? AbortSignal.timeout(Math.min(remaining, 1_000))
+            : AbortSignal.any([
+                signal,
+                AbortSignal.timeout(Math.min(remaining, 1_000)),
+              ]),
       })
         .then((response) => response.json())
         .then((targets) => ({ kind: "targets", targets }))
-        .catch(() => ({ kind: "targets", targets: [] })),
+        .catch(() => {
+          if (signal?.aborted) {
+            throw new Error("Packaged Electron launch was interrupted.");
+          }
+          return { kind: "targets", targets: [] };
+        }),
     ]);
     if (exit.kind === "exit" || exit.kind === "error") {
       throw new Error(
@@ -176,6 +189,7 @@ export async function launchPackagedElectron({
   fixture,
   port: requestedPort,
   sessionName = `skills-desktop-qa-${process.pid}`,
+  signal,
 } = {}) {
   if (
     fixture === undefined ||
@@ -190,6 +204,8 @@ export async function launchPackagedElectron({
   if (typeof executable !== "string" || executable.length === 0) {
     throw new Error("A packaged Electron executable is required.");
   }
+  if (signal?.aborted)
+    throw new Error("Packaged Electron launch was interrupted.");
   await access(executable).catch(() => {
     throw new Error(
       `Packaged Electron executable is unavailable: ${executable}`,
@@ -232,9 +248,11 @@ export async function launchPackagedElectron({
       expectedUrl,
       childExit,
       DEFAULT_CONNECT_TIMEOUT_MS,
+      signal,
     );
     const page = await CdpPage.connect(port, expectedUrl, {
       connectTimeoutMs: DEFAULT_CONNECT_TIMEOUT_MS,
+      signal,
     });
     return {
       child,

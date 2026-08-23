@@ -13,20 +13,23 @@ if (process.argv.includes("--help") || process.argv.includes("-h")) {
 
 assertRuntimeArchitecture();
 const fixture = await createPackagedQaFixture();
-const cleanup = async () => {
-  await fixture.cleanup().catch(() => undefined);
+const controller = new AbortController();
+let interruptExitCode;
+const interrupt = (exitCode, signalName) => {
+  if (interruptExitCode !== undefined) return;
+  interruptExitCode = exitCode;
+  controller.abort(new Error(`Packaged UI QA interrupted by ${signalName}.`));
 };
-process.once("SIGINT", () => {
-  void cleanup().finally(() => process.exit(130));
-});
-process.once("SIGTERM", () => {
-  void cleanup().finally(() => process.exit(143));
-});
+const handleSigint = () => interrupt(130, "SIGINT");
+const handleSigterm = () => interrupt(143, "SIGTERM");
+process.once("SIGINT", handleSigint);
+process.once("SIGTERM", handleSigterm);
 
 try {
   const result = await runPackagedUiQa({
     executable: resolvePackagedExecutable(),
     fixture,
+    signal: controller.signal,
   });
   process.stdout.write(
     `packaged UI QA passed: ${result.scenarios.join(", ")}\n`,
@@ -35,12 +38,21 @@ try {
   process.stderr.write(
     `${redactFailureText(error instanceof Error ? error.stack : error)}\n`,
   );
-  process.exitCode = 1;
+  process.exitCode = interruptExitCode ?? 1;
   await persistFailureArtifacts(
     fixture,
     error,
     process.env.SKILLS_DESKTOP_QA_ARTIFACTS,
   );
 } finally {
-  await cleanup();
+  process.removeListener("SIGINT", handleSigint);
+  process.removeListener("SIGTERM", handleSigterm);
+  try {
+    await fixture.cleanup();
+  } catch (error) {
+    process.stderr.write(
+      `${redactFailureText(error instanceof Error ? error.stack : error)}\n`,
+    );
+    process.exitCode = 1;
+  }
 }

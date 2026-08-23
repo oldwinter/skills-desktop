@@ -24,17 +24,52 @@ function timeoutPromise(timeoutMs, message) {
   });
 }
 
+function throwIfAborted(signal) {
+  if (signal?.aborted) throw new CdpDisconnectedError();
+}
+
+function rejectOnAbort(signal) {
+  if (signal === undefined) {
+    return { dispose() {}, promise: new Promise(() => {}) };
+  }
+  let listener;
+  const promise = new Promise((_, reject) => {
+    listener = () => reject(new CdpDisconnectedError());
+    signal.addEventListener("abort", listener, { once: true });
+    if (signal.aborted) listener();
+  });
+  return {
+    dispose() {
+      if (listener !== undefined) signal.removeEventListener("abort", listener);
+    },
+    promise,
+  };
+}
+
 export class CdpPage {
   constructor(socket, options = {}) {
     this.errors = [];
     this.nextId = 1;
     this.pending = new Map();
     this.socket = socket;
-    this.requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+    this.requestTimeoutMs =
+      options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+    this.signal = options.signal;
     this.closed = socket.readyState === 3;
     socket.addEventListener("message", (event) => this.#receive(event));
     socket.addEventListener("close", () => this.#disconnect());
     socket.addEventListener("error", () => this.#disconnect());
+    if (this.signal !== undefined) {
+      this.abortListener = () => {
+        try {
+          this.socket.close();
+        } finally {
+          this.#disconnect();
+        }
+      };
+      this.signal.addEventListener("abort", this.abortListener, { once: true });
+      if (this.signal.aborted) this.abortListener();
+    }
   }
 
   static async connect(port, expectedUrl, options = {}) {
@@ -43,38 +78,56 @@ export class CdpPage {
     const deadline = Date.now() + connectTimeoutMs;
     let target;
     while (target === undefined) {
+      throwIfAborted(options.signal);
       const remainingMs = deadline - Date.now();
       if (remainingMs <= 0) {
         throw new Error("Timed out waiting for the packaged Electron page.");
       }
+      const timeoutSignal = AbortSignal.timeout(Math.min(remainingMs, 1_000));
+      const requestSignal =
+        options.signal === undefined
+          ? timeoutSignal
+          : AbortSignal.any([options.signal, timeoutSignal]);
       const listTargets = await Promise.race([
         fetch(`http://127.0.0.1:${port}/json/list`, {
-          signal: AbortSignal.timeout(Math.min(remainingMs, 1_000)),
+          signal: requestSignal,
         }).then((response) => response.json()),
         timeoutPromise(remainingMs, "Timed out listing CDP targets."),
-      ]).catch(() => []);
+      ]).catch(() => {
+        throwIfAborted(options.signal);
+        return [];
+      });
       target = listTargets.find(
         ({ type, url }) =>
-          type === "page" &&
-          (expectedUrl === undefined || url === expectedUrl),
+          type === "page" && (expectedUrl === undefined || url === expectedUrl),
       );
       if (target === undefined) {
         await new Promise((resolve) => setTimeout(resolve, 50));
       }
     }
 
+    throwIfAborted(options.signal);
     const socket = new WebSocket(target.webSocketDebuggerUrl);
-    await Promise.race([
-      new Promise((resolve, reject) => {
-        socket.addEventListener("open", resolve, { once: true });
-        socket.addEventListener(
-          "error",
-          () => reject(new CdpDisconnectedError()),
-          { once: true },
-        );
-      }),
-      timeoutPromise(connectTimeoutMs, "Timed out opening the CDP session."),
-    ]);
+    const aborted = rejectOnAbort(options.signal);
+    try {
+      await Promise.race([
+        new Promise((resolve, reject) => {
+          socket.addEventListener("open", resolve, { once: true });
+          socket.addEventListener(
+            "error",
+            () => reject(new CdpDisconnectedError()),
+            { once: true },
+          );
+        }),
+        aborted.promise,
+        timeoutPromise(connectTimeoutMs, "Timed out opening the CDP session."),
+      ]);
+    } catch (error) {
+      socket.close();
+      throw error;
+    } finally {
+      aborted.dispose();
+    }
     const page = new CdpPage(socket, options);
     await Promise.all([page.send("Runtime.enable"), page.send("Page.enable")]);
     return page;
@@ -120,6 +173,10 @@ export class CdpPage {
   #disconnect() {
     if (this.closed) return;
     this.closed = true;
+    if (this.abortListener !== undefined) {
+      this.signal?.removeEventListener("abort", this.abortListener);
+      this.abortListener = undefined;
+    }
     const error = new CdpDisconnectedError();
     for (const pending of this.pending.values()) {
       clearTimeout(pending.timer);
@@ -210,9 +267,7 @@ export class CdpPage {
       Tab: 9,
     };
     const windowsVirtualKeyCode =
-      key.length === 1
-        ? key.toUpperCase().charCodeAt(0)
-        : virtualKeyCodes[key];
+      key.length === 1 ? key.toUpperCase().charCodeAt(0) : virtualKeyCodes[key];
     await this.send("Input.dispatchKeyEvent", {
       code,
       key,

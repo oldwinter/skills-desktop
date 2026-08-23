@@ -89,22 +89,28 @@ async function scanWithAxe(page, axeSource, label) {
   return result;
 }
 
-async function waitForTargetGone(port, expectedUrl, timeoutMs = 5_000) {
+async function waitForTargetGone(port, expectedUrl, timeoutMs = 5_000, signal) {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
+    if (signal?.aborted) throw new CdpDisconnectedError();
     const remaining = deadline - Date.now();
     if (remaining <= 0) {
       throw new Error(`Timed out waiting for ${expectedUrl} to close.`);
     }
     let targets;
     try {
+      const timeoutSignal = AbortSignal.timeout(Math.min(remaining, 1_000));
       const response = await fetch(`http://127.0.0.1:${port}/json/list`, {
-        signal: AbortSignal.timeout(Math.min(remaining, 1_000)),
+        signal:
+          signal === undefined
+            ? timeoutSignal
+            : AbortSignal.any([signal, timeoutSignal]),
       });
       if (!response.ok)
         throw new Error(`CDP target list failed: ${response.status}`);
       targets = await response.json();
     } catch {
+      if (signal?.aborted) throw new CdpDisconnectedError();
       await new Promise((resolve) =>
         setTimeout(resolve, Math.min(50, remaining)),
       );
@@ -140,6 +146,7 @@ function appendFailures(prior, failures) {
 export async function runPackagedUiQa({
   executable = resolvePackagedExecutable(),
   fixture: providedFixture,
+  signal,
 } = {}) {
   if (providedFixture === undefined && executable === undefined) {
     throw new Error(
@@ -153,7 +160,7 @@ export async function runPackagedUiQa({
   let scenarioFailure;
   let result;
   try {
-    session = await launchPackagedElectron({ executable, fixture });
+    session = await launchPackagedElectron({ executable, fixture, signal });
     const { page } = session;
     await page.waitFor(
       `document.body?.textContent?.includes("qa-project-skill") === true`,
@@ -319,7 +326,7 @@ export async function runPackagedUiQa({
     reviewPage = await CdpPage.connect(
       session.port,
       "skills-desktop://review/index.html",
-      { connectTimeoutMs: 5_000 },
+      { connectTimeoutMs: 5_000, signal },
     );
     await reviewPage.waitFor(
       `document.body?.textContent?.includes("Trusted Review") === true`,
@@ -359,7 +366,12 @@ export async function runPackagedUiQa({
     await reviewPage.dispatchKey("Enter").catch((error) => {
       if (!(error instanceof CdpDisconnectedError)) throw error;
     });
-    await waitForTargetGone(session.port, "skills-desktop://review/index.html");
+    await waitForTargetGone(
+      session.port,
+      "skills-desktop://review/index.html",
+      5_000,
+      signal,
+    );
     const restored = await page.evaluate(
       `document.activeElement?.textContent?.includes("Open Trusted Review") === true`,
     );

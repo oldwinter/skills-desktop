@@ -111,6 +111,24 @@ describe("packaged UI QA CDP seam", () => {
     );
   });
 
+  it("disconnects pending and future requests when the run is interrupted", async () => {
+    const socket = new FakeSocket();
+    const controller = new AbortController();
+    const page = new CdpPage(socket, {
+      requestTimeoutMs: 1_000,
+      signal: controller.signal,
+    });
+    const pending = page.send("Runtime.enable");
+
+    controller.abort();
+
+    await expect(pending).rejects.toBeInstanceOf(CdpDisconnectedError);
+    await expect(page.send("Page.enable")).rejects.toBeInstanceOf(
+      CdpDisconnectedError,
+    );
+    expect(socket.readyState).toBe(FakeSocket.CLOSED);
+  });
+
   it("rejects requests while the browser is closing", async () => {
     const socket = new FakeSocket();
     const page = new CdpPage(socket, { requestTimeoutMs: 1_000 });
