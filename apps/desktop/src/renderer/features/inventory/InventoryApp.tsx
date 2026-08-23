@@ -16,6 +16,7 @@ import {
   Search,
   Server,
   Settings2,
+  Terminal,
   ShieldCheck,
   Square,
   Trash2,
@@ -170,7 +171,7 @@ function EmptyInventory({ filtered }: { readonly filtered: boolean }) {
       <p>
         {filtered
           ? "Change the current search or scope filter."
-          : "Project and global inventory are empty."}
+          : "Project and global inventory are empty. Refresh this Target, or install a skill via npx skills."}
       </p>
     </div>
   );
@@ -186,17 +187,18 @@ function MissingInventoryEvidence({
       ? {
           heading: "Waiting for inventory",
           message:
-            "A complete project and global observation has not finished yet.",
+            "A complete project and global observation has not finished yet. Wait for the refresh to complete.",
         }
       : phase === "error"
         ? {
             heading: "Inventory unavailable",
             message:
-              "No complete inventory evidence is available for this Target.",
+              "No complete inventory evidence is available for this Target. Refresh this Target to try again.",
           }
         : {
             heading: "No inventory evidence",
-            message: "Refresh this Target to establish a complete inventory.",
+            message:
+              "No complete inventory evidence yet. Refresh this Target to establish one.",
           };
   return (
     <div className="empty-state" role="status">
@@ -563,7 +565,7 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
             </dl>
           </section>
           <div className="rail-version">
-            <Server aria-hidden="true" size={14} />
+            <Terminal aria-hidden="true" size={14} />
             <span>skills {snapshot.inventory.cliVersion ?? "1.5.23"}</span>
           </div>
         </aside>

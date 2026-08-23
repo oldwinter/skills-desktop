@@ -80,6 +80,36 @@ describe("About surface", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("shows unsigned-preview manual-upgrade guidance with verify docs", async () => {
+    const unsignedSnapshot: AboutUpdateSnapshot = {
+      ...linuxSnapshot,
+      application: {
+        architecture: "arm64",
+        platform: "darwin",
+        version: "0.1.0",
+      },
+      policy: {
+        message:
+          "This unsigned-preview build is not signed or notarized. Download a newer package from GitHub Releases, verify it per docs/unsigned-developer-preview.md, then install it manually.",
+        mode: "manual",
+        releasePageUrl: "https://github.com/oldwinter/skills-desktop/releases",
+      },
+    };
+    render(<AboutView client={clientFor(unsignedSnapshot)} />);
+
+    expect(
+      await screen.findByRole("heading", { name: "Manual upgrade" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "This unsigned-preview build is not signed or notarized. Download a newer package from GitHub Releases, verify it per docs/unsigned-developer-preview.md, then install it manually.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Check for updates" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("requests one explicit check and renders the returned checking state", async () => {
     const checkingSnapshot: AboutUpdateSnapshot = {
       application: {

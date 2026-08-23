@@ -10,6 +10,7 @@ export {
   ABOUT_MANUAL_UPDATE_MESSAGE,
   ABOUT_RELEASES_URL,
   ABOUT_UNAVAILABLE_UPDATE_MESSAGE,
+  ABOUT_UNSIGNED_MANUAL_UPDATE_MESSAGE,
 } from "./about-update-contracts.js";
 
 export const aboutUpdateCheckRequestSchema = z
