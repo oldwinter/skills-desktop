@@ -3250,6 +3250,16 @@ export function createDesktopCapabilities(
           }
 
           if (parsed.data.type === "host-trust.review") {
+            if (options.v1LocalOnlyTargets === true) {
+              return requestFailure(
+                publicError(
+                  "invalid_request",
+                  "SSH Targets are next-scope and outside the V1 Local commitment.",
+                  "target",
+                  false,
+                ),
+              );
+            }
             const reviewedTargetId = parsed.data.targetId;
             const reviewedTarget = targetDefinitions().find(
               ({ id }) => id === reviewedTargetId,

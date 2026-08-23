@@ -1432,7 +1432,7 @@ describe("Local Target Inventory shell", () => {
   });
 
 
-  it("requests isolated host trust review from a trust-required SSH state", async () => {
+  it("does not offer operable host-key Trusted Review under SSH V1-unavailable chrome", async () => {
     const requestHostTrustReview = vi.fn(async () => ({
       ok: true as const,
       value: { operationId: "host-trust-review-1" },
@@ -1472,15 +1472,13 @@ describe("Local Target Inventory shell", () => {
       />,
     );
 
-    fireEvent.click(
-      await screen.findByRole("button", { name: "Review host identity" }),
-    );
-
-    await waitFor(() =>
-      expect(requestHostTrustReview).toHaveBeenCalledWith(
-        "00000000-0000-4000-8000-000000000018",
-      ),
-    );
+    expect(
+      await screen.findByText(/Host identity review · 未在 V1 开放/),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Review host identity" }),
+    ).not.toBeInTheDocument();
+    expect(requestHostTrustReview).not.toHaveBeenCalled();
   });
 
 
