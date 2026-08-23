@@ -1401,8 +1401,13 @@ describe("Local Target Inventory shell", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Targets" }));
     expect(screen.getByText("Fresh")).toBeInTheDocument();
-    expect(screen.queryByText("Generation")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByText("Advanced"));
+    const advanced = screen.getByText("Advanced");
+    const details = advanced.closest("details");
+    expect(details).not.toBeNull();
+    expect(details).not.toHaveAttribute("open");
+    expect(details).toHaveTextContent("Generation");
+    fireEvent.click(advanced);
+    expect(details).toHaveAttribute("open");
     expect(screen.getByText("Generation")).toBeInTheDocument();
   });
 
