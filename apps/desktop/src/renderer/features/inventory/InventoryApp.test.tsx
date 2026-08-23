@@ -553,6 +553,7 @@ describe("Local Target Inventory shell", () => {
     render(<InventoryApp client={clientFor(twoLocalTargetsSnapshot)} />);
 
     const chooser = await screen.findByRole("combobox", { name: "Target" });
+    expect(screen.queryByLabelText("Target summary")).toBeNull();
     expect(chooser).toHaveDisplayValue("This device");
     expect(
       within(chooser).getByRole("option", { name: "This device" }),
