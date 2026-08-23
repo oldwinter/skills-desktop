@@ -3250,23 +3250,20 @@ export function createDesktopCapabilities(
           }
 
           if (parsed.data.type === "host-trust.review") {
-            const reviewedTargetId = parsed.data.targetId;
-            const reviewedTarget = targetDefinitions().find(
-              ({ id }) => id === reviewedTargetId,
-            );
-            if (
-              options.v1LocalOnlyTargets === true &&
-              reviewedTarget?.kind === "ssh"
-            ) {
+            if (options.v1LocalOnlyTargets === true) {
               return requestFailure(
                 publicError(
                   "invalid_request",
-                  "SSH Targets are next-scope and outside the V1 Local commitment.",
+                  "主机身份复核未在 V1 开放。",
                   "target",
                   false,
                 ),
               );
             }
+            const reviewedTargetId = parsed.data.targetId;
+            const reviewedTarget = targetDefinitions().find(
+              ({ id }) => id === reviewedTargetId,
+            );
             const challenge =
               options.skillsTargets.pendingHostTrust(reviewedTargetId);
             if (

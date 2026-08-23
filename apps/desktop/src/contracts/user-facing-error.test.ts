@@ -46,6 +46,28 @@ describe("userFacingErrorMessage", () => {
     );
   });
 
+
+  it("maps host-trust codes without inviting an unavailable V1 review CTA", () => {
+    expect(
+      userFacingErrorMessage({
+        code: "host_trust_required",
+        message: "This SSH Target requires explicit host-key review.",
+      }),
+    ).toBe("需要确认主机身份，但主机身份复核未在 V1 开放。");
+    expect(
+      userFacingErrorMessage({
+        code: "host_key_changed",
+        message: "Host key changed",
+      }),
+    ).toBe("主机密钥已变更。主机身份复核未在 V1 开放。");
+    expect(
+      userFacingErrorMessage({
+        code: "host_trust_invalid",
+        message: "invalid",
+      }),
+    ).toBe("主机信任无效。主机身份复核未在 V1 开放。");
+  });
+
   it("falls back safely for nullish errors", () => {
     expect(userFacingErrorMessage(null)).toBe(USER_FACING_ERROR_FALLBACK);
     expect(userFacingErrorMessage(undefined)).toBe(USER_FACING_ERROR_FALLBACK);

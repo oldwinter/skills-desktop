@@ -466,12 +466,6 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
     if (result.ok) setActionError(undefined);
     else setActionError(result.error);
   };
-  const requestHostTrustReview = async () => {
-    const result = await client.requestHostTrustReview(snapshot.target.id);
-    if (result.ok) setActionError(undefined);
-    else setActionError(result.error);
-  };
-
   return (
     <div className="app-shell">
       <header className="app-header">
@@ -744,15 +738,9 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                   role="status"
                 >
                   <ShieldCheck aria-hidden="true" size={16} />
-                  <span>Host identity review required</span>
-                  <button
-                    className="text-button"
-                    onClick={() => void requestHostTrustReview()}
-                    type="button"
-                  >
-                    <ShieldCheck aria-hidden="true" size={15} />
-                    Review host identity
-                  </button>
+                  <span>
+                    主机身份复核 · 未在 V1 开放。当前版本不能启动该复核。
+                  </span>
                 </div>
               ) : null}
               {snapshot.mutation.phase === "reconciliation-required" ? (
