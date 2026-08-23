@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => {
     readonly options: unknown;
     readonly webContents: {
       readonly id: number;
+      getURL: ReturnType<typeof vi.fn>;
       on: ReturnType<typeof vi.fn>;
       emit(event: string, ...args: unknown[]): void;
     };
@@ -41,10 +42,12 @@ const mocks = vi.hoisted(() => {
   };
 
   const createWindow = (options: unknown): WindowLike => {
+    let currentUrl = "";
     const windowListeners = new Map<string, Listener[]>();
     const webContentsListeners = new Map<string, Listener[]>();
     const webContents = {
       id: nextWebContentsId++,
+      getURL: vi.fn(() => currentUrl),
       on: vi.fn((event: string, listener: Listener) => {
         addListener(webContentsListeners, event, listener);
         return webContents;
@@ -61,7 +64,9 @@ const mocks = vi.hoisted(() => {
         emitListeners(windowListeners, event, args);
       },
       focus: vi.fn(),
-      loadURL: vi.fn(async () => undefined),
+      loadURL: vi.fn(async (url: string) => {
+        currentUrl = url;
+      }),
       once: vi.fn((event: string, listener: Listener) => {
         const onceListener = (...args: unknown[]) => {
           const remaining = windowListeners.get(event) ?? [];
@@ -318,6 +323,12 @@ describe("desktop main entrypoint", () => {
       workspace,
       "skills-desktop://workspace/index.html",
     );
+    workspace?.webContents.getURL.mockReturnValueOnce(
+      "skills-desktop://unexpected/index.html",
+    );
+    workspace?.webContents.emit("dom-ready");
+    expect(mocks.desktopIpc.attach).not.toHaveBeenCalled();
+    workspace?.webContents.emit("dom-ready");
     expect(mocks.desktopIpc.attach).toHaveBeenCalledWith(
       workspace?.webContents,
       "workspace",
@@ -327,21 +338,27 @@ describe("desktop main entrypoint", () => {
       "skills-desktop://workspace/index.html",
     );
 
-    workspace?.webContents.emit(
-      "did-start-navigation",
-      {},
-      "skills-desktop://unexpected/index.html",
-      false,
-      false,
-    );
+    workspace?.webContents.emit("did-start-navigation", {
+      isMainFrame: false,
+      isSameDocument: false,
+      url: "skills-desktop://unexpected/index.html",
+    });
     expect(mocks.desktopIpc.attach).toHaveBeenCalledTimes(1);
-    workspace?.webContents.emit(
-      "did-start-navigation",
-      {},
-      "skills-desktop://workspace/index.html",
-      false,
-      true,
+    workspace?.webContents.emit("did-start-navigation", {
+      isMainFrame: true,
+      isSameDocument: true,
+      url: "skills-desktop://workspace/index.html",
+    });
+    expect(mocks.desktopIpc.detach).not.toHaveBeenCalled();
+    workspace?.webContents.emit("did-start-navigation", {
+      isMainFrame: true,
+      isSameDocument: false,
+      url: "skills-desktop://workspace/index.html",
+    });
+    expect(mocks.desktopIpc.detach).toHaveBeenCalledWith(
+      workspace?.webContents.id,
     );
+    workspace?.webContents.emit("dom-ready");
     expect(mocks.desktopIpc.attach).toHaveBeenCalledTimes(2);
     workspace?.emit("ready-to-show");
     expect(workspace?.show).toHaveBeenCalledTimes(1);
@@ -356,21 +373,21 @@ describe("desktop main entrypoint", () => {
       expect.stringContaining("app-icon.png"),
     );
     expect(mocks.desktopIpc.attach).toHaveBeenCalledTimes(2);
-    review?.webContents.emit(
-      "did-start-navigation",
-      {},
-      "skills-desktop://review/index.html",
-      false,
-      false,
-    );
+    review?.webContents.emit("did-start-navigation", {
+      isMainFrame: false,
+      isSameDocument: false,
+      url: "skills-desktop://review/index.html",
+    });
     expect(mocks.desktopIpc.attach).toHaveBeenCalledTimes(2);
-    review?.webContents.emit(
-      "did-start-navigation",
-      {},
-      "skills-desktop://review/index.html",
-      false,
-      true,
+    review?.webContents.emit("did-start-navigation", {
+      isMainFrame: true,
+      isSameDocument: false,
+      url: "skills-desktop://review/index.html",
+    });
+    expect(mocks.desktopIpc.detach).toHaveBeenCalledWith(
+      review?.webContents.id,
     );
+    review?.webContents.emit("dom-ready");
     expect(mocks.desktopIpc.attach).toHaveBeenLastCalledWith(
       review?.webContents,
       "review",
@@ -387,11 +404,15 @@ describe("desktop main entrypoint", () => {
 
     mocks.reviewRequested()?.("review-2");
     expect(review?.close).toHaveBeenCalledTimes(1);
-    expect(mocks.desktopIpc.detach).toHaveBeenCalledWith(review?.webContents.id);
+    expect(mocks.desktopIpc.detach).toHaveBeenCalledWith(
+      review?.webContents.id,
+    );
     expect(mocks.windows[2]?.options).toEqual({ kind: "review" });
 
     (workspace?.close as unknown as (() => void) | undefined)?.();
-    expect(mocks.desktopIpc.detach).toHaveBeenCalledWith(workspace?.webContents.id);
+    expect(mocks.desktopIpc.detach).toHaveBeenCalledWith(
+      workspace?.webContents.id,
+    );
     mocks.emitApp("activate");
     const replacement = mocks.windows[3];
     expect(replacement?.options).toEqual({ kind: "workspace" });
@@ -468,7 +489,9 @@ describe("desktop main entrypoint", () => {
     await waitForStartup();
 
     mocks.emitUpdater("before-quit-for-update");
-    await vi.waitFor(() => expect(mocks.capabilities.shutdown).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() =>
+      expect(mocks.capabilities.shutdown).toHaveBeenCalledTimes(1),
+    );
     expect(mocks.updates.dispose).toHaveBeenCalledTimes(1);
     expect(mocks.desktopIpc.dispose).toHaveBeenCalledTimes(1);
 
@@ -478,7 +501,9 @@ describe("desktop main entrypoint", () => {
   });
 
   it("quits if composition-root startup fails", async () => {
-    mocks.createCompositionRoot.mockRejectedValueOnce(new Error("startup failure"));
+    mocks.createCompositionRoot.mockRejectedValueOnce(
+      new Error("startup failure"),
+    );
 
     await loadEntrypoint();
     await vi.waitFor(() => expect(mocks.app.quit).toHaveBeenCalledTimes(1));

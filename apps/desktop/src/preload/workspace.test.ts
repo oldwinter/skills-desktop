@@ -4,6 +4,7 @@ const electron = vi.hoisted(() => ({
   exposeInMainWorld: vi.fn(),
   invoke: vi.fn(),
   on: vi.fn(),
+  once: vi.fn(),
   removeListener: vi.fn(),
 }));
 
@@ -12,6 +13,7 @@ vi.mock("electron", () => ({
   ipcRenderer: {
     invoke: electron.invoke,
     on: electron.on,
+    once: electron.once,
     removeListener: electron.removeListener,
   },
 }));
@@ -85,13 +87,21 @@ async function loadBridge() {
       subscribe(listener: (snapshot: unknown) => void): () => void;
     };
     cancelInventory(operationId: string): Promise<unknown>;
-    compareTargets(leftTargetId: string, rightTargetId: string): Promise<unknown>;
+    compareTargets(
+      leftTargetId: string,
+      rightTargetId: string,
+    ): Promise<unknown>;
     createTarget(definition: typeof targetDraft): Promise<unknown>;
     deleteTarget(targetId: string): Promise<unknown>;
     getSnapshot(): Promise<unknown>;
-    prepareMutation(targetId: string, intent: typeof mutationIntent): Promise<unknown>;
+    prepareMutation(
+      targetId: string,
+      intent: typeof mutationIntent,
+    ): Promise<unknown>;
     prepareCollection(request: Record<string, unknown>): Promise<unknown>;
-    prepareCollectionAcrossTargets(request: Record<string, unknown>): Promise<unknown>;
+    prepareCollectionAcrossTargets(
+      request: Record<string, unknown>,
+    ): Promise<unknown>;
     prepareComparison(
       comparisonId: string,
       rowKey: string,
@@ -104,7 +114,10 @@ async function loadBridge() {
     requestHostTrustReview(targetId: string): Promise<unknown>;
     requestReview(preparedMutationId: string): Promise<unknown>;
     subscribe(listener: (event: unknown) => void): () => void;
-    updateTarget(targetId: string, definition: typeof targetDraft): Promise<unknown>;
+    updateTarget(
+      targetId: string,
+      definition: typeof targetDraft,
+    ): Promise<unknown>;
   };
 }
 
@@ -116,6 +129,11 @@ describe("workspace preload authority", () => {
       channel.startsWith("about:") ? aboutError : workspaceError,
     );
     electron.on.mockClear();
+    electron.once.mockReset();
+    electron.once.mockImplementation(
+      (_channel: string, listener: (event: unknown, value: unknown) => void) =>
+        listener({}, "attachment-epoch"),
+    );
     electron.removeListener.mockClear();
   });
 
@@ -130,21 +148,25 @@ describe("workspace preload authority", () => {
       "subscribe",
     ]);
     await bridge.about.requestCheck();
-    expect(electron.invoke).toHaveBeenCalledWith("about:update:check", {
-      type: "update.check",
-      version: 1,
-    });
-    await bridge.about.requestRestart(
-      "00000000-0000-4000-8000-000000000025",
+    expect(electron.invoke).toHaveBeenCalledWith(
+      "about:update:check",
+      "attachment-epoch",
+      { type: "update.check", version: 1 },
     );
-    expect(electron.invoke).toHaveBeenCalledWith("about:update:restart", {
-      candidateId: "00000000-0000-4000-8000-000000000025",
-      type: "update.restart",
-      version: 1,
-    });
+    await bridge.about.requestRestart("00000000-0000-4000-8000-000000000025");
+    expect(electron.invoke).toHaveBeenCalledWith(
+      "about:update:restart",
+      "attachment-epoch",
+      {
+        candidateId: "00000000-0000-4000-8000-000000000025",
+        type: "update.restart",
+        version: 1,
+      },
+    );
     await bridge.about.exportDiagnostics();
     expect(electron.invoke).toHaveBeenCalledWith(
       "about:release-diagnostics:export",
+      "attachment-epoch",
       { type: "release-diagnostics.export", version: 1 },
     );
   });
@@ -180,7 +202,11 @@ describe("workspace preload authority", () => {
     await bridge.prepareMutation(targetId, mutationIntent);
     await bridge.prepareCollection(collectionRequest);
     await bridge.prepareCollectionAcrossTargets(collectionManyRequest);
-    await bridge.prepareComparison("comparison-1", "find-skills", secondTargetId);
+    await bridge.prepareComparison(
+      "comparison-1",
+      "find-skills",
+      secondTargetId,
+    );
     await bridge.reconcileMutation(targetId);
     await bridge.refreshInventory(targetId);
     await bridge.requestCancellationReview("operation-1");
@@ -190,28 +216,61 @@ describe("workspace preload authority", () => {
     await bridge.updateTarget(targetId, targetDraft);
 
     expect(electron.invoke.mock.calls).toEqual([
-      ["workspace:inventory:cancel", "operation-1"],
-      ["workspace:comparison:open", targetId, secondTargetId],
-      ["workspace:target:create", targetDraft],
-      ["workspace:target:delete", targetId],
-      ["workspace:snapshot:get"],
-      ["workspace:mutation:prepare", targetId, mutationIntent],
-      ["workspace:collection:prepare", collectionRequest],
-      ["workspace:collection:prepare-many", collectionManyRequest],
+      ["workspace:inventory:cancel", "attachment-epoch", "operation-1"],
+      [
+        "workspace:comparison:open",
+        "attachment-epoch",
+        targetId,
+        secondTargetId,
+      ],
+      ["workspace:target:create", "attachment-epoch", targetDraft],
+      ["workspace:target:delete", "attachment-epoch", targetId],
+      ["workspace:snapshot:get", "attachment-epoch"],
+      [
+        "workspace:mutation:prepare",
+        "attachment-epoch",
+        targetId,
+        mutationIntent,
+      ],
+      ["workspace:collection:prepare", "attachment-epoch", collectionRequest],
+      [
+        "workspace:collection:prepare-many",
+        "attachment-epoch",
+        collectionManyRequest,
+      ],
       [
         "workspace:comparison:prepare",
+        "attachment-epoch",
         "comparison-1",
         "find-skills",
         secondTargetId,
       ],
-      ["workspace:mutation:reconcile", targetId],
-      ["workspace:inventory:refresh", targetId],
-      ["workspace:review:cancel-request", "operation-1"],
-      ["workspace:collection:review-request", "collection-plan-1"],
-      ["workspace:host-trust:review", targetId],
-      ["workspace:review:request", "prepared-1"],
-      ["workspace:target:update", targetId, targetDraft],
+      ["workspace:mutation:reconcile", "attachment-epoch", targetId],
+      ["workspace:inventory:refresh", "attachment-epoch", targetId],
+      ["workspace:review:cancel-request", "attachment-epoch", "operation-1"],
+      [
+        "workspace:collection:review-request",
+        "attachment-epoch",
+        "collection-plan-1",
+      ],
+      ["workspace:host-trust:review", "attachment-epoch", targetId],
+      ["workspace:review:request", "attachment-epoch", "prepared-1"],
+      ["workspace:target:update", "attachment-epoch", targetId, targetDraft],
     ]);
+  });
+
+  it("keeps the attachment epoch private and fails closed when it is malformed", async () => {
+    electron.once.mockImplementationOnce(
+      (_channel: string, listener: (event: unknown, value: unknown) => void) =>
+        listener({}, { exposed: true }),
+    );
+    const bridge = await loadBridge();
+
+    expect(Object.keys(bridge)).not.toContain("attachmentEpoch");
+    await expect(bridge.getSnapshot()).rejects.toThrow(
+      "Invalid desktop attachment epoch.",
+    );
+    expect(electron.invoke).not.toHaveBeenCalled();
   });
 
   it("validates workspace results and removes event listeners on unsubscribe", async () => {

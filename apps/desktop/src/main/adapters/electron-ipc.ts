@@ -30,6 +30,7 @@ import type {
 } from "../application/desktop-capabilities.js";
 
 const CHANNELS = {
+  attachmentEpoch: "desktop:attachment-epoch",
   aboutCheck: "about:update:check",
   aboutDiagnosticsExport: "about:release-diagnostics:export",
   aboutEvent: "about:update:snapshot-changed",
@@ -58,6 +59,7 @@ const CHANNELS = {
 } as const;
 
 interface RegisteredEndpoint {
+  readonly attachmentEpoch: string;
   readonly expectedUrl: string;
   readonly role: "review" | "workspace";
   readonly session: DesktopSession;
@@ -169,11 +171,13 @@ export function registerDesktopIpc(input: {
   const authorized = (
     event: IpcMainInvokeEvent,
     role: RegisteredEndpoint["role"],
+    attachmentEpoch: unknown,
   ) => {
     const endpoint = endpoints.get(event.sender.id);
     const frame = event.senderFrame;
     if (
       endpoint === undefined ||
+      attachmentEpoch !== endpoint.attachmentEpoch ||
       frame === null ||
       !isAuthorizedSender(
         {
@@ -194,24 +198,27 @@ export function registerDesktopIpc(input: {
     return endpoint;
   };
 
-  input.ipcMain.handle(CHANNELS.aboutSnapshot, async (event, ...args) => {
-    if (authorized(event, "workspace") === undefined) {
-      return aboutFailure("unauthorized");
-    }
-    if (args.length !== 0) return aboutFailure("invalid_request");
-    try {
-      return aboutUpdateResultSchema.parse({
-        ok: true,
-        value: aboutUpdateSnapshotSchema.parse(input.updates.getSnapshot()),
-      });
-    } catch {
-      return aboutFailure("internal_error");
-    }
-  });
+  input.ipcMain.handle(
+    CHANNELS.aboutSnapshot,
+    async (event, attachmentEpoch: unknown, ...args) => {
+      if (authorized(event, "workspace", attachmentEpoch) === undefined) {
+        return aboutFailure("unauthorized");
+      }
+      if (args.length !== 0) return aboutFailure("invalid_request");
+      try {
+        return aboutUpdateResultSchema.parse({
+          ok: true,
+          value: aboutUpdateSnapshotSchema.parse(input.updates.getSnapshot()),
+        });
+      } catch {
+        return aboutFailure("internal_error");
+      }
+    },
+  );
   input.ipcMain.handle(
     CHANNELS.aboutCheck,
-    async (event, request: unknown, ...args) => {
-      if (authorized(event, "workspace") === undefined) {
+    async (event, attachmentEpoch: unknown, request: unknown, ...args) => {
+      if (authorized(event, "workspace", attachmentEpoch) === undefined) {
         return aboutFailure("unauthorized");
       }
       if (
@@ -233,8 +240,8 @@ export function registerDesktopIpc(input: {
   );
   input.ipcMain.handle(
     CHANNELS.aboutRestart,
-    async (event, request: unknown, ...args) => {
-      if (authorized(event, "workspace") === undefined) {
+    async (event, attachmentEpoch: unknown, request: unknown, ...args) => {
+      if (authorized(event, "workspace", attachmentEpoch) === undefined) {
         return aboutFailure("unauthorized");
       }
       const parsed = aboutUpdateRestartRequestSchema.safeParse(request);
@@ -259,8 +266,8 @@ export function registerDesktopIpc(input: {
   );
   input.ipcMain.handle(
     CHANNELS.aboutDiagnosticsExport,
-    async (event, request: unknown, ...args) => {
-      if (authorized(event, "workspace") === undefined) {
+    async (event, attachmentEpoch: unknown, request: unknown, ...args) => {
+      if (authorized(event, "workspace", attachmentEpoch) === undefined) {
         return aboutDiagnosticsExportResultSchema.parse(
           aboutFailure("unauthorized"),
         );
@@ -286,8 +293,8 @@ export function registerDesktopIpc(input: {
     },
   );
 
-  input.ipcMain.handle(CHANNELS.snapshot, async (event) => {
-    const endpoint = authorized(event, "workspace");
+  input.ipcMain.handle(CHANNELS.snapshot, async (event, attachmentEpoch) => {
+    const endpoint = authorized(event, "workspace", attachmentEpoch);
     if (endpoint === undefined) {
       return workspaceSnapshotResultSchema.parse(authorizationFailure());
     }
@@ -300,40 +307,51 @@ export function registerDesktopIpc(input: {
       return workspaceSnapshotResultSchema.parse(snapshotFailure(error));
     }
   });
-  input.ipcMain.handle(CHANNELS.refresh, async (event, targetId: unknown) => {
-    const endpoint = authorized(event, "workspace");
-    if (endpoint === undefined) return authorizationFailure();
-    try {
-      return workspaceRequestResultSchema.parse(
-        await endpoint.session.request({
-          targetId,
-          type: "inventory.refresh",
-          version: 1,
-        }),
-      );
-    } catch {
-      return internalFailure();
-    }
-  });
-  input.ipcMain.handle(CHANNELS.cancel, async (event, operationId: unknown) => {
-    const endpoint = authorized(event, "workspace");
-    if (endpoint === undefined) return authorizationFailure();
-    try {
-      return workspaceRequestResultSchema.parse(
-        await endpoint.session.request({
-          operationId,
-          type: "inventory.cancel",
-          version: 1,
-        }),
-      );
-    } catch {
-      return internalFailure();
-    }
-  });
+  input.ipcMain.handle(
+    CHANNELS.refresh,
+    async (event, attachmentEpoch: unknown, targetId: unknown) => {
+      const endpoint = authorized(event, "workspace", attachmentEpoch);
+      if (endpoint === undefined) return authorizationFailure();
+      try {
+        return workspaceRequestResultSchema.parse(
+          await endpoint.session.request({
+            targetId,
+            type: "inventory.refresh",
+            version: 1,
+          }),
+        );
+      } catch {
+        return internalFailure();
+      }
+    },
+  );
+  input.ipcMain.handle(
+    CHANNELS.cancel,
+    async (event, attachmentEpoch: unknown, operationId: unknown) => {
+      const endpoint = authorized(event, "workspace", attachmentEpoch);
+      if (endpoint === undefined) return authorizationFailure();
+      try {
+        return workspaceRequestResultSchema.parse(
+          await endpoint.session.request({
+            operationId,
+            type: "inventory.cancel",
+            version: 1,
+          }),
+        );
+      } catch {
+        return internalFailure();
+      }
+    },
+  );
   input.ipcMain.handle(
     CHANNELS.compare,
-    async (event, leftTargetId: unknown, rightTargetId: unknown) => {
-      const endpoint = authorized(event, "workspace");
+    async (
+      event,
+      attachmentEpoch: unknown,
+      leftTargetId: unknown,
+      rightTargetId: unknown,
+    ) => {
+      const endpoint = authorized(event, "workspace", attachmentEpoch);
       if (endpoint === undefined) return authorizationFailure();
       try {
         return workspaceRequestResultSchema.parse(
@@ -353,11 +371,12 @@ export function registerDesktopIpc(input: {
     CHANNELS.comparisonPrepare,
     async (
       event,
+      attachmentEpoch: unknown,
       comparisonId: unknown,
       rowKey: unknown,
       destinationTargetId: unknown,
     ) => {
-      const endpoint = authorized(event, "workspace");
+      const endpoint = authorized(event, "workspace", attachmentEpoch);
       if (endpoint === undefined) return authorizationFailure();
       try {
         return workspaceRequestResultSchema.parse(
@@ -376,8 +395,8 @@ export function registerDesktopIpc(input: {
   );
   input.ipcMain.handle(
     CHANNELS.collectionPrepare,
-    async (event, request: unknown) => {
-      const endpoint = authorized(event, "workspace");
+    async (event, attachmentEpoch: unknown, request: unknown) => {
+      const endpoint = authorized(event, "workspace", attachmentEpoch);
       if (endpoint === undefined) return authorizationFailure();
       const fields =
         typeof request === "object" && request !== null
@@ -403,8 +422,8 @@ export function registerDesktopIpc(input: {
   );
   input.ipcMain.handle(
     CHANNELS.collectionReview,
-    async (event, collectionPlanId: unknown) => {
-      const endpoint = authorized(event, "workspace");
+    async (event, attachmentEpoch: unknown, collectionPlanId: unknown) => {
+      const endpoint = authorized(event, "workspace", attachmentEpoch);
       if (endpoint === undefined) return authorizationFailure();
       try {
         return workspaceRequestResultSchema.parse(
@@ -421,8 +440,8 @@ export function registerDesktopIpc(input: {
   );
   input.ipcMain.handle(
     CHANNELS.collectionPrepareMany,
-    async (event, request: unknown) => {
-      const endpoint = authorized(event, "workspace");
+    async (event, attachmentEpoch: unknown, request: unknown) => {
+      const endpoint = authorized(event, "workspace", attachmentEpoch);
       if (endpoint === undefined) return authorizationFailure();
       const fields =
         typeof request === "object" && request !== null
@@ -471,8 +490,8 @@ export function registerDesktopIpc(input: {
   );
   input.ipcMain.handle(
     CHANNELS.targetCreate,
-    async (event, definition: unknown) => {
-      const endpoint = authorized(event, "workspace");
+    async (event, attachmentEpoch: unknown, definition: unknown) => {
+      const endpoint = authorized(event, "workspace", attachmentEpoch);
       if (endpoint === undefined) return authorizationFailure();
       try {
         return workspaceRequestResultSchema.parse(
@@ -489,8 +508,13 @@ export function registerDesktopIpc(input: {
   );
   input.ipcMain.handle(
     CHANNELS.targetUpdate,
-    async (event, targetId: unknown, definition: unknown) => {
-      const endpoint = authorized(event, "workspace");
+    async (
+      event,
+      attachmentEpoch: unknown,
+      targetId: unknown,
+      definition: unknown,
+    ) => {
+      const endpoint = authorized(event, "workspace", attachmentEpoch);
       if (endpoint === undefined) return authorizationFailure();
       try {
         return workspaceRequestResultSchema.parse(
@@ -508,8 +532,8 @@ export function registerDesktopIpc(input: {
   );
   input.ipcMain.handle(
     CHANNELS.targetDelete,
-    async (event, targetId: unknown) => {
-      const endpoint = authorized(event, "workspace");
+    async (event, attachmentEpoch: unknown, targetId: unknown) => {
+      const endpoint = authorized(event, "workspace", attachmentEpoch);
       if (endpoint === undefined) return authorizationFailure();
       try {
         return workspaceRequestResultSchema.parse(
@@ -526,8 +550,13 @@ export function registerDesktopIpc(input: {
   );
   input.ipcMain.handle(
     CHANNELS.mutationPrepare,
-    async (event, targetId: unknown, intent: unknown) => {
-      const endpoint = authorized(event, "workspace");
+    async (
+      event,
+      attachmentEpoch: unknown,
+      targetId: unknown,
+      intent: unknown,
+    ) => {
+      const endpoint = authorized(event, "workspace", attachmentEpoch);
       if (endpoint === undefined) return authorizationFailure();
       try {
         return workspaceRequestResultSchema.parse(
@@ -545,8 +574,8 @@ export function registerDesktopIpc(input: {
   );
   input.ipcMain.handle(
     CHANNELS.mutationReconcile,
-    async (event, targetId: unknown) => {
-      const endpoint = authorized(event, "workspace");
+    async (event, attachmentEpoch: unknown, targetId: unknown) => {
+      const endpoint = authorized(event, "workspace", attachmentEpoch);
       if (endpoint === undefined) return authorizationFailure();
       try {
         return workspaceRequestResultSchema.parse(
@@ -563,8 +592,8 @@ export function registerDesktopIpc(input: {
   );
   input.ipcMain.handle(
     CHANNELS.hostTrustReview,
-    async (event, targetId: unknown) => {
-      const endpoint = authorized(event, "workspace");
+    async (event, attachmentEpoch: unknown, targetId: unknown) => {
+      const endpoint = authorized(event, "workspace", attachmentEpoch);
       if (endpoint === undefined) return authorizationFailure();
       try {
         return workspaceRequestResultSchema.parse(
@@ -581,8 +610,8 @@ export function registerDesktopIpc(input: {
   );
   input.ipcMain.handle(
     CHANNELS.requestReview,
-    async (event, preparedMutationId: unknown) => {
-      const endpoint = authorized(event, "workspace");
+    async (event, attachmentEpoch: unknown, preparedMutationId: unknown) => {
+      const endpoint = authorized(event, "workspace", attachmentEpoch);
       if (endpoint === undefined) return authorizationFailure();
       try {
         return workspaceRequestResultSchema.parse(
@@ -599,8 +628,8 @@ export function registerDesktopIpc(input: {
   );
   input.ipcMain.handle(
     CHANNELS.requestCancellationReview,
-    async (event, operationId: unknown) => {
-      const endpoint = authorized(event, "workspace");
+    async (event, attachmentEpoch: unknown, operationId: unknown) => {
+      const endpoint = authorized(event, "workspace", attachmentEpoch);
       if (endpoint === undefined) return authorizationFailure();
       try {
         return workspaceRequestResultSchema.parse(
@@ -615,23 +644,27 @@ export function registerDesktopIpc(input: {
       }
     },
   );
-  input.ipcMain.handle(CHANNELS.reviewSnapshot, async (event) => {
-    const endpoint = authorized(event, "review");
-    if (endpoint === undefined) {
-      return reviewSnapshotResultSchema.parse(authorizationFailure());
-    }
-    try {
-      return reviewSnapshotResultSchema.parse({
-        ok: true,
-        value: reviewSnapshotSchema.parse(await endpoint.session.snapshot()),
-      });
-    } catch {
-      return reviewSnapshotResultSchema.parse(internalFailure());
-    }
-  });
+  input.ipcMain.handle(
+    CHANNELS.reviewSnapshot,
+    async (event, attachmentEpoch) => {
+      const endpoint = authorized(event, "review", attachmentEpoch);
+      if (endpoint === undefined) {
+        return reviewSnapshotResultSchema.parse(authorizationFailure());
+      }
+      try {
+        return reviewSnapshotResultSchema.parse({
+          ok: true,
+          value: reviewSnapshotSchema.parse(await endpoint.session.snapshot()),
+        });
+      } catch {
+        return reviewSnapshotResultSchema.parse(internalFailure());
+      }
+    },
+  );
   const decideReview =
-    (decision: "approve" | "reject") => async (event: IpcMainInvokeEvent) => {
-      const endpoint = authorized(event, "review");
+    (decision: "approve" | "reject") =>
+    async (event: IpcMainInvokeEvent, attachmentEpoch: unknown) => {
+      const endpoint = authorized(event, "review", attachmentEpoch);
       if (endpoint === undefined) {
         return reviewDecisionResultSchema.parse(authorizationFailure());
       }
@@ -666,8 +699,8 @@ export function registerDesktopIpc(input: {
   const detach = (webContentsId: number) => {
     const prior = endpoints.get(webContentsId);
     if (prior === undefined) return;
-    prior.session.teardown();
     endpoints.delete(webContentsId);
+    prior.session.teardown();
   };
 
   const attach = (
@@ -677,6 +710,7 @@ export function registerDesktopIpc(input: {
     reviewId?: string,
   ) => {
     detach(webContents.id);
+    const attachmentEpoch = input.newEpoch();
     const session = input.capabilities.attach(
       {
         endpointId: String(webContents.id),
@@ -685,12 +719,30 @@ export function registerDesktopIpc(input: {
         sessionEpoch: input.newEpoch(),
       },
       (event) => {
-        if (!webContents.isDestroyed()) {
+        if (
+          !webContents.isDestroyed() &&
+          endpoints.get(webContents.id)?.attachmentEpoch === attachmentEpoch
+        ) {
           webContents.send(CHANNELS.event, desktopEventSchema.parse(event));
         }
       },
     );
-    endpoints.set(webContents.id, { expectedUrl, role, session, webContents });
+    if (webContents.isDestroyed()) {
+      session.teardown();
+      return;
+    }
+    endpoints.set(webContents.id, {
+      attachmentEpoch,
+      expectedUrl,
+      role,
+      session,
+      webContents,
+    });
+    try {
+      webContents.send(CHANNELS.attachmentEpoch, attachmentEpoch);
+    } catch {
+      detach(webContents.id);
+    }
   };
 
   return {

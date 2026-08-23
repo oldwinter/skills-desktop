@@ -96,12 +96,17 @@ describe("Electron IPC sender authorization", () => {
       handlers.get("workspace:snapshot:get")!(hostileEvent as never),
     ).resolves.toMatchObject({ error: { code: "unauthorized" }, ok: false });
     await expect(
-      handlers.get("workspace:snapshot:get")!(authorizedEvent as never),
+      handlers.get("workspace:snapshot:get")!(
+        authorizedEvent as never,
+        "epoch-1",
+      ),
     ).resolves.toMatchObject({ error: { code: "internal_error" }, ok: false });
     await expect(
-      handlers.get("workspace:inventory:refresh")!(authorizedEvent as never, {
-        executable: "sh",
-      }),
+      handlers.get("workspace:inventory:refresh")!(
+        authorizedEvent as never,
+        "epoch-1",
+        { executable: "sh" },
+      ),
     ).resolves.toMatchObject({ error: { code: "invalid_request" }, ok: false });
     expect(session.request).toHaveBeenCalledWith({
       targetId: { executable: "sh" },
@@ -111,6 +116,7 @@ describe("Electron IPC sender authorization", () => {
     await expect(
       handlers.get("workspace:comparison:open")!(
         authorizedEvent as never,
+        "epoch-1",
         "00000000-0000-4000-8000-00000000000b",
         "00000000-0000-4000-8000-00000000000c",
       ),
@@ -124,6 +130,7 @@ describe("Electron IPC sender authorization", () => {
     await expect(
       handlers.get("workspace:host-trust:review")!(
         authorizedEvent as never,
+        "epoch-1",
         "00000000-0000-4000-8000-000000000018",
       ),
     ).resolves.toMatchObject({ error: { code: "invalid_request" }, ok: false });
@@ -133,15 +140,19 @@ describe("Electron IPC sender authorization", () => {
       version: 1,
     });
     await expect(
-      handlers.get("workspace:collection:prepare")!(authorizedEvent as never, {
-        collectionId: "skills-desktop-starter",
-        executable: "must-not-cross-ipc",
-        manifestDigest: `sha256:${"a".repeat(64)}`,
-        releaseNumber: 1,
-        scope: "project",
-        selections: [{ mode: "add", name: "find-skills" }],
-        targetId: "00000000-0000-4000-8000-000000000001",
-      }),
+      handlers.get("workspace:collection:prepare")!(
+        authorizedEvent as never,
+        "epoch-1",
+        {
+          collectionId: "skills-desktop-starter",
+          executable: "must-not-cross-ipc",
+          manifestDigest: `sha256:${"a".repeat(64)}`,
+          releaseNumber: 1,
+          scope: "project",
+          selections: [{ mode: "add", name: "find-skills" }],
+          targetId: "00000000-0000-4000-8000-000000000001",
+        },
+      ),
     ).resolves.toMatchObject({ error: { code: "invalid_request" }, ok: false });
     expect(session.request).toHaveBeenLastCalledWith({
       collectionId: "skills-desktop-starter",
@@ -156,6 +167,7 @@ describe("Electron IPC sender authorization", () => {
     await expect(
       handlers.get("workspace:collection:prepare-many")!(
         authorizedEvent as never,
+        "epoch-1",
         {
           collectionId: "skills-desktop-starter",
           manifestDigest: `sha256:${"a".repeat(64)}`,
@@ -198,6 +210,7 @@ describe("Electron IPC sender authorization", () => {
     await expect(
       handlers.get("workspace:collection:review-request")!(
         authorizedEvent as never,
+        "epoch-1",
         "collection-plan-1",
       ),
     ).resolves.toMatchObject({ error: { code: "invalid_request" }, ok: false });
@@ -207,13 +220,17 @@ describe("Electron IPC sender authorization", () => {
       version: 1,
     });
     await expect(
-      handlers.get("workspace:target:create")!(authorizedEvent as never, {
-        connectionReference: "build-host",
-        harness: "Codex",
-        kind: "ssh",
-        label: "Build host",
-        workspace: "/srv/project",
-      }),
+      handlers.get("workspace:target:create")!(
+        authorizedEvent as never,
+        "epoch-1",
+        {
+          connectionReference: "build-host",
+          harness: "Codex",
+          kind: "ssh",
+          label: "Build host",
+          workspace: "/srv/project",
+        },
+      ),
     ).resolves.toMatchObject({ error: { code: "invalid_request" }, ok: false });
     expect(session.request).toHaveBeenLastCalledWith({
       definition: {
@@ -246,22 +263,195 @@ describe("Electron IPC sender authorization", () => {
     };
 
     await expect(
-      handlers.get("review:decision:approve")!(authorizedEvent as never),
+      handlers.get("review:decision:approve")!(
+        authorizedEvent as never,
+        "epoch-1",
+      ),
     ).resolves.toMatchObject({ error: { code: "unauthorized" }, ok: false });
     await expect(
       handlers.get("workspace:mutation:prepare")!(
         reviewEvent as never,
+        "epoch-1",
         "00000000-0000-4000-8000-000000000001",
         { names: ["tdd"], scope: "project", type: "remove" },
       ),
     ).resolves.toMatchObject({ error: { code: "unauthorized" }, ok: false });
     await expect(
-      handlers.get("review:decision:reject")!(reviewEvent as never),
+      handlers.get("review:decision:reject")!(reviewEvent as never, "epoch-1"),
     ).resolves.toMatchObject({ error: { code: "invalid_request" }, ok: false });
     expect(session.request).toHaveBeenLastCalledWith({
       decision: "reject",
       type: "review.decide",
       version: 1,
+    });
+  });
+
+  it("rejects queued workspace and review invokes from a prior attachment epoch", async () => {
+    const handlers = new Map<
+      string,
+      (event: never, ...args: unknown[]) => unknown
+    >();
+    const ipcMain = {
+      handle(
+        channel: string,
+        handler: (event: never, ...args: unknown[]) => unknown,
+      ) {
+        handlers.set(channel, handler);
+      },
+      removeHandler: vi.fn(),
+    };
+    const sessions = Array.from({ length: 4 }, (_, index) => ({
+      request: vi.fn(async () => ({
+        ok: true as const,
+        value: { operationId: `operation-${index}` },
+      })),
+      snapshot: vi.fn(),
+      teardown: vi.fn(),
+    }));
+    const eventSinks: Array<(event: unknown) => void> = [];
+    let epoch = 0;
+    const capabilities = {
+      attach: vi.fn((_endpoint: unknown, publish: (event: unknown) => void) => {
+        eventSinks.push(publish);
+        return sessions[eventSinks.length - 1];
+      }),
+    };
+    const registration = registerDesktopIpc({
+      capabilities: capabilities as never,
+      ipcMain: ipcMain as never,
+      newEpoch: () => `private-${++epoch}`,
+      updates: {
+        exportDiagnostics: vi.fn(async () => "cancelled" as const),
+        getSnapshot: vi.fn(),
+        requestCheck: vi.fn(async () => undefined),
+        requestRestart: vi.fn(async () => "stale" as const),
+        subscribe: vi.fn(() => () => undefined),
+      },
+    });
+    const workspaceFrame = {
+      url: "skills-desktop://workspace/index.html",
+    };
+    const workspaceContents = {
+      id: 17,
+      isDestroyed: () => false,
+      mainFrame: workspaceFrame,
+      send: vi.fn(),
+    };
+    const workspaceEvent = {
+      sender: workspaceContents,
+      senderFrame: workspaceFrame,
+    };
+    const targetId = "00000000-0000-4000-8000-000000000001";
+
+    registration.attach(
+      workspaceContents as never,
+      "workspace",
+      workspaceFrame.url,
+    );
+    const staleWorkspaceInvoke = Promise.resolve().then(() =>
+      handlers.get("workspace:inventory:refresh")!(
+        workspaceEvent as never,
+        "private-1",
+        targetId,
+      ),
+    );
+    registration.attach(
+      workspaceContents as never,
+      "workspace",
+      workspaceFrame.url,
+    );
+
+    await expect(staleWorkspaceInvoke).resolves.toMatchObject({
+      error: { code: "unauthorized" },
+      ok: false,
+    });
+    expect(sessions[0]?.teardown).toHaveBeenCalledTimes(1);
+    expect(sessions[0]?.request).not.toHaveBeenCalled();
+    expect(sessions[1]?.request).not.toHaveBeenCalled();
+    await expect(
+      handlers.get("workspace:inventory:refresh")!(
+        workspaceEvent as never,
+        "private-3",
+        targetId,
+      ),
+    ).resolves.toEqual({
+      ok: true,
+      value: { operationId: "operation-1" },
+    });
+    expect(sessions[1]?.request).toHaveBeenCalledTimes(1);
+
+    workspaceContents.send.mockClear();
+    eventSinks[0]?.({
+      reason: "buffer_overflow",
+      sequence: 1,
+      sessionEpoch: "public-2",
+      stateRevision: 1,
+      type: "resync.required",
+    });
+    expect(workspaceContents.send).not.toHaveBeenCalled();
+    eventSinks[1]?.({
+      reason: "buffer_overflow",
+      sequence: 1,
+      sessionEpoch: "public-4",
+      stateRevision: 1,
+      type: "resync.required",
+    });
+    expect(workspaceContents.send).toHaveBeenCalledWith(
+      "workspace:event",
+      expect.objectContaining({ sessionEpoch: "public-4" }),
+    );
+
+    const reviewFrame = { url: "skills-desktop://review/index.html" };
+    const reviewContents = {
+      id: 18,
+      isDestroyed: () => false,
+      mainFrame: reviewFrame,
+      send: vi.fn(),
+    };
+    const reviewEvent = { sender: reviewContents, senderFrame: reviewFrame };
+    registration.attach(
+      reviewContents as never,
+      "review",
+      reviewFrame.url,
+      "review-1",
+    );
+    const staleReviewInvoke = Promise.resolve().then(() =>
+      handlers.get("review:decision:approve")!(
+        reviewEvent as never,
+        "private-5",
+      ),
+    );
+    registration.attach(
+      reviewContents as never,
+      "review",
+      reviewFrame.url,
+      "review-1",
+    );
+
+    await expect(staleReviewInvoke).resolves.toMatchObject({
+      error: { code: "unauthorized" },
+      ok: false,
+    });
+    expect(sessions[2]?.request).not.toHaveBeenCalled();
+    expect(sessions[3]?.request).not.toHaveBeenCalled();
+    await expect(
+      handlers.get("review:decision:approve")!(
+        reviewEvent as never,
+        "private-7",
+      ),
+    ).resolves.toEqual({
+      ok: true,
+      value: { operationId: "operation-3" },
+    });
+    registration.detach(reviewContents.id);
+    await expect(
+      handlers.get("review:decision:reject")!(
+        reviewEvent as never,
+        "private-7",
+      ),
+    ).resolves.toMatchObject({
+      error: { code: "unauthorized" },
+      ok: false,
     });
   });
 
@@ -339,10 +529,13 @@ describe("Electron IPC sender authorization", () => {
     registration.attach(webContents as never, "workspace", mainFrame.url);
 
     await expect(
-      handlers.get("workspace:snapshot:get")!({
-        sender: webContents,
-        senderFrame: mainFrame,
-      } as never),
+      handlers.get("workspace:snapshot:get")!(
+        {
+          sender: webContents,
+          senderFrame: mainFrame,
+        } as never,
+        "epoch-1",
+      ),
     ).resolves.toEqual({
       error: {
         code: "target_unavailable",
@@ -382,8 +575,7 @@ describe("Electron IPC sender authorization", () => {
         message:
           "Download a newer package from GitHub Releases and install it manually.",
         mode: "manual",
-        releasePageUrl:
-          "https://github.com/oldwinter/skills-desktop/releases",
+        releasePageUrl: "https://github.com/oldwinter/skills-desktop/releases",
       },
       schemaVersion: 1,
       state: { kind: "manual" },
@@ -417,11 +609,7 @@ describe("Electron IPC sender authorization", () => {
       mainFrame,
       send: vi.fn(),
     };
-    registration.attach(
-      workspaceContents as never,
-      "workspace",
-      mainFrame.url,
-    );
+    registration.attach(workspaceContents as never, "workspace", mainFrame.url);
     const workspaceEvent = {
       sender: workspaceContents,
       senderFrame: mainFrame,
@@ -436,21 +624,28 @@ describe("Electron IPC sender authorization", () => {
       "about:release-diagnostics:export",
     ]);
     await expect(
-      handlers.get("about:update:snapshot:get")!(workspaceEvent as never),
+      handlers.get("about:update:snapshot:get")!(
+        workspaceEvent as never,
+        "epoch-1",
+      ),
     ).resolves.toEqual({ ok: true, value: aboutSnapshot });
     await expect(
-      handlers.get("about:update:check")!(workspaceEvent as never, {
+      handlers.get("about:update:check")!(workspaceEvent as never, "epoch-1", {
         type: "update.check",
         version: 1,
       }),
     ).resolves.toEqual({ ok: true, value: aboutSnapshot });
     expect(updates.requestCheck).toHaveBeenCalledTimes(1);
     await expect(
-      handlers.get("about:update:restart")!(workspaceEvent as never, {
-        candidateId: "00000000-0000-4000-8000-000000000025",
-        type: "update.restart",
-        version: 1,
-      }),
+      handlers.get("about:update:restart")!(
+        workspaceEvent as never,
+        "epoch-1",
+        {
+          candidateId: "00000000-0000-4000-8000-000000000025",
+          type: "update.restart",
+          version: 1,
+        },
+      ),
     ).resolves.toEqual({ ok: true, value: aboutSnapshot });
     expect(updates.requestRestart).toHaveBeenCalledWith(
       "00000000-0000-4000-8000-000000000025",
@@ -458,6 +653,7 @@ describe("Electron IPC sender authorization", () => {
     await expect(
       handlers.get("about:release-diagnostics:export")!(
         workspaceEvent as never,
+        "epoch-1",
         { type: "release-diagnostics.export", version: 1 },
       ),
     ).resolves.toEqual({ ok: true, value: { status: "saved" } });
@@ -468,13 +664,13 @@ describe("Electron IPC sender authorization", () => {
       senderFrame: { url: mainFrame.url },
     };
     await expect(
-      handlers.get("about:update:check")!(hostileSubframe as never, {
+      handlers.get("about:update:check")!(hostileSubframe as never, "epoch-1", {
         type: "update.check",
         version: 1,
       }),
     ).resolves.toMatchObject({ error: { code: "unauthorized" }, ok: false });
     await expect(
-      handlers.get("about:update:check")!(workspaceEvent as never, {
+      handlers.get("about:update:check")!(workspaceEvent as never, "epoch-1", {
         feedUrl: "https://attacker.invalid",
         type: "update.check",
         version: 1,
@@ -482,16 +678,21 @@ describe("Electron IPC sender authorization", () => {
     ).resolves.toMatchObject({ error: { code: "invalid_request" }, ok: false });
     expect(updates.requestCheck).toHaveBeenCalledTimes(1);
     await expect(
-      handlers.get("about:update:restart")!(workspaceEvent as never, {
-        candidateId: "00000000-0000-4000-8000-000000000025",
-        feedUrl: "https://attacker.invalid",
-        type: "update.restart",
-        version: 1,
-      }),
+      handlers.get("about:update:restart")!(
+        workspaceEvent as never,
+        "epoch-1",
+        {
+          candidateId: "00000000-0000-4000-8000-000000000025",
+          feedUrl: "https://attacker.invalid",
+          type: "update.restart",
+          version: 1,
+        },
+      ),
     ).resolves.toMatchObject({ error: { code: "invalid_request" }, ok: false });
     await expect(
       handlers.get("about:release-diagnostics:export")!(
         workspaceEvent as never,
+        "epoch-1",
         {
           outputPath: "/SECRET_PATH/diagnostics.json",
           type: "release-diagnostics.export",
@@ -521,12 +722,14 @@ describe("Electron IPC sender authorization", () => {
     await expect(
       handlers.get("about:update:check")!(
         { sender: reviewContents, senderFrame: reviewFrame } as never,
+        "epoch-1",
         { type: "update.check", version: 1 },
       ),
     ).resolves.toMatchObject({ error: { code: "unauthorized" }, ok: false });
     await expect(
       handlers.get("about:update:restart")!(
         { sender: reviewContents, senderFrame: reviewFrame } as never,
+        "epoch-1",
         {
           candidateId: "00000000-0000-4000-8000-000000000025",
           type: "update.restart",
