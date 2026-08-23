@@ -25,7 +25,7 @@ jobs:
     if: github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main'
     permissions:
       contents: read
-    runs-on: ${{ matrix.runner }}
+    runs-on: ${{ fromJSON(matrix.runner) }}
     timeout-minutes: 35
     strategy:
       fail-fast: false
@@ -33,16 +33,16 @@ jobs:
         include:
           - architecture: arm64
             platform: darwin
-            runner: macos-15
+            runner: '"macos-15"'
           - architecture: x64
             platform: darwin
-            runner: macos-15
+            runner: '"macos-15"'
           - architecture: x64
             platform: win32
-            runner: windows-2025
+            runner: '"windows-2025"'
           - architecture: x64
             platform: linux
-            runner: ubuntu-24.04
+            runner: '["self-hosted", "Linux", "X64", "skills-desktop"]'
     steps:
       - name: Check out candidate source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -116,7 +116,7 @@ jobs:
       attestations: write
       contents: read
       id-token: write
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, Linux, X64, skills-desktop]
     timeout-minutes: 15
     outputs:
       candidate-set-digest: ${{ steps.finalize.outputs.candidate-set-digest }}
@@ -192,7 +192,7 @@ jobs:
     permissions:
       attestations: read
       contents: read
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, Linux, X64, skills-desktop]
     timeout-minutes: 15
     outputs:
       candidate-set-digest: ${{ steps.assemble.outputs.candidate-set-digest }}
@@ -245,8 +245,7 @@ jobs:
                 --predicate-type "${predicate}" \
                 --signer-workflow "${GITHUB_REPOSITORY}/.github/workflows/release-candidates.yml" \
                 --source-digest "${GITHUB_SHA}" \
-                --source-ref "${GITHUB_REF}" \
-                --deny-self-hosted-runners >/dev/null
+                --source-ref "${GITHUB_REF}" >/dev/null
             done
           done
       - name: Verify exact signed attestation statements
@@ -267,7 +266,6 @@ jobs:
               --signer-workflow "${GITHUB_REPOSITORY}/.github/workflows/release-candidates.yml" \
               --source-digest "${GITHUB_SHA}" \
               --source-ref "${GITHUB_REF}" \
-              --deny-self-hosted-runners \
               --format json > "${output}"
           }
           verify_bundle \
@@ -331,7 +329,7 @@ jobs:
     needs: verify
     permissions:
       contents: write
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, Linux, X64, skills-desktop]
     timeout-minutes: 10
     outputs:
       draft-state: ${{ steps.verify-release.outputs.draft-state }}
@@ -402,7 +400,7 @@ jobs:
     needs: [verify, draft-assembly]
     permissions:
       contents: write
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, Linux, X64, skills-desktop]
     timeout-minutes: 10
     outputs:
       preview-state: ${{ steps.verify-preview.outputs.preview-state }}

@@ -89,11 +89,16 @@ describe("unsigned candidate workflow contract", () => {
     const packageJob = workflow.jobs.package;
     expect(packageJob.if).toContain("github.ref == 'refs/heads/main'");
     expect(packageJob.permissions).toEqual({ contents: "read" });
+    expect(packageJob["runs-on"]).toBe("${{ fromJSON(matrix.runner) }}");
     expect(packageJob.strategy.matrix.include).toEqual([
-      { architecture: "arm64", platform: "darwin", runner: "macos-15" },
-      { architecture: "x64", platform: "darwin", runner: "macos-15" },
-      { architecture: "x64", platform: "win32", runner: "windows-2025" },
-      { architecture: "x64", platform: "linux", runner: "ubuntu-24.04" },
+      { architecture: "arm64", platform: "darwin", runner: '"macos-15"' },
+      { architecture: "x64", platform: "darwin", runner: '"macos-15"' },
+      { architecture: "x64", platform: "win32", runner: '"windows-2025"' },
+      {
+        architecture: "x64",
+        platform: "linux",
+        runner: '["self-hosted", "Linux", "X64", "skills-desktop"]',
+      },
     ]);
     const packageSteps = packageJob.steps;
     const checkout = packageSteps.find((step: { name?: string }) =>
@@ -212,7 +217,7 @@ describe("unsigned candidate workflow contract", () => {
     expect(verifySource).toContain("--signer-workflow");
     expect(verifySource).toContain("--source-digest");
     expect(verifySource).toContain("--source-ref");
-    expect(verifySource).toContain("--deny-self-hosted-runners");
+    expect(verifySource).not.toContain("--deny-self-hosted-runners");
     expect(verifySource).toContain("release-integrity-cli.mjs verify-attestation");
     expect(verifySource).toContain("release-integrity-cli.mjs assemble");
     const verifiedUpload = verifyJob.steps.find(
