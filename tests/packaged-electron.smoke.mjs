@@ -1226,27 +1226,36 @@ try {
   );
   console.log("packaged smoke: durable Targets and comparison verified");
 
-  await first.page.setViewportSize(760, 820);
+  await first.page.setViewportSize(800, 820);
   const narrowLayout = await first.page.evaluate(`(() => {
-    const row = document.querySelector(".inventory-table tbody tr");
-    const targetChooser = document.querySelector(".inventory-target-chooser");
-    const workspace = document.querySelector(".workspace-layout");
-    if (!(row instanceof HTMLTableRowElement)) throw new Error("Narrow Inventory row is unavailable.");
-    if (!(targetChooser instanceof HTMLLabelElement)) throw new Error("Narrow Target chooser is unavailable.");
-    if (!(workspace instanceof HTMLDivElement)) throw new Error("Narrow workspace is unavailable.");
+    const chooser = document.querySelector("label.inventory-target-chooser");
+    const select = chooser?.querySelector("select");
     return {
+      chooserDisplay: chooser ? getComputedStyle(chooser).display : null,
       documentWidth: document.documentElement.scrollWidth,
-      rowDisplay: getComputedStyle(row).display,
-      targetChooserDisplay: getComputedStyle(targetChooser).display,
+      options: select
+        ? [...select.options].map((option) => option.textContent?.trim())
+        : [],
+      rowDisplay: getComputedStyle(
+        document.querySelector(".inventory-table tbody tr"),
+      ).display,
+      selected: select?.selectedOptions[0]?.textContent?.trim() ?? "",
+      selectLabel: chooser?.childNodes[0]?.textContent?.trim() ?? "",
       viewportWidth: window.innerWidth,
-      workspaceDisplay: getComputedStyle(workspace).display,
+      workspaceDisplay: getComputedStyle(
+        document.querySelector(".workspace-layout"),
+      ).display,
     };
   })()`);
   console.log("packaged smoke: narrow layout inspected");
   if (
     narrowLayout.documentWidth > narrowLayout.viewportWidth ||
     narrowLayout.rowDisplay !== "grid" ||
-    narrowLayout.targetChooserDisplay !== "grid" ||
+    narrowLayout.chooserDisplay !== "grid" ||
+    narrowLayout.selectLabel !== "Target" ||
+    JSON.stringify(narrowLayout.options) !==
+      JSON.stringify(["This device", "Second local"]) ||
+    !["This device", "Second local"].includes(narrowLayout.selected) ||
     narrowLayout.workspaceDisplay !== "block"
   ) {
     throw new Error(`Narrow layout failed: ${JSON.stringify(narrowLayout)}`);
@@ -1265,11 +1274,23 @@ try {
     throw new Error("Inventory table semantics are missing.");
   }
   await first.page.setViewportSize(420, 820);
-  const compactNavigation = await first.page.evaluate(`({
-    labels: [...document.querySelectorAll(".nav-item")].map((button) => button.getAttribute("aria-label")),
-    selectedTarget: document.querySelector(".inventory-target-chooser select")?.selectedOptions[0]?.textContent?.trim() ?? "",
-    targetOptions: [...document.querySelectorAll(".inventory-target-chooser option")].map((option) => option.textContent?.trim()),
-  })`);
+  const compactNavigation = await first.page.evaluate(`(() => {
+    const chooser = document.querySelector("label.inventory-target-chooser");
+    const select = chooser?.querySelector("select");
+    return {
+      chooserDisplay: chooser ? getComputedStyle(chooser).display : null,
+      documentWidth: document.documentElement.scrollWidth,
+      labels: [...document.querySelectorAll(".nav-item")].map((button) =>
+        button.getAttribute("aria-label"),
+      ),
+      options: select
+        ? [...select.options].map((option) => option.textContent?.trim())
+        : [],
+      selected: select?.selectedOptions[0]?.textContent?.trim() ?? "",
+      selectLabel: chooser?.childNodes[0]?.textContent?.trim() ?? "",
+      viewportWidth: window.innerWidth,
+    };
+  })()`);
   if (
     JSON.stringify(compactNavigation.labels) !==
       JSON.stringify([
@@ -1279,9 +1300,12 @@ try {
         "Targets",
         "About",
       ]) ||
-    compactNavigation.selectedTarget !== "This device" ||
-    JSON.stringify(compactNavigation.targetOptions) !==
-      JSON.stringify(["This device", "Second local"])
+    compactNavigation.chooserDisplay !== "grid" ||
+    compactNavigation.selectLabel !== "Target" ||
+    JSON.stringify(compactNavigation.options) !==
+      JSON.stringify(["This device", "Second local"]) ||
+    !["This device", "Second local"].includes(compactNavigation.selected) ||
+    compactNavigation.documentWidth > compactNavigation.viewportWidth
   ) {
     throw new Error(
       `Compact accessibility contract failed: ${JSON.stringify(compactNavigation)}`,
