@@ -16,7 +16,6 @@ import {
   type PublicMutationState,
   type RendererError,
   type TargetDefinition as PublicTargetDefinition,
-  type WorkspaceRequestResult,
   type WorkspaceSnapshot,
 } from "../../contracts/workspace.js";
 import {

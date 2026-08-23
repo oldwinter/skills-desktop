@@ -3,8 +3,11 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdir, open, readFile, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import type { PublicError, Result } from "@skills-desktop/skills-runtime";
-import { WIRE_PROTOCOL_VERSION } from "@skills-desktop/skills-runtime";
+import {
+  type PublicError,
+  type Result,
+  WIRE_PROTOCOL_VERSION,
+} from "@skills-desktop/skills-runtime";
 import { REMOTE_BOOTSTRAP_DIGEST } from "@skills-desktop/remote-bootstrap";
 
 import type { TargetDefinition } from "../targets/skills-targets.js";

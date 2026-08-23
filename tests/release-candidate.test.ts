@@ -198,7 +198,7 @@ describe("unsigned release candidate contract", () => {
       : [];
     expect(linuxMakers).toHaveLength(2);
     expect(linuxMakers).toEqual(
-      linuxMakers.map((maker) =>
+      linuxMakers.map(() =>
         expect.objectContaining({
           config: expect.objectContaining({
             options: expect.objectContaining({

@@ -166,7 +166,7 @@ export function createUpdateCoordinator(input: {
     const checkedAt = input.clock.now().toISOString();
     try {
       await input.records.save(checkedAt);
-    } catch (_error) {
+    } catch {
       // Eligibility-store errors can contain local paths; publish only fixed state.
       failCheck();
       return;
@@ -184,7 +184,7 @@ export function createUpdateCoordinator(input: {
         feedUrl,
         onEvent: (event) => receiveUpdaterEvent(checkId, event),
       });
-    } catch (_error) {
+    } catch {
       // Updater errors can contain feed details; publish only fixed state.
       await receiveUpdaterEvent(checkId, { type: "error" });
     }
@@ -228,7 +228,7 @@ export function createUpdateCoordinator(input: {
       let lastCheckAt: string | null;
       try {
         lastCheckAt = await input.records.load();
-      } catch (_error) {
+      } catch {
         // Eligibility-store errors can contain local paths; publish only fixed state.
         failCheck();
         return;
