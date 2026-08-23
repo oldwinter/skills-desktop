@@ -937,6 +937,7 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                 <div className="inspector-empty">
                   <CircleHelp aria-hidden="true" size={22} />
                   <h2>No skill selected</h2>
+                  <p>Select a skill in the table to inspect evidence.</p>
                 </div>
               ) : (
                 <>
