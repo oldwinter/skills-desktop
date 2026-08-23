@@ -9,6 +9,8 @@ The runner creates one disposable root and never reads developer skill state:
 - `HOME`, `XDG_CONFIG_HOME`, `XDG_CACHE_HOME`, and Electron `--user-data-dir`
 - a unique loopback CDP port and session name
 - a stub `npx` on `PATH` that serves fixture inventory
+- a pinned `axe-core` source; an unavailable dependency fails the run closed
+- on Windows, `node.exe`, npm shims, and npm's `npx-cli.js` resolver layout
 - ephemeral logs and optional screenshots under `<fixture>/artifacts`
 
 Teardown deletes only that fixture root and the Electron process group it spawned.

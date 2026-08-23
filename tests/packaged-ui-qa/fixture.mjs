@@ -1,4 +1,12 @@
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  copyFile,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -23,7 +31,7 @@ function packageRootCandidate(root, platform, arch) {
       "Skills Desktop.app",
       "Contents",
       "MacOS",
-      "Skills Desktop",
+      "skills-desktop",
     );
   }
   return join(directory, `skills-desktop${platform === "win32" ? ".exe" : ""}`);
@@ -36,6 +44,21 @@ export function resolvePackagedExecutable({
   override = process.env.SKILLS_DESKTOP_PACKAGED_EXECUTABLE,
 } = {}) {
   return override ?? packageRootCandidate(root, platform, arch);
+}
+
+export function assertRuntimeArchitecture(
+  expected = process.env.SKILLS_DESKTOP_QA_ARCH,
+) {
+  if (expected === undefined || expected === "") return process.arch;
+  if (expected !== "x64" && expected !== "arm64") {
+    throw new Error(`Unsupported packaged QA architecture: ${expected}`);
+  }
+  if (process.arch !== expected) {
+    throw new Error(
+      `Packaged QA runtime architecture mismatch: expected ${expected}, got ${process.arch}.`,
+    );
+  }
+  return process.arch;
 }
 
 const projectEntry = (workspace) => ({
@@ -92,9 +115,10 @@ export async function createPackagedQaFixture({
 
   const npxScript = join(bin, platform === "win32" ? "npx.cmd" : "npx");
   const npxProgram = join(bin, "qa-npx.cjs");
-  await writeFile(
-    npxProgram,
-    `#!/usr/bin/env node
+  const windowsNode = join(bin, "node.exe");
+  const windowsNpxCli = join(bin, "node_modules", "npm", "bin", "npx-cli.js");
+  const windowsNpm = join(bin, "npm.cmd");
+  const qaNpxSource = `#!/usr/bin/env node
 const fs = require("node:fs");
 const path = require("node:path");
 const args = process.argv.slice(2);
@@ -114,11 +138,24 @@ if (args.at(-1) === "--version") {
 } else {
   process.exitCode = 2;
 }
-`,
+`;
+  await writeFile(
+    npxProgram,
+    qaNpxSource,
     { mode: 0o700 },
   );
   if (platform === "win32") {
-    await writeFile(npxScript, `@echo off\r\nnode "%~dp0qa-npx.cjs" %*\r\n`);
+    await mkdir(dirname(windowsNpxCli), { recursive: true });
+    await copyFile(process.execPath, windowsNode);
+    await writeFile(windowsNpxCli, qaNpxSource);
+    await writeFile(
+      npxScript,
+      `@echo off\r\n"%~dp0node.exe" "%~dp0node_modules\\npm\\bin\\npx-cli.js" %*\r\n`,
+    );
+    await writeFile(
+      windowsNpm,
+      `@echo off\r\n"%~dp0node.exe" "%~dp0node_modules\\npm\\bin\\npx-cli.js" %*\r\n`,
+    );
   } else {
     await writeFile(npxScript, `#!/bin/sh\nexec node "${npxProgram}" "$@"\n`, {
       mode: 0o700,
@@ -141,6 +178,7 @@ if (args.at(-1) === "--version") {
       "USERPROFILE",
       "TEMP",
       "TMP",
+      "PATHEXT",
     ].flatMap((name) => (process.env[name] ? [[name, process.env[name]]] : [])),
   );
   const environment = {

@@ -129,7 +129,7 @@ export class CdpPage {
   }
 
   send(method, params = {}) {
-    if (this.closed || this.socket.readyState === 3) {
+    if (this.closed || this.socket.readyState !== 1) {
       return Promise.reject(new CdpDisconnectedError());
     }
     const id = this.nextId++;
@@ -145,7 +145,11 @@ export class CdpPage {
       } catch (error) {
         clearTimeout(timer);
         this.pending.delete(id);
-        reject(error);
+        reject(
+          this.closed || this.socket.readyState !== 1
+            ? new CdpDisconnectedError()
+            : error,
+        );
       }
     });
   }
@@ -195,8 +199,20 @@ export class CdpPage {
   }
 
   async dispatchKey(key, code = key) {
+    const virtualKeyCodes = {
+      ArrowDown: 40,
+      ArrowLeft: 37,
+      ArrowRight: 39,
+      ArrowUp: 38,
+      Enter: 13,
+      Escape: 27,
+      Space: 32,
+      Tab: 9,
+    };
     const windowsVirtualKeyCode =
-      key.length === 1 ? key.toUpperCase().charCodeAt(0) : undefined;
+      key.length === 1
+        ? key.toUpperCase().charCodeAt(0)
+        : virtualKeyCodes[key];
     await this.send("Input.dispatchKeyEvent", {
       code,
       key,

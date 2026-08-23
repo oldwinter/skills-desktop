@@ -28,6 +28,12 @@ describe("packaged UI QA workflow contract", () => {
           `${entry.platform}-${entry.architecture}`,
       ),
     ).toEqual(["linux-x64", "darwin-arm64", "darwin-x64", "win32-x64"]);
+    expect(
+      job.strategy.matrix.include.find(
+        (entry: { architecture: string; platform: string }) =>
+          entry.platform === "darwin" && entry.architecture === "x64",
+      ).runner,
+    ).toBe('"macos-13"');
 
     const uses = job.steps
       .map((step: { uses?: string }) => step.uses)
@@ -44,5 +50,17 @@ describe("packaged UI QA workflow contract", () => {
     expect(source).toContain("tests/packaged-ui-qa/run.mjs");
     expect(source).toContain("SKILLS_DESKTOP_PACKAGED_EXECUTABLE");
     expect(source).toContain("SKILLS_DESKTOP_QA_ARTIFACTS");
+    expect(source).toContain("SKILLS_DESKTOP_QA_ARCH");
+    expect(source).toContain("Contents/MacOS/skills-desktop");
+    expect(source).toContain("trap cleanup EXIT");
+    const qaStep = job.steps.find(
+      (step: { env?: Record<string, string>; run?: string }) =>
+        typeof step.run === "string" &&
+        step.run.includes("tests/packaged-ui-qa/run.mjs"),
+    );
+    expect(qaStep?.env).toMatchObject({
+      SKILLS_DESKTOP_QA_ARCH: "${{ matrix.architecture }}",
+      SKILLS_DESKTOP_QA_ARTIFACTS: "${{ runner.temp }}/packaged-ui-qa",
+    });
   });
 });

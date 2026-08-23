@@ -5,18 +5,20 @@ import {
   CdpPage,
   CdpRequestTimeoutError,
 } from "./cdp.mjs";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { persistFailureArtifacts } from "./artifacts.mjs";
 import {
+  assertRuntimeArchitecture,
   createPackagedQaFixture,
   resolvePackagedExecutable,
 } from "./fixture.mjs";
 import { findAvailablePort, launchPackagedElectron } from "./launch.mjs";
 import {
   PACKAGED_UI_QA_SCENARIOS,
+  requireAxeSource,
   packagedUiQaHelp,
   runPackagedUiQa,
 } from "./scenarios.mjs";
@@ -97,6 +99,17 @@ describe("packaged UI QA CDP seam", () => {
     );
   });
 
+  it("rejects requests while the browser is closing", async () => {
+    const socket = new FakeSocket();
+    const page = new CdpPage(socket, { requestTimeoutMs: 1_000 });
+    socket.readyState = 2;
+
+    await expect(page.send("Runtime.enable")).rejects.toBeInstanceOf(
+      CdpDisconnectedError,
+    );
+    expect(socket.sent).toHaveLength(0);
+  });
+
   it("resolves a response and keeps request ids monotonic", async () => {
     const socket = new FakeSocket();
     const page = new CdpPage(socket, { requestTimeoutMs: 100 });
@@ -175,7 +188,7 @@ describe("packaged UI QA fixture seam", () => {
         platform: "darwin",
         arch: "arm64",
       }),
-    ).toContain("Skills Desktop.app/Contents/MacOS/Skills Desktop");
+    ).toContain("Skills Desktop.app/Contents/MacOS/skills-desktop");
     expect(
       resolvePackagedExecutable({
         root: "C:\\repo",
@@ -183,6 +196,26 @@ describe("packaged UI QA fixture seam", () => {
         arch: "x64",
       }),
     ).toContain("skills-desktop.exe");
+  });
+
+  it("creates the Windows node/npm/npx layout used by the production resolver", async () => {
+    const fixture = await createPackagedQaFixture({ platform: "win32" });
+    fixtures.push(fixture);
+
+    await expect(access(`${fixture.bin}/node.exe`)).resolves.toBeUndefined();
+    await expect(
+      access(`${fixture.bin}/node_modules/npm/bin/npx-cli.js`),
+    ).resolves.toBeUndefined();
+    await expect(access(`${fixture.bin}/npm.cmd`)).resolves.toBeUndefined();
+    await expect(access(`${fixture.bin}/npx.cmd`)).resolves.toBeUndefined();
+    expect(fixture.environment.PATH?.split(";")[0]).toBe(fixture.bin);
+  });
+
+  it("fails when the packaged QA runtime architecture does not match", () => {
+    expect(assertRuntimeArchitecture(process.arch)).toBe(process.arch);
+    expect(() =>
+      assertRuntimeArchitecture(process.arch === "x64" ? "arm64" : "x64"),
+    ).toThrow(/architecture mismatch/i);
   });
 });
 
@@ -223,17 +256,59 @@ describe("packaged UI QA scenario contract", () => {
   it("writes failure-only redacted logs to an explicit artifact directory", async () => {
     const fixture = await createPackagedQaFixture();
     fixtures.push(fixture);
-    await fixture.cleanup();
+    await writeFile(
+      `${fixture.artifacts}/electron.stdout.log`,
+      "/Users/alice/skills-desktop\nhttps://example.test/?token=top-secret\n",
+    );
+    await writeFile(
+      `${fixture.artifacts}/electron.stderr.log`,
+      "Authorization: Bearer secret-value\nAPI_KEY=another-secret\nAWS_SECRET_ACCESS_KEY=env-secret\n",
+    );
     const destination = await mkdtemp(join(tmpdir(), "skills-desktop-qa-art-"));
     fixtures.push({ cleanup: () => rm(destination, { force: true, recursive: true }) });
     await persistFailureArtifacts(
       fixture,
-      new Error("qa failed"),
+      new Error(
+        "qa failed at /tmp/fixture with https://example.test/path and token=error-secret",
+      ),
       destination,
     );
-    expect(await readFile(join(destination, "error.txt"), "utf8")).toContain(
-      "qa failed",
+    const artifact = await Promise.all(
+      ["error.txt", "electron.stdout.log", "electron.stderr.log"].map(
+        (name) => readFile(join(destination, name), "utf8"),
+      ),
+    ).then((values) => values.join("\n"));
+    expect(artifact).toContain("qa failed");
+    expect(artifact).not.toContain("/Users/alice/skills-desktop");
+    expect(artifact).not.toContain("/tmp/fixture");
+    expect(artifact).not.toContain("https://example.test");
+    expect(artifact).not.toContain("top-secret");
+    expect(artifact).not.toContain("secret-value");
+    expect(artifact).not.toContain("another-secret");
+    expect(artifact).not.toContain("env-secret");
+    expect(artifact).not.toContain("error-secret");
+  });
+
+  it("pins the axe-core runtime used by the packaged scan", async () => {
+    const packageJson = JSON.parse(
+      await readFile(new URL("../../package.json", import.meta.url), "utf8"),
     );
+    const packageLock = JSON.parse(
+      await readFile(new URL("../../package-lock.json", import.meta.url), "utf8"),
+    );
+    expect(packageJson.devDependencies["axe-core"]).toBe("4.11.0");
+    expect(packageLock.packages[""].devDependencies["axe-core"]).toBe("4.11.0");
+    expect(packageLock.packages["node_modules/axe-core"]).toMatchObject({
+      integrity:
+        "sha512-ilYanEU8vxxBexpJd8cWM4ElSQq4QctCLKih0TSfjIfCQTeyH/6zVrmIJfLPrKTKJRbiG+cfnZbQIjAlJmF1jQ==",
+      version: "4.11.0",
+    });
+  });
+
+  it("fails closed when the pinned axe source cannot be loaded", async () => {
+    await expect(
+      requireAxeSource("/missing/axe-core/axe.min.js"),
+    ).rejects.toThrow(/axe-core/i);
   });
 
   it("does not launch without a packaged executable", async () => {

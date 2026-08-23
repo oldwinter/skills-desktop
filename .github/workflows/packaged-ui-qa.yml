@@ -30,7 +30,7 @@ jobs:
             runner: '"macos-15"'
           - architecture: x64
             platform: darwin
-            runner: '"macos-15"'
+            runner: '"macos-13"'
           - architecture: x64
             platform: win32
             runner: '"windows-2025"'
@@ -51,16 +51,27 @@ jobs:
           --arch=${{ matrix.architecture }}
       - name: Run isolated Local-only UI QA
         env:
+          SKILLS_DESKTOP_QA_ARCH: ${{ matrix.architecture }}
           SKILLS_DESKTOP_QA_ARTIFACTS: ${{ runner.temp }}/packaged-ui-qa
         shell: bash
         run: |
           set -euo pipefail
+          profile_path=""
+          cleanup() {
+            status=$?
+            if [[ -n "${profile_path}" ]]; then
+              sudo apparmor_parser --skip-cache --remove "$profile_path" || true
+              rm -f "$profile_path"
+            fi
+            exit "$status"
+          }
+          trap cleanup EXIT
           case "${{ matrix.platform }}" in
             linux)
               executable="$GITHUB_WORKSPACE/apps/desktop/out/Skills Desktop-linux-${{ matrix.architecture }}/skills-desktop"
               ;;
             darwin)
-              executable="$GITHUB_WORKSPACE/apps/desktop/out/Skills Desktop-darwin-${{ matrix.architecture }}/Skills Desktop.app/Contents/MacOS/Skills Desktop"
+              executable="$GITHUB_WORKSPACE/apps/desktop/out/Skills Desktop-darwin-${{ matrix.architecture }}/Skills Desktop.app/Contents/MacOS/skills-desktop"
               ;;
             win32)
               executable="$GITHUB_WORKSPACE/apps/desktop/out/Skills Desktop-win32-${{ matrix.architecture }}/skills-desktop.exe"
@@ -79,8 +90,6 @@ jobs:
           EOF
             sudo apparmor_parser --skip-cache --replace "$profile_path"
             xvfb-run -a node tests/packaged-ui-qa/run.mjs
-            sudo apparmor_parser --skip-cache --remove "$profile_path" || true
-            rm -f "$profile_path"
           else
             node tests/packaged-ui-qa/run.mjs
           fi

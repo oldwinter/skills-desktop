@@ -1,5 +1,9 @@
-import { persistFailureArtifacts } from "./artifacts.mjs";
-import { createPackagedQaFixture, resolvePackagedExecutable } from "./fixture.mjs";
+import { persistFailureArtifacts, redactFailureText } from "./artifacts.mjs";
+import {
+  assertRuntimeArchitecture,
+  createPackagedQaFixture,
+  resolvePackagedExecutable,
+} from "./fixture.mjs";
 import { packagedUiQaHelp, runPackagedUiQa } from "./scenarios.mjs";
 
 if (process.argv.includes("--help") || process.argv.includes("-h")) {
@@ -7,6 +11,7 @@ if (process.argv.includes("--help") || process.argv.includes("-h")) {
   process.exit(0);
 }
 
+assertRuntimeArchitecture();
 const fixture = await createPackagedQaFixture();
 const cleanup = async () => {
   await fixture.cleanup().catch(() => undefined);
@@ -27,7 +32,9 @@ try {
     `packaged UI QA passed: ${result.scenarios.join(", ")}\n`,
   );
 } catch (error) {
-  process.stderr.write(`${error instanceof Error ? error.stack : error}\n`);
+  process.stderr.write(
+    `${redactFailureText(error instanceof Error ? error.stack : error)}\n`,
+  );
   process.exitCode = 1;
   await persistFailureArtifacts(
     fixture,
