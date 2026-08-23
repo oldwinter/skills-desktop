@@ -36,6 +36,7 @@ const CURRENT_GUARD_SCHEMA_VERSION = 2 as const;
 const CURRENT_TARGET_SCHEMA_VERSION = 3 as const;
 const CURRENT_COLLECTION_SCHEMA_VERSION = 1 as const;
 const targetIdSchema = z.string().uuid();
+const legacyTargetIdSchema = z.string().min(1).max(256);
 
 function rejectDuplicateIdentities<Value>(
   values: readonly Value[],
@@ -593,7 +594,8 @@ function uniqueByTargetId<Value extends { readonly targetId: string }>(
 
 function isLegacyTargetId(targetId: string) {
   return (
-    targetId.length > 0 && !targetIdSchema.safeParse(targetId).success
+    legacyTargetIdSchema.safeParse(targetId).success &&
+    !targetIdSchema.safeParse(targetId).success
   );
 }
 
@@ -888,6 +890,7 @@ export function createJsonRecoveryRecords(
   };
   let pendingLegacySnapshots: InventorySnapshot[] | undefined;
   let pendingInventoryVersion: 1 | 2 | undefined;
+  let pendingLegacySnapshotRaw: string | undefined;
   let failures: RecoveryFailure[] = [];
   let guardDocument: GuardDocument = {
     guards: [],
@@ -896,6 +899,7 @@ export function createJsonRecoveryRecords(
     schemaVersion: CURRENT_GUARD_SCHEMA_VERSION,
   };
   let pendingLegacyGuards: MutationGuard[] | undefined;
+  let pendingLegacyGuardRaw: string | undefined;
   let guardFailures: RecoveryFailure[] = [];
   let guardsLoaded = false;
   let guardUnsupportedSchema = false;
@@ -937,6 +941,44 @@ export function createJsonRecoveryRecords(
     return result;
   };
 
+  const syncPath = async (path: string) => {
+    const handle = await fileSystem.open(path, "r");
+    try {
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+  };
+
+  const syncParentDirectory = async () => {
+    if ((options.platform ?? process.platform) === "win32") return;
+    await syncPath(options.directory);
+  };
+
+  const createVerifiedBackup = async (
+    sourcePath: string,
+    backupPath: string,
+    sourceContents?: string,
+  ) => {
+    const expectedContents =
+      sourceContents ?? (await fileSystem.readFile(sourcePath, "utf8"));
+    try {
+      await fileSystem.copyFile(
+        sourcePath,
+        backupPath,
+        constants.COPYFILE_EXCL,
+      );
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    }
+    const backupContents = await fileSystem.readFile(backupPath, "utf8");
+    if (backupContents !== expectedContents) {
+      throw new Error("Pre-existing recovery backup does not match its source.");
+    }
+    await syncPath(backupPath);
+    await syncParentDirectory();
+  };
+
   const writeUtf8 = async (
     contents: string,
     name = DOCUMENT_NAME,
@@ -962,14 +1004,7 @@ export function createJsonRecoveryRecords(
 
       await fileSystem.rename(temporaryPath, destinationPath);
       ownsTemporary = false;
-      if ((options.platform ?? process.platform) !== "win32") {
-        const directoryHandle = await fileSystem.open(options.directory, "r");
-        try {
-          await directoryHandle.sync();
-        } finally {
-          await directoryHandle.close();
-        }
-      }
+      await syncParentDirectory();
     } catch (error) {
       if (ownsTemporary)
         await fileSystem.unlink(temporaryPath).catch(() => undefined);
@@ -1075,21 +1110,21 @@ export function createJsonRecoveryRecords(
     if (!migrated.success) {
       pendingLegacySnapshots = legacySnapshots;
       pendingInventoryVersion = legacyCurrent.success ? 2 : 1;
+      pendingLegacySnapshotRaw = raw;
       return;
     }
     try {
-      await fileSystem.copyFile(
+      await createVerifiedBackup(
         documentPath,
         `${documentPath}.v${legacyCurrent.success ? 2 : 1}.backup`,
-        constants.COPYFILE_EXCL,
-      ).catch((error: NodeJS.ErrnoException) => {
-        if (error.code !== "EEXIST") throw error;
-      });
+        raw,
+      );
       await writeDocument(migrated.data);
       document = migrated.data;
     } catch {
       pendingLegacySnapshots = legacySnapshots;
       pendingInventoryVersion = legacyCurrent.success ? 2 : 1;
+      pendingLegacySnapshotRaw = raw;
       writeBlocked = true;
       failures = [{ code: "migration_failed", store: STORE_NAME }];
     }
@@ -1207,13 +1242,14 @@ export function createJsonRecoveryRecords(
     });
     if (!migrated.success) {
       pendingLegacyGuards = legacy.data.guards;
+      pendingLegacyGuardRaw = raw;
       return;
     }
     try {
-      await fileSystem.copyFile(
+      await createVerifiedBackup(
         guardDocumentPath,
         `${guardDocumentPath}.v1.backup`,
-        constants.COPYFILE_EXCL,
+        raw,
       );
       await writeDocument(
         migrated.data,
@@ -1363,10 +1399,10 @@ export function createJsonRecoveryRecords(
       return;
     }
     try {
-      await fileSystem.copyFile(
+      await createVerifiedBackup(
         targetDocumentPath,
         `${targetDocumentPath}.${legacyV2.success ? "v2" : "v1"}.backup`,
-        constants.COPYFILE_EXCL,
+        raw,
       );
       await writeDocument(
         migrated.data,
@@ -1687,32 +1723,24 @@ export function createJsonRecoveryRecords(
 
           try {
             if (pendingLegacySnapshots !== undefined) {
-              await fileSystem
-                .copyFile(
-                  documentPath,
-                  `${documentPath}.v${pendingInventoryVersion ?? 2}.backup`,
-                  constants.COPYFILE_EXCL,
-                )
-                .catch((error: NodeJS.ErrnoException) => {
-                  if (error.code !== "EEXIST") throw error;
-                });
+              await createVerifiedBackup(
+                documentPath,
+                `${documentPath}.v${pendingInventoryVersion ?? 2}.backup`,
+                pendingLegacySnapshotRaw,
+              );
+            }
+            if (pendingLegacyGuards !== undefined) {
+              await createVerifiedBackup(
+                guardDocumentPath,
+                `${guardDocumentPath}.v1.backup`,
+                pendingLegacyGuardRaw,
+              );
             }
             await writeDocument(nextDocument.data);
             document = nextDocument.data;
             pendingLegacySnapshots = undefined;
             pendingInventoryVersion = undefined;
-
-            if (pendingLegacyGuards !== undefined) {
-              await fileSystem
-                .copyFile(
-                  guardDocumentPath,
-                  `${guardDocumentPath}.v1.backup`,
-                  constants.COPYFILE_EXCL,
-                )
-                .catch((error: NodeJS.ErrnoException) => {
-                  if (error.code !== "EEXIST") throw error;
-                });
-            }
+            pendingLegacySnapshotRaw = undefined;
             await writeDocument(
               nextGuardDocument.data,
               GUARD_DOCUMENT_NAME,
@@ -1720,6 +1748,7 @@ export function createJsonRecoveryRecords(
             );
             guardDocument = nextGuardDocument.data;
             pendingLegacyGuards = undefined;
+            pendingLegacyGuardRaw = undefined;
             failures = [];
             guardFailures = [];
             return { ok: true, value: undefined };

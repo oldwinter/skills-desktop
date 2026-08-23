@@ -136,6 +136,33 @@ function migrationFaultingFileSystem(
   };
 }
 
+function backupSyncFaultingFileSystem(
+  directory: string,
+  fault: "backup" | "directory",
+): RecoveryFileSystem {
+  const delegate = createNodeRecoveryFileSystem();
+  return {
+    ...delegate,
+    async open(path, flags, mode) {
+      const handle = await delegate.open(path, flags, mode);
+      return {
+        close: () => handle.close(),
+        sync() {
+          if (
+            flags === "r" &&
+            ((fault === "backup" && path.endsWith(".backup")) ||
+              (fault === "directory" && path === directory))
+          ) {
+            return Promise.reject(new Error("backup sync fault"));
+          }
+          return handle.sync();
+        },
+        writeFile: (data, options) => handle.writeFile(data, options),
+      };
+    },
+  };
+}
+
 describe("RecoveryRecords Inventory Snapshot contract", () => {
   it("allowlists evidence in memory", async () => {
     await recoveryContract(() => createMemoryRecoveryRecords());
@@ -274,6 +301,115 @@ describe("RecoveryRecords Inventory Snapshot contract", () => {
       expect(JSON.parse(await readFile(snapshotPath, "utf8"))).toMatchObject({
         schemaVersion: 3,
       });
+    },
+  );
+
+  it("does not replace a legacy Snapshot when a pre-existing backup conflicts", async () => {
+    const directory = await temporaryDirectory();
+    const snapshotPath = join(directory, "inventory-snapshots.json");
+    const backupPath = `${snapshotPath}.v1.backup`;
+    const legacyDocument = {
+      kind: "inventory-snapshots",
+      schemaVersion: 1,
+      records: [
+        {
+          capturedAt: "2026-08-20T08:00:00.000Z",
+          cliVersion: "1.5.23",
+          generation: 2,
+          skills: [],
+          target: "00000000-0000-4000-8000-000000000001",
+        },
+      ],
+    };
+    const legacyRaw = JSON.stringify(legacyDocument);
+    await writeFile(snapshotPath, legacyRaw, "utf8");
+    await writeFile(backupPath, "conflicting backup", "utf8");
+
+    await expect(
+      createJsonRecoveryRecords({
+        directory,
+        id: () => "snapshot-conflicting-backup",
+      }).restore(),
+    ).resolves.toMatchObject({
+      failures: [{ code: "migration_failed", store: "inventorySnapshots" }],
+      inventorySnapshots: [{ observedAt: "2026-08-20T08:00:00.000Z" }],
+    });
+    await expect(readFile(snapshotPath, "utf8")).resolves.toBe(legacyRaw);
+    await expect(readFile(backupPath, "utf8")).resolves.toBe(
+      "conflicting backup",
+    );
+  });
+
+  it("accepts an exact pre-existing Snapshot backup and retries migration idempotently", async () => {
+    const directory = await temporaryDirectory();
+    const snapshotPath = join(directory, "inventory-snapshots.json");
+    const backupPath = `${snapshotPath}.v1.backup`;
+    const legacyDocument = {
+      kind: "inventory-snapshots",
+      schemaVersion: 1,
+      records: [
+        {
+          capturedAt: "2026-08-20T08:00:00.000Z",
+          cliVersion: "1.5.23",
+          generation: 2,
+          skills: [],
+          target: "00000000-0000-4000-8000-000000000001",
+        },
+      ],
+    };
+    const legacyRaw = JSON.stringify(legacyDocument);
+    await writeFile(snapshotPath, legacyRaw, "utf8");
+    await writeFile(backupPath, legacyRaw, "utf8");
+
+    await expect(
+      createJsonRecoveryRecords({
+        directory,
+        id: () => "snapshot-matching-backup",
+      }).restore(),
+    ).resolves.toMatchObject({
+      failures: [],
+      inventorySnapshots: [
+        { targetId: "00000000-0000-4000-8000-000000000001" },
+      ],
+    });
+    expect(JSON.parse(await readFile(snapshotPath, "utf8"))).toMatchObject({
+      schemaVersion: 3,
+    });
+    await expect(readFile(backupPath, "utf8")).resolves.toBe(legacyRaw);
+  });
+
+  it.each(["backup", "directory"] as const)(
+    "blocks Snapshot replacement when its %s cannot be synchronized",
+    async (fault) => {
+      const directory = await temporaryDirectory();
+      const snapshotPath = join(directory, "inventory-snapshots.json");
+      const legacyDocument = {
+        kind: "inventory-snapshots",
+        schemaVersion: 1,
+        records: [
+          {
+            capturedAt: "2026-08-20T08:00:00.000Z",
+            cliVersion: "1.5.23",
+            generation: 2,
+            skills: [],
+            target: "00000000-0000-4000-8000-000000000001",
+          },
+        ],
+      };
+      const legacyRaw = JSON.stringify(legacyDocument);
+      await writeFile(snapshotPath, legacyRaw, "utf8");
+
+      await expect(
+        createJsonRecoveryRecords({
+          directory,
+          fileSystem: backupSyncFaultingFileSystem(directory, fault),
+          id: () => `snapshot-backup-sync-${fault}`,
+        }).restore(),
+      ).resolves.toMatchObject({
+        failures: [{ code: "migration_failed", store: "inventorySnapshots" }],
+        inventorySnapshots: [{ observedAt: "2026-08-20T08:00:00.000Z" }],
+      });
+      await expect(readFile(snapshotPath, "utf8")).resolves.toBe(legacyRaw);
     },
   );
 
@@ -571,6 +707,106 @@ describe("RecoveryRecords Inventory Snapshot contract", () => {
           targetId: currentTargetId,
         },
       ],
+    });
+  });
+
+  it("keeps delayed remap primaries unchanged for a conflicting backup and retries with a matching backup", async () => {
+    const directory = await temporaryDirectory();
+    const legacyTargetId = "local-codex-0123456789abcdef01234567";
+    const currentTargetId = "00000000-0000-4000-8000-000000000020";
+    const snapshotPath = join(directory, "inventory-snapshots.json");
+    const guardPath = join(directory, "mutation-guards.json");
+    const snapshotDocument = {
+      kind: "inventory-snapshots",
+      schemaVersion: 2,
+      snapshots: [
+        {
+          cliVersion: "1.5.23",
+          entries: [],
+          generation: 1,
+          observedAt: "2026-08-20T08:00:00.000Z",
+          targetId: legacyTargetId,
+        },
+      ],
+    };
+    const guardDocument = {
+      guards: [
+        {
+          deadline: "2026-08-20T08:10:00.000Z",
+          effects: "possible",
+          generation: 1,
+          operationId: "legacy-operation",
+          phase: "reconciliation-required",
+          targetId: legacyTargetId,
+        },
+      ],
+      kind: "mutation-guards",
+      schemaVersion: 1,
+    };
+    const snapshotRaw = JSON.stringify(snapshotDocument);
+    const guardRaw = JSON.stringify(guardDocument);
+    await writeFile(snapshotPath, snapshotRaw, "utf8");
+    await writeFile(guardPath, guardRaw, "utf8");
+    await writeFile(
+      join(directory, "target-definitions.json"),
+      JSON.stringify({
+        kind: "target-definitions",
+        schemaVersion: 3,
+        targets: [
+          {
+            connectionReference: null,
+            executionBindingDigest: null,
+            generation: 1,
+            harness: "Codex",
+            id: currentTargetId,
+            kind: "local",
+            label: "Current local",
+            workspace: "/work/current",
+          },
+        ],
+      }),
+      "utf8",
+    );
+    const snapshotBackupPath = `${snapshotPath}.v2.backup`;
+    await writeFile(snapshotBackupPath, "conflicting backup", "utf8");
+    const records = createJsonRecoveryRecords({
+      directory,
+      id: () => "delayed-remap-backup",
+    });
+
+    await expect(records.restore()).resolves.toMatchObject({
+      failures: [],
+      inventorySnapshots: [{ targetId: legacyTargetId }],
+      mutationGuards: [{ targetId: legacyTargetId }],
+    });
+    await expect(
+      records.commit({
+        fromTargetId: legacyTargetId,
+        toTargetId: currentTargetId,
+        type: "target.remap",
+      }),
+    ).resolves.toMatchObject({
+      error: { code: "persist_failed" },
+      ok: false,
+    });
+    await expect(readFile(snapshotPath, "utf8")).resolves.toBe(snapshotRaw);
+    await expect(readFile(guardPath, "utf8")).resolves.toBe(guardRaw);
+    await expect(readFile(snapshotBackupPath, "utf8")).resolves.toBe(
+      "conflicting backup",
+    );
+
+    await writeFile(snapshotBackupPath, snapshotRaw, "utf8");
+    await expect(
+      records.commit({
+        fromTargetId: legacyTargetId,
+        toTargetId: currentTargetId,
+        type: "target.remap",
+      }),
+    ).resolves.toEqual({ ok: true, value: undefined });
+    await expect(records.restore()).resolves.toMatchObject({
+      failures: [],
+      inventorySnapshots: [{ targetId: currentTargetId }],
+      mutationGuards: [{ targetId: currentTargetId }],
     });
   });
 
