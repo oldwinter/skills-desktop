@@ -2,6 +2,9 @@
 
 import "@testing-library/jest-dom/vitest";
 
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
 import {
   act,
   cleanup,
@@ -267,6 +270,11 @@ const aboutClient: AboutBridge = {
 
 afterEach(cleanup);
 
+const rendererStyles = readFileSync(
+  resolve(process.cwd(), "apps/desktop/src/renderer/styles.css"),
+  "utf8",
+);
+
 describe("Local Target Inventory shell", () => {
   it("shows Target, Harness, scope, source identity, and Fresh evidence", async () => {
     render(<InventoryApp client={clientFor(snapshot)} />);
@@ -478,6 +486,44 @@ describe("Local Target Inventory shell", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("Version 0.1.0")).toBeInTheDocument();
     expect(screen.getByText("Manual upgrade")).toBeInTheDocument();
+  });
+
+  it("keeps Collection Include semantics and checkbox hit areas explicit", async () => {
+    render(<InventoryApp client={clientFor(collectionSnapshot)} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Collections" }));
+
+    const table = screen.getByRole("table");
+    const includeHeader = within(table).getByRole("columnheader", {
+      name: "Include",
+    });
+    expect(includeHeader).toHaveAttribute("scope", "col");
+    expect(
+      within(table).getByRole("columnheader", { name: "Skill" }),
+    ).toBeInTheDocument();
+
+    expect(
+      screen.getByRole("checkbox", { name: "Include This device" }).parentElement,
+    ).toHaveClass("collection-checkbox-hit-area");
+    expect(
+      screen.getByRole("checkbox", { name: "Select find-skills" }).parentElement,
+    ).toHaveClass("collection-checkbox-hit-area");
+
+    expect(rendererStyles).toMatch(
+      /\.collection-checkbox-hit-area\s*\{(?=[^}]*min-width:\s*40px)(?=[^}]*min-height:\s*40px)[^}]*\}/s,
+    );
+  });
+
+  it("keeps skill-name controls at the shared 40px minimum", async () => {
+    render(<InventoryApp client={clientFor(snapshot)} />);
+
+    const skillButton = await screen.findByRole("button", {
+      name: "Case-Sensitive-Skill",
+    });
+    expect(skillButton).toHaveClass("skill-button");
+    expect(rendererStyles).toMatch(
+      /\.skill-button\s*\{(?=[^}]*min-height:\s*40px)[^}]*\}/s,
+    );
   });
 
   it("requires explicit eligible Collection selections before preparing", async () => {

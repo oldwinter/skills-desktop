@@ -441,28 +441,30 @@ export function CollectionsView({
                 key={targetState.target.id}
               >
                 <header>
-                  <label className="collection-machine-toggle">
-                    <input
-                      aria-label={`Include ${targetState.target.label}`}
-                      checked={
-                        targetState.target.kind === "ssh" ? false : included
-                      }
-                      disabled={locked || targetState.target.kind === "ssh"}
-                      onChange={(event) => {
-                        if (targetState.target.kind === "ssh") return;
-                        const included = event.currentTarget.checked;
-                        updateInput(targetState.target.id, (current) => ({
-                          ...current,
-                          included,
-                        }));
-                      }}
-                      title={
-                        targetState.target.kind === "ssh"
-                          ? "SSH · 未在 V1 开放，不在 V1 Local Collections 范围内"
-                          : undefined
-                      }
-                      type="checkbox"
-                    />
+                  <div className="collection-machine-toggle">
+                    <label className="collection-checkbox-hit-area">
+                      <input
+                        aria-label={`Include ${targetState.target.label}`}
+                        checked={
+                          targetState.target.kind === "ssh" ? false : included
+                        }
+                        disabled={locked || targetState.target.kind === "ssh"}
+                        onChange={(event) => {
+                          if (targetState.target.kind === "ssh") return;
+                          const included = event.currentTarget.checked;
+                          updateInput(targetState.target.id, (current) => ({
+                            ...current,
+                            included,
+                          }));
+                        }}
+                        title={
+                          targetState.target.kind === "ssh"
+                            ? "SSH · 未在 V1 开放，不在 V1 Local Collections 范围内"
+                            : undefined
+                        }
+                        type="checkbox"
+                      />
+                    </label>
                     <TargetIcon aria-hidden="true" size={17} />
                     <span>
                       <strong>{targetState.target.label}</strong>
@@ -474,7 +476,7 @@ export function CollectionsView({
                       </small>
                       <small>{inventoryFreshnessLabel}</small>
                     </span>
-                  </label>
+                  </div>
                   <label className="collection-scope-select">
                     <span>Scope</span>
                     <select
@@ -492,7 +494,7 @@ export function CollectionsView({
                       <option value="project">Project</option>
                       <option value="global">Global</option>
                     </select>
-                  </label>
+                  </div>
                 </header>
                 {blockers.length === 0 ? null : (
                   <ul className="collection-target-blockers">
@@ -509,10 +511,10 @@ export function CollectionsView({
                     </caption>
                     <thead>
                       <tr>
-                        <th aria-label="Select" />
-                        <th>Skill</th>
-                        <th>Assessment</th>
-                        <th>Action</th>
+                        <th scope="col">Include</th>
+                        <th scope="col">Skill</th>
+                        <th scope="col">Assessment</th>
+                        <th scope="col">Action</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -524,34 +526,37 @@ export function CollectionsView({
                             : `Select ${entry.name} on ${targetState.target.label}`;
                         return (
                           <tr key={`${input.scope}:${entry.name}`}>
-                            <td data-label="Select">
-                              <input
-                                aria-label={selectionLabel}
-                                checked={
-                                  input.selected[entry.name] !== undefined
-                                }
-                                disabled={
-                                  locked ||
-                                  !included ||
-                                  !targetRelease?.executable ||
-                                  !entry.selectable ||
-                                  mode === undefined
-                                }
-                                onChange={(event) => {
-                                  const checked = event.currentTarget.checked;
-                                  updateInput(
-                                    targetState.target.id,
-                                    (current) => {
-                                      const selected = { ...current.selected };
-                                      if (!checked) delete selected[entry.name];
-                                      else if (mode !== undefined)
-                                        selected[entry.name] = mode;
-                                      return { ...current, selected };
-                                    },
-                                  );
-                                }}
-                                type="checkbox"
-                              />
+                            <td data-label="Include">
+                              <label className="collection-checkbox-hit-area">
+                                <input
+                                  aria-label={selectionLabel}
+                                  checked={
+                                    input.selected[entry.name] !== undefined
+                                  }
+                                  disabled={
+                                    locked ||
+                                    !included ||
+                                    !targetRelease?.executable ||
+                                    !entry.selectable ||
+                                    mode === undefined
+                                  }
+                                  onChange={(event) => {
+                                    const checked = event.currentTarget.checked;
+                                    updateInput(
+                                      targetState.target.id,
+                                      (current) => {
+                                        const selected = { ...current.selected };
+                                        if (!checked)
+                                          delete selected[entry.name];
+                                        else if (mode !== undefined)
+                                          selected[entry.name] = mode;
+                                        return { ...current, selected };
+                                      },
+                                    );
+                                  }}
+                                  type="checkbox"
+                                />
+                              </label>
                             </td>
                             <td data-label="Skill">
                               <strong>{entry.name}</strong>
