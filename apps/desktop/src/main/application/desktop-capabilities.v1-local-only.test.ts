@@ -291,17 +291,29 @@ describe("V1 Local-only Target authority", () => {
         type: "mutation.reconcile" as const,
         version: 1 as const,
       },
-      {
-        targetId: readySshTarget.id,
-        type: "host-trust.review" as const,
-        version: 1 as const,
-      },
     ]) {
       await expect(session.request(request)).resolves.toEqual({
         ok: false,
         error: sshRejectError,
       });
     }
+
+    await expect(
+      session.request({
+        targetId: readySshTarget.id,
+        type: "host-trust.review",
+        version: 1,
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      error: {
+        code: "invalid_request",
+        effects: "none",
+        message: "主机身份复核未在 V1 开放。",
+        phase: "target",
+        retryable: false,
+      },
+    });
 
     expect(inspectCalls).toBe(0);
     expect(observeCalls).toBe(0);
