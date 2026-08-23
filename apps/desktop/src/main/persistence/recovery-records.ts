@@ -212,6 +212,11 @@ const guardDocumentSchema = z
       ({ targetId }) => targetId,
       context,
     );
+    rejectDuplicateIdentities(
+      [...document.legacyGuards, ...document.guards],
+      ({ operationId }) => operationId,
+      context,
+    );
   });
 
 const legacyGuardDocumentSchema = z
@@ -223,6 +228,11 @@ const legacyGuardDocumentSchema = z
   .strict()
   .superRefine((document, context) => {
     rejectDuplicateIdentities(document.guards, ({ targetId }) => targetId, context);
+    rejectDuplicateIdentities(
+      document.guards,
+      ({ operationId }) => operationId,
+      context,
+    );
   });
 
 const targetDefinitionSchema = z

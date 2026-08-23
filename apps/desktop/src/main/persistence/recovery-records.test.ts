@@ -1354,6 +1354,84 @@ describe("RecoveryRecords Mutation Guard contract", () => {
         },
         id: "duplicate-legacy-guards",
       },
+      {
+        document: {
+          guards: [
+            {
+              deadline: "2026-08-21T10:10:00.000Z",
+              effects: "none",
+              generation: 1,
+              operationId: "duplicate-operation",
+              phase: "executing",
+              targetId: "00000000-0000-4000-8000-000000000001",
+            },
+            {
+              deadline: "2026-08-21T11:10:00.000Z",
+              effects: "possible",
+              generation: 2,
+              operationId: "duplicate-operation",
+              phase: "reconciliation-required",
+              targetId: "00000000-0000-4000-8000-000000000002",
+            },
+          ],
+          kind: "mutation-guards",
+          legacyGuards: [],
+          schemaVersion: 2,
+        },
+        id: "duplicate-current-operation-ids",
+      },
+      {
+        document: {
+          guards: [
+            {
+              deadline: "2026-08-21T10:10:00.000Z",
+              effects: "none",
+              generation: 1,
+              operationId: "duplicate-operation",
+              phase: "executing",
+              targetId: "legacy-target-a",
+            },
+            {
+              deadline: "2026-08-21T11:10:00.000Z",
+              effects: "possible",
+              generation: 2,
+              operationId: "duplicate-operation",
+              phase: "reconciliation-required",
+              targetId: "legacy-target-b",
+            },
+          ],
+          kind: "mutation-guards",
+          schemaVersion: 1,
+        },
+        id: "duplicate-legacy-operation-ids",
+      },
+      {
+        document: {
+          guards: [
+            {
+              deadline: "2026-08-21T10:10:00.000Z",
+              effects: "none",
+              generation: 1,
+              operationId: "duplicate-operation",
+              phase: "executing",
+              targetId: "00000000-0000-4000-8000-000000000001",
+            },
+          ],
+          kind: "mutation-guards",
+          legacyGuards: [
+            {
+              deadline: "2026-08-21T11:10:00.000Z",
+              effects: "possible",
+              generation: 2,
+              operationId: "duplicate-operation",
+              phase: "reconciliation-required",
+              targetId: "legacy-target",
+            },
+          ],
+          schemaVersion: 2,
+        },
+        id: "duplicate-mixed-operation-ids",
+      },
     ] as const;
 
     for (const { document, id } of cases) {
@@ -1374,6 +1452,90 @@ describe("RecoveryRecords Mutation Guard contract", () => {
         `mutation-guards.quarantine-${id}.json`,
       );
     }
+  });
+
+  it("keeps current Guards with distinct operation identities and deadlines readable", async () => {
+    const directory = await temporaryDirectory();
+    const firstTargetId = "00000000-0000-4000-8000-000000000001";
+    const secondTargetId = "00000000-0000-4000-8000-000000000002";
+    await writeFile(
+      join(directory, "target-definitions.json"),
+      JSON.stringify({
+        kind: "target-definitions",
+        schemaVersion: 3,
+        targets: [
+          {
+            connectionReference: null,
+            executionBindingDigest: null,
+            generation: 1,
+            harness: "Codex",
+            id: firstTargetId,
+            kind: "local",
+            label: "First local",
+            workspace: "/work/first",
+          },
+          {
+            connectionReference: null,
+            executionBindingDigest: null,
+            generation: 2,
+            harness: "Codex",
+            id: secondTargetId,
+            kind: "local",
+            label: "Second local",
+            workspace: "/work/second",
+          },
+        ],
+      }),
+      "utf8",
+    );
+    await writeFile(
+      join(directory, "mutation-guards.json"),
+      JSON.stringify({
+        guards: [
+          {
+            deadline: "2026-08-21T10:10:00.000Z",
+            effects: "none",
+            generation: 1,
+            operationId: "operation-first",
+            phase: "executing",
+            targetId: firstTargetId,
+          },
+          {
+            deadline: "2026-08-21T11:10:00.000Z",
+            effects: "possible",
+            generation: 2,
+            operationId: "operation-second",
+            phase: "reconciliation-required",
+            targetId: secondTargetId,
+          },
+        ],
+        kind: "mutation-guards",
+        legacyGuards: [],
+        schemaVersion: 2,
+      }),
+      "utf8",
+    );
+
+    await expect(
+      createJsonRecoveryRecords({
+        directory,
+        id: () => "distinct-guard-operations",
+      }).restore(),
+    ).resolves.toMatchObject({
+      failures: [],
+      mutationGuards: [
+        {
+          deadline: "2026-08-21T10:10:00.000Z",
+          operationId: "operation-first",
+          targetId: firstTargetId,
+        },
+        {
+          deadline: "2026-08-21T11:10:00.000Z",
+          operationId: "operation-second",
+          targetId: secondTargetId,
+        },
+      ],
+    });
   });
 
   it("fails closed when current Guards survive without a Target store", async () => {
