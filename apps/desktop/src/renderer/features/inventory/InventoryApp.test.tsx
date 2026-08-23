@@ -1506,6 +1506,181 @@ describe("Local Target Inventory shell", () => {
     );
   });
 
+  it("explains Prepare disabled when Missing side already has the skill (#73)", async () => {
+    const rightTarget = {
+      connectionReference: null,
+      generation: 1,
+      harness: "Codex",
+      id: "00000000-0000-4000-8000-00000000000a",
+      kind: "local" as const,
+      label: "Right device",
+      workspace: "/work/right",
+      workspaceLabel: "right",
+    };
+    const comparison = {
+      id: "comparison-missing-left-has-skill",
+      leftFreshness: "fresh" as const,
+      leftTargetId: snapshot.target.id,
+      rightFreshness: "fresh" as const,
+      rightTargetId: rightTarget.id,
+      rows: [
+        {
+          dimensions: {
+            contentFingerprint: "not-applicable" as const,
+            declaredSource: "not-applicable" as const,
+            presence: "left-only" as const,
+            revision: "not-applicable" as const,
+          },
+          key: "Case-Sensitive-Skill",
+          left: {
+            entries: snapshot.inventory.entries,
+            freshness: "fresh" as const,
+            harnessAvailability: "available" as const,
+          },
+          right: {
+            entries: [],
+            freshness: "fresh" as const,
+            harnessAvailability: "absent" as const,
+          },
+          summary: "missing" as const,
+        },
+      ],
+    };
+    render(
+      <InventoryApp
+        client={clientFor({
+          ...snapshot,
+          comparison,
+          targets: [
+            {
+              deletionBlocked: false,
+              inventory: snapshot.inventory,
+              mutation: snapshot.mutation,
+              target: {
+                ...snapshot.target,
+                connectionReference: null,
+                workspace: "/work/skills-desktop",
+              },
+            },
+            {
+              deletionBlocked: false,
+              inventory: snapshot.inventory,
+              mutation: snapshot.mutation,
+              target: rightTarget,
+            },
+          ],
+        })}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Comparison" }));
+    const prepareLeft = screen.getByRole("button", {
+      name: "Prepare for Left",
+    });
+    expect(prepareLeft).toBeDisabled();
+    expect(prepareLeft).toHaveAttribute(
+      "title",
+      "Prepare for Missing only when Left lacks the skill",
+    );
+    expect(prepareLeft).toHaveAttribute(
+      "aria-describedby",
+      "comparison-prepare-left-unqualified",
+    );
+    expect(
+      document.getElementById("comparison-prepare-left-unqualified"),
+    ).toHaveTextContent("Prepare for Missing only when Left lacks the skill");
+    expect(
+      screen.getByRole("button", { name: "Prepare for Right" }),
+    ).toBeEnabled();
+  });
+
+  it("explains Prepare disabled when row is not Missing or version-drift (#73)", async () => {
+    const rightTarget = {
+      connectionReference: null,
+      generation: 1,
+      harness: "Codex",
+      id: "00000000-0000-4000-8000-00000000000a",
+      kind: "local" as const,
+      label: "Right device",
+      workspace: "/work/right",
+      workspaceLabel: "right",
+    };
+    const comparison = {
+      id: "comparison-matched-prepare",
+      leftFreshness: "fresh" as const,
+      leftTargetId: snapshot.target.id,
+      rightFreshness: "fresh" as const,
+      rightTargetId: rightTarget.id,
+      rows: [
+        {
+          dimensions: {
+            contentFingerprint: "matched" as const,
+            declaredSource: "matched" as const,
+            presence: "both" as const,
+            revision: "matched" as const,
+          },
+          key: "Case-Sensitive-Skill",
+          left: {
+            entries: snapshot.inventory.entries,
+            freshness: "fresh" as const,
+            harnessAvailability: "available" as const,
+          },
+          right: {
+            entries: snapshot.inventory.entries,
+            freshness: "fresh" as const,
+            harnessAvailability: "available" as const,
+          },
+          summary: "matched" as const,
+        },
+      ],
+    };
+    render(
+      <InventoryApp
+        client={clientFor({
+          ...snapshot,
+          comparison,
+          targets: [
+            {
+              deletionBlocked: false,
+              inventory: snapshot.inventory,
+              mutation: snapshot.mutation,
+              target: {
+                ...snapshot.target,
+                connectionReference: null,
+                workspace: "/work/skills-desktop",
+              },
+            },
+            {
+              deletionBlocked: false,
+              inventory: snapshot.inventory,
+              mutation: snapshot.mutation,
+              target: rightTarget,
+            },
+          ],
+        })}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Comparison" }));
+    const prepareRight = screen.getByRole("button", {
+      name: "Prepare for Right",
+    });
+    expect(prepareRight).toBeDisabled();
+    expect(prepareRight).toHaveAttribute(
+      "title",
+      "Prepare only applies to Missing or Revision or content drift rows (current: Matched)",
+    );
+    expect(prepareRight).toHaveAttribute(
+      "aria-describedby",
+      "comparison-prepare-right-unqualified",
+    );
+    expect(
+      document.getElementById("comparison-prepare-right-unqualified"),
+    ).toHaveTextContent(
+      "Prepare only applies to Missing or Revision or content drift rows (current: Matched)",
+    );
+  });
+
   it("keeps the Targets editor Local-only for V1", async () => {
     const createTarget = vi.fn(async () => ({
       ok: true as const,

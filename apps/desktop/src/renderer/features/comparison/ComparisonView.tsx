@@ -96,6 +96,12 @@ function prepareDisabledReason(input: {
   readonly comparisonFresh: boolean;
   readonly eligible: boolean;
   readonly mutationEligible: boolean;
+  readonly row:
+    | {
+        readonly sideEntryCount: number;
+        readonly summary: PublicComparison["rows"][number]["summary"];
+      }
+    | undefined;
   readonly side: "left" | "right";
   readonly ssh: boolean;
 }): string | undefined {
@@ -112,9 +118,19 @@ function prepareDisabledReason(input: {
   if (input.busy) {
     return "Comparison is busy";
   }
-  return input.side === "left"
-    ? "Selected skill is not eligible to Prepare for Left"
-    : "Selected skill is not eligible to Prepare for Right";
+  if (input.row === undefined) {
+    return "Select a skill row before Prepare";
+  }
+  const sideLabel = input.side === "left" ? "Left" : "Right";
+  if (input.row.summary === "missing") {
+    return input.row.sideEntryCount > 0
+      ? `Prepare for Missing only when ${sideLabel} lacks the skill`
+      : `Prepare for Missing requires ${sideLabel} to lack the skill`;
+  }
+  if (input.row.summary === "version-drift") {
+    return `Prepare applies to Revision or content drift on ${sideLabel}`;
+  }
+  return `Prepare only applies to Missing or Revision or content drift rows (current: ${summaryLabel[input.row.summary]})`;
 }
 
 export function ComparisonView({
@@ -269,6 +285,13 @@ export function ComparisonView({
     comparisonFresh,
     eligible: leftEligible,
     mutationEligible: leftMutationEligible,
+    row:
+      selectedRow === undefined
+        ? undefined
+        : {
+            sideEntryCount: selectedRow.left.entries.length,
+            summary: selectedRow.summary,
+          },
     side: "left",
     ssh: leftTarget?.target.kind === "ssh",
   });
@@ -277,6 +300,13 @@ export function ComparisonView({
     comparisonFresh,
     eligible: rightEligible,
     mutationEligible: rightMutationEligible,
+    row:
+      selectedRow === undefined
+        ? undefined
+        : {
+            sideEntryCount: selectedRow.right.entries.length,
+            summary: selectedRow.summary,
+          },
     side: "right",
     ssh: rightTarget?.target.kind === "ssh",
   });
@@ -621,14 +651,14 @@ export function ComparisonView({
                 </span>
               </div>
             ) : null}
-            {leftPrepareReason !== undefined &&
-            leftPrepareReason.startsWith("Selected skill") ? (
+            {prepareDescribedBy(leftPrepareReason, "left") ===
+            "comparison-prepare-left-unqualified" ? (
               <p className="sr-only" id="comparison-prepare-left-unqualified">
                 {leftPrepareReason}
               </p>
             ) : null}
-            {rightPrepareReason !== undefined &&
-            rightPrepareReason.startsWith("Selected skill") ? (
+            {prepareDescribedBy(rightPrepareReason, "right") ===
+            "comparison-prepare-right-unqualified" ? (
               <p className="sr-only" id="comparison-prepare-right-unqualified">
                 {rightPrepareReason}
               </p>
