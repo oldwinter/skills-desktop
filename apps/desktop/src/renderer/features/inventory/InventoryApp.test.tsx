@@ -311,9 +311,11 @@ describe("Local Target Inventory shell", () => {
 
     render(<InventoryApp client={client} />);
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "This window cannot make that request.",
-    );
+    const openingAlert = await screen.findByRole("alert");
+    expect(openingAlert).toHaveTextContent("无权限执行该操作。");
+    expect(
+      openingAlert.querySelector(".user-facing-error-details code"),
+    ).toHaveTextContent("This window cannot make that request.");
     expect(
       screen.getByRole("button", { name: "Retry opening inventory" }),
     ).toBeInTheDocument();
@@ -345,7 +347,7 @@ describe("Local Target Inventory shell", () => {
       name: "cancellation",
     },
     {
-      expected: "Inventory observation failed.",
+      expected: "本地进程执行失败。请刷新后重试。",
       inventory: {
         freshness: "stale" as const,
         lastError: {
@@ -370,6 +372,36 @@ describe("Local Target Inventory shell", () => {
     );
 
     expect((await screen.findAllByText(expected)).length).toBeGreaterThan(0);
+  });
+
+  it("maps inventory banner errors to user-facing copy and keeps raw text under details", async () => {
+    render(
+      <InventoryApp
+        client={clientFor({
+          ...snapshot,
+          inventory: {
+            ...snapshot.inventory,
+            freshness: "stale",
+            lastError: {
+              code: "process_failed",
+              effects: "none",
+              message: "Inventory observation failed with Error: ENOENT /tmp/x",
+              phase: "observe",
+              retryable: true,
+            },
+            phase: "error",
+          },
+        })}
+      />,
+    );
+
+    const alert = await screen.findByRole("alert");
+    const primary = alert.querySelector(".user-facing-error > span");
+    expect(primary).toHaveTextContent("本地进程执行失败。请刷新后重试。");
+    expect(primary).not.toHaveTextContent("ENOENT");
+    expect(alert.querySelector(".user-facing-error-details code")).toHaveTextContent(
+      "Inventory observation failed with Error: ENOENT /tmp/x",
+    );
   });
 
   it("cancels the active operation directly", async () => {

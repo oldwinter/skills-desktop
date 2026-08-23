@@ -13,6 +13,7 @@ import type {
   WorkspaceBridge,
   WorkspaceSnapshot,
 } from "../../../contracts/workspace.js";
+import { UserFacingErrorCopy } from "../../UserFacingErrorCopy.js";
 
 type TargetState = NonNullable<WorkspaceSnapshot["targets"]>[number];
 
@@ -51,15 +52,20 @@ function evidenceSummary(
     : `${evidence.authority} / ${evidence.kind} / ${evidence.value}`;
 }
 
+function freshnessLabel(
+  freshness: TargetState["inventory"]["freshness"],
+) {
+  if (freshness === "fresh") return "Fresh evidence";
+  if (freshness === "stale") return "Stale evidence";
+  return "No evidence";
+}
+
 function inventoryStatus(state: TargetState) {
   if (state.mutation.phase === "reconciliation-required") {
     return "Blocked: reconciliation required";
   }
   if (state.inventory.phase === "loading") return "Loading Inventory";
-  if (state.inventory.lastError !== null) {
-    return `${state.inventory.freshness}: ${state.inventory.lastError.message}`;
-  }
-  return `${state.inventory.freshness} evidence`;
+  return freshnessLabel(state.inventory.freshness);
 }
 
 export function ComparisonView({
@@ -301,7 +307,7 @@ export function ComparisonView({
         {error !== undefined ? (
           <div className="state-banner state-banner--danger" role="alert">
             <AlertCircle aria-hidden="true" size={16} />
-            <span>{error.message}</span>
+            <UserFacingErrorCopy error={error} />
           </div>
         ) : null}
 
@@ -313,6 +319,11 @@ export function ComparisonView({
                 <strong>{state.target.label}</strong>
                 <code>{state.target.workspaceLabel}</code>
                 <span>{inventoryStatus(state)}</span>
+                {state.inventory.lastError !== null ? (
+                  <span className="paired-status-error" role="status">
+                    <UserFacingErrorCopy error={state.inventory.lastError} />
+                  </span>
+                ) : null}
                 <button
                   aria-label={`Refresh ${state.target.label}`}
                   className="icon-button"

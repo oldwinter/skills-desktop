@@ -95,6 +95,12 @@ code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; fo
 .state-banner--loading { color: #075fa9; background: #e8f2fb; }
 .state-banner--warning { color: var(--warning); background: var(--warning-soft); }
 .state-banner--danger { color: var(--danger); background: var(--danger-soft); }
+.user-facing-error { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; min-width: 0; }
+.user-facing-error-details { color: var(--text-secondary); font-size: var(--font-size-micro); }
+.user-facing-error-details summary { cursor: pointer; user-select: none; }
+.user-facing-error-details code { display: block; margin-top: 4px; max-width: 100%; white-space: pre-wrap; word-break: break-word; color: var(--text-tertiary); }
+.paired-status-error { display: block; margin-top: 4px; color: var(--danger); font-size: var(--font-size-meta); }
+.target-state-error .user-facing-error, .collection-child-error .user-facing-error { display: block; }
 .inventory-toolbar { justify-content: space-between; gap: 12px; padding: 0 20px 12px; }
 .search-control { min-width: 180px; max-width: 420px; flex: 1; height: 40px; gap: 8px; padding: 0 10px; color: var(--text-secondary); background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-control); }
 .search-control:focus-within { border-color: var(--focus); box-shadow: 0 0 0 1px var(--focus); }

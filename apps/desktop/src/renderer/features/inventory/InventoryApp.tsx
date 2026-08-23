@@ -32,6 +32,7 @@ import type {
   RendererError,
   WorkspaceSnapshot,
 } from "../../../contracts/workspace.js";
+import { UserFacingErrorCopy } from "../../UserFacingErrorCopy.js";
 import { AboutView } from "../about/AboutView.js";
 import { ComparisonView } from "../comparison/ComparisonView.js";
 import { CollectionsView } from "../collections/CollectionsView.js";
@@ -123,7 +124,7 @@ function InventoryStatus({
         ) : (
           <AlertCircle aria-hidden="true" size={16} />
         )}
-        <span>{inventory.lastError.message}</span>
+        <UserFacingErrorCopy error={inventory.lastError} />
         {offline ? (
           <strong>Target offline</strong>
         ) : inventory.freshness === "stale" ? (
@@ -145,10 +146,13 @@ function InventoryStatus({
     return (
       <div className="state-banner state-banner--warning" role="status">
         <Clock3 aria-hidden="true" size={16} />
-        <span>
-          {inventory.lastError?.message ??
-            "Showing stale evidence restored from the last complete observation"}
-        </span>
+        {inventory.lastError !== null ? (
+          <UserFacingErrorCopy error={inventory.lastError} />
+        ) : (
+          <span>
+            Showing stale evidence restored from the last complete observation
+          </span>
+        )}
       </div>
     );
   }
@@ -156,7 +160,7 @@ function InventoryStatus({
     return (
       <div className="state-banner state-banner--warning" role="status">
         <AlertCircle aria-hidden="true" size={16} />
-        <span>{inventory.persistenceWarning.message}</span>
+        <UserFacingErrorCopy error={inventory.persistenceWarning} />
       </div>
     );
   }
@@ -347,7 +351,7 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
       return (
         <main className="boot-state boot-state--error" role="alert">
           <AlertCircle aria-hidden="true" size={24} />
-          <span>{bootstrapError.message}</span>
+          <UserFacingErrorCopy error={bootstrapError} />
           <button
             aria-label="Retry opening inventory"
             className="icon-button"
@@ -734,10 +738,11 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
               {snapshot.mutation.phase === "reconciliation-required" ? (
                 <div className="state-banner state-banner--danger" role="alert">
                   <AlertCircle aria-hidden="true" size={16} />
-                  <span>
-                    {snapshot.mutation.lastError?.message ??
-                      "This Target requires reconciliation."}
-                  </span>
+                  {snapshot.mutation.lastError !== null ? (
+                    <UserFacingErrorCopy error={snapshot.mutation.lastError} />
+                  ) : (
+                    <span>This Target requires reconciliation.</span>
+                  )}
                   {showReconcileMutationCta ? null : (
                     <button
                       className="text-button text-button--primary"
@@ -774,13 +779,13 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
               ) : snapshot.mutation.lastError !== null ? (
                 <div className="state-banner state-banner--danger" role="alert">
                   <AlertCircle aria-hidden="true" size={16} />
-                  <span>{snapshot.mutation.lastError.message}</span>
+                  <UserFacingErrorCopy error={snapshot.mutation.lastError} />
                 </div>
               ) : null}
               {actionError !== undefined ? (
                 <div className="state-banner state-banner--danger" role="alert">
                   <AlertCircle aria-hidden="true" size={16} />
-                  <span>{actionError.message}</span>
+                  <UserFacingErrorCopy error={actionError} />
                 </div>
               ) : null}
 

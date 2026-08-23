@@ -223,9 +223,8 @@ describe("About surface", () => {
         },
       }),
     );
-    expect(screen.getByRole("alert")).toHaveTextContent(
-      "The update check could not be completed.",
-    );
+    const updateAlert = screen.getByRole("alert");
+    expect(updateAlert).toHaveTextContent("更新检查未能完成。请稍后重试。");
   });
 
   it("does not let the initial fetch overwrite a newer pushed snapshot", async () => {
