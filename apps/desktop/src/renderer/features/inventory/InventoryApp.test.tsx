@@ -1473,8 +1473,10 @@ describe("Local Target Inventory shell", () => {
     );
 
     expect(
-      await screen.findByText(/Host identity review · 未在 V1 开放/),
+      await screen.findByText(/主机身份复核 · 未在 V1 开放/),
     ).toBeInTheDocument();
+    expect(screen.queryByText(/请打开主机身份复核/)).not.toBeInTheDocument();
+    expect(screen.getByText(/主机身份复核未在 V1 开放/)).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Review host identity" }),
     ).not.toBeInTheDocument();
