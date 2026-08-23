@@ -103,6 +103,7 @@ export interface DesktopCapabilitiesOptions {
   readonly scheduleEventDelivery?: (deliver: () => void) => void;
   readonly shutdownTimeoutMs?: number;
   readonly skillsTargets: SkillsTargets;
+  readonly v1LocalOnlyTargets?: boolean;
 }
 
 interface EndpointState extends DesktopEndpoint {
@@ -351,6 +352,7 @@ export function createDesktopCapabilities(
   const reservedTargetIds = new Set<string>();
   let initialized = false;
   let recoveryUncertain = false;
+  let guardStoreCorrupted = false;
   let targetAuthorityUnavailable = false;
   let targetDefinitionsChanging = false;
   let shuttingDown = false;
@@ -1615,17 +1617,60 @@ export function createDesktopCapabilities(
       });
       return requestFailure(inventoryCommitted.error);
     }
+    const reconciledTargetId = opened.value.binding.targetId;
     const guardCleared = await options.recoveryRecords.commit({
-      targetId: opened.value.binding.targetId,
+      targetId: reconciledTargetId,
       type: "guard.clear",
     });
     if (!guardCleared.ok) {
-      publishMutation({
-        ...mutationState,
-        activeOperationId: null,
-        lastError: guardCleared.error,
+      if (!guardStoreCorrupted) {
+        publishMutation({
+          ...mutationState,
+          activeOperationId: null,
+          lastError: guardCleared.error,
+        });
+        return requestFailure(guardCleared.error);
+      }
+      const remainingGuards = [...guardedTargetIds]
+        .filter((targetId) => targetId !== reconciledTargetId)
+        .flatMap((targetId) => {
+          const definition = targetDefinitions().find(
+            ({ id }) => id === targetId,
+          );
+          const remainingState =
+            targetId === target.id
+              ? mutationState
+              : mutationStates.get(targetId);
+          if (definition === undefined || remainingState === undefined) {
+            return [];
+          }
+          return [
+            {
+              deadline:
+                remainingState.reconciliationDeadline ??
+                clock().toISOString(),
+              effects: "possible" as const,
+              generation: definition.generation,
+              operationId: options.id(),
+              phase: "reconciliation-required" as const,
+              targetId,
+            },
+          ];
+        });
+      const corruptionCleared = await options.recoveryRecords.commit({
+        remainingGuards,
+        type: "guards.clear-corruption",
       });
-      return requestFailure(guardCleared.error);
+      if (!corruptionCleared.ok) {
+        publishMutation({
+          ...mutationState,
+          activeOperationId: null,
+          lastError: corruptionCleared.error,
+        });
+        return requestFailure(corruptionCleared.error);
+      }
+      guardStoreCorrupted = false;
+      recoveryUncertain = targetAuthorityUnavailable;
     }
     guardedTargetIds.delete(opened.value.binding.targetId);
 
@@ -2107,6 +2152,19 @@ export function createDesktopCapabilities(
             parsed.data.type === "target.update"
           ) {
             const targetChangeRequest = parsed.data;
+            if (
+              options.v1LocalOnlyTargets === true &&
+              targetChangeRequest.definition.kind === "ssh"
+            ) {
+              return requestFailure(
+                publicError(
+                  "invalid_request",
+                  'SSH Targets are next-scope and outside the V1 Local commitment.',
+                  "target",
+                  false,
+                ),
+              );
+            }
             const updatedTargetId =
               targetChangeRequest.type === "target.update"
                 ? targetChangeRequest.targetId
@@ -2421,10 +2479,33 @@ export function createDesktopCapabilities(
           }
 
           if (parsed.data.type === "collection.prepare") {
+            if (guardStoreCorrupted) {
+              return requestFailure(
+                publicError(
+                  "reconciliation_required",
+                  "Reconciliation is required before another mutation.",
+                  "prepare",
+                  false,
+                ),
+              );
+            }
             const request = parsed.data;
             const requestedTarget = targetDefinitions().find(
               ({ id }) => id === request.targetId,
             );
+            if (
+              options.v1LocalOnlyTargets === true &&
+              requestedTarget?.kind === "ssh"
+            ) {
+              return requestFailure(
+                publicError(
+                  "invalid_request",
+                  "SSH Targets are next-scope and outside the V1 Local commitment.",
+                  "target",
+                  false,
+                ),
+              );
+            }
             const release = officialCollectionCatalog.releases.find(
               (candidate) =>
                 candidate.manifest.collectionId === request.collectionId &&
@@ -2600,6 +2681,34 @@ export function createDesktopCapabilities(
 
           if (parsed.data.type === "collection.prepare-many") {
             const request = parsed.data;
+            if (guardStoreCorrupted) {
+              return requestFailure(
+                publicError(
+                  "reconciliation_required",
+                  "Reconciliation is required before another mutation.",
+                  "prepare",
+                  false,
+                ),
+              );
+            }
+            if (options.v1LocalOnlyTargets === true) {
+              const sshRequested = request.targets.some((child) => {
+                const selected = targetDefinitions().find(
+                  ({ id }) => id === child.targetId,
+                );
+                return selected?.kind === "ssh";
+              });
+              if (sshRequested) {
+                return requestFailure(
+                  publicError(
+                    "invalid_request",
+                    "SSH Targets are next-scope and outside the V1 Local commitment.",
+                    "target",
+                    false,
+                  ),
+                );
+              }
+            }
             const release = officialCollectionCatalog.releases.find(
               (candidate) =>
                 candidate.manifest.collectionId === request.collectionId &&
@@ -3145,6 +3254,19 @@ export function createDesktopCapabilities(
             const reviewedTarget = targetDefinitions().find(
               ({ id }) => id === reviewedTargetId,
             );
+            if (
+              options.v1LocalOnlyTargets === true &&
+              reviewedTarget?.kind === "ssh"
+            ) {
+              return requestFailure(
+                publicError(
+                  "invalid_request",
+                  "SSH Targets are next-scope and outside the V1 Local commitment.",
+                  "target",
+                  false,
+                ),
+              );
+            }
             const challenge =
               options.skillsTargets.pendingHostTrust(reviewedTargetId);
             if (
@@ -3300,7 +3422,38 @@ export function createDesktopCapabilities(
             activateTarget(requestedTarget);
           }
 
+          if (options.v1LocalOnlyTargets === true && target.kind === "ssh") {
+            return requestFailure(
+              publicError(
+                "invalid_request",
+                "SSH Targets are next-scope and outside the V1 Local commitment.",
+                "target",
+                false,
+              ),
+            );
+          }
+
           if (parsed.data.type === "mutation.prepare") {
+            if (guardStoreCorrupted) {
+              return requestFailure(
+                publicError(
+                  "reconciliation_required",
+                  "Reconciliation is required before another mutation.",
+                  "prepare",
+                  false,
+                ),
+              );
+            }
+            if (options.v1LocalOnlyTargets === true && target.kind === "ssh") {
+              return requestFailure(
+                publicError(
+                  "invalid_request",
+                  "SSH Targets are next-scope and outside the V1 Local commitment.",
+                  "target",
+                  false,
+                ),
+              );
+            }
             if (mutationState.phase === "reconciliation-required") {
               return requestFailure(
                 publicError(
@@ -3651,6 +3804,7 @@ export function createDesktopCapabilities(
       const guardStoreFailed = restored.failures.some(
         (failure) => failure.store === "mutationGuards",
       );
+      guardStoreCorrupted = guardStoreFailed;
       if (guardStoreFailed) {
         for (const definition of targetDefinitions()) {
           guardedTargetIds.add(definition.id);

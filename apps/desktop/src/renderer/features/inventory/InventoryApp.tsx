@@ -16,6 +16,7 @@ import {
   Search,
   Server,
   Settings2,
+  Terminal,
   ShieldCheck,
   Square,
   Trash2,
@@ -31,6 +32,7 @@ import type {
   RendererError,
   WorkspaceSnapshot,
 } from "../../../contracts/workspace.js";
+import { UserFacingErrorCopy } from "../../UserFacingErrorCopy.js";
 import { AboutView } from "../about/AboutView.js";
 import { ComparisonView } from "../comparison/ComparisonView.js";
 import { CollectionsView } from "../collections/CollectionsView.js";
@@ -122,7 +124,7 @@ function InventoryStatus({
         ) : (
           <AlertCircle aria-hidden="true" size={16} />
         )}
-        <span>{inventory.lastError.message}</span>
+        <UserFacingErrorCopy error={inventory.lastError} />
         {offline ? (
           <strong>Target offline</strong>
         ) : inventory.freshness === "stale" ? (
@@ -144,10 +146,13 @@ function InventoryStatus({
     return (
       <div className="state-banner state-banner--warning" role="status">
         <Clock3 aria-hidden="true" size={16} />
-        <span>
-          {inventory.lastError?.message ??
-            "Showing stale evidence restored from the last complete observation"}
-        </span>
+        {inventory.lastError !== null ? (
+          <UserFacingErrorCopy error={inventory.lastError} />
+        ) : (
+          <span>
+            Showing stale evidence restored from the last complete observation
+          </span>
+        )}
       </div>
     );
   }
@@ -155,7 +160,7 @@ function InventoryStatus({
     return (
       <div className="state-banner state-banner--warning" role="status">
         <AlertCircle aria-hidden="true" size={16} />
-        <span>{inventory.persistenceWarning.message}</span>
+        <UserFacingErrorCopy error={inventory.persistenceWarning} />
       </div>
     );
   }
@@ -170,7 +175,7 @@ function EmptyInventory({ filtered }: { readonly filtered: boolean }) {
       <p>
         {filtered
           ? "Change the current search or scope filter."
-          : "Project and global inventory are empty."}
+          : "Project and global inventory are empty. Refresh this Target, or install a skill via npx skills."}
       </p>
     </div>
   );
@@ -186,17 +191,18 @@ function MissingInventoryEvidence({
       ? {
           heading: "Waiting for inventory",
           message:
-            "A complete project and global observation has not finished yet.",
+            "A complete project and global observation has not finished yet. Wait for the refresh to complete.",
         }
       : phase === "error"
         ? {
             heading: "Inventory unavailable",
             message:
-              "No complete inventory evidence is available for this Target.",
+              "No complete inventory evidence is available for this Target. Refresh this Target to try again.",
           }
         : {
             heading: "No inventory evidence",
-            message: "Refresh this Target to establish a complete inventory.",
+            message:
+              "No complete inventory evidence yet. Refresh this Target to establish one.",
           };
   return (
     <div className="empty-state" role="status">
@@ -346,7 +352,7 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
       return (
         <main className="boot-state boot-state--error" role="alert">
           <AlertCircle aria-hidden="true" size={24} />
-          <span>{bootstrapError.message}</span>
+          <UserFacingErrorCopy error={bootstrapError} />
           <button
             aria-label="Retry opening inventory"
             className="icon-button"
@@ -373,12 +379,43 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
   const globalCount = snapshot.inventory.entries.length - projectCount;
   const isFiltered = query.trim() !== "" || scope !== "all";
   const activeOperationId = snapshot.inventory.activeOperationId;
+  const sshUnavailable = snapshot.target.kind === "ssh";
   const mutationBlocked =
+    sshUnavailable ||
     snapshot.inventory.freshness !== "fresh" ||
     snapshot.mutation.phase === "reconciliation-required" ||
     snapshot.mutation.phase === "running";
+  const mutationBlockedReason = sshUnavailable
+    ? "SSH · 未在 V1 开放，无法准备变更"
+    : snapshot.inventory.freshness !== "fresh"
+      ? "需要先刷新 inventory 证据"
+      : snapshot.mutation.phase === "reconciliation-required"
+        ? "需要先完成 reconciliation"
+        : snapshot.mutation.phase === "running"
+          ? "变更进行中，请等待"
+          : undefined;
+  const mutationBlockedDescribedBy = sshUnavailable
+    ? "inventory-ssh-unavailable-reason"
+    : mutationBlocked
+      ? [
+          "inventory-mutation-blocked-reason",
+          snapshot.inventory.freshness !== "fresh"
+            ? "inventory-refresh-cta"
+            : snapshot.mutation.phase === "reconciliation-required"
+              ? "inventory-reconcile-cta"
+              : undefined,
+        ]
+          .filter((id): id is string => id !== undefined)
+          .join(" ")
+      : undefined;
+  const showRefreshMutationCta =
+    !sshUnavailable && snapshot.inventory.freshness !== "fresh";
+  const showReconcileMutationCta =
+    !sshUnavailable &&
+    snapshot.inventory.freshness === "fresh" &&
+    snapshot.mutation.phase === "reconciliation-required";
   const prepareSelected = async (type: "remove" | "update") => {
-    if (selected === undefined) return;
+    if (sshUnavailable || selected === undefined) return;
     const result = await client.prepareMutation(snapshot.target.id, {
       names: [selected.name],
       scope: selected.scope,
@@ -390,7 +427,7 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
     } else setActionError(result.error);
   };
   const prepareUpdateAll = async () => {
-    if (scope === "all") return;
+    if (sshUnavailable || scope === "all") return;
     const result = await client.prepareMutation(snapshot.target.id, {
       scope,
       type: "update-all",
@@ -401,6 +438,7 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
     } else setActionError(result.error);
   };
   const prepareAdd = async () => {
+    if (sshUnavailable) return;
     const result = await client.prepareMutation(snapshot.target.id, {
       names: [addName],
       scope: addScope,
@@ -546,6 +584,15 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                   <strong>{state.target.label}</strong>
                   <small>{state.target.workspaceLabel}</small>
                 </span>
+                {state.target.kind === "ssh" ? (
+                  <span
+                    aria-label="SSH 未开放"
+                    className="scope-badge"
+                    title="SSH · 未在 V1 开放"
+                  >
+                    未开放
+                  </span>
+                ) : null}
               </button>
             ))}
             <dl className="target-facts">
@@ -564,7 +611,7 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
             </dl>
           </section>
           <div className="rail-version">
-            <Server aria-hidden="true" size={14} />
+            <Terminal aria-hidden="true" size={14} />
             <span>skills {snapshot.inventory.cliVersion ?? "1.5.23"}</span>
           </div>
         </aside>
@@ -582,18 +629,37 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                     {snapshot.inventory.entries.length} skills across project
                     and global scopes
                   </p>
-                  <p
-                    aria-label="Target summary"
-                    className="mobile-target-summary"
-                  >
-                    {snapshot.target.kind === "ssh" ? (
-                      <Server aria-hidden="true" size={14} />
-                    ) : (
-                      <HardDrive aria-hidden="true" size={14} />
-                    )}
-                    {snapshot.target.label} / {snapshot.target.workspaceLabel} /{" "}
-                    {snapshot.target.harness}
-                  </p>
+                  {targetStates.length > 1 ? (
+                    <label className="inventory-target-chooser">
+                      Target
+                      <select
+                        onChange={(event) => {
+                          setSelectedTargetId(event.currentTarget.value);
+                          setView("inventory");
+                        }}
+                        value={snapshot.target.id}
+                      >
+                        {targetStates.map((state) => (
+                          <option key={state.target.id} value={state.target.id}>
+                            {state.target.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  ) : (
+                    <p
+                      aria-label="Target summary"
+                      className="mobile-target-summary"
+                    >
+                      {snapshot.target.kind === "ssh" ? (
+                        <Server aria-hidden="true" size={14} />
+                      ) : (
+                        <HardDrive aria-hidden="true" size={14} />
+                      )}
+                      {snapshot.target.label} / {snapshot.target.workspaceLabel}{" "}
+                      / {snapshot.target.harness}
+                    </p>
+                  )}
                 </div>
                 {snapshot.inventory.phase === "loading" &&
                 activeOperationId !== null ? (
@@ -624,6 +690,53 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
               </section>
 
               <InventoryStatus snapshot={snapshot} />
+              {sshUnavailable ? (
+                <div
+                  className="state-banner state-banner--warning"
+                  id="inventory-ssh-unavailable-reason"
+                  role="status"
+                >
+                  <Server aria-hidden="true" size={16} />
+                  <span>
+                    SSH · 未在 V1 开放。远程 Target 仅保留只读痕迹，不能作为变更工作区。
+                  </span>
+                  <strong>未开放</strong>
+                </div>
+              ) : null}
+              {mutationBlockedReason && !sshUnavailable ? (
+                <div
+                  className="state-banner state-banner--warning"
+                  id="inventory-mutation-blocked-reason"
+                  role="status"
+                >
+                  <CircleHelp aria-hidden="true" size={16} />
+                  <span>{mutationBlockedReason}</span>
+                  {showRefreshMutationCta ? (
+                    <button
+                      className="text-button text-button--primary"
+                      id="inventory-refresh-cta"
+                      onClick={() =>
+                        void client.refreshInventory(snapshot.target.id)
+                      }
+                      type="button"
+                    >
+                      <RefreshCw aria-hidden="true" size={15} />
+                      Refresh
+                    </button>
+                  ) : null}
+                  {showReconcileMutationCta ? (
+                    <button
+                      className="text-button text-button--primary"
+                      id="inventory-reconcile-cta"
+                      onClick={() => void reconcileMutation()}
+                      type="button"
+                    >
+                      <RefreshCw aria-hidden="true" size={15} />
+                      Reconcile
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
               {snapshot.inventory.lastError?.code === "host_trust_required" ||
               snapshot.inventory.lastError?.code === "host_key_changed" ? (
                 <div
@@ -645,18 +758,21 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
               {snapshot.mutation.phase === "reconciliation-required" ? (
                 <div className="state-banner state-banner--danger" role="alert">
                   <AlertCircle aria-hidden="true" size={16} />
-                  <span>
-                    {snapshot.mutation.lastError?.message ??
-                      "This Target requires reconciliation."}
-                  </span>
-                  <button
-                    className="text-button"
-                    onClick={() => void reconcileMutation()}
-                    type="button"
-                  >
-                    <RefreshCw aria-hidden="true" size={15} />
-                    Reconcile
-                  </button>
+                  {snapshot.mutation.lastError !== null ? (
+                    <UserFacingErrorCopy error={snapshot.mutation.lastError} />
+                  ) : (
+                    <span>This Target requires reconciliation.</span>
+                  )}
+                  {showReconcileMutationCta ? null : (
+                    <button
+                      className="text-button text-button--primary"
+                      onClick={() => void reconcileMutation()}
+                      type="button"
+                    >
+                      <RefreshCw aria-hidden="true" size={15} />
+                      Reconcile
+                    </button>
+                  )}
                 </div>
               ) : snapshot.mutation.phase === "running" ? (
                 <div
@@ -683,13 +799,13 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
               ) : snapshot.mutation.lastError !== null ? (
                 <div className="state-banner state-banner--danger" role="alert">
                   <AlertCircle aria-hidden="true" size={16} />
-                  <span>{snapshot.mutation.lastError.message}</span>
+                  <UserFacingErrorCopy error={snapshot.mutation.lastError} />
                 </div>
               ) : null}
               {actionError !== undefined ? (
                 <div className="state-banner state-banner--danger" role="alert">
                   <AlertCircle aria-hidden="true" size={16} />
-                  <span>{actionError.message}</span>
+                  <UserFacingErrorCopy error={actionError} />
                 </div>
               ) : null}
 
@@ -704,7 +820,11 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                     value={query}
                   />
                 </label>
-                <div className="segmented-control" aria-label="Inventory scope">
+                <div
+                  className="segmented-control"
+                  aria-label="Inventory scope"
+                  role="group"
+                >
                   {(["all", "project", "global"] as const).map((value) => (
                     <button
                       aria-pressed={scope === value}
@@ -719,9 +839,17 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                   ))}
                 </div>
                 <button
+                  aria-describedby={
+                    scope === "all" ? undefined : mutationBlockedDescribedBy
+                  }
                   className="text-button"
                   disabled={scope === "all" || mutationBlocked}
                   onClick={() => void prepareUpdateAll()}
+                  title={
+                    scope === "all"
+                      ? "Choose project or global scope first"
+                      : mutationBlockedReason
+                  }
                   type="button"
                 >
                   <RefreshCw aria-hidden="true" size={15} />
@@ -886,18 +1014,22 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                   </dl>
                   <div className="inspector-actions">
                     <button
+                      aria-describedby={mutationBlockedDescribedBy}
                       className="text-button"
                       disabled={mutationBlocked}
                       onClick={() => void prepareSelected("update")}
+                      title={mutationBlockedReason}
                       type="button"
                     >
                       <RefreshCw aria-hidden="true" size={15} />
                       Prepare update
                     </button>
                     <button
+                      aria-describedby={mutationBlockedDescribedBy}
                       className="text-button text-button--danger"
                       disabled={mutationBlocked}
                       onClick={() => void prepareSelected("remove")}
+                      title={mutationBlockedReason}
                       type="button"
                     >
                       <Trash2 aria-hidden="true" size={15} />
@@ -937,6 +1069,7 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                 <div
                   className="segmented-control segmented-control--compact"
                   aria-label="Add scope"
+                  role="group"
                 >
                   {(["project", "global"] as const).map((value) => (
                     <button
@@ -950,8 +1083,10 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                   ))}
                 </div>
                 <button
+                  aria-describedby={mutationBlockedDescribedBy}
                   className="text-button"
                   disabled={mutationBlocked}
+                  title={mutationBlockedReason}
                   type="submit"
                 >
                   <PackagePlus aria-hidden="true" size={15} />

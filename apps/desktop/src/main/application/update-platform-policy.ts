@@ -2,6 +2,7 @@ import {
   ABOUT_MANUAL_UPDATE_MESSAGE,
   ABOUT_RELEASES_URL,
   ABOUT_UNAVAILABLE_UPDATE_MESSAGE,
+  ABOUT_UNSIGNED_MANUAL_UPDATE_MESSAGE,
 } from "../../contracts/about.js";
 
 export interface UpdateApplicationIdentity {
@@ -19,7 +20,9 @@ export type UpdatePlatformPolicy =
       readonly mode: "automatic";
     }
   | {
-      readonly message: typeof ABOUT_MANUAL_UPDATE_MESSAGE;
+      readonly message:
+        | typeof ABOUT_MANUAL_UPDATE_MESSAGE
+        | typeof ABOUT_UNSIGNED_MANUAL_UPDATE_MESSAGE;
       readonly mode: "manual";
       readonly releasePageUrl: typeof ABOUT_RELEASES_URL;
     }
@@ -32,10 +35,16 @@ export function selectUpdatePlatformPolicy(
   application: UpdateApplicationIdentity,
 ): UpdatePlatformPolicy {
   if (
-    application.platform === "linux" ||
-    (application.isPackaged &&
-      application.releaseChannel === "unsigned-preview")
+    application.isPackaged &&
+    application.releaseChannel === "unsigned-preview"
   ) {
+    return {
+      message: ABOUT_UNSIGNED_MANUAL_UPDATE_MESSAGE,
+      mode: "manual",
+      releasePageUrl: ABOUT_RELEASES_URL,
+    };
+  }
+  if (application.platform === "linux") {
     return {
       message: ABOUT_MANUAL_UPDATE_MESSAGE,
       mode: "manual",

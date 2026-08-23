@@ -2,6 +2,8 @@ import { z } from "zod";
 
 export const ABOUT_MANUAL_UPDATE_MESSAGE =
   "Download a newer package from GitHub Releases and install it manually.";
+export const ABOUT_UNSIGNED_MANUAL_UPDATE_MESSAGE =
+  "This unsigned-preview build is not signed or notarized. Download a newer package from GitHub Releases, verify it per docs/unsigned-developer-preview.md, then install it manually.";
 export const ABOUT_RELEASES_URL =
   "https://github.com/oldwinter/skills-desktop/releases";
 export const ABOUT_UNAVAILABLE_UPDATE_MESSAGE =
@@ -26,7 +28,10 @@ export const updatePolicySchema = z.discriminatedUnion("mode", [
   automaticPolicySchema,
   z
     .object({
-      message: z.literal(ABOUT_MANUAL_UPDATE_MESSAGE),
+      message: z.union([
+        z.literal(ABOUT_MANUAL_UPDATE_MESSAGE),
+        z.literal(ABOUT_UNSIGNED_MANUAL_UPDATE_MESSAGE),
+      ]),
       mode: z.literal("manual"),
       releasePageUrl: z.literal(ABOUT_RELEASES_URL),
     })

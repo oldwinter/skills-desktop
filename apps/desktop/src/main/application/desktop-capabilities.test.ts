@@ -1,11 +1,14 @@
 import { createHash } from "node:crypto";
-import { normalize } from "node:path";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, normalize } from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
 import type { Inventory } from "@skills-desktop/skills-runtime";
 
 import {
+  createJsonRecoveryRecords,
   createMemoryRecoveryRecords,
   type RecoveryRecords,
 } from "../persistence/recovery-records.js";
@@ -2703,6 +2706,520 @@ describe("DesktopCapabilities release restart guard contract", () => {
     expect(capabilities.restartSafety()).toEqual({
       guardReasons: ["reconciliation-required", "recovery-uncertain"],
     });
+  });
+
+  it("keeps quarantined Guard corruption fail-closed across DesktopCapabilities restarts", async () => {
+    const directory = await mkdtemp(
+      join(tmpdir(), "skills-desktop-guard-corruption-"),
+    );
+    try {
+      await writeFile(
+        join(directory, "target-definitions.json"),
+        JSON.stringify({
+          kind: "target-definitions",
+          schemaVersion: 3,
+          targets: [
+            {
+              connectionReference: null,
+              executionBindingDigest: null,
+              generation: target.generation,
+              harness: target.harness,
+              id: target.id,
+              kind: target.kind,
+              label: target.label,
+              workspace: target.workspace,
+            },
+          ],
+        }),
+        "utf8",
+      );
+      await writeFile(
+        join(directory, "mutation-guards.json"),
+        "{not valid JSON",
+        "utf8",
+      );
+
+      const first = createDesktopCapabilities({
+        id: () => "guard-corruption-first",
+        recoveryRecords: createJsonRecoveryRecords({
+          directory,
+          id: () => "guard-corruption-first",
+        }),
+        skillsTargets: targetsWith({
+          ...mutationNotExercised,
+          async observeInventory() {
+            return { ok: true, value: freshInventory };
+          },
+          async prepareMutation() {
+            throw new Error("first instance must not prepare a mutation");
+          },
+        }),
+      });
+      await first.initialize();
+      expect(first.restartSafety()).toEqual({
+        guardReasons: ["reconciliation-required", "recovery-uncertain"],
+      });
+
+      let prepareCalls = 0;
+      const restarted = createDesktopCapabilities({
+        id: () => "guard-corruption-restart",
+        recoveryRecords: createJsonRecoveryRecords({
+          directory,
+          id: () => "guard-corruption-restart",
+        }),
+        skillsTargets: targetsWith({
+          ...mutationNotExercised,
+          async observeInventory() {
+            return { ok: true, value: freshInventory };
+          },
+          async prepareMutation() {
+            prepareCalls += 1;
+            throw new Error("restarted instance must not prepare a mutation");
+          },
+        }),
+      });
+      await restarted.initialize();
+      const session = restarted.attach(
+        {
+          endpointId: "workspace-guard-corruption-restart",
+          role: "workspace",
+          sessionEpoch: "epoch-guard-corruption-restart",
+        },
+        () => undefined,
+      );
+
+      expect(restarted.restartSafety()).toEqual({
+        guardReasons: ["reconciliation-required", "recovery-uncertain"],
+      });
+      await expect(session.snapshot()).resolves.toMatchObject({
+        mutation: { phase: "reconciliation-required" },
+      });
+      await expect(
+        session.request({
+          targetId: target.id,
+          type: "inventory.refresh",
+          version: 1,
+        }),
+      ).resolves.toMatchObject({ ok: true });
+      await expect(
+        session.request({
+          intent: { names: ["tdd"], scope: "project", type: "remove" },
+          targetId: target.id,
+          type: "mutation.prepare",
+          version: 1,
+        }),
+      ).resolves.toMatchObject({
+        error: { code: "reconciliation_required" },
+        ok: false,
+      });
+      expect(prepareCalls).toBe(0);
+    } finally {
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("blocks mutation prepare on a later Target until Guard corruption is explicitly recovered", async () => {
+    const directory = await mkdtemp(
+      join(tmpdir(), "skills-desktop-guard-corruption-create-"),
+    );
+    const createdTargetId = "00000000-0000-4000-8000-000000000021";
+    try {
+      await writeFile(
+        join(directory, "target-definitions.json"),
+        JSON.stringify({
+          kind: "target-definitions",
+          schemaVersion: 3,
+          targets: [
+            {
+              connectionReference: null,
+              executionBindingDigest: null,
+              generation: target.generation,
+              harness: target.harness,
+              id: target.id,
+              kind: target.kind,
+              label: target.label,
+              workspace: target.workspace,
+            },
+          ],
+        }),
+        "utf8",
+      );
+      await writeFile(
+        join(directory, "mutation-guards.json"),
+        JSON.stringify({
+          guards: "not-an-array",
+          kind: "mutation-guards",
+          schemaVersion: 2,
+        }),
+        "utf8",
+      );
+
+      await createDesktopCapabilities({
+        id: () => "guard-corruption-create-first",
+        recoveryRecords: createJsonRecoveryRecords({
+          directory,
+          id: () => "guard-corruption-create-first",
+        }),
+        skillsTargets: targetsWith({
+          ...mutationNotExercised,
+          async observeInventory() {
+            return { ok: true, value: freshInventory };
+          },
+        }),
+      }).initialize();
+
+      let prepareCalls = 0;
+      const restarted = createDesktopCapabilities({
+        id: () => createdTargetId,
+        recoveryRecords: createJsonRecoveryRecords({
+          directory,
+          id: () => "guard-corruption-create-restart",
+        }),
+        skillsTargets: createSkillsTargetsCatalog({
+          id: () => createdTargetId,
+          initialTarget: target,
+          processFor: () => ({
+            ...mutationNotExercised,
+            async observeInventory() {
+              return { ok: true as const, value: freshInventory };
+            },
+            async prepareMutation() {
+              prepareCalls += 1;
+              throw new Error("created Target must not prepare after Guard corruption");
+            },
+          }),
+        }),
+      });
+      await restarted.initialize();
+      const session = restarted.attach(
+        {
+          endpointId: "workspace-guard-corruption-create",
+          role: "workspace",
+          sessionEpoch: "epoch-guard-corruption-create",
+        },
+        () => undefined,
+      );
+      await expect(
+        session.request({
+          definition: {
+            connectionReference: null,
+            harness: "Codex",
+            kind: "local",
+            label: "Second workspace",
+            workspace: "/work/second",
+          },
+          type: "target.create",
+          version: 1,
+        }),
+      ).resolves.toMatchObject({ ok: true });
+      await expect(
+        session.request({
+          targetId: createdTargetId,
+          type: "inventory.refresh",
+          version: 1,
+        }),
+      ).resolves.toMatchObject({ ok: true });
+      await expect(
+        session.request({
+          intent: { names: ["tdd"], scope: "project", type: "remove" },
+          targetId: createdTargetId,
+          type: "mutation.prepare",
+          version: 1,
+        }),
+      ).resolves.toMatchObject({
+        error: { code: "reconciliation_required" },
+        ok: false,
+      });
+      expect(prepareCalls).toBe(0);
+    } finally {
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("clears quarantined Guard corruption only through explicit reconciliation", async () => {
+    const directory = await mkdtemp(
+      join(tmpdir(), "skills-desktop-guard-corruption-recover-"),
+    );
+    try {
+      await writeFile(
+        join(directory, "target-definitions.json"),
+        JSON.stringify({
+          kind: "target-definitions",
+          schemaVersion: 3,
+          targets: [
+            {
+              connectionReference: null,
+              executionBindingDigest: null,
+              generation: target.generation,
+              harness: target.harness,
+              id: target.id,
+              kind: target.kind,
+              label: target.label,
+              workspace: target.workspace,
+            },
+          ],
+        }),
+        "utf8",
+      );
+      await writeFile(
+        join(directory, "mutation-guards.json"),
+        "{not valid JSON",
+        "utf8",
+      );
+
+      await createDesktopCapabilities({
+        id: () => "guard-corruption-recover-first",
+        recoveryRecords: createJsonRecoveryRecords({
+          directory,
+          id: () => "guard-corruption-recover-first",
+        }),
+        skillsTargets: targetsWith({
+          ...mutationNotExercised,
+          async observeInventory() {
+            return { ok: true, value: freshInventory };
+          },
+        }),
+      }).initialize();
+
+      let prepareCalls = 0;
+      const restarted = createDesktopCapabilities({
+        clock: () => new Date("2026-08-23T12:00:00.000Z"),
+        id: () => "guard-corruption-recover-restart",
+        recoveryRecords: createJsonRecoveryRecords({
+          directory,
+          id: () => "guard-corruption-recover-restart",
+        }),
+        skillsTargets: targetsWith({
+          ...mutationNotExercised,
+          async observeInventory() {
+            return { ok: true, value: freshInventory };
+          },
+          async prepareMutation() {
+            prepareCalls += 1;
+            return {
+              ok: true as const,
+              value: {
+                commandPlan: {
+                  harness: target.harness,
+                  names: ["tdd"],
+                  operation: "remove" as const,
+                  preview: "review-only preview",
+                  schemaVersion: 1 as const,
+                  scope: "project" as const,
+                  source: null,
+                  targetId: target.id,
+                  timeoutMs: 30_000,
+                },
+                digest: "a".repeat(64),
+                expiresAt: "2099-01-01T00:10:00.000Z",
+                id: "prepared-after-guard-recovery",
+                inventoryId: "fresh",
+                targetGeneration: target.generation,
+                targetId: target.id,
+              },
+            };
+          },
+        }),
+      });
+      await restarted.initialize();
+      const session = restarted.attach(
+        {
+          endpointId: "workspace-guard-corruption-recover",
+          role: "workspace",
+          sessionEpoch: "epoch-guard-corruption-recover",
+        },
+        () => undefined,
+      );
+
+      await expect(
+        session.request({
+          targetId: target.id,
+          type: "mutation.reconcile",
+          version: 1,
+        }),
+      ).resolves.toMatchObject({ ok: true });
+      await expect(
+        createJsonRecoveryRecords({
+          directory,
+          id: () => "guard-corruption-recover-probe",
+        }).restore(),
+      ).resolves.toMatchObject({
+        failures: [],
+        mutationGuards: [],
+      });
+      await expect(
+        session.request({
+          intent: { names: ["tdd"], scope: "project", type: "remove" },
+          targetId: target.id,
+          type: "mutation.prepare",
+          version: 1,
+        }),
+      ).resolves.toMatchObject({ ok: true });
+      expect(prepareCalls).toBe(1);
+    } finally {
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("keeps sibling Targets guarded after one Target recovers Guard corruption", async () => {
+    const directory = await mkdtemp(
+      join(tmpdir(), "skills-desktop-guard-corruption-sibling-"),
+    );
+    const sibling: TargetDefinition = {
+      ...target,
+      id: "00000000-0000-4000-8000-000000000022",
+      label: "Sibling workspace",
+      workspace: "/work/sibling",
+      workspaceLabel: "sibling",
+    };
+    try {
+      await writeFile(
+        join(directory, "target-definitions.json"),
+        JSON.stringify({
+          kind: "target-definitions",
+          schemaVersion: 3,
+          targets: [
+            {
+              connectionReference: null,
+              executionBindingDigest: null,
+              generation: target.generation,
+              harness: target.harness,
+              id: target.id,
+              kind: target.kind,
+              label: target.label,
+              workspace: target.workspace,
+            },
+            {
+              connectionReference: null,
+              executionBindingDigest: null,
+              generation: sibling.generation,
+              harness: sibling.harness,
+              id: sibling.id,
+              kind: sibling.kind,
+              label: sibling.label,
+              workspace: sibling.workspace,
+            },
+          ],
+        }),
+        "utf8",
+      );
+      await writeFile(
+        join(directory, "mutation-guards.json"),
+        "{not valid JSON",
+        "utf8",
+      );
+
+      await createDesktopCapabilities({
+        id: () => "guard-corruption-sibling-first",
+        recoveryRecords: createJsonRecoveryRecords({
+          directory,
+          id: () => "guard-corruption-sibling-first",
+        }),
+        skillsTargets: createSkillsTargetsCatalog({
+          id: () => "unused-sibling-id",
+          initialTarget: target,
+          processFor: () => ({
+            ...mutationNotExercised,
+            async observeInventory() {
+              return { ok: true as const, value: freshInventory };
+            },
+          }),
+        }),
+      }).initialize();
+
+      const recovering = createDesktopCapabilities({
+        clock: () => new Date("2026-08-23T12:00:00.000Z"),
+        id: () => "guard-corruption-sibling-recover",
+        recoveryRecords: createJsonRecoveryRecords({
+          directory,
+          id: () => "guard-corruption-sibling-recover",
+        }),
+        skillsTargets: createSkillsTargetsCatalog({
+          id: () => "unused-sibling-recover",
+          initialTarget: target,
+          processFor: () => ({
+            ...mutationNotExercised,
+            async observeInventory() {
+              return { ok: true as const, value: freshInventory };
+            },
+          }),
+        }),
+      });
+      await recovering.initialize();
+      const recoveringSession = recovering.attach(
+        {
+          endpointId: "workspace-guard-corruption-sibling-recover",
+          role: "workspace",
+          sessionEpoch: "epoch-guard-corruption-sibling-recover",
+        },
+        () => undefined,
+      );
+      await expect(
+        recoveringSession.request({
+          targetId: target.id,
+          type: "mutation.reconcile",
+          version: 1,
+        }),
+      ).resolves.toMatchObject({ ok: true });
+
+      let prepareCalls = 0;
+      const restarted = createDesktopCapabilities({
+        id: () => "guard-corruption-sibling-restart",
+        recoveryRecords: createJsonRecoveryRecords({
+          directory,
+          id: () => "guard-corruption-sibling-restart",
+        }),
+        skillsTargets: createSkillsTargetsCatalog({
+          id: () => "unused-sibling-restart",
+          initialTarget: target,
+          processFor: (binding) => ({
+            ...mutationNotExercised,
+            async observeInventory() {
+              return { ok: true as const, value: freshInventory };
+            },
+            async prepareMutation() {
+              prepareCalls += 1;
+              throw new Error(
+                `${binding.targetId} must not prepare while sibling recovery remains`,
+              );
+            },
+          }),
+        }),
+      });
+      await restarted.initialize();
+      const session = restarted.attach(
+        {
+          endpointId: "workspace-guard-corruption-sibling-restart",
+          role: "workspace",
+          sessionEpoch: "epoch-guard-corruption-sibling-restart",
+        },
+        () => undefined,
+      );
+      await expect(session.snapshot()).resolves.toMatchObject({
+        targets: expect.arrayContaining([
+          expect.objectContaining({
+            mutation: expect.objectContaining({
+              phase: "reconciliation-required",
+            }),
+            target: expect.objectContaining({ id: sibling.id }),
+          }),
+        ]),
+      });
+      await expect(
+        session.request({
+          intent: { names: ["tdd"], scope: "project", type: "remove" },
+          targetId: sibling.id,
+          type: "mutation.prepare",
+          version: 1,
+        }),
+      ).resolves.toMatchObject({
+        error: { code: "reconciliation_required" },
+        ok: false,
+      });
+      expect(prepareCalls).toBe(0);
+    } finally {
+      await rm(directory, { force: true, recursive: true });
+    }
   });
 });
 

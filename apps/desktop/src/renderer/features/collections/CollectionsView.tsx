@@ -18,6 +18,7 @@ import type {
   WorkspaceBridge,
   WorkspaceSnapshot,
 } from "../../../contracts/workspace.js";
+import { UserFacingErrorCopy } from "../../UserFacingErrorCopy.js";
 
 type Release = PublicCollectionsState["releases"][number];
 type TargetState = NonNullable<WorkspaceSnapshot["targets"]>[number];
@@ -56,9 +57,14 @@ function targetStatesFor(snapshot: WorkspaceSnapshot): TargetState[] {
   );
 }
 
-function inputFor(targetId: string, activeTargetId: string): TargetInput {
+function inputFor(
+  targetId: string,
+  activeTargetId: string,
+  kind: TargetState["target"]["kind"],
+): TargetInput {
   return {
-    included: targetId === activeTargetId,
+    // V1 Local-only: SSH Targets stay visible but never included in Collections.
+    included: kind !== "ssh" && targetId === activeTargetId,
     scope: "project",
     selected: {},
   };
@@ -85,7 +91,7 @@ export function CollectionsView({
     Object.fromEntries(
       targetStates.map(({ target }) => [
         target.id,
-        inputFor(target.id, snapshot.target.id),
+        inputFor(target.id, snapshot.target.id, target.kind),
       ]),
     ),
   );
@@ -103,7 +109,7 @@ export function CollectionsView({
       Object.fromEntries(
         targetStates.map(({ target }) => [
           target.id,
-          inputFor(target.id, snapshot.target.id),
+          inputFor(target.id, snapshot.target.id, target.kind),
         ]),
       ),
     );
@@ -165,6 +171,7 @@ export function CollectionsView({
   const selectedTargets = targetStates.flatMap((targetState) => {
     const input = inputs[targetState.target.id];
     if (input === undefined || !input.included) return [];
+    if (targetState.target.kind === "ssh") return [];
     return [
       { input, selections: selectionsFor(targetState, input), targetState },
     ];
@@ -259,6 +266,10 @@ export function CollectionsView({
         <div className="empty-state" role="status">
           <CircleHelp aria-hidden="true" size={22} />
           <h2>No Official Collections</h2>
+          <p>
+            This build has no bundled reviewed releases. V1 Collections only
+            apply to Local Targets once a release is packaged with the app.
+          </p>
         </div>
       </main>
     );
@@ -321,7 +332,7 @@ export function CollectionsView({
         {error !== undefined ? (
           <div className="state-banner state-banner--danger" role="alert">
             <AlertCircle aria-hidden="true" size={16} />
-            <span>{error.message}</span>
+            <UserFacingErrorCopy error={error} />
           </div>
         ) : null}
 
@@ -370,7 +381,7 @@ export function CollectionsView({
                   </ul>
                   {child.error === null ? null : (
                     <p className="collection-child-error">
-                      {child.error.message}
+                      <UserFacingErrorCopy error={child.error} />
                     </p>
                   )}
                   {child.status === "reconciliation-required" ? (
@@ -406,7 +417,7 @@ export function CollectionsView({
           {targetStates.map((targetState) => {
             const input =
               inputs[targetState.target.id] ??
-              inputFor(targetState.target.id, snapshot.target.id);
+              inputFor(targetState.target.id, snapshot.target.id, targetState.target.kind);
             const assessment = assessmentFor(targetState, input.scope);
             const blockers = targetBlockers(targetState, input);
             const targetRelease = releaseFor(targetState);
@@ -429,30 +440,42 @@ export function CollectionsView({
                 key={targetState.target.id}
               >
                 <header>
-                  <label className="collection-machine-toggle">
-                    <input
-                      aria-label={`Include ${targetState.target.label}`}
-                      checked={included}
-                      disabled={locked}
-                      onChange={(event) => {
-                        const included = event.currentTarget.checked;
-                        updateInput(targetState.target.id, (current) => ({
-                          ...current,
-                          included,
-                        }));
-                      }}
-                      type="checkbox"
-                    />
+                  <div className="collection-machine-toggle">
+                    <label className="collection-checkbox-hit-area">
+                      <input
+                        aria-label={`Include ${targetState.target.label}`}
+                        checked={
+                          targetState.target.kind === "ssh" ? false : included
+                        }
+                        disabled={locked || targetState.target.kind === "ssh"}
+                        onChange={(event) => {
+                          if (targetState.target.kind === "ssh") return;
+                          const included = event.currentTarget.checked;
+                          updateInput(targetState.target.id, (current) => ({
+                            ...current,
+                            included,
+                          }));
+                        }}
+                        title={
+                          targetState.target.kind === "ssh"
+                            ? "SSH · 未在 V1 开放，不在 V1 Local Collections 范围内"
+                            : undefined
+                        }
+                        type="checkbox"
+                      />
+                    </label>
                     <TargetIcon aria-hidden="true" size={17} />
                     <span>
                       <strong>{targetState.target.label}</strong>
                       <small>
-                        {targetState.target.kind === "ssh" ? "SSH" : "Local"} /{" "}
-                        {targetState.target.harness}
+                        {targetState.target.kind === "ssh"
+                          ? "SSH · 未在 V1 开放"
+                          : "Local"}{" "}
+                        / {targetState.target.harness}
                       </small>
                       <small>{inventoryFreshnessLabel}</small>
                     </span>
-                  </label>
+                  </div>
                   <label className="collection-scope-select">
                     <span>Scope</span>
                     <select
@@ -487,10 +510,10 @@ export function CollectionsView({
                     </caption>
                     <thead>
                       <tr>
-                        <th aria-label="Select" />
-                        <th>Skill</th>
-                        <th>Assessment</th>
-                        <th>Action</th>
+                        <th scope="col">Include</th>
+                        <th scope="col">Skill</th>
+                        <th scope="col">Assessment</th>
+                        <th scope="col">Action</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -502,34 +525,37 @@ export function CollectionsView({
                             : `Select ${entry.name} on ${targetState.target.label}`;
                         return (
                           <tr key={`${input.scope}:${entry.name}`}>
-                            <td data-label="Select">
-                              <input
-                                aria-label={selectionLabel}
-                                checked={
-                                  input.selected[entry.name] !== undefined
-                                }
-                                disabled={
-                                  locked ||
-                                  !included ||
-                                  !targetRelease?.executable ||
-                                  !entry.selectable ||
-                                  mode === undefined
-                                }
-                                onChange={(event) => {
-                                  const checked = event.currentTarget.checked;
-                                  updateInput(
-                                    targetState.target.id,
-                                    (current) => {
-                                      const selected = { ...current.selected };
-                                      if (!checked) delete selected[entry.name];
-                                      else if (mode !== undefined)
-                                        selected[entry.name] = mode;
-                                      return { ...current, selected };
-                                    },
-                                  );
-                                }}
-                                type="checkbox"
-                              />
+                            <td data-label="Include">
+                              <label className="collection-checkbox-hit-area">
+                                <input
+                                  aria-label={selectionLabel}
+                                  checked={
+                                    input.selected[entry.name] !== undefined
+                                  }
+                                  disabled={
+                                    locked ||
+                                    !included ||
+                                    !targetRelease?.executable ||
+                                    !entry.selectable ||
+                                    mode === undefined
+                                  }
+                                  onChange={(event) => {
+                                    const checked = event.currentTarget.checked;
+                                    updateInput(
+                                      targetState.target.id,
+                                      (current) => {
+                                        const selected = { ...current.selected };
+                                        if (!checked)
+                                          delete selected[entry.name];
+                                        else if (mode !== undefined)
+                                          selected[entry.name] = mode;
+                                        return { ...current, selected };
+                                      },
+                                    );
+                                  }}
+                                  type="checkbox"
+                                />
+                              </label>
                             </td>
                             <td data-label="Skill">
                               <strong>{entry.name}</strong>

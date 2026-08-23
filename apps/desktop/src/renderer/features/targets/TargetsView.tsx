@@ -15,6 +15,7 @@ import type {
   WorkspaceBridge,
   WorkspaceSnapshot,
 } from "../../../contracts/workspace.js";
+import { UserFacingErrorCopy } from "../../UserFacingErrorCopy.js";
 
 type TargetState = NonNullable<WorkspaceSnapshot["targets"]>[number];
 
@@ -101,7 +102,7 @@ export function TargetsView({
         <section className="page-heading">
           <div>
             <h1>Targets</h1>
-            <p>{targets.length} durable Target Definitions</p>
+            <p>{targets.length} Target Definitions · V1 is Local-only</p>
           </div>
           <button className="text-button" onClick={() => edit()} type="button">
             <Plus aria-hidden="true" size={15} />
@@ -111,7 +112,7 @@ export function TargetsView({
         {error !== undefined ? (
           <div className="state-banner state-banner--danger" role="alert">
             <AlertCircle aria-hidden="true" size={16} />
-            <span>{error.message}</span>
+            <UserFacingErrorCopy error={error} />
           </div>
         ) : null}
         {savedMessage !== undefined ? (
@@ -133,6 +134,15 @@ export function TargetsView({
                   <h2>{state.target.label}</h2>
                   <code>{state.target.workspace}</code>
                 </div>
+                {state.target.kind === "ssh" ? (
+                  <span
+                    aria-label="SSH 未开放"
+                    className="scope-badge"
+                    title="SSH · 未在 V1 开放"
+                  >
+                    未开放
+                  </span>
+                ) : null}
                 <span
                   className={`status-pill status-pill--${state.inventory.freshness === "fresh" ? "healthy" : "neutral"}`}
                 >
@@ -144,7 +154,11 @@ export function TargetsView({
               <dl>
                 <div>
                   <dt>Kind</dt>
-                  <dd>{state.target.kind === "local" ? "Local" : "SSH"}</dd>
+                  <dd>
+                    {state.target.kind === "local"
+                      ? "Local"
+                      : "SSH · 未在 V1 开放"}
+                  </dd>
                 </div>
                 <div>
                   <dt>Harness</dt>
@@ -161,7 +175,7 @@ export function TargetsView({
               </dl>
               {state.inventory.lastError !== null ? (
                 <p className="target-state-error" role="status">
-                  {state.inventory.lastError.message}
+                  <UserFacingErrorCopy error={state.inventory.lastError} />
                 </p>
               ) : null}
               <div className="target-item-actions">
@@ -220,29 +234,27 @@ export function TargetsView({
             void save();
           }}
         >
+          {draft.kind === "ssh" ? (
+            <div className="state-banner state-banner--loading" role="status">
+              <Server aria-hidden="true" size={16} />
+              <span>
+                SSH · 未在 V1 开放，不能作为可保存的 Target Definition。
+              </span>
+            </div>
+          ) : null}
           <fieldset>
             <legend>Target kind</legend>
-            <div className="segmented-control segmented-control--compact">
-              {(["local", "ssh"] as const).map((kind) => (
-                <button
-                  aria-pressed={draft.kind === kind}
-                  key={kind}
-                  onClick={() =>
-                    setDraft((current) => ({
-                      ...current,
-                      connectionReference:
-                        kind === "local"
-                          ? null
-                          : (current.connectionReference ?? ""),
-                      kind,
-                    }))
-                  }
-                  type="button"
-                >
-                  {kind === "local" ? "Local" : "SSH"}
+            {draft.kind === "ssh" ? (
+              <p className="target-kind-readonly">
+                Kind: SSH · 未在 V1 开放
+              </p>
+            ) : (
+              <div className="segmented-control segmented-control--compact">
+                <button aria-pressed={true} type="button">
+                  Local
                 </button>
-              ))}
-            </div>
+              </div>
+            )}
           </fieldset>
           <label>
             <span>Display label</span>
@@ -251,6 +263,7 @@ export function TargetsView({
               onChange={(event) =>
                 setDraft({ ...draft, label: event.currentTarget.value })
               }
+              readOnly={draft.kind === "ssh"}
               required
               value={draft.label}
             />
@@ -262,6 +275,7 @@ export function TargetsView({
               onChange={(event) =>
                 setDraft({ ...draft, workspace: event.currentTarget.value })
               }
+              readOnly={draft.kind === "ssh"}
               required
               value={draft.workspace}
             />
@@ -269,6 +283,7 @@ export function TargetsView({
           <label>
             <span>Harness</span>
             <select
+              disabled={draft.kind === "ssh"}
               onChange={(event) =>
                 setDraft({ ...draft, harness: event.currentTarget.value })
               }
@@ -288,12 +303,22 @@ export function TargetsView({
                     connectionReference: event.currentTarget.value,
                   })
                 }
+                readOnly
                 required
                 value={draft.connectionReference ?? ""}
               />
             </label>
           ) : null}
-          <button className="text-button text-button--primary" type="submit">
+          <button
+            className="text-button text-button--primary"
+            disabled={draft.kind === "ssh"}
+            title={
+              draft.kind === "ssh"
+                ? "SSH · 未在 V1 开放，无法保存"
+                : undefined
+            }
+            type="submit"
+          >
             <Save aria-hidden="true" size={15} />
             Save Target
           </button>

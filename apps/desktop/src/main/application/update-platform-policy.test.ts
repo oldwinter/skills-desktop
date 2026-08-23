@@ -57,7 +57,7 @@ describe("update platform guidance", () => {
         }),
       ).toEqual({
         message:
-          "Download a newer package from GitHub Releases and install it manually.",
+          "This unsigned-preview build is not signed or notarized. Download a newer package from GitHub Releases, verify it per docs/unsigned-developer-preview.md, then install it manually.",
         mode: "manual",
         releasePageUrl: "https://github.com/oldwinter/skills-desktop/releases",
       });

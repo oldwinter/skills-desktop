@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { AlertCircle, Check, Clock3, ShieldCheck, X } from "lucide-react";
 
 import type { ReviewBridge, ReviewSnapshot } from "../contracts/review.js";
+import { userFacingErrorMessage } from "../contracts/user-facing-error.js";
 import type { RendererError } from "../contracts/workspace.js";
 
 function scopeLabel(scope: "global" | "project") {
@@ -49,7 +50,13 @@ export function ReviewSurface({ client }: { readonly client: ReviewBridge }) {
       <main className="review-surface">
         <div className="review-alert" role="alert">
           <AlertCircle aria-hidden="true" size={18} />
-          <span>{error.message}</span>
+          <span className="user-facing-error">
+            <span>{userFacingErrorMessage(error)}</span>
+            <details className="user-facing-error-details">
+              <summary>详情</summary>
+              <code>{error.message}</code>
+            </details>
+          </span>
         </div>
       </main>
     );

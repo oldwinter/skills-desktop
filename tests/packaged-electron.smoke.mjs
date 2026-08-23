@@ -614,6 +614,47 @@ try {
   );
   console.log("packaged smoke: fresh inventory rendered");
 
+  const scopeSemantics = await first.page.evaluate(`(() => {
+    const readGroup = (label) => {
+      const groups = [...document.querySelectorAll('[role="group"]')].filter(
+        (candidate) => candidate.getAttribute("aria-label") === label,
+      );
+      if (groups.length !== 1) {
+        throw new Error(
+          "Expected one named " + label + " group, found " + groups.length + ".",
+        );
+      }
+      const buttons = [...groups[0].querySelectorAll("button")];
+      return {
+        labels: buttons.map((button) => button.textContent?.trim()),
+        pressed: buttons.map((button) => button.getAttribute("aria-pressed")),
+        tabIndices: buttons.map((button) => button.tabIndex),
+      };
+    };
+    return {
+      add: readGroup("Add scope"),
+      inventory: readGroup("Inventory scope"),
+    };
+  })()`);
+  const expectedScopeSemantics = {
+    add: {
+      labels: ["Project scope", "Global scope"],
+      pressed: ["true", "false"],
+      tabIndices: [0, 0],
+    },
+    inventory: {
+      labels: ["All scopes", "Project scope", "Global scope"],
+      pressed: ["true", "false", "false"],
+      tabIndices: [0, 0, 0],
+    },
+  };
+  if (JSON.stringify(scopeSemantics) !== JSON.stringify(expectedScopeSemantics)) {
+    throw new Error(
+      `Packaged scope group semantics failed: ${JSON.stringify(scopeSemantics)}`,
+    );
+  }
+  console.log("packaged smoke: scope group semantics verified");
+
   const rendererBoundary = await first.page.evaluate(`({
     aboutBridgeKeys: Object.keys(window.skillsDesktop.about).sort(),
     bridgeKeys: Object.keys(window.skillsDesktop).sort(),
@@ -673,8 +714,10 @@ try {
     `document.body?.textContent?.includes("Version 0.1.0") &&
       document.body?.textContent?.includes("linux / x64") &&
       document.body?.textContent?.includes("Manual upgrade") &&
-      document.body?.textContent?.includes("Download a newer package from GitHub Releases and install it manually.")`,
-    "packaged Linux About guidance",
+      document.body?.textContent?.includes(
+        "This unsigned-preview build is not signed or notarized. Download a newer package from GitHub Releases, verify it per docs/unsigned-developer-preview.md, then install it manually.",
+      )`,
+    "packaged unsigned-preview About guidance",
   );
   const aboutBoundary = await first.page.evaluate(`(async () => {
     const result = await window.skillsDesktop.about.getSnapshot();
@@ -713,7 +756,7 @@ try {
       `Unexpected packaged About boundary: ${JSON.stringify(aboutBoundary)}`,
     );
   }
-  console.log("packaged smoke: Linux About guidance verified");
+  console.log("packaged smoke: unsigned-preview About guidance verified");
   await first.page.evaluate(`(() => {
     const button = document.querySelector('button[aria-label="Inventory"]');
     if (!(button instanceof HTMLButtonElement)) throw new Error("Inventory navigation is unavailable.");
@@ -921,107 +964,17 @@ try {
     label: "Packaged SSH",
     workspace: ${JSON.stringify(workspace)},
   })`);
-  if (!createdSsh.ok) {
-    throw new Error(
-      `Packaged SSH Target creation failed: ${JSON.stringify(createdSsh)}`,
-    );
-  }
-  const sshTargetId = await first.page.evaluate(
-    `window.skillsDesktop.getSnapshot().then((result) => result.value.targets.find(({ target }) => target.connectionReference === "packaged-ssh")?.target.id)`,
-  );
-  if (typeof sshTargetId !== "string") {
-    throw new Error("Packaged SSH Target identity is unavailable.");
-  }
-  const untrustedRefresh = await first.page.evaluate(
-    `window.skillsDesktop.refreshInventory(${JSON.stringify(sshTargetId)})`,
-  );
   if (
-    untrustedRefresh.ok ||
-    untrustedRefresh.error?.code !== "host_trust_required"
+    createdSsh.ok ||
+    createdSsh.error?.code !== "invalid_request" ||
+    !String(createdSsh.error?.message ?? "").includes("V1 Local")
   ) {
     throw new Error(
-      `Packaged first-use trust was not required: ${JSON.stringify(untrustedRefresh)}`,
+      `Packaged V1 must reject SSH Target creation: ${JSON.stringify(createdSsh)}`,
     );
   }
-  const requestedHostReview = await first.page.evaluate(
-    `window.skillsDesktop.requestHostTrustReview(${JSON.stringify(sshTargetId)})`,
-  );
-  if (!requestedHostReview.ok) {
-    throw new Error(
-      `Packaged host review could not open: ${JSON.stringify(requestedHostReview)}`,
-    );
-  }
-  const hostReviewPage = await first.connectPage(
-    "skills-desktop://review/index.html",
-  );
-  await hostReviewPage.waitFor(
-    `document.body?.textContent?.includes("Review host key") &&
-      document.body?.textContent?.includes("SHA-256 fingerprint")`,
-    "packaged host-key Trusted Review",
-  );
-  await hostReviewPage.evaluate(`(() => {
-    const approve = document.querySelector('button[aria-label="Trust host key"]');
-    if (!(approve instanceof HTMLButtonElement)) throw new Error("Host trust approval is unavailable.");
-    approve.click();
-  })()`);
-  await hostReviewPage.waitFor(
-    `document.body?.textContent?.includes("Host trust confirmed")`,
-    "packaged host trust confirmation",
-  );
-  await hostReviewPage.disconnect();
-  await first.page.send("Page.bringToFront");
-  const remoteRefresh = await first.page.evaluate(
-    `window.skillsDesktop.refreshInventory(${JSON.stringify(sshTargetId)})`,
-  );
-  if (!remoteRefresh.ok) {
-    throw new Error(
-      `Packaged SSH refresh failed: ${JSON.stringify(remoteRefresh)}`,
-    );
-  }
-  await first.page.evaluate(`(() => {
-    const targets = document.querySelector('button[aria-label="Targets"]');
-    if (!(targets instanceof HTMLButtonElement)) throw new Error("Targets navigation is unavailable.");
-    targets.click();
-  })()`);
-  await first.page.waitFor(
-    `document.querySelector(".targets-workspace") !== null`,
-    "Targets workspace for packaged SSH",
-  );
-  await first.page.evaluate(`(() => {
-    const target = [...document.querySelectorAll(".target-row")].find(
-      (candidate) => candidate.textContent?.includes("Packaged SSH"),
-    );
-    if (!(target instanceof HTMLButtonElement)) throw new Error("Packaged SSH Target is unavailable.");
-    target.click();
-  })()`);
-  await first.page.waitFor(
-    `document.querySelector(".header-target")?.textContent?.includes("Packaged SSH") === true &&
-      document.body?.textContent?.includes("packaged-project-skill") &&
-      document.body?.textContent?.includes("Fresh evidence")`,
-    "packaged SSH Inventory",
-  );
-  const ordinarySshText = await first.page.evaluate("document.body.innerText");
-  if (
-    ordinarySshText.includes("127.0.0.1") ||
-    ordinarySshText.includes("client_ed25519") ||
-    ordinarySshText.includes(String(sshServer.port))
-  ) {
-    throw new Error(
-      "Effective SSH identity escaped the packaged workspace boundary.",
-    );
-  }
-  console.log("packaged smoke: SSH trust and remote Inventory verified");
-  const sshLaunch = first;
-  await sshLaunch.close();
-  if (sshLaunch.errors.length > 0) throw new Error(sshLaunch.errors.join("\n"));
-  first = await launch();
-  await first.page.waitFor(
-    `document.body?.textContent?.includes("packaged-project-skill") &&
-      document.body?.textContent?.includes("packaged-global-skill") &&
-      document.body?.textContent?.includes("Fresh evidence")`,
-    "fresh Inventory after packaged SSH restart",
-  );
-  console.log("packaged smoke: post-SSH restart opened");
+  console.log("packaged smoke: V1 rejected SSH Target creation");
+
 
   await first.page.evaluate(`(() => {
     const targets = [...document.querySelectorAll("button")].find(
@@ -1043,7 +996,7 @@ try {
   })()`);
   await first.page.waitFor(
     `document.querySelector(".header-target")?.textContent?.includes("This device") === true`,
-    "primary Target restoration after SSH",
+    "primary Target restoration",
   );
   await first.page.evaluate(`(() => {
     const targets = [...document.querySelectorAll("button")].find(
@@ -1054,7 +1007,7 @@ try {
   })()`);
   await first.page.waitFor(
     `document.querySelector(".targets-workspace") !== null`,
-    "Targets workspace after SSH",
+    "Targets workspace for second Local",
   );
   await first.page.evaluate(`(() => {
     const button = [...document.querySelectorAll("button")].find(
@@ -1448,7 +1401,7 @@ try {
   const versionChecks = invocations.filter(
     (line) => line === "--yes skills@1.5.23 --version",
   );
-  if (versionChecks.length !== 7) {
+  if (versionChecks.length !== 5) {
     throw new Error(
       `Expected one version check per opened Target Adapter, got ${versionChecks.length}.`,
     );
@@ -1467,13 +1420,10 @@ try {
   );
   if (
     targetDocument.schemaVersion !== 3 ||
-    targetDocument.targets.length !== 3 ||
-    targetDocument.targets
-      .filter(({ kind }) => kind === "local")
-      .some(({ executionBindingDigest }) => executionBindingDigest !== null) ||
-    !targetDocument.targets.some(
-      ({ executionBindingDigest, kind }) =>
-        kind === "ssh" && /^[a-f0-9]{64}$/.test(executionBindingDigest),
+    targetDocument.targets.length !== 2 ||
+    targetDocument.targets.some(({ kind }) => kind !== "local") ||
+    targetDocument.targets.some(
+      ({ executionBindingDigest }) => executionBindingDigest !== null,
     )
   ) {
     throw new Error("Packaged Target Definitions were not durably restored.");

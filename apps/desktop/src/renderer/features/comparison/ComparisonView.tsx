@@ -13,6 +13,7 @@ import type {
   WorkspaceBridge,
   WorkspaceSnapshot,
 } from "../../../contracts/workspace.js";
+import { UserFacingErrorCopy } from "../../UserFacingErrorCopy.js";
 
 type TargetState = NonNullable<WorkspaceSnapshot["targets"]>[number];
 
@@ -51,15 +52,20 @@ function evidenceSummary(
     : `${evidence.authority} / ${evidence.kind} / ${evidence.value}`;
 }
 
+function freshnessLabel(
+  freshness: TargetState["inventory"]["freshness"],
+) {
+  if (freshness === "fresh") return "Fresh evidence";
+  if (freshness === "stale") return "Stale evidence";
+  return "No evidence";
+}
+
 function inventoryStatus(state: TargetState) {
   if (state.mutation.phase === "reconciliation-required") {
     return "Blocked: reconciliation required";
   }
   if (state.inventory.phase === "loading") return "Loading Inventory";
-  if (state.inventory.lastError !== null) {
-    return `${state.inventory.freshness}: ${state.inventory.lastError.message}`;
-  }
-  return `${state.inventory.freshness} evidence`;
+  return freshnessLabel(state.inventory.freshness);
 }
 
 export function ComparisonView({
@@ -76,20 +82,44 @@ export function ComparisonView({
   readonly snapshot: WorkspaceSnapshot;
   readonly targets: readonly TargetState[];
 }) {
-  const [leftTargetId, setLeftTargetId] = useState(targets[0]?.target.id ?? "");
+  const plannableTargets = useMemo(
+    () => targets.filter(({ target }) => target.kind !== "ssh"),
+    [targets],
+  );
+  const [leftTargetId, setLeftTargetId] = useState(
+    plannableTargets[0]?.target.id ?? targets[0]?.target.id ?? "",
+  );
   const [rightTargetId, setRightTargetId] = useState(
-    targets[1]?.target.id ?? targets[0]?.target.id ?? "",
+    plannableTargets[1]?.target.id ??
+      plannableTargets[0]?.target.id ??
+      targets[0]?.target.id ??
+      "",
   );
   const [selectedKey, setSelectedKey] = useState<string>();
   const [error, setError] = useState<RendererError>();
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    if (!targets.some(({ target }) => target.id === leftTargetId)) {
-      setLeftTargetId(targets[0]?.target.id ?? "");
+    const locals = targets.filter(({ target }) => target.kind !== "ssh");
+    const pickDefault = (excludeId?: string) =>
+      locals.find(({ target }) => target.id !== excludeId)?.target.id ??
+      locals[0]?.target.id ??
+      "";
+    const leftExists = targets.some(({ target }) => target.id === leftTargetId);
+    const leftIsSsh = targets.some(
+      ({ target }) => target.id === leftTargetId && target.kind === "ssh",
+    );
+    if (!leftExists || leftIsSsh) {
+      setLeftTargetId(pickDefault(rightTargetId));
     }
-    if (!targets.some(({ target }) => target.id === rightTargetId)) {
-      setRightTargetId(targets[1]?.target.id ?? targets[0]?.target.id ?? "");
+    const rightExists = targets.some(
+      ({ target }) => target.id === rightTargetId,
+    );
+    const rightIsSsh = targets.some(
+      ({ target }) => target.id === rightTargetId && target.kind === "ssh",
+    );
+    if (!rightExists || rightIsSsh) {
+      setRightTargetId(pickDefault(leftTargetId));
     }
   }, [leftTargetId, rightTargetId, targets]);
 
@@ -108,6 +138,11 @@ export function ComparisonView({
   const rightTarget = targets.find(({ target }) => target.id === rightTargetId);
 
   const openComparison = async () => {
+    const leftKind = targets.find(({ target }) => target.id === leftTargetId)
+      ?.target.kind;
+    const rightKind = targets.find(({ target }) => target.id === rightTargetId)
+      ?.target.kind;
+    if (leftKind === "ssh" || rightKind === "ssh") return;
     setBusy(true);
     try {
       const result = await client.compareTargets(leftTargetId, rightTargetId);
@@ -119,6 +154,10 @@ export function ComparisonView({
   };
   const prepare = async (destinationTargetId: string) => {
     if (comparison === null || selectedRow === undefined) return;
+    const destination = targets.find(
+      ({ target }) => target.id === destinationTargetId,
+    );
+    if (destination?.target.kind === "ssh") return;
     setBusy(true);
     try {
       const result = await client.prepareComparison(
@@ -138,8 +177,10 @@ export function ComparisonView({
     comparison?.leftFreshness === "fresh" &&
     comparison.rightFreshness === "fresh";
   const leftMutationEligible =
+    leftTarget?.target.kind !== "ssh" &&
     leftTarget?.mutation.phase !== "reconciliation-required";
   const rightMutationEligible =
+    rightTarget?.target.kind !== "ssh" &&
     rightTarget?.mutation.phase !== "reconciliation-required";
   const leftEligible =
     comparisonFresh &&
@@ -155,6 +196,8 @@ export function ComparisonView({
     ((selectedRow.summary === "missing" &&
       selectedRow.right.entries.length === 0) ||
       selectedRow.summary === "version-drift");
+  const sshSideSelected =
+    leftTarget?.target.kind === "ssh" || rightTarget?.target.kind === "ssh";
 
   return (
     <>
@@ -162,7 +205,11 @@ export function ComparisonView({
         <section className="page-heading">
           <div>
             <h1>Comparison</h1>
-            <p>{comparison?.rows.length ?? 0} aligned skill keys</p>
+            <p>
+              {plannableTargets.length < 2
+                ? "Needs a second Local Target"
+                : `${comparison?.rows.length ?? 0} aligned skill keys`}
+            </p>
           </div>
         </section>
 
@@ -175,11 +222,15 @@ export function ComparisonView({
             >
               {targets.map(({ target }) => (
                 <option
-                  disabled={target.id === rightTargetId}
+                  disabled={
+                    target.id === rightTargetId || target.kind === "ssh"
+                  }
                   key={target.id}
                   value={target.id}
                 >
-                  {target.label}
+                  {target.kind === "ssh"
+                    ? `${target.label} · 未开放`
+                    : target.label}
                 </option>
               ))}
             </select>
@@ -206,11 +257,15 @@ export function ComparisonView({
             >
               {targets.map(({ target }) => (
                 <option
-                  disabled={target.id === leftTargetId}
+                  disabled={
+                    target.id === leftTargetId || target.kind === "ssh"
+                  }
                   key={target.id}
                   value={target.id}
                 >
-                  {target.label}
+                  {target.kind === "ssh"
+                    ? `${target.label} · 未开放`
+                    : target.label}
                 </option>
               ))}
             </select>
@@ -218,9 +273,19 @@ export function ComparisonView({
           <button
             className="text-button text-button--primary"
             disabled={
-              busy || leftTargetId === rightTargetId || targets.length < 2
+              busy ||
+              leftTargetId === rightTargetId ||
+              plannableTargets.length < 2 ||
+              sshSideSelected
             }
             onClick={() => void openComparison()}
+            title={
+              sshSideSelected
+                ? "SSH · 未在 V1 开放，不能作为可规划对比侧"
+                : plannableTargets.length < 2
+                  ? "Comparison needs two Local Targets"
+                  : undefined
+            }
             type="button"
           >
             <ArrowLeftRight aria-hidden="true" size={15} />
@@ -228,10 +293,21 @@ export function ComparisonView({
           </button>
         </div>
 
+        {plannableTargets.length < 2 ? (
+          <div className="state-banner state-banner--loading" role="status">
+            <CircleHelp aria-hidden="true" size={16} />
+            <span>
+              {targets.some(({ target }) => target.kind === "ssh")
+                ? "Comparison needs two Local Targets. SSH · 未在 V1 开放，不能作为可规划对比侧。Add another Local Target under Targets, then return here to compare inventories."
+                : "Comparison needs two Local Targets. Add another Local Target under Targets, then return here to compare inventories."}
+            </span>
+          </div>
+        ) : null}
+
         {error !== undefined ? (
           <div className="state-banner state-banner--danger" role="alert">
             <AlertCircle aria-hidden="true" size={16} />
-            <span>{error.message}</span>
+            <UserFacingErrorCopy error={error} />
           </div>
         ) : null}
 
@@ -243,6 +319,11 @@ export function ComparisonView({
                 <strong>{state.target.label}</strong>
                 <code>{state.target.workspaceLabel}</code>
                 <span>{inventoryStatus(state)}</span>
+                {state.inventory.lastError !== null ? (
+                  <span className="paired-status-error" role="status">
+                    <UserFacingErrorCopy error={state.inventory.lastError} />
+                  </span>
+                ) : null}
                 <button
                   aria-label={`Refresh ${state.target.label}`}
                   className="icon-button"
@@ -428,6 +509,11 @@ export function ComparisonView({
                 className="text-button"
                 disabled={busy || !leftEligible}
                 onClick={() => void prepare(leftTargetId)}
+                title={
+                  leftTarget?.target.kind === "ssh"
+                    ? "SSH · 未在 V1 开放，无法准备变更"
+                    : undefined
+                }
                 type="button"
               >
                 <PackagePlus aria-hidden="true" size={15} />
@@ -437,6 +523,11 @@ export function ComparisonView({
                 className="text-button"
                 disabled={busy || !rightEligible}
                 onClick={() => void prepare(rightTargetId)}
+                title={
+                  rightTarget?.target.kind === "ssh"
+                    ? "SSH · 未在 V1 开放，无法准备变更"
+                    : undefined
+                }
                 type="button"
               >
                 <PackagePlus aria-hidden="true" size={15} />
