@@ -4,6 +4,11 @@ Cross-platform desktop client for inspecting and managing Skills through the
 existing `npx skills` CLI on the Local Target. V1 ships Local Target only;
 SSH Target support is next-scope.
 
+
+## 用户手册
+
+面向最终用户的操作说明见 [docs/user-guide.md](docs/user-guide.md)（V1 Local-only）。
+
 ## Status
 
 The first production tracer is implemented: a hardened packaged Electron shell
