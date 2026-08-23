@@ -588,7 +588,7 @@ describe("Local Target Inventory shell", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Collections" }));
     expect(screen.getAllByText("Fresh inventory")).toHaveLength(2);
-    expect(screen.getByText(/SSH · next-scope/)).toBeInTheDocument();
+    expect(screen.getByText(/SSH · 未在 V1 开放/)).toBeInTheDocument();
     const sshInclude = screen.getByRole("checkbox", {
       name: "Include Build host",
     });
