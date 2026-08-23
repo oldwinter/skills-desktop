@@ -104,6 +104,7 @@ export async function createCompositionRoot(options?: {
     recoveryRecords,
     platform: process.platform,
     skillsTargets,
+    v1LocalOnlyTargets: true,
   });
   await capabilities.initialize();
   const updates = await createElectronUpdateComposition({

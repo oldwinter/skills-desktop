@@ -101,7 +101,7 @@ export function TargetsView({
         <section className="page-heading">
           <div>
             <h1>Targets</h1>
-            <p>{targets.length} durable Target Definitions</p>
+            <p>{targets.length} Target Definitions · V1 is Local-only</p>
           </div>
           <button className="text-button" onClick={() => edit()} type="button">
             <Plus aria-hidden="true" size={15} />
@@ -220,29 +220,28 @@ export function TargetsView({
             void save();
           }}
         >
+          {draft.kind === "ssh" ? (
+            <div className="state-banner state-banner--loading" role="status">
+              <Server aria-hidden="true" size={16} />
+              <span>
+                SSH targets are next-scope and outside the V1 Local
+                commitment.
+              </span>
+            </div>
+          ) : null}
           <fieldset>
             <legend>Target kind</legend>
-            <div className="segmented-control segmented-control--compact">
-              {(["local", "ssh"] as const).map((kind) => (
-                <button
-                  aria-pressed={draft.kind === kind}
-                  key={kind}
-                  onClick={() =>
-                    setDraft((current) => ({
-                      ...current,
-                      connectionReference:
-                        kind === "local"
-                          ? null
-                          : (current.connectionReference ?? ""),
-                      kind,
-                    }))
-                  }
-                  type="button"
-                >
-                  {kind === "local" ? "Local" : "SSH"}
+            {draft.kind === "ssh" ? (
+              <p className="target-kind-readonly">
+                Kind: SSH (next-scope, not V1)
+              </p>
+            ) : (
+              <div className="segmented-control segmented-control--compact">
+                <button aria-pressed={true} type="button">
+                  Local
                 </button>
-              ))}
-            </div>
+              </div>
+            )}
           </fieldset>
           <label>
             <span>Display label</span>
