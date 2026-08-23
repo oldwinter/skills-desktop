@@ -1712,6 +1712,79 @@ describe("Local Target Inventory shell", () => {
     ).toBeInTheDocument();
   });
 
+
+  it("keeps No skill selected when inventory still has rows (#111)", async () => {
+    let listener: ((event: DesktopEvent) => void) | undefined;
+    let snapshots = 0;
+    const otherSkill = {
+      ...snapshot.inventory.entries[0]!,
+      name: "Other-Skill",
+      scope: "project" as const,
+    };
+    const client: DesktopBridge = {
+      ...clientFor(snapshot),
+      async getSnapshot() {
+        snapshots += 1;
+        return {
+          ok: true as const,
+          value:
+            snapshots === 1
+              ? {
+                  ...snapshot,
+                  inventory: {
+                    ...snapshot.inventory,
+                    entries: [...snapshot.inventory.entries, otherSkill],
+                  },
+                }
+              : {
+                  ...snapshot,
+                  inventory: {
+                    ...snapshot.inventory,
+                    entries: [otherSkill],
+                  },
+                  stateRevision: 2,
+                },
+        };
+      },
+      subscribe(next) {
+        listener = next;
+        return () => undefined;
+      },
+    };
+    render(<InventoryApp client={client} />);
+    fireEvent.click(
+      (
+        await screen.findAllByRole("button", {
+          name: "Case-Sensitive-Skill",
+        })
+      )[0]!,
+    );
+    expect(
+      screen.getByRole("heading", { name: "Case-Sensitive-Skill" }),
+    ).toBeInTheDocument();
+
+    await act(async () => {
+      listener?.({
+        reason: "buffer_overflow",
+        sequence: 1,
+        sessionEpoch: "epoch-1",
+        stateRevision: 2,
+        type: "resync.required",
+      });
+    });
+
+    expect(
+      await screen.findByRole("heading", { name: "No skill selected" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Select a skill in the table to inspect evidence."),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "No skills to inspect" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText("Other-Skill")).toBeInTheDocument();
+  });
+
   it("humanizes Targets list pills and hides Generation by default (#74)", async () => {
     render(
       <InventoryApp
