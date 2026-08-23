@@ -494,7 +494,7 @@ export function CollectionsView({
                       <option value="project">Project</option>
                       <option value="global">Global</option>
                     </select>
-                  </div>
+                  </label>
                 </header>
                 {blockers.length === 0 ? null : (
                   <ul className="collection-target-blockers">

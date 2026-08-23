@@ -494,13 +494,16 @@ describe("Local Target Inventory shell", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Collections" }));
 
     const table = screen.getByRole("table");
-    const includeHeader = within(table).getByRole("columnheader", {
-      name: "Include",
-    });
-    expect(includeHeader).toHaveAttribute("scope", "col");
-    expect(
-      within(table).getByRole("columnheader", { name: "Skill" }),
-    ).toBeInTheDocument();
+    const headers = within(table).getAllByRole("columnheader");
+    expect(headers.map((header) => header.textContent)).toEqual([
+      "Include",
+      "Skill",
+      "Assessment",
+      "Action",
+    ]);
+    for (const header of headers) {
+      expect(header).toHaveAttribute("scope", "col");
+    }
 
     expect(
       screen.getByRole("checkbox", { name: "Include This device" }).parentElement,
@@ -510,7 +513,7 @@ describe("Local Target Inventory shell", () => {
     ).toHaveClass("collection-checkbox-hit-area");
 
     expect(rendererStyles).toMatch(
-      /\.collection-checkbox-hit-area\s*\{(?=[^}]*min-width:\s*40px)(?=[^}]*min-height:\s*40px)[^}]*\}/s,
+      /\.collection-checkbox-hit-area\s*\{(?=[^}]*width:\s*40px)(?=[^}]*min-width:\s*40px)(?=[^}]*height:\s*40px)(?=[^}]*min-height:\s*40px)[^}]*\}/s,
     );
   });
 
