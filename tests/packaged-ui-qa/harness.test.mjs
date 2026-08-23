@@ -159,7 +159,9 @@ describe("packaged UI QA fixture seam", () => {
   });
 
   it("treats an explicit root as a parent and preserves caller-owned siblings", async () => {
-    const parent = await mkdtemp(join(tmpdir(), "skills-desktop-ui-qa-parent-"));
+    const parent = await mkdtemp(
+      join(tmpdir(), "skills-desktop-ui-qa-parent-"),
+    );
     const callerFile = join(parent, "caller-sentinel.txt");
     const siblingFile = join(parent, "sibling.txt");
     await writeFile(callerFile, "keep caller file");
@@ -167,15 +169,21 @@ describe("packaged UI QA fixture seam", () => {
 
     const fixture = await createPackagedQaFixture({ root: parent });
     fixtures.push(fixture);
-    fixtures.push({ cleanup: () => rm(parent, { force: true, recursive: true }) });
+    fixtures.push({
+      cleanup: () => rm(parent, { force: true, recursive: true }),
+    });
 
     expect(fixture.root).not.toBe(parent);
     expect(fixture.root.startsWith(`${parent}/`)).toBe(true);
     await fixture.cleanup();
 
     await expect(access(fixture.root)).rejects.toThrow();
-    await expect(readFile(callerFile, "utf8")).resolves.toBe("keep caller file");
-    await expect(readFile(siblingFile, "utf8")).resolves.toBe("keep sibling file");
+    await expect(readFile(callerFile, "utf8")).resolves.toBe(
+      "keep caller file",
+    );
+    await expect(readFile(siblingFile, "utf8")).resolves.toBe(
+      "keep sibling file",
+    );
   });
 
   it("provides deterministic inventory and controllable process failures", async () => {
@@ -309,6 +317,46 @@ describe("packaged Electron launcher seam", () => {
     expect(Date.now() - startedAt).toBeLessThan(500);
   });
 
+  it("does not issue a second Windows tree kill when exit is not observed", async () => {
+    const treeKills = [];
+    const child = {
+      exitCode: null,
+      kill: () => {
+        throw new Error("direct child termination is not allowed");
+      },
+      pid: 4344,
+      signalCode: null,
+    };
+
+    await expect(
+      stopChild(child, new Promise(() => {}), {
+        killWindowsTree: async (pid) => treeKills.push(pid),
+        platform: "win32",
+        stopTimeoutMs: 20,
+        treeTerminationTimeoutMs: 20,
+      }),
+    ).rejects.toThrow(/did not exit/i);
+    expect(treeKills).toEqual([4344]);
+  });
+
+  it("fails closed when a forced POSIX child exit is not observed", async () => {
+    const signals = [];
+    const child = {
+      exitCode: null,
+      kill: (signal) => signals.push(signal),
+      pid: undefined,
+      signalCode: null,
+    };
+
+    await expect(
+      stopChild(child, new Promise(() => {}), {
+        platform: "linux",
+        stopTimeoutMs: 20,
+      }),
+    ).rejects.toThrow(/did not exit/i);
+    expect(signals).toEqual(["SIGTERM", "SIGKILL"]);
+  });
+
   it("invokes taskkill with an argument-array process-tree contract", async () => {
     const calls = [];
     const completion = terminateWindowsProcessTree(4444, {
@@ -360,7 +408,9 @@ describe("packaged UI QA scenario contract", () => {
       "Authorization: Bearer secret-value\nAPI_KEY=another-secret\nAWS_SECRET_ACCESS_KEY=env-secret\n",
     );
     const destination = await mkdtemp(join(tmpdir(), "skills-desktop-qa-art-"));
-    fixtures.push({ cleanup: () => rm(destination, { force: true, recursive: true }) });
+    fixtures.push({
+      cleanup: () => rm(destination, { force: true, recursive: true }),
+    });
     await writeFile(`${destination}/error.txt`, "stale artifact");
     await chmod(`${destination}/error.txt`, 0o666);
     await persistFailureArtifacts(
@@ -372,8 +422,8 @@ describe("packaged UI QA scenario contract", () => {
     );
     expect((await stat(`${destination}/error.txt`)).mode & 0o777).toBe(0o600);
     const artifact = await Promise.all(
-      ["error.txt", "electron.stdout.log", "electron.stderr.log"].map(
-        (name) => readFile(join(destination, name), "utf8"),
+      ["error.txt", "electron.stdout.log", "electron.stderr.log"].map((name) =>
+        readFile(join(destination, name), "utf8"),
       ),
     ).then((values) => values.join("\n"));
     expect(artifact).toContain("qa failed");
@@ -392,7 +442,10 @@ describe("packaged UI QA scenario contract", () => {
       await readFile(new URL("../../package.json", import.meta.url), "utf8"),
     );
     const packageLock = JSON.parse(
-      await readFile(new URL("../../package-lock.json", import.meta.url), "utf8"),
+      await readFile(
+        new URL("../../package-lock.json", import.meta.url),
+        "utf8",
+      ),
     );
     expect(packageJson.devDependencies["axe-core"]).toBe("4.11.0");
     expect(packageLock.packages[""].devDependencies["axe-core"]).toBe("4.11.0");

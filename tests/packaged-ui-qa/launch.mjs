@@ -39,7 +39,9 @@ function observeExit(child) {
       resolve(value);
     };
     child.once("error", (error) => finish({ error, kind: "error" }));
-    child.once("exit", (code, signal) => finish({ code, kind: "exit", signal }));
+    child.once("exit", (code, signal) =>
+      finish({ code, kind: "exit", signal }),
+    );
   });
 }
 
@@ -75,10 +77,7 @@ async function waitForTarget(port, expectedUrl, childExit, timeoutMs) {
 
 export function terminateWindowsProcessTree(
   pid,
-  {
-    execFileImpl = execFile,
-    timeoutMs = DEFAULT_WINDOWS_TREE_TIMEOUT_MS,
-  } = {},
+  { execFileImpl = execFile, timeoutMs = DEFAULT_WINDOWS_TREE_TIMEOUT_MS } = {},
 ) {
   if (!Number.isSafeInteger(pid) || pid <= 0) {
     return Promise.reject(new Error("A valid process id is required."));
@@ -122,11 +121,14 @@ export async function stopChild(
     treeTerminationTimeoutMs = DEFAULT_WINDOWS_TREE_TIMEOUT_MS,
   } = {},
 ) {
+  let windowsTreeWasForced = false;
   if (child.exitCode === null && child.signalCode === null) {
     try {
       if (platform === "win32" && child.pid !== undefined) {
+        windowsTreeWasForced = true;
         await Promise.race([
           Promise.resolve().then(() => killWindowsTree(child.pid)),
+          childExit,
           delay(treeTerminationTimeoutMs).then(() => {
             throw new Error(
               `Windows process-tree termination timed out for PID ${child.pid}.`,
@@ -146,23 +148,26 @@ export async function stopChild(
   ]);
   if (stopped || child.exitCode !== null || child.signalCode !== null) return;
 
+  if (windowsTreeWasForced) {
+    throw new Error(
+      `Windows process tree did not exit after forced termination for PID ${child.pid}.`,
+    );
+  }
+
   try {
-    if (platform === "win32" && child.pid !== undefined) {
-      await Promise.race([
-        Promise.resolve().then(() => killWindowsTree(child.pid)),
-        delay(treeTerminationTimeoutMs).then(() => {
-          throw new Error(
-            `Windows process-tree termination timed out for PID ${child.pid}.`,
-          );
-        }),
-      ]);
-    } else if (child.pid === undefined) {
+    if (child.pid === undefined) {
       child.kill("SIGKILL");
     } else process.kill(-child.pid, "SIGKILL");
   } catch (error) {
     if (error?.code !== "ESRCH") throw error;
   }
-  await Promise.race([childExit, delay(stopTimeoutMs)]);
+  const killed = await Promise.race([
+    childExit.then(() => true),
+    delay(stopTimeoutMs).then(() => false),
+  ]);
+  if (!killed && child.exitCode === null && child.signalCode === null) {
+    throw new Error("Packaged Electron did not exit after forced termination.");
+  }
 }
 
 export async function launchPackagedElectron({
@@ -240,15 +245,29 @@ export async function launchPackagedElectron({
       sessionName,
       async close() {
         await page.disconnect().catch(() => undefined);
-        await stopChild(child, childExit);
-        stdout.end();
-        stderr.end();
+        try {
+          await stopChild(child, childExit);
+        } finally {
+          stdout.end();
+          stderr.end();
+        }
       },
     };
   } catch (error) {
-    await stopChild(child, childExit).catch(() => undefined);
+    let cleanupError;
+    try {
+      await stopChild(child, childExit);
+    } catch (failure) {
+      cleanupError = failure;
+    }
     stdout.destroy();
     stderr.destroy();
+    if (cleanupError !== undefined) {
+      throw new AggregateError(
+        [error, cleanupError],
+        "Packaged Electron launch and cleanup both failed.",
+      );
+    }
     throw error;
   }
 }

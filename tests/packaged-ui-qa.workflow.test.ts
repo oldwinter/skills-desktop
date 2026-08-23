@@ -14,7 +14,10 @@ describe("packaged UI QA workflow contract", () => {
     const workflow = parse(source);
 
     expect(workflow.name).toBe("Packaged UI QA");
-    expect(Object.keys(workflow.on).sort()).toEqual(["push", "workflow_dispatch"]);
+    expect(Object.keys(workflow.on).sort()).toEqual([
+      "push",
+      "workflow_dispatch",
+    ]);
     expect(workflow.on.push.branches).toEqual(["main"]);
     expect(workflow.permissions).toEqual({ contents: "read" });
     expect(source).not.toContain("sshd");
@@ -33,11 +36,13 @@ describe("packaged UI QA workflow contract", () => {
         (entry: { architecture: string; platform: string }) =>
           entry.platform === "darwin" && entry.architecture === "x64",
       ).runner,
-    ).toBe('"macos-13"');
+    ).toBe('"macos-15-intel"');
 
     const uses = job.steps
       .map((step: { uses?: string }) => step.uses)
-      .filter((value: string | undefined): value is string => value !== undefined);
+      .filter(
+        (value: string | undefined): value is string => value !== undefined,
+      );
     expect(uses.every((value: string) => pinnedAction.test(value))).toBe(true);
     expect(
       job.steps.some(
