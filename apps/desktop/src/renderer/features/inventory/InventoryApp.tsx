@@ -690,6 +690,7 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                   {showRefreshMutationCta ? (
                     <button
                       className="text-button text-button--primary"
+                      id="inventory-refresh-cta"
                       onClick={() =>
                         void client.refreshInventory(snapshot.target.id)
                       }
@@ -702,6 +703,7 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                   {showReconcileMutationCta ? (
                     <button
                       className="text-button text-button--primary"
+                      id="inventory-reconcile-cta"
                       onClick={() => void reconcileMutation()}
                       type="button"
                     >
@@ -736,14 +738,16 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                     {snapshot.mutation.lastError?.message ??
                       "This Target requires reconciliation."}
                   </span>
-                  <button
-                    className="text-button text-button--primary"
-                    onClick={() => void reconcileMutation()}
-                    type="button"
-                  >
-                    <RefreshCw aria-hidden="true" size={15} />
-                    Reconcile
-                  </button>
+                  {showReconcileMutationCta ? null : (
+                    <button
+                      className="text-button text-button--primary"
+                      onClick={() => void reconcileMutation()}
+                      type="button"
+                    >
+                      <RefreshCw aria-hidden="true" size={15} />
+                      Reconcile
+                    </button>
+                  )}
                 </div>
               ) : snapshot.mutation.phase === "running" ? (
                 <div
@@ -822,30 +826,6 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                   <RefreshCw aria-hidden="true" size={15} />
                   Update scope
                 </button>
-                {showRefreshMutationCta ? (
-                  <button
-                    className="text-button text-button--primary"
-                    id="inventory-refresh-cta"
-                    onClick={() =>
-                      void client.refreshInventory(snapshot.target.id)
-                    }
-                    type="button"
-                  >
-                    <RefreshCw aria-hidden="true" size={15} />
-                    Refresh
-                  </button>
-                ) : null}
-                {showReconcileMutationCta ? (
-                  <button
-                    className="text-button text-button--primary"
-                    id="inventory-reconcile-cta"
-                    onClick={() => void reconcileMutation()}
-                    type="button"
-                  >
-                    <RefreshCw aria-hidden="true" size={15} />
-                    Reconcile
-                  </button>
-                ) : null}
               </div>
 
               <div className="inventory-table-wrap">
