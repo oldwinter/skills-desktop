@@ -68,6 +68,55 @@ function inventoryStatus(state: TargetState) {
   return freshnessLabel(state.inventory.freshness);
 }
 
+
+function compareDisabledReason(input: {
+  readonly busy: boolean;
+  readonly leftTargetId: string;
+  readonly plannableCount: number;
+  readonly rightTargetId: string;
+  readonly sshSideSelected: boolean;
+}): string | undefined {
+  if (input.sshSideSelected) {
+    return "SSH · 未在 V1 开放，不能作为可规划对比侧";
+  }
+  if (input.plannableCount < 2) {
+    return "Comparison needs two Local Targets";
+  }
+  if (input.leftTargetId === input.rightTargetId) {
+    return "Left and Right must be different Targets";
+  }
+  if (input.busy) {
+    return "Comparison is busy";
+  }
+  return undefined;
+}
+
+function prepareDisabledReason(input: {
+  readonly busy: boolean;
+  readonly comparisonFresh: boolean;
+  readonly eligible: boolean;
+  readonly mutationEligible: boolean;
+  readonly side: "left" | "right";
+  readonly ssh: boolean;
+}): string | undefined {
+  if (!input.busy && input.eligible) return undefined;
+  if (input.ssh) {
+    return "SSH · 未在 V1 开放，无法准备变更";
+  }
+  if (!input.comparisonFresh) {
+    return "Fresh evidence is required on both Targets before planning.";
+  }
+  if (!input.mutationEligible) {
+    return "Reconciliation is required before this Target can receive a comparison mutation.";
+  }
+  if (input.busy) {
+    return "Comparison is busy";
+  }
+  return input.side === "left"
+    ? "Selected skill is not eligible to Prepare for Left"
+    : "Selected skill is not eligible to Prepare for Right";
+}
+
 export function ComparisonView({
   client,
   onPrepared,
@@ -198,6 +247,57 @@ export function ComparisonView({
       selectedRow.summary === "version-drift");
   const sshSideSelected =
     leftTarget?.target.kind === "ssh" || rightTarget?.target.kind === "ssh";
+  const compareReason = compareDisabledReason({
+    busy,
+    leftTargetId,
+    plannableCount: plannableTargets.length,
+    rightTargetId,
+    sshSideSelected,
+  });
+  const compareDescribedBy =
+    compareReason === undefined
+      ? undefined
+      : sshSideSelected
+        ? undefined
+        : plannableTargets.length < 2
+          ? "comparison-needs-two-targets"
+          : leftTargetId === rightTargetId
+            ? "comparison-same-sides-reason"
+            : "comparison-busy-reason";
+  const leftPrepareReason = prepareDisabledReason({
+    busy,
+    comparisonFresh,
+    eligible: leftEligible,
+    mutationEligible: leftMutationEligible,
+    side: "left",
+    ssh: leftTarget?.target.kind === "ssh",
+  });
+  const rightPrepareReason = prepareDisabledReason({
+    busy,
+    comparisonFresh,
+    eligible: rightEligible,
+    mutationEligible: rightMutationEligible,
+    side: "right",
+    ssh: rightTarget?.target.kind === "ssh",
+  });
+  const prepareDescribedBy = (
+    reason: string | undefined,
+    side: "left" | "right",
+  ) => {
+    if (reason === undefined) return undefined;
+    if (reason.startsWith("SSH")) return undefined;
+    if (!comparisonFresh) return "comparison-freshness-reason";
+    if (
+      (side === "left" && !leftMutationEligible) ||
+      (side === "right" && !rightMutationEligible)
+    ) {
+      return "comparison-reconciliation-reason";
+    }
+    if (busy) return "comparison-busy-reason";
+    return side === "left"
+      ? "comparison-prepare-left-unqualified"
+      : "comparison-prepare-right-unqualified";
+  };
 
   return (
     <>
@@ -271,6 +371,7 @@ export function ComparisonView({
             </select>
           </label>
           <button
+            aria-describedby={compareDescribedBy}
             className="text-button text-button--primary"
             disabled={
               busy ||
@@ -279,13 +380,7 @@ export function ComparisonView({
               sshSideSelected
             }
             onClick={() => void openComparison()}
-            title={
-              sshSideSelected
-                ? "SSH · 未在 V1 开放，不能作为可规划对比侧"
-                : plannableTargets.length < 2
-                  ? "Comparison needs two Local Targets"
-                  : undefined
-            }
+            title={compareReason}
             type="button"
           >
             <ArrowLeftRight aria-hidden="true" size={15} />
@@ -294,7 +389,11 @@ export function ComparisonView({
         </div>
 
         {plannableTargets.length < 2 ? (
-          <div className="state-banner state-banner--loading" role="status">
+          <div
+            className="state-banner state-banner--loading"
+            id="comparison-needs-two-targets"
+            role="status"
+          >
             <CircleHelp aria-hidden="true" size={16} />
             <span>
               {targets.some(({ target }) => target.kind === "ssh")
@@ -302,6 +401,16 @@ export function ComparisonView({
                 : "Comparison needs two Local Targets. Add another Local Target under Targets, then return here to compare inventories."}
             </span>
           </div>
+        ) : null}
+        {plannableTargets.length >= 2 && leftTargetId === rightTargetId ? (
+          <p className="sr-only" id="comparison-same-sides-reason">
+            Left and Right must be different Targets
+          </p>
+        ) : null}
+        {busy ? (
+          <p className="sr-only" id="comparison-busy-reason">
+            Comparison is busy
+          </p>
         ) : null}
 
         {error !== undefined ? (
@@ -488,7 +597,11 @@ export function ComparisonView({
               ))}
             </div>
             {!comparisonFresh ? (
-              <div className="state-banner state-banner--warning" role="status">
+              <div
+                className="state-banner state-banner--warning"
+                id="comparison-freshness-reason"
+                role="status"
+              >
                 <AlertCircle aria-hidden="true" size={16} />
                 <span>
                   Fresh evidence is required on both Targets before planning.
@@ -496,7 +609,11 @@ export function ComparisonView({
               </div>
             ) : null}
             {!leftMutationEligible || !rightMutationEligible ? (
-              <div className="state-banner state-banner--danger" role="alert">
+              <div
+                className="state-banner state-banner--danger"
+                id="comparison-reconciliation-reason"
+                role="alert"
+              >
                 <AlertCircle aria-hidden="true" size={16} />
                 <span>
                   Reconciliation is required before this Target can receive a
@@ -504,30 +621,39 @@ export function ComparisonView({
                 </span>
               </div>
             ) : null}
+            {leftPrepareReason !== undefined &&
+            leftPrepareReason.startsWith("Selected skill") ? (
+              <p className="sr-only" id="comparison-prepare-left-unqualified">
+                {leftPrepareReason}
+              </p>
+            ) : null}
+            {rightPrepareReason !== undefined &&
+            rightPrepareReason.startsWith("Selected skill") ? (
+              <p className="sr-only" id="comparison-prepare-right-unqualified">
+                {rightPrepareReason}
+              </p>
+            ) : null}
             <div className="comparison-actions">
               <button
+                aria-describedby={prepareDescribedBy(leftPrepareReason, "left")}
                 className="text-button"
                 disabled={busy || !leftEligible}
                 onClick={() => void prepare(leftTargetId)}
-                title={
-                  leftTarget?.target.kind === "ssh"
-                    ? "SSH · 未在 V1 开放，无法准备变更"
-                    : undefined
-                }
+                title={leftPrepareReason}
                 type="button"
               >
                 <PackagePlus aria-hidden="true" size={15} />
                 Prepare for Left
               </button>
               <button
+                aria-describedby={prepareDescribedBy(
+                  rightPrepareReason,
+                  "right",
+                )}
                 className="text-button"
                 disabled={busy || !rightEligible}
                 onClick={() => void prepare(rightTargetId)}
-                title={
-                  rightTarget?.target.kind === "ssh"
-                    ? "SSH · 未在 V1 开放，无法准备变更"
-                    : undefined
-                }
+                title={rightPrepareReason}
                 type="button"
               >
                 <PackagePlus aria-hidden="true" size={15} />
