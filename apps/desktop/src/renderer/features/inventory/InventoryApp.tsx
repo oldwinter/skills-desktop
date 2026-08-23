@@ -680,9 +680,36 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                 </div>
               ) : null}
               {mutationBlockedReason && !sshUnavailable ? (
-                <span className="sr-only" id="inventory-mutation-blocked-reason">
-                  {mutationBlockedReason}
-                </span>
+                <div
+                  className="state-banner state-banner--warning"
+                  id="inventory-mutation-blocked-reason"
+                  role="status"
+                >
+                  <CircleHelp aria-hidden="true" size={16} />
+                  <span>{mutationBlockedReason}</span>
+                  {showRefreshMutationCta ? (
+                    <button
+                      className="text-button text-button--primary"
+                      onClick={() =>
+                        void client.refreshInventory(snapshot.target.id)
+                      }
+                      type="button"
+                    >
+                      <RefreshCw aria-hidden="true" size={15} />
+                      Refresh
+                    </button>
+                  ) : null}
+                  {showReconcileMutationCta ? (
+                    <button
+                      className="text-button text-button--primary"
+                      onClick={() => void reconcileMutation()}
+                      type="button"
+                    >
+                      <RefreshCw aria-hidden="true" size={15} />
+                      Reconcile
+                    </button>
+                  ) : null}
+                </div>
               ) : null}
               {snapshot.inventory.lastError?.code === "host_trust_required" ||
               snapshot.inventory.lastError?.code === "host_key_changed" ? (
