@@ -25,7 +25,7 @@ jobs:
     if: github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main'
     permissions:
       contents: read
-    runs-on: ${{ matrix.runner }}
+    runs-on: ${{ fromJSON(matrix.runner) }}
     timeout-minutes: 35
     strategy:
       fail-fast: false
@@ -33,16 +33,16 @@ jobs:
         include:
           - architecture: arm64
             platform: darwin
-            runner: macos-15
+            runner: '"macos-15"'
           - architecture: x64
             platform: darwin
-            runner: macos-15
+            runner: '"macos-15"'
           - architecture: x64
             platform: win32
-            runner: windows-2025
+            runner: '"windows-2025"'
           - architecture: x64
             platform: linux
-            runner: [self-hosted, Linux, X64, skills-desktop]
+            runner: '["self-hosted", "Linux", "X64", "skills-desktop"]
     steps:
       - name: Check out candidate source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
