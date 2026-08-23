@@ -19,6 +19,23 @@ import { UserFacingErrorCopy } from "../../UserFacingErrorCopy.js";
 
 type TargetState = NonNullable<WorkspaceSnapshot["targets"]>[number];
 
+function inventoryPill(state: TargetState): {
+  readonly label: string;
+  readonly tone: "healthy" | "neutral" | "warning";
+} {
+  if (state.inventory.phase === "loading") {
+    return { label: "Loading", tone: "neutral" };
+  }
+  if (state.inventory.freshness === "fresh") {
+    return { label: "Fresh", tone: "healthy" };
+  }
+  if (state.inventory.freshness === "stale") {
+    return { label: "Stale", tone: "warning" };
+  }
+  return { label: "No evidence", tone: "neutral" };
+}
+
+
 const blankTarget = (): TargetDraft => ({
   connectionReference: null,
   harness: "Codex",
@@ -122,8 +139,17 @@ export function TargetsView({
           </div>
         ) : null}
         <div className="target-list">
-          {targets.map((state) => (
-            <article className="target-item" key={state.target.id}>
+          {targets.map((state) => {
+            const pill = inventoryPill(state);
+            return (
+            <article
+              className={
+                state.target.kind === "ssh"
+                  ? "target-item target-item--ssh-demoted"
+                  : "target-item"
+              }
+              key={state.target.id}
+            >
               <header>
                 {state.target.kind === "local" ? (
                   <HardDrive aria-hidden="true" size={18} />
@@ -143,12 +169,8 @@ export function TargetsView({
                     未开放
                   </span>
                 ) : null}
-                <span
-                  className={`status-pill status-pill--${state.inventory.freshness === "fresh" ? "healthy" : "neutral"}`}
-                >
-                  {state.inventory.phase === "loading"
-                    ? "loading"
-                    : state.inventory.freshness}
+                <span className={`status-pill status-pill--${pill.tone}`}>
+                  {pill.label}
                 </span>
               </header>
               <dl>
@@ -164,15 +186,28 @@ export function TargetsView({
                   <dt>Harness</dt>
                   <dd>{state.target.harness}</dd>
                 </div>
-                <div>
-                  <dt>Generation</dt>
-                  <dd>{state.target.generation}</dd>
-                </div>
-                <div>
-                  <dt>Connection</dt>
-                  <dd>{state.target.connectionReference ?? "Local process"}</dd>
-                </div>
+                {state.target.kind === "ssh" ? (
+                  <div>
+                    <dt>Connection</dt>
+                    <dd>{state.target.connectionReference ?? "SSH host"}</dd>
+                  </div>
+                ) : null}
               </dl>
+              <details className="target-item-advanced">
+                <summary>Advanced</summary>
+                <dl>
+                  <div>
+                    <dt>Generation</dt>
+                    <dd>{state.target.generation}</dd>
+                  </div>
+                  {state.target.kind === "local" ? (
+                    <div>
+                      <dt>Connection</dt>
+                      <dd>This device</dd>
+                    </div>
+                  ) : null}
+                </dl>
+              </details>
               {state.inventory.lastError !== null ? (
                 <p className="target-state-error" role="status">
                   <UserFacingErrorCopy error={state.inventory.lastError} />
@@ -204,7 +239,8 @@ export function TargetsView({
                 </button>
               </div>
             </article>
-          ))}
+            );
+          })}
         </div>
       </main>
 

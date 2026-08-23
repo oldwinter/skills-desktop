@@ -388,3 +388,20 @@ code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; fo
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
 }
+
+.target-item--ssh-demoted {
+  background: var(--surface-muted);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding-left: 12px;
+  padding-right: 12px;
+}
+.target-item--ssh-demoted h2 { color: var(--text-secondary); }
+.target-item--ssh-demoted .scope-badge {
+  color: var(--warning);
+  background: var(--warning-soft);
+}
+.target-item-advanced { grid-column: 1 / -1; color: var(--text-tertiary); font-size: var(--font-size-meta); }
+.target-item-advanced summary { cursor: pointer; user-select: none; }
+.target-item-advanced dl { margin-top: 6px; }
+.inspector-empty p, .empty-state p { max-width: 28ch; }
