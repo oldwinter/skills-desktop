@@ -1344,10 +1344,16 @@ describe("Local Target Inventory shell", () => {
     );
 
     expect(await screen.findAllByText("未开放")).not.toHaveLength(0);
+
+    fireEvent.click(screen.getByRole("button", { name: /Build host/i }));
+
     expect(
-      screen.getByText(/远程 Target 仅保留只读痕迹/),
+      await screen.findByText(/远程 Target 仅保留只读痕迹/),
     ).toBeInTheDocument();
     expect(screen.getByLabelText("SSH 未开放")).toBeInTheDocument();
+    expect(
+      document.getElementById("inventory-ssh-unavailable-reason"),
+    ).not.toBeNull();
 
     fireEvent.click(
       (
@@ -1367,6 +1373,14 @@ describe("Local Target Inventory shell", () => {
     expect(prepareUpdate).toHaveAttribute(
       "title",
       "SSH · 未在 V1 开放，无法准备变更",
+    );
+    expect(prepareUpdate).toHaveAttribute(
+      "aria-describedby",
+      "inventory-ssh-unavailable-reason",
+    );
+    expect(prepareAdd).toHaveAttribute(
+      "aria-describedby",
+      "inventory-ssh-unavailable-reason",
     );
     fireEvent.click(prepareUpdate);
     fireEvent.click(prepareRemoval);
