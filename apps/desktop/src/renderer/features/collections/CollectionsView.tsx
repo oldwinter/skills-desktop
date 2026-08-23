@@ -109,7 +109,7 @@ export function CollectionsView({
     );
     // targetKey captures the Target identity and generation changes that reset
     // inputs without resetting them for unrelated Snapshot updates.
-    // oxlint-disable-next-line react/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [releaseSelection, snapshot.target.id, targetKey]);
 
   useEffect(() => {
