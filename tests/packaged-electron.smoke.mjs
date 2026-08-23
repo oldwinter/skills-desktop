@@ -716,7 +716,9 @@ try {
       document.body?.textContent?.includes("Manual upgrade") &&
       document.body?.textContent?.includes(
         "This unsigned-preview build is not signed or notarized. Download a newer package from GitHub Releases, verify it per docs/unsigned-developer-preview.md, then install it manually.",
-      )`,
+      ) &&
+      !document.body?.textContent?.includes("Electron is downloading") &&
+      !/\\bCandidate\\b/.test(document.body?.textContent ?? "")`,
     "packaged unsigned-preview About guidance",
   );
   const aboutBoundary = await first.page.evaluate(`(async () => {
@@ -724,6 +726,7 @@ try {
     const rejectedRestart = await window.skillsDesktop.about.requestRestart(
       "00000000-0000-4000-8000-000000000025",
     );
+    const bodyText = document.body?.textContent ?? "";
     return {
       hasCheckButton: [...document.querySelectorAll("button")].some(
         (button) => button.textContent?.includes("Check for updates"),
@@ -734,6 +737,8 @@ try {
       hasDiagnosticExport: [...document.querySelectorAll("button")].some(
         (button) => button.textContent?.includes("Export release diagnostics"),
       ),
+      hasElectronDownloadJargon: bodyText.includes("Electron is downloading"),
+      hasCandidateJargon: /\\bCandidate\\b/.test(bodyText),
       rejectedRestart,
       result,
     };
@@ -742,6 +747,8 @@ try {
     aboutBoundary.hasCheckButton ||
     aboutBoundary.hasInstallCommand ||
     !aboutBoundary.hasDiagnosticExport ||
+    aboutBoundary.hasElectronDownloadJargon ||
+    aboutBoundary.hasCandidateJargon ||
     !aboutBoundary.result.ok ||
     aboutBoundary.result.value.application.version !== "0.1.0" ||
     aboutBoundary.result.value.application.platform !== "linux" ||
