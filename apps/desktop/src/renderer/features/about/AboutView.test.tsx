@@ -383,8 +383,18 @@ describe("About surface", () => {
 
     expect(await screen.findByText("Mutation active")).toBeInTheDocument();
     expect(screen.getByText("Reconciliation required")).toBeInTheDocument();
+    const restart = screen.getByRole("button", { name: "Restart to update" });
+    expect(restart).toBeDisabled();
+    expect(restart).toHaveAttribute(
+      "title",
+      "Restart unavailable: Mutation active, Reconciliation required",
+    );
+    expect(restart).toHaveAttribute(
+      "aria-describedby",
+      "about-restart-unavailable-reason",
+    );
     expect(
-      screen.getByRole("button", { name: "Restart to update" }),
-    ).toBeDisabled();
+      document.getElementById("about-restart-unavailable-reason"),
+    ).toHaveTextContent("Mutation active");
   });
 });

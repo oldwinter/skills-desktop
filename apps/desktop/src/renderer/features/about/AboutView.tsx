@@ -203,16 +203,41 @@ export function AboutView({ client }: { readonly client: AboutBridge }) {
                     版本 {restartCandidate.version} 已就绪
                   </p>
                   {snapshot.restart.guardReasons.length > 0 ? (
-                    <ul className="about-guard-reasons" aria-label="Restart guards">
+                    <ul
+                      className="about-guard-reasons"
+                      aria-label="Restart guards"
+                      id="about-restart-unavailable-reason"
+                    >
                       {snapshot.restart.guardReasons.map((reason) => (
                         <li key={reason}>{guardLabels[reason]}</li>
                       ))}
                     </ul>
+                  ) : !snapshot.restart.immediateRestartAvailable ? (
+                    <p
+                      className="sr-only"
+                      id="about-restart-unavailable-reason"
+                    >
+                      Restart unavailable
+                    </p>
                   ) : null}
                   <button
+                    aria-describedby={
+                      snapshot.restart.immediateRestartAvailable
+                        ? undefined
+                        : "about-restart-unavailable-reason"
+                    }
                     className="text-button text-button--primary"
                     disabled={!snapshot.restart.immediateRestartAvailable}
                     onClick={() => void requestRestart(restartCandidate.id)}
+                    title={
+                      snapshot.restart.immediateRestartAvailable
+                        ? undefined
+                        : snapshot.restart.guardReasons.length > 0
+                          ? `Restart unavailable: ${snapshot.restart.guardReasons
+                              .map((reason) => guardLabels[reason])
+                              .join(", ")}`
+                          : "Restart unavailable"
+                    }
                     type="button"
                   >
                     <RotateCw aria-hidden="true" size={15} />
