@@ -494,7 +494,7 @@ describe("Local Target Inventory shell", () => {
     );
   });
 
-  it("prepares exact entries in the visible machine order", async () => {
+  it("excludes SSH Targets from V1 Collections prepare while Local stays ordered", async () => {
     const otherTarget = {
       ...snapshot.target,
       id: "00000000-0000-4000-8000-000000000002",
@@ -556,17 +556,15 @@ describe("Local Target Inventory shell", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Collections" }));
     expect(screen.getAllByText("Fresh inventory")).toHaveLength(2);
+    expect(screen.getByText("SSH · next-scope")).toBeInTheDocument();
+    const sshInclude = screen.getByRole("checkbox", {
+      name: "Include Build host",
+    });
+    expect(sshInclude).toBeDisabled();
+    expect(sshInclude).not.toBeChecked();
     fireEvent.click(
       screen.getByRole("checkbox", {
         name: "Select find-skills on This device",
-      }),
-    );
-    fireEvent.click(
-      screen.getByRole("checkbox", { name: "Include Build host" }),
-    );
-    fireEvent.click(
-      screen.getByRole("checkbox", {
-        name: "Select find-skills on Build host",
       }),
     );
     fireEvent.click(screen.getByRole("button", { name: "Prepare plan" }));
@@ -581,11 +579,6 @@ describe("Local Target Inventory shell", () => {
             scope: "project",
             selections: [{ mode: "add", name: "find-skills" }],
             targetId: snapshot.target.id,
-          },
-          {
-            scope: "project",
-            selections: [{ mode: "add", name: "find-skills" }],
-            targetId: otherTarget.id,
           },
         ],
       }),
