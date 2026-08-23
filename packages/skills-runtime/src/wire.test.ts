@@ -1,8 +1,18 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  decodeSingleWireFramePayload,
   decodeWireFrames,
   encodeWireFrame,
+  encodeWireFramePayload,
+  isWireObservationRequest,
+  isWireRequest,
+  MAX_WIRE_FRAME_BYTES,
+  MAX_WIRE_HARNESS_LENGTH,
+  MAX_WIRE_REQUEST_ID_LENGTH,
+  MAX_WIRE_WORKSPACE_LENGTH,
+  validateWireObservationRequest,
+  validateWireRequest,
   WIRE_PROTOCOL_VERSION,
 } from "./wire.js";
 
@@ -227,5 +237,322 @@ describe("Remote Bootstrap Wire Protocol", () => {
         type: "failure",
       }),
     ).toThrow();
+  });
+});
+
+describe("Wire request validators", () => {
+  const observe = {
+    harness: "Codex",
+    operation: "observe" as const,
+    protocolVersion: WIRE_PROTOCOL_VERSION,
+    requestId: "observe-1",
+    type: "request" as const,
+    workspace: "/srv/workspace",
+  };
+
+  it("accepts root and rejects traversal or empty segments in observation workspaces", () => {
+    expect(isWireObservationRequest({ ...observe, workspace: "/" })).toBe(true);
+    expect(
+      validateWireObservationRequest(
+        { ...observe, workspace: "/srv/./workspace" },
+        WIRE_PROTOCOL_VERSION,
+        MAX_WIRE_HARNESS_LENGTH,
+        MAX_WIRE_REQUEST_ID_LENGTH,
+        MAX_WIRE_WORKSPACE_LENGTH,
+      ),
+    ).toBe(false);
+    expect(
+      validateWireObservationRequest(
+        { ...observe, workspace: "/srv/../workspace" },
+        WIRE_PROTOCOL_VERSION,
+        MAX_WIRE_HARNESS_LENGTH,
+        MAX_WIRE_REQUEST_ID_LENGTH,
+        MAX_WIRE_WORKSPACE_LENGTH,
+      ),
+    ).toBe(false);
+    expect(
+      validateWireObservationRequest(
+        { ...observe, workspace: "/srv//workspace" },
+        WIRE_PROTOCOL_VERSION,
+        MAX_WIRE_HARNESS_LENGTH,
+        MAX_WIRE_REQUEST_ID_LENGTH,
+        MAX_WIRE_WORKSPACE_LENGTH,
+      ),
+    ).toBe(false);
+    expect(isWireObservationRequest(null)).toBe(false);
+    expect(isWireObservationRequest([])).toBe(false);
+    expect(isWireObservationRequest({ ...observe, extra: true })).toBe(false);
+    expect(isWireObservationRequest({ ...observe, harness: "" })).toBe(false);
+    expect(
+      isWireObservationRequest({
+        ...observe,
+        harness: "x".repeat(MAX_WIRE_HARNESS_LENGTH + 1),
+      }),
+    ).toBe(false);
+    expect(isWireObservationRequest({ ...observe, requestId: "" })).toBe(false);
+    expect(isWireObservationRequest({ ...observe, workspace: "" })).toBe(false);
+    expect(
+      isWireObservationRequest({ ...observe, protocolVersion: 1 }),
+    ).toBe(false);
+  });
+
+  it("validates cancel, observe, and mutate request shapes", () => {
+    expect(
+      isWireRequest({
+        operation: "cancel",
+        protocolVersion: WIRE_PROTOCOL_VERSION,
+        requestId: "cancel-1",
+        type: "request",
+      }),
+    ).toBe(true);
+    expect(isWireRequest(observe)).toBe(true);
+    expect(
+      isWireRequest({
+        harness: "Codex",
+        mutation: {
+          names: ["find-skills"],
+          scope: "project",
+          source: { source: "vercel-labs/skills", sourceType: "github" },
+          type: "add",
+        },
+        operation: "mutate",
+        protocolVersion: WIRE_PROTOCOL_VERSION,
+        requestId: "mutation-add",
+        type: "request",
+        workspace: "/srv/workspace",
+      }),
+    ).toBe(true);
+    expect(
+      isWireRequest({
+        harness: "Codex",
+        mutation: {
+          names: ["find-skills"],
+          scope: "global",
+          type: "update",
+        },
+        operation: "mutate",
+        protocolVersion: WIRE_PROTOCOL_VERSION,
+        requestId: "mutation-update",
+        type: "request",
+        workspace: "/srv/workspace",
+      }),
+    ).toBe(true);
+
+    expect(isWireRequest({ type: "request" })).toBe(false);
+    expect(
+      validateWireRequest(
+        { ...observe, protocolVersion: 99 },
+        WIRE_PROTOCOL_VERSION,
+        MAX_WIRE_HARNESS_LENGTH,
+        MAX_WIRE_REQUEST_ID_LENGTH,
+        MAX_WIRE_WORKSPACE_LENGTH,
+      ),
+    ).toBe(false);
+    expect(
+      isWireRequest({
+        operation: "cancel",
+        payload: "nope",
+        protocolVersion: WIRE_PROTOCOL_VERSION,
+        requestId: "cancel-1",
+        type: "request",
+      }),
+    ).toBe(false);
+    expect(
+      isWireRequest({
+        harness: "Codex",
+        mutation: {
+          names: ["bad name"],
+          scope: "project",
+          type: "remove",
+        },
+        operation: "mutate",
+        protocolVersion: WIRE_PROTOCOL_VERSION,
+        requestId: "mutation-bad-name",
+        type: "request",
+        workspace: "/srv/workspace",
+      }),
+    ).toBe(false);
+    expect(
+      isWireRequest({
+        harness: "Codex",
+        mutation: {
+          names: ["find-skills", "find-skills"],
+          scope: "project",
+          type: "remove",
+        },
+        operation: "mutate",
+        protocolVersion: WIRE_PROTOCOL_VERSION,
+        requestId: "mutation-dup",
+        type: "request",
+        workspace: "/srv/workspace",
+      }),
+    ).toBe(false);
+    expect(
+      isWireRequest({
+        harness: "Codex",
+        mutation: {
+          names: ["find-skills"],
+          scope: "project",
+          source: {
+            revision: "not-a-sha",
+            source: "vercel-labs/skills",
+            sourceType: "github",
+          },
+          type: "add",
+        },
+        operation: "mutate",
+        protocolVersion: WIRE_PROTOCOL_VERSION,
+        requestId: "mutation-bad-rev",
+        type: "request",
+        workspace: "/srv/workspace",
+      }),
+    ).toBe(false);
+    expect(
+      isWireRequest({
+        harness: "Codex",
+        mutation: {
+          names: ["find-skills"],
+          scope: "project",
+          source: { source: "../evil", sourceType: "github" },
+          type: "add",
+        },
+        operation: "mutate",
+        protocolVersion: WIRE_PROTOCOL_VERSION,
+        requestId: "mutation-bad-source",
+        type: "request",
+        workspace: "/srv/workspace",
+      }),
+    ).toBe(false);
+    expect(
+      isWireRequest({
+        harness: "Codex",
+        mutation: { names: [], scope: "project", type: "remove" },
+        operation: "mutate",
+        protocolVersion: WIRE_PROTOCOL_VERSION,
+        requestId: "mutation-empty",
+        type: "request",
+        workspace: "/srv/workspace",
+      }),
+    ).toBe(false);
+    expect(
+      isWireRequest({
+        harness: "Codex",
+        mutation: {
+          names: ["find-skills"],
+          scope: "other",
+          type: "remove",
+        },
+        operation: "mutate",
+        protocolVersion: WIRE_PROTOCOL_VERSION,
+        requestId: "mutation-scope",
+        type: "request",
+        workspace: "/srv/workspace",
+      }),
+    ).toBe(false);
+    expect(
+      isWireRequest({
+        harness: "Codex",
+        mutation: {
+          names: ["find-skills"],
+          scope: "project",
+          type: "remove",
+        },
+        operation: "mutate",
+        protocolVersion: WIRE_PROTOCOL_VERSION,
+        requestId: "mutation-1",
+        type: "request",
+        workspace: "relative/path",
+      }),
+    ).toBe(false);
+    expect(
+      isWireRequest({
+        harness: "Codex",
+        mutation: { type: "add" },
+        operation: "mutate",
+        protocolVersion: WIRE_PROTOCOL_VERSION,
+        requestId: "mutation-1",
+        type: "request",
+        workspace: "/srv/workspace",
+      }),
+    ).toBe(false);
+    expect(
+      isWireRequest({
+        harness: "Codex",
+        mutation: null,
+        operation: "mutate",
+        protocolVersion: WIRE_PROTOCOL_VERSION,
+        requestId: "mutation-1",
+        type: "request",
+        workspace: "/srv/workspace",
+      }),
+    ).toBe(false);
+  });
+
+  it("encodes multi-byte JSON and rejects oversized frames", () => {
+    const framed = encodeWireFramePayload({ emoji: "🙂", cjk: "技能" }, 1024);
+    expect(framed.byteLength).toBeGreaterThan(4);
+    const payload = decodeSingleWireFramePayload(framed, 1024);
+    expect(payload).toBeDefined();
+    expect(JSON.parse(Buffer.from(payload!).toString("utf8"))).toEqual({
+      emoji: "🙂",
+      cjk: "技能",
+    });
+    expect(decodeSingleWireFramePayload(new Uint8Array([0, 0]), 1024)).toBe(
+      undefined,
+    );
+    expect(
+      decodeSingleWireFramePayload(new Uint8Array([0, 0, 0, 2, 1]), 1024),
+    ).toBe(undefined);
+    expect(
+      decodeSingleWireFramePayload(new Uint8Array([0, 0, 0, 5, 1, 2, 3, 4, 5]), 4),
+    ).toBe(undefined);
+    expect(() =>
+      encodeWireFramePayload({ huge: "x".repeat(100) }, 16),
+    ).toThrow(/Wire frame exceeds/);
+  });
+
+  it("decodes multi-frame streams and rejects truncated UTF-8 continuations", () => {
+    const hello = encodeWireFrame({
+      bootstrapDigest: "a".repeat(64),
+      protocolVersion: WIRE_PROTOCOL_VERSION,
+      type: "hello",
+    });
+    const inventory = encodeWireFrame({
+      cliVersion: "1.5.23",
+      globalJson: "[]",
+      projectJson: "[]",
+      protocolVersion: WIRE_PROTOCOL_VERSION,
+      requestId: "observe-1",
+      type: "inventory",
+    });
+    const joined = new Uint8Array(hello.length + inventory.length);
+    joined.set(hello);
+    joined.set(inventory, hello.length);
+    expect(decodeWireFrames(joined)).toMatchObject({
+      ok: true,
+      value: [{ type: "hello" }, { type: "inventory" }],
+    });
+
+    const truncatedHeader = new Uint8Array([0, 0, 1]);
+    expect(decodeWireFrames(truncatedHeader)).toMatchObject({
+      error: { code: "incomplete_frame" },
+      ok: false,
+    });
+
+    const badContinuation = new Uint8Array([0, 0, 0, 2, 0xc2, 0x20]);
+    expect(decodeWireFrames(badContinuation)).toMatchObject({
+      error: { code: "invalid_frame" },
+      ok: false,
+    });
+    const overlong = new Uint8Array([0, 0, 0, 2, 0xc0, 0x80]);
+    expect(decodeWireFrames(overlong)).toMatchObject({
+      error: { code: "invalid_frame" },
+      ok: false,
+    });
+    const truncatedMulti = new Uint8Array([0, 0, 0, 1, 0xe0]);
+    expect(decodeWireFrames(truncatedMulti)).toMatchObject({
+      error: { code: "invalid_frame" },
+      ok: false,
+    });
   });
 });

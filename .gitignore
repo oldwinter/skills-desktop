@@ -8,3 +8,5 @@ dist/
 out/
 release-candidates/
 visual-qa/
+
+coverage/
