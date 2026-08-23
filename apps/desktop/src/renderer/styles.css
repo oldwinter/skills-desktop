@@ -87,6 +87,7 @@ code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; fo
 .page-heading { justify-content: space-between; gap: 16px; padding: 20px 20px 14px; }
 .page-heading p { margin-top: 3px; color: var(--text-secondary); font-size: var(--font-size-meta); }
 .mobile-target-summary { display: none; }
+.inventory-target-chooser { display: none; }
 .icon-button { display: inline-grid; flex: 0 0 auto; width: 40px; height: 40px; padding: 0; place-items: center; color: var(--text-secondary); background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-control); }
 .icon-button:hover { color: var(--text); border-color: var(--line-strong); }
 .state-banner { min-height: 40px; gap: 8px; margin: 0 20px 10px; padding: 8px 10px; border-radius: var(--radius-control); font-size: var(--font-size-meta); }
@@ -315,6 +316,8 @@ code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; fo
   .about-content { width: auto; margin: 0 14px 24px; }
   .page-heading { padding: 16px 14px 10px; }
   .mobile-target-summary { display: flex; align-items: center; gap: 5px; overflow-wrap: anywhere; }
+  .inventory-target-chooser { display: grid; gap: 4px; min-width: 0; max-width: 100%; color: var(--text-secondary); font-size: var(--font-size-meta); }
+  .inventory-target-chooser select { width: 100%; max-width: 100%; min-width: 0; height: 36px; }
   .state-banner { margin: 0 14px 10px; align-items: flex-start; flex-wrap: wrap; }
   .state-banner strong { width: 100%; margin-left: 24px; }
   .inventory-toolbar { align-items: stretch; flex-direction: column; padding: 0 14px 12px; }

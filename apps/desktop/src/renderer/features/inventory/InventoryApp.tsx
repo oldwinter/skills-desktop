@@ -628,18 +628,37 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                     {snapshot.inventory.entries.length} skills across project
                     and global scopes
                   </p>
-                  <p
-                    aria-label="Target summary"
-                    className="mobile-target-summary"
-                  >
-                    {snapshot.target.kind === "ssh" ? (
-                      <Server aria-hidden="true" size={14} />
-                    ) : (
-                      <HardDrive aria-hidden="true" size={14} />
-                    )}
-                    {snapshot.target.label} / {snapshot.target.workspaceLabel} /{" "}
-                    {snapshot.target.harness}
-                  </p>
+                  {targetStates.length > 1 ? (
+                    <label className="inventory-target-chooser">
+                      Target
+                      <select
+                        onChange={(event) => {
+                          setSelectedTargetId(event.currentTarget.value);
+                          setView("inventory");
+                        }}
+                        value={snapshot.target.id}
+                      >
+                        {targetStates.map((state) => (
+                          <option key={state.target.id} value={state.target.id}>
+                            {state.target.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  ) : (
+                    <p
+                      aria-label="Target summary"
+                      className="mobile-target-summary"
+                    >
+                      {snapshot.target.kind === "ssh" ? (
+                        <Server aria-hidden="true" size={14} />
+                      ) : (
+                        <HardDrive aria-hidden="true" size={14} />
+                      )}
+                      {snapshot.target.label} / {snapshot.target.workspaceLabel}{" "}
+                      / {snapshot.target.harness}
+                    </p>
+                  )}
                 </div>
                 {snapshot.inventory.phase === "loading" &&
                 activeOperationId !== null ? (

@@ -275,6 +275,45 @@ const rendererStyles = readFileSync(
   "utf8",
 );
 
+const twoLocalTargetsSnapshot: WorkspaceSnapshot = {
+  ...snapshot,
+  targets: [
+    {
+      deletionBlocked: false,
+      inventory: snapshot.inventory,
+      mutation: snapshot.mutation,
+      target: {
+        ...snapshot.target,
+        connectionReference: null,
+        workspace: "/work/skills-desktop",
+      },
+    },
+    {
+      deletionBlocked: false,
+      inventory: {
+        ...snapshot.inventory,
+        entries: [
+          {
+            ...snapshot.inventory.entries[0]!,
+            name: "Other-Skill",
+          },
+        ],
+      },
+      mutation: snapshot.mutation,
+      target: {
+        connectionReference: null,
+        generation: 1,
+        harness: "Codex",
+        id: "00000000-0000-4000-8000-00000000000a",
+        kind: "local",
+        label: "Second device",
+        workspace: "/work/second",
+        workspaceLabel: "second",
+      },
+    },
+  ],
+};
+
 describe("Local Target Inventory shell", () => {
   it("shows Target, Harness, scope, source identity, and Fresh evidence", async () => {
     render(<InventoryApp client={clientFor(snapshot)} />);
@@ -506,6 +545,38 @@ describe("Local Target Inventory shell", () => {
     expect(screen.getByRole("button", { name: "Comparison" })).toHaveAttribute(
       "title",
       "Comparison",
+    );
+    expect(screen.queryByRole("combobox", { name: "Target" })).toBeNull();
+  });
+
+  it("keeps a compact accessible Target chooser for two Local Targets at 800px", async () => {
+    render(<InventoryApp client={clientFor(twoLocalTargetsSnapshot)} />);
+
+    const chooser = await screen.findByRole("combobox", { name: "Target" });
+    expect(chooser).toHaveDisplayValue("This device");
+    expect(
+      within(chooser).getByRole("option", { name: "This device" }),
+    ).toBeInTheDocument();
+    expect(
+      within(chooser).getByRole("option", { name: "Second device" }),
+    ).toBeInTheDocument();
+
+    fireEvent.change(chooser, {
+      target: { value: "00000000-0000-4000-8000-00000000000a" },
+    });
+    expect(chooser).toHaveDisplayValue("Second device");
+    expect(
+      await screen.findByRole("button", { name: "Other-Skill" }),
+    ).toBeInTheDocument();
+
+    expect(rendererStyles).toMatch(
+      /@media \(max-width: 820px\)[\s\S]*\.inventory-target-chooser\s*\{(?=[^}]*max-width:\s*100%)(?=[^}]*min-width:\s*0)[^}]*\}/,
+    );
+    expect(rendererStyles).toMatch(
+      /@media \(max-width: 820px\)[\s\S]*\.inventory-target-chooser\s*\{(?![^}]*display:\s*none)/,
+    );
+    expect(rendererStyles).not.toMatch(
+      /@media \(max-width: 820px\)[\s\S]*\.inventory-target-chooser\s*\{\s*display:\s*none/,
     );
   });
 
