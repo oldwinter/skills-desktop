@@ -144,7 +144,7 @@ export function TargetsView({
               <dl>
                 <div>
                   <dt>Kind</dt>
-                  <dd>{state.target.kind === "local" ? "Local" : "SSH"}</dd>
+                  <dd>{state.target.kind === "local" ? "Local" : "SSH · next-scope"}</dd>
                 </div>
                 <div>
                   <dt>Harness</dt>
@@ -250,6 +250,7 @@ export function TargetsView({
               onChange={(event) =>
                 setDraft({ ...draft, label: event.currentTarget.value })
               }
+              readOnly={draft.kind === "ssh"}
               required
               value={draft.label}
             />
@@ -261,6 +262,7 @@ export function TargetsView({
               onChange={(event) =>
                 setDraft({ ...draft, workspace: event.currentTarget.value })
               }
+              readOnly={draft.kind === "ssh"}
               required
               value={draft.workspace}
             />
@@ -268,6 +270,7 @@ export function TargetsView({
           <label>
             <span>Harness</span>
             <select
+              disabled={draft.kind === "ssh"}
               onChange={(event) =>
                 setDraft({ ...draft, harness: event.currentTarget.value })
               }
@@ -287,12 +290,22 @@ export function TargetsView({
                     connectionReference: event.currentTarget.value,
                   })
                 }
+                readOnly
                 required
                 value={draft.connectionReference ?? ""}
               />
             </label>
           ) : null}
-          <button className="text-button text-button--primary" type="submit">
+          <button
+            className="text-button text-button--primary"
+            disabled={draft.kind === "ssh"}
+            title={
+              draft.kind === "ssh"
+                ? "SSH Targets are next-scope and cannot be saved in V1"
+                : undefined
+            }
+            type="submit"
+          >
             <Save aria-hidden="true" size={15} />
             Save Target
           </button>
