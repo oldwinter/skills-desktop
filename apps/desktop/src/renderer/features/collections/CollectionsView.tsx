@@ -56,9 +56,14 @@ function targetStatesFor(snapshot: WorkspaceSnapshot): TargetState[] {
   );
 }
 
-function inputFor(targetId: string, activeTargetId: string): TargetInput {
+function inputFor(
+  targetId: string,
+  activeTargetId: string,
+  kind: TargetState["target"]["kind"],
+): TargetInput {
   return {
-    included: targetId === activeTargetId,
+    // V1 Local-only: SSH Targets stay visible but never included in Collections.
+    included: kind !== "ssh" && targetId === activeTargetId,
     scope: "project",
     selected: {},
   };
@@ -85,7 +90,7 @@ export function CollectionsView({
     Object.fromEntries(
       targetStates.map(({ target }) => [
         target.id,
-        inputFor(target.id, snapshot.target.id),
+        inputFor(target.id, snapshot.target.id, target.kind),
       ]),
     ),
   );
@@ -103,7 +108,7 @@ export function CollectionsView({
       Object.fromEntries(
         targetStates.map(({ target }) => [
           target.id,
-          inputFor(target.id, snapshot.target.id),
+          inputFor(target.id, snapshot.target.id, target.kind),
         ]),
       ),
     );
@@ -166,6 +171,7 @@ export function CollectionsView({
   const selectedTargets = targetStates.flatMap((targetState) => {
     const input = inputs[targetState.target.id];
     if (input === undefined || !input.included) return [];
+    if (targetState.target.kind === "ssh") return [];
     return [
       { input, selections: selectionsFor(targetState, input), targetState },
     ];
