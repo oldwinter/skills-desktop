@@ -18,6 +18,17 @@ const localTarget: TargetDefinition = {
   workspaceLabel: "skills-desktop",
 };
 
+const sshTarget: TargetDefinition = {
+  connectionReference: "build-host",
+  generation: 1,
+  harness: "Codex",
+  id: "00000000-0000-4000-8000-000000000002",
+  kind: "ssh",
+  label: "Build host",
+  workspace: "/srv/skills",
+  workspaceLabel: "remote",
+};
+
 const unusedProcess = {
   async executeConfirmed() {
     return {
@@ -56,32 +67,44 @@ const unusedProcess = {
   },
 } satisfies SkillsProcess;
 
+const sshRejectError = {
+  code: "invalid_request",
+  effects: "none",
+  message: "SSH Targets are next-scope and outside the V1 Local commitment.",
+  phase: "target",
+  retryable: false,
+} as const;
+
+function createV1LocalOnlyCapabilities(initialTarget: TargetDefinition) {
+  return createDesktopCapabilities({
+    id: () => "00000000-0000-4000-8000-000000000099",
+    recoveryRecords: createMemoryRecoveryRecords(
+      [],
+      [],
+      [
+        {
+          connectionReference: initialTarget.connectionReference ?? null,
+          generation: initialTarget.generation,
+          harness: initialTarget.harness,
+          id: initialTarget.id,
+          kind: initialTarget.kind,
+          label: initialTarget.label,
+          workspace: initialTarget.workspace,
+        },
+      ],
+    ),
+    skillsTargets: createSkillsTargetsCatalog({
+      id: () => "00000000-0000-4000-8000-000000000099",
+      initialTarget,
+      processFor: () => unusedProcess,
+    }),
+    v1LocalOnlyTargets: true,
+  });
+}
+
 describe("V1 Local-only Target authority", () => {
   it("rejects ssh Target create when v1LocalOnlyTargets is enabled", async () => {
-    const capabilities = createDesktopCapabilities({
-      id: () => "00000000-0000-4000-8000-000000000099",
-      recoveryRecords: createMemoryRecoveryRecords(
-        [],
-        [],
-        [
-          {
-            connectionReference: null,
-            generation: localTarget.generation,
-            harness: localTarget.harness,
-            id: localTarget.id,
-            kind: localTarget.kind,
-            label: localTarget.label,
-            workspace: localTarget.workspace,
-          },
-        ],
-      ),
-      skillsTargets: createSkillsTargetsCatalog({
-        id: () => "00000000-0000-4000-8000-000000000099",
-        initialTarget: localTarget,
-        processFor: () => unusedProcess,
-      }),
-      v1LocalOnlyTargets: true,
-    });
+    const capabilities = createV1LocalOnlyCapabilities(localTarget);
     await capabilities.initialize();
     const session = capabilities.attach(
       {
@@ -106,14 +129,45 @@ describe("V1 Local-only Target authority", () => {
       }),
     ).resolves.toEqual({
       ok: false,
-      error: {
-        code: "invalid_request",
-        effects: "none",
-        message:
-          "SSH Targets are next-scope and outside the V1 Local commitment.",
-        phase: "target",
-        retryable: false,
+      error: sshRejectError,
+    });
+  });
+
+  it("rejects collection.prepare-many that includes an ssh Target", async () => {
+    const capabilities = createV1LocalOnlyCapabilities(localTarget);
+    await capabilities.initialize();
+    const session = capabilities.attach(
+      {
+        endpointId: "workspace-v1-prepare-many",
+        role: "workspace",
+        sessionEpoch: "epoch-v1-many",
       },
+      () => undefined,
+    );
+
+    await expect(
+      session.request({
+        collectionId: "skills-desktop-starter",
+        manifestDigest: `sha256:${"a".repeat(64)}`,
+        releaseNumber: 1,
+        targets: [
+          {
+            scope: "project",
+            selections: [{ mode: "add", name: "find-skills" }],
+            targetId: localTarget.id,
+          },
+          {
+            scope: "project",
+            selections: [{ mode: "add", name: "find-skills" }],
+            targetId: sshTarget.id,
+          },
+        ],
+        type: "collection.prepare-many",
+        version: 1,
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      error: sshRejectError,
     });
   });
 });
