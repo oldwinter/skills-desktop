@@ -3254,6 +3254,19 @@ export function createDesktopCapabilities(
             const reviewedTarget = targetDefinitions().find(
               ({ id }) => id === reviewedTargetId,
             );
+            if (
+              options.v1LocalOnlyTargets === true &&
+              reviewedTarget?.kind === "ssh"
+            ) {
+              return requestFailure(
+                publicError(
+                  "invalid_request",
+                  "SSH Targets are next-scope and outside the V1 Local commitment.",
+                  "target",
+                  false,
+                ),
+              );
+            }
             const challenge =
               options.skillsTargets.pendingHostTrust(reviewedTargetId);
             if (
@@ -3407,6 +3420,17 @@ export function createDesktopCapabilities(
               );
             }
             activateTarget(requestedTarget);
+          }
+
+          if (options.v1LocalOnlyTargets === true && target.kind === "ssh") {
+            return requestFailure(
+              publicError(
+                "invalid_request",
+                "SSH Targets are next-scope and outside the V1 Local commitment.",
+                "target",
+                false,
+              ),
+            );
           }
 
           if (parsed.data.type === "mutation.prepare") {
