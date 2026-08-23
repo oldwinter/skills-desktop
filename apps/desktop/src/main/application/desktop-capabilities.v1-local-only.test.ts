@@ -291,11 +291,6 @@ describe("V1 Local-only Target authority", () => {
         type: "mutation.reconcile" as const,
         version: 1 as const,
       },
-      {
-        targetId: readySshTarget.id,
-        type: "host-trust.review" as const,
-        version: 1 as const,
-      },
     ]) {
       await expect(session.request(request)).resolves.toEqual({
         ok: false,
@@ -319,4 +314,51 @@ describe("V1 Local-only Target authority", () => {
       ]),
     });
   });
+
+  it("rejects host-trust.review when v1LocalOnlyTargets is enabled", async () => {
+    const skillsTargets = createSkillsTargetsCatalog({
+      id: () => "00000000-0000-4000-8000-000000000099",
+      initialTarget: localTarget,
+      processFor: () => unusedProcess,
+    });
+    skillsTargets.replaceDefinitions([localTarget, sshTarget]);
+    const capabilities = createDesktopCapabilities({
+      id: () => "00000000-0000-4000-8000-000000000099",
+      recoveryRecords: createMemoryRecoveryRecords(
+        [],
+        [],
+        [durable(localTarget), durable(sshTarget)],
+      ),
+      skillsTargets,
+      v1LocalOnlyTargets: true,
+    });
+    await capabilities.initialize();
+    const session = capabilities.attach(
+      {
+        endpointId: "workspace-v1-host-trust",
+        role: "workspace",
+        sessionEpoch: "epoch-v1-host-trust",
+      },
+      () => undefined,
+    );
+
+    await expect(
+      session.request({
+        targetId: sshTarget.id,
+        type: "host-trust.review",
+        version: 1,
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      error: {
+        code: "invalid_request",
+        effects: "none",
+        message:
+          "主机身份复核未在 V1 开放。",
+        phase: "target",
+        retryable: false,
+      },
+    });
+  });
+
 });
