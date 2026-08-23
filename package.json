@@ -23,7 +23,7 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "check:imports": "node scripts/check-imports.mjs",
-    "verify": "npm run typecheck && npm run lint && npm run check:imports && npm test && npm run build",
+    "verify": "npm run typecheck && npm run lint && npm run check:imports && npm run test:coverage && npm run build",
     "smoke:cli": "vitest run --config vitest.smoke.config.ts tests/real-cli.smoke.test.ts",
     "smoke:ssh": "vitest run --config vitest.ssh-smoke.config.ts",
     "package:linux": "npm run build && npm exec --workspace @skills-desktop/desktop electron-forge package -- --platform=linux --arch=x64",
