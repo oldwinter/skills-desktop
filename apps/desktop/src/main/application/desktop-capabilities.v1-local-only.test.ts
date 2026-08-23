@@ -75,36 +75,31 @@ const sshRejectError = {
   retryable: false,
 } as const;
 
-function createV1LocalOnlyCapabilities(initialTarget: TargetDefinition) {
-  return createDesktopCapabilities({
-    id: () => "00000000-0000-4000-8000-000000000099",
-    recoveryRecords: createMemoryRecoveryRecords(
-      [],
-      [],
-      [
-        {
-          connectionReference: initialTarget.connectionReference ?? null,
-          generation: initialTarget.generation,
-          harness: initialTarget.harness,
-          id: initialTarget.id,
-          kind: initialTarget.kind,
-          label: initialTarget.label,
-          workspace: initialTarget.workspace,
-        },
-      ],
-    ),
-    skillsTargets: createSkillsTargetsCatalog({
-      id: () => "00000000-0000-4000-8000-000000000099",
-      initialTarget,
-      processFor: () => unusedProcess,
-    }),
-    v1LocalOnlyTargets: true,
-  });
+function durable(target: TargetDefinition) {
+  return {
+    connectionReference: target.connectionReference ?? null,
+    executionBindingDigest: null,
+    generation: target.generation,
+    harness: target.harness,
+    id: target.id,
+    kind: target.kind,
+    label: target.label,
+    workspace: target.workspace,
+  };
 }
 
 describe("V1 Local-only Target authority", () => {
   it("rejects ssh Target create when v1LocalOnlyTargets is enabled", async () => {
-    const capabilities = createV1LocalOnlyCapabilities(localTarget);
+    const capabilities = createDesktopCapabilities({
+      id: () => "00000000-0000-4000-8000-000000000099",
+      recoveryRecords: createMemoryRecoveryRecords([], [], [durable(localTarget)]),
+      skillsTargets: createSkillsTargetsCatalog({
+        id: () => "00000000-0000-4000-8000-000000000099",
+        initialTarget: localTarget,
+        processFor: () => unusedProcess,
+      }),
+      v1LocalOnlyTargets: true,
+    });
     await capabilities.initialize();
     const session = capabilities.attach(
       {
@@ -134,8 +129,27 @@ describe("V1 Local-only Target authority", () => {
   });
 
   it("rejects collection.prepare-many that includes an ssh Target", async () => {
-    const capabilities = createV1LocalOnlyCapabilities(localTarget);
+    const skillsTargets = createSkillsTargetsCatalog({
+      id: () => "00000000-0000-4000-8000-000000000099",
+      initialTarget: localTarget,
+      processFor: () => unusedProcess,
+    });
+    skillsTargets.replaceDefinitions([localTarget, sshTarget]);
+    const capabilities = createDesktopCapabilities({
+      id: () => "00000000-0000-4000-8000-000000000099",
+      recoveryRecords: createMemoryRecoveryRecords(
+        [],
+        [],
+        [durable(localTarget), durable(sshTarget)],
+      ),
+      skillsTargets,
+      v1LocalOnlyTargets: true,
+    });
     await capabilities.initialize();
+    expect(skillsTargets.definitions.map((target) => target.kind)).toEqual([
+      "local",
+      "ssh",
+    ]);
     const session = capabilities.attach(
       {
         endpointId: "workspace-v1-prepare-many",
