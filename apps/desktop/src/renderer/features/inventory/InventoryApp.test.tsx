@@ -1111,7 +1111,7 @@ describe("Local Target Inventory shell", () => {
       screen.getByRole("cell", { name: "Case-Sensitive-Skill" }),
     ).toBeInTheDocument();
     expect(screen.getAllByText("Missing")).toHaveLength(2);
-    expect(screen.getByText("stale evidence")).toBeInTheDocument();
+    expect(screen.getByText("Stale evidence")).toBeInTheDocument();
     expect(
       screen.getByText("Source: github / example/skills"),
     ).toBeInTheDocument();
