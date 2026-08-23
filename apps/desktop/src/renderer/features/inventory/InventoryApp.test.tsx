@@ -2,6 +2,9 @@
 
 import "@testing-library/jest-dom/vitest";
 
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
 import {
   act,
   cleanup,
@@ -267,6 +270,50 @@ const aboutClient: AboutBridge = {
 
 afterEach(cleanup);
 
+const rendererStyles = readFileSync(
+  resolve(process.cwd(), "apps/desktop/src/renderer/styles.css"),
+  "utf8",
+);
+
+const twoLocalTargetsSnapshot: WorkspaceSnapshot = {
+  ...snapshot,
+  targets: [
+    {
+      deletionBlocked: false,
+      inventory: snapshot.inventory,
+      mutation: snapshot.mutation,
+      target: {
+        ...snapshot.target,
+        connectionReference: null,
+        workspace: "/work/skills-desktop",
+      },
+    },
+    {
+      deletionBlocked: false,
+      inventory: {
+        ...snapshot.inventory,
+        entries: [
+          {
+            ...snapshot.inventory.entries[0]!,
+            name: "Other-Skill",
+          },
+        ],
+      },
+      mutation: snapshot.mutation,
+      target: {
+        connectionReference: null,
+        generation: 1,
+        harness: "Codex",
+        id: "00000000-0000-4000-8000-00000000000a",
+        kind: "local",
+        label: "Second device",
+        workspace: "/work/second",
+        workspaceLabel: "second",
+      },
+    },
+  ],
+};
+
 describe("Local Target Inventory shell", () => {
   it("shows Target, Harness, scope, source identity, and Fresh evidence", async () => {
     render(<InventoryApp client={clientFor(snapshot)} />);
@@ -292,6 +339,39 @@ describe("Local Target Inventory shell", () => {
     expect(screen.getByText("Revision unknown")).toBeInTheDocument();
   });
 
+  it("exposes Inventory and Add scopes as named groups with ordered pressed buttons", async () => {
+    render(<InventoryApp client={clientFor(snapshot)} />);
+
+    const inventoryScope = await screen.findByRole("group", {
+      name: "Inventory scope",
+    });
+    const addScope = screen.getByRole("group", { name: "Add scope" });
+    const inventoryButtons = within(inventoryScope).getAllByRole("button");
+    const addButtons = within(addScope).getAllByRole("button");
+
+    expect(inventoryButtons.map((button) => button.textContent)).toEqual([
+      "All scopes",
+      "Project scope",
+      "Global scope",
+    ]);
+    expect(inventoryButtons.map((button) => button.getAttribute("aria-pressed"))).toEqual([
+      "true",
+      "false",
+      "false",
+    ]);
+    expect(addButtons.map((button) => button.textContent)).toEqual([
+      "Project scope",
+      "Global scope",
+    ]);
+    expect(addButtons.map((button) => button.getAttribute("aria-pressed"))).toEqual([
+      "true",
+      "false",
+    ]);
+
+    expect(inventoryButtons.every((button) => button.tabIndex === 0)).toBe(true);
+    expect(addButtons.every((button) => button.tabIndex === 0)).toBe(true);
+  });
+
   it("shows a bounded opening error returned by the IPC boundary", async () => {
     const client: DesktopBridge = {
       ...clientFor(snapshot),
@@ -311,9 +391,11 @@ describe("Local Target Inventory shell", () => {
 
     render(<InventoryApp client={client} />);
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "This window cannot make that request.",
-    );
+    const openingAlert = await screen.findByRole("alert");
+    expect(openingAlert).toHaveTextContent("无权限执行该操作。");
+    expect(
+      openingAlert.querySelector(".user-facing-error-details code"),
+    ).toHaveTextContent("This window cannot make that request.");
     expect(
       screen.getByRole("button", { name: "Retry opening inventory" }),
     ).toBeInTheDocument();
@@ -345,7 +427,7 @@ describe("Local Target Inventory shell", () => {
       name: "cancellation",
     },
     {
-      expected: "Inventory observation failed.",
+      expected: "本地进程执行失败。请刷新后重试。",
       inventory: {
         freshness: "stale" as const,
         lastError: {
@@ -370,6 +452,36 @@ describe("Local Target Inventory shell", () => {
     );
 
     expect((await screen.findAllByText(expected)).length).toBeGreaterThan(0);
+  });
+
+  it("maps inventory banner errors to user-facing copy and keeps raw text under details", async () => {
+    render(
+      <InventoryApp
+        client={clientFor({
+          ...snapshot,
+          inventory: {
+            ...snapshot.inventory,
+            freshness: "stale",
+            lastError: {
+              code: "process_failed",
+              effects: "none",
+              message: "Inventory observation failed with Error: ENOENT /tmp/x",
+              phase: "observe",
+              retryable: true,
+            },
+            phase: "error",
+          },
+        })}
+      />,
+    );
+
+    const alert = await screen.findByRole("alert");
+    const primary = alert.querySelector(".user-facing-error > span");
+    expect(primary).toHaveTextContent("本地进程执行失败。请刷新后重试。");
+    expect(primary).not.toHaveTextContent("ENOENT");
+    expect(alert.querySelector(".user-facing-error-details code")).toHaveTextContent(
+      "Inventory observation failed with Error: ENOENT /tmp/x",
+    );
   });
 
   it("cancels the active operation directly", async () => {
@@ -434,6 +546,39 @@ describe("Local Target Inventory shell", () => {
       "title",
       "Comparison",
     );
+    expect(screen.queryByRole("combobox", { name: "Target" })).toBeNull();
+  });
+
+  it("keeps a compact accessible Target chooser for two Local Targets at 800px", async () => {
+    render(<InventoryApp client={clientFor(twoLocalTargetsSnapshot)} />);
+
+    const chooser = await screen.findByRole("combobox", { name: "Target" });
+    expect(screen.queryByLabelText("Target summary")).toBeNull();
+    expect(chooser).toHaveDisplayValue("This device");
+    expect(
+      within(chooser).getByRole("option", { name: "This device" }),
+    ).toBeInTheDocument();
+    expect(
+      within(chooser).getByRole("option", { name: "Second device" }),
+    ).toBeInTheDocument();
+
+    fireEvent.change(chooser, {
+      target: { value: "00000000-0000-4000-8000-00000000000a" },
+    });
+    expect(chooser).toHaveDisplayValue("Second device");
+    expect(
+      await screen.findByRole("button", { name: "Other-Skill" }),
+    ).toBeInTheDocument();
+
+    expect(rendererStyles).toMatch(
+      /@media \(max-width: 820px\)[\s\S]*\.inventory-target-chooser\s*\{(?=[^}]*max-width:\s*100%)(?=[^}]*min-width:\s*0)[^}]*\}/,
+    );
+    expect(rendererStyles).toMatch(
+      /@media \(max-width: 820px\)[\s\S]*\.inventory-target-chooser\s*\{(?![^}]*display:\s*none)/,
+    );
+    expect(rendererStyles).not.toMatch(
+      /@media \(max-width: 820px\)[\s\S]*\.inventory-target-chooser\s*\{\s*display:\s*none/,
+    );
   });
 
   it("opens About from workspace navigation", async () => {
@@ -446,6 +591,47 @@ describe("Local Target Inventory shell", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("Version 0.1.0")).toBeInTheDocument();
     expect(screen.getByText("Manual upgrade")).toBeInTheDocument();
+  });
+
+  it("keeps Collection Include semantics and checkbox hit areas explicit", async () => {
+    render(<InventoryApp client={clientFor(collectionSnapshot)} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Collections" }));
+
+    const table = screen.getByRole("table");
+    const headers = within(table).getAllByRole("columnheader");
+    expect(headers.map((header) => header.textContent)).toEqual([
+      "Include",
+      "Skill",
+      "Assessment",
+      "Action",
+    ]);
+    for (const header of headers) {
+      expect(header).toHaveAttribute("scope", "col");
+    }
+
+    expect(
+      screen.getByRole("checkbox", { name: "Include This device" }).parentElement,
+    ).toHaveClass("collection-checkbox-hit-area");
+    expect(
+      screen.getByRole("checkbox", { name: "Select find-skills" }).parentElement,
+    ).toHaveClass("collection-checkbox-hit-area");
+
+    expect(rendererStyles).toMatch(
+      /\.collection-checkbox-hit-area\s*\{(?=[^}]*width:\s*40px)(?=[^}]*min-width:\s*40px)(?=[^}]*height:\s*40px)(?=[^}]*min-height:\s*40px)[^}]*\}/s,
+    );
+  });
+
+  it("keeps skill-name controls at the shared 40px minimum", async () => {
+    render(<InventoryApp client={clientFor(snapshot)} />);
+
+    const skillButton = await screen.findByRole("button", {
+      name: "Case-Sensitive-Skill",
+    });
+    expect(skillButton).toHaveClass("skill-button");
+    expect(rendererStyles).toMatch(
+      /\.skill-button\s*\{(?=[^}]*min-height:\s*40px)[^}]*\}/s,
+    );
   });
 
   it("requires explicit eligible Collection selections before preparing", async () => {
@@ -556,7 +742,7 @@ describe("Local Target Inventory shell", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Collections" }));
     expect(screen.getAllByText("Fresh inventory")).toHaveLength(2);
-    expect(screen.getByText(/SSH · next-scope/)).toBeInTheDocument();
+    expect(screen.getByText(/SSH · 未在 V1 开放/)).toBeInTheDocument();
     const sshInclude = screen.getByRole("checkbox", {
       name: "Include Build host",
     });
@@ -1005,14 +1191,14 @@ describe("Local Target Inventory shell", () => {
 
   it("selects and swaps paired Targets in the dimensioned Comparison view", async () => {
     const rightTarget = {
-      connectionReference: "build-host",
+      connectionReference: null,
       generation: 2,
       harness: "Codex",
       id: "00000000-0000-4000-8000-00000000000a",
-      kind: "ssh" as const,
-      label: "Build host",
-      workspace: "/srv/skills-desktop",
-      workspaceLabel: "skills-desktop",
+      kind: "local" as const,
+      label: "Other device",
+      workspace: "/work/other",
+      workspaceLabel: "other",
     };
     const targetStates = [
       {
@@ -1079,7 +1265,7 @@ describe("Local Target Inventory shell", () => {
       screen.getByRole("cell", { name: "Case-Sensitive-Skill" }),
     ).toBeInTheDocument();
     expect(screen.getAllByText("Missing")).toHaveLength(2);
-    expect(screen.getByText("stale evidence")).toBeInTheDocument();
+    expect(screen.getByText("Stale evidence")).toBeInTheDocument();
     expect(
       screen.getByText("Source: github / example/skills"),
     ).toBeInTheDocument();
@@ -1295,6 +1481,216 @@ describe("Local Target Inventory shell", () => {
         "00000000-0000-4000-8000-000000000018",
       ),
     );
+  });
+
+
+  it("hard-disables Inventory mutation CTAs and shows SSH-active banner for SSH Targets", async () => {
+    const prepareMutation = vi.fn(async () => ({
+      ok: true as const,
+      value: { operationId: "prepared-ssh" },
+    }));
+    const sshTarget = {
+      connectionReference: "build-host",
+      generation: 2,
+      harness: "Codex",
+      id: "00000000-0000-4000-8000-000000000018",
+      kind: "ssh" as const,
+      label: "Build host",
+      workspace: "/srv/skills",
+      workspaceLabel: "skills",
+    };
+    render(
+      <InventoryApp
+        client={{
+          ...clientFor({
+            ...snapshot,
+            target: sshTarget,
+            targets: [
+              {
+                deletionBlocked: false,
+                inventory: snapshot.inventory,
+                mutation: snapshot.mutation,
+                target: {
+                  ...snapshot.target,
+                  connectionReference: null,
+                  workspace: "/work/skills-desktop",
+                },
+              },
+              {
+                deletionBlocked: false,
+                inventory: snapshot.inventory,
+                mutation: snapshot.mutation,
+                target: sshTarget,
+              },
+            ],
+          }),
+          prepareMutation,
+        }}
+      />,
+    );
+
+    expect(await screen.findAllByText("未开放")).not.toHaveLength(0);
+
+    fireEvent.click(screen.getByRole("button", { name: /Build host/i }));
+
+    expect(
+      await screen.findByText(/远程 Target 仅保留只读痕迹/),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("SSH 未开放")).toBeInTheDocument();
+    expect(
+      document.getElementById("inventory-ssh-unavailable-reason"),
+    ).not.toBeNull();
+
+    fireEvent.click(
+      (
+        await screen.findAllByRole("button", {
+          name: "Case-Sensitive-Skill",
+        })
+      )[0]!,
+    );
+    const prepareUpdate = screen.getByRole("button", { name: "Prepare update" });
+    const prepareRemoval = screen.getByRole("button", {
+      name: "Prepare removal",
+    });
+    const prepareAdd = screen.getByRole("button", { name: "Prepare add" });
+    expect(prepareUpdate).toBeDisabled();
+    expect(prepareRemoval).toBeDisabled();
+    expect(prepareAdd).toBeDisabled();
+    expect(prepareUpdate).toHaveAttribute(
+      "title",
+      "SSH · 未在 V1 开放，无法准备变更",
+    );
+    expect(prepareUpdate).toHaveAttribute(
+      "aria-describedby",
+      "inventory-ssh-unavailable-reason",
+    );
+    expect(prepareAdd).toHaveAttribute(
+      "aria-describedby",
+      "inventory-ssh-unavailable-reason",
+    );
+    fireEvent.click(prepareUpdate);
+    fireEvent.click(prepareRemoval);
+    expect(prepareMutation).not.toHaveBeenCalled();
+  });
+
+  it("disables SSH Targets as plannable Comparison sides", async () => {
+    const sshTarget = {
+      connectionReference: "build-host",
+      generation: 2,
+      harness: "Codex",
+      id: "00000000-0000-4000-8000-00000000000a",
+      kind: "ssh" as const,
+      label: "Build host",
+      workspace: "/srv/skills-desktop",
+      workspaceLabel: "skills-desktop",
+    };
+    const localB = {
+      connectionReference: null,
+      generation: 1,
+      harness: "Codex",
+      id: "00000000-0000-4000-8000-00000000000b",
+      kind: "local" as const,
+      label: "Second local",
+      workspace: "/work/second",
+      workspaceLabel: "second",
+    };
+    render(
+      <InventoryApp
+        client={clientFor({
+          ...snapshot,
+          targets: [
+            {
+              deletionBlocked: false,
+              inventory: snapshot.inventory,
+              mutation: snapshot.mutation,
+              target: {
+                ...snapshot.target,
+                connectionReference: null,
+                workspace: "/work/skills-desktop",
+              },
+            },
+            {
+              deletionBlocked: false,
+              inventory: snapshot.inventory,
+              mutation: snapshot.mutation,
+              target: sshTarget,
+            },
+            {
+              deletionBlocked: false,
+              inventory: snapshot.inventory,
+              mutation: snapshot.mutation,
+              target: localB,
+            },
+          ],
+        })}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Comparison" }));
+    const sshOptions = screen.getAllByRole("option", {
+      name: /Build host · 未开放/,
+    });
+    expect(sshOptions.length).toBeGreaterThan(0);
+    for (const option of sshOptions) {
+      expect(option).toBeDisabled();
+    }
+    expect(
+      screen.getByRole("button", { name: "Compare" }),
+    ).not.toBeDisabled();
+  });
+
+
+  it("explains stale freshness blocked mutation controls with Refresh next step (#70)", async () => {
+    const refreshInventory = vi.fn(async () => ({
+      ok: true as const,
+      value: { operationId: "refresh-stale-1" },
+    }));
+    render(
+      <InventoryApp
+        client={{
+          ...clientFor({
+            ...snapshot,
+            inventory: {
+              ...snapshot.inventory,
+              freshness: "stale",
+            },
+          }),
+          refreshInventory,
+        }}
+      />,
+    );
+
+    fireEvent.click(
+      (
+        await screen.findAllByRole("button", {
+          name: "Case-Sensitive-Skill",
+        })
+      )[0]!,
+    );
+
+    const reason = "需要先刷新 inventory 证据";
+    expect(
+      document.getElementById("inventory-mutation-blocked-reason"),
+    ).toHaveTextContent(reason);
+    expect(screen.getByRole("button", { name: "Refresh" })).toHaveAttribute(
+      "id",
+      "inventory-refresh-cta",
+    );
+
+    const prepareUpdate = screen.getByRole("button", { name: "Prepare update" });
+    const prepareAdd = screen.getByRole("button", { name: "Prepare add" });
+    expect(prepareUpdate).toBeDisabled();
+    expect(prepareAdd).toBeDisabled();
+    expect(prepareUpdate).toHaveAttribute("title", reason);
+    expect(prepareUpdate).toHaveAttribute(
+      "aria-describedby",
+      "inventory-mutation-blocked-reason inventory-refresh-cta",
+    );
+    expect(prepareAdd).toHaveAttribute(
+      "aria-describedby",
+      "inventory-mutation-blocked-reason inventory-refresh-cta",
+    );
+    expect(screen.getByText(reason)).toBeInTheDocument();
   });
 
   it("presents SSH transport loss as an accessible offline state", async () => {

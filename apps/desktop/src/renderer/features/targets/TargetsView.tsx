@@ -15,6 +15,7 @@ import type {
   WorkspaceBridge,
   WorkspaceSnapshot,
 } from "../../../contracts/workspace.js";
+import { UserFacingErrorCopy } from "../../UserFacingErrorCopy.js";
 
 type TargetState = NonNullable<WorkspaceSnapshot["targets"]>[number];
 
@@ -111,7 +112,7 @@ export function TargetsView({
         {error !== undefined ? (
           <div className="state-banner state-banner--danger" role="alert">
             <AlertCircle aria-hidden="true" size={16} />
-            <span>{error.message}</span>
+            <UserFacingErrorCopy error={error} />
           </div>
         ) : null}
         {savedMessage !== undefined ? (
@@ -133,6 +134,15 @@ export function TargetsView({
                   <h2>{state.target.label}</h2>
                   <code>{state.target.workspace}</code>
                 </div>
+                {state.target.kind === "ssh" ? (
+                  <span
+                    aria-label="SSH 未开放"
+                    className="scope-badge"
+                    title="SSH · 未在 V1 开放"
+                  >
+                    未开放
+                  </span>
+                ) : null}
                 <span
                   className={`status-pill status-pill--${state.inventory.freshness === "fresh" ? "healthy" : "neutral"}`}
                 >
@@ -144,7 +154,11 @@ export function TargetsView({
               <dl>
                 <div>
                   <dt>Kind</dt>
-                  <dd>{state.target.kind === "local" ? "Local" : "SSH · next-scope"}</dd>
+                  <dd>
+                    {state.target.kind === "local"
+                      ? "Local"
+                      : "SSH · 未在 V1 开放"}
+                  </dd>
                 </div>
                 <div>
                   <dt>Harness</dt>
@@ -161,7 +175,7 @@ export function TargetsView({
               </dl>
               {state.inventory.lastError !== null ? (
                 <p className="target-state-error" role="status">
-                  {state.inventory.lastError.message}
+                  <UserFacingErrorCopy error={state.inventory.lastError} />
                 </p>
               ) : null}
               <div className="target-item-actions">
@@ -224,8 +238,7 @@ export function TargetsView({
             <div className="state-banner state-banner--loading" role="status">
               <Server aria-hidden="true" size={16} />
               <span>
-                SSH targets are next-scope and outside the V1 Local
-                commitment.
+                SSH · 未在 V1 开放，不能作为可保存的 Target Definition。
               </span>
             </div>
           ) : null}
@@ -233,7 +246,7 @@ export function TargetsView({
             <legend>Target kind</legend>
             {draft.kind === "ssh" ? (
               <p className="target-kind-readonly">
-                Kind: SSH (next-scope, not V1)
+                Kind: SSH · 未在 V1 开放
               </p>
             ) : (
               <div className="segmented-control segmented-control--compact">
@@ -301,7 +314,7 @@ export function TargetsView({
             disabled={draft.kind === "ssh"}
             title={
               draft.kind === "ssh"
-                ? "SSH Targets are next-scope and cannot be saved in V1"
+                ? "SSH · 未在 V1 开放，无法保存"
                 : undefined
             }
             type="submit"

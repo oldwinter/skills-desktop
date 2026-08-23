@@ -134,7 +134,7 @@ export function createDeferredUpdateController(input: {
           downloadedAt: input.clock.now().toISOString(),
           runningVersion: input.application.version,
         });
-      } catch (_error) {
+      } catch {
         // Store failures can contain local paths; only fixed state crosses this boundary.
         recoveryUncertain = true;
         return "failed";
@@ -172,7 +172,7 @@ export function createDeferredUpdateController(input: {
       let recovered: DeferredUpdateRecord | null;
       try {
         recovered = await input.records.load();
-      } catch (_error) {
+      } catch {
         // Store failures can contain local paths; only fixed state crosses this boundary.
         recoveryUncertain = true;
         return "failed";
@@ -204,7 +204,7 @@ export function createDeferredUpdateController(input: {
       }
       try {
         await input.records.clear();
-      } catch (_error) {
+      } catch {
         // Store failures can contain local paths; only fixed state crosses this boundary.
         recoveryUncertain = true;
         return "failed";
@@ -235,7 +235,7 @@ export function createDeferredUpdateController(input: {
       input.onChange();
       try {
         await input.prepareRestart();
-      } catch (_error) {
+      } catch {
         // Shutdown failures are contained without exposing process or path details.
         restartInProgress = false;
         input.onChange();

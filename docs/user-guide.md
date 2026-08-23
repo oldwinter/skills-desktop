@@ -2,7 +2,7 @@
 
 面向已经装好本机 `npx skills` 环境、想用桌面端查看与管理 Skills 的开发者。
 
-**V1 只支持 Local Target。** SSH Target、远程 bootstrap、跨机 reconciliation 属于下一步（next-scope）：界面里可能仍能看见，但会标成未开放，不能当作当前可用路径。
+**V1 只支持 Local Target。** SSH Target、远程 bootstrap、跨机 reconciliation 属于下一步：界面里可能仍能看见，但会标成「SSH · 未在 V1 开放」，不能当作当前可用路径。
 
 实际技能发现与变更仍交给 `npx skills`；本应用不另起一套安装器，也不自行扫描技能目录。
 
@@ -48,7 +48,7 @@ npm run verify
 2. **New Target**，填写显示标签、工作区、harness 等。
 3. Kind 保持 **Local**，保存。
 
-列表上 Local 显示为 Local；若仍看到历史残留的 SSH 项，会标 **SSH · next-scope**，编辑只读、不能保存。新建 SSH 在 V1 中不可用。
+列表上 Local 显示为 Local；若仍看到历史残留的 SSH 项，会标 **SSH · 未在 V1 开放**，编辑只读、不能保存。新建 SSH 在 V1 中不可用。
 
 页眉会显示当前 Target 标签与工作区路径。侧栏 **Targets** 区可切换当前观察对象。
 
@@ -130,7 +130,7 @@ Inventory 是对当前 Target 一次只读 `npx skills list --json` 的归一化
 ### 空态与 SSH
 
 - 若当前构建 **没有** 捆绑任何 reviewed release：会看到空态说明（有合集包之后，才对 Local Target 可用）。
-- SSH Target 仍可能出现在列表，但标 **SSH · next-scope**，Include 不可用（V1 Local Collections 范围外）。
+- SSH Target 仍可能出现在列表，但标 **SSH · 未在 V1 开放**，Include 不可用（V1 Local Collections 范围外）。
 
 ---
 
@@ -164,7 +164,7 @@ A：不是按时间自动过期。刷新失败、Target 定义变更、或新会
 A：V1 需要两个 Local Target。先到 Targets 再建一个，再回来 Compare。
 
 **Q：界面上还有 SSH，能用吗？**  
-A：**不能当作 V1 主路径。** 列表可能显示 **SSH · next-scope**；新建/保存不可用，已有项只读；Collections 也不会把 SSH 纳入 V1 Include。远程相关能力属于下一步。
+A：**不能当作 V1 主路径。** 列表可能显示 **SSH · 未在 V1 开放**；新建/保存不可用，已有项只读；Collections 也不会把 SSH 纳入 V1 Include。远程相关能力属于下一步（next-scope），不是 V1 承诺范围。
 
 **Q：macOS / Windows 拦安装正常吗？**  
 A：对 Unsigned Developer Preview 是预期行为。先校验字节，再按平台自带的「仍要打开 / 按文件覆盖」处理。不要为了安装去关 Gatekeeper 或导入不受信的自签根证书。

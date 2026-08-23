@@ -184,4 +184,139 @@ describe("V1 Local-only Target authority", () => {
       error: sshRejectError,
     });
   });
+
+  it("rejects operational requests for a restored SSH Target without opening SSH", async () => {
+    const readySshTarget: TargetDefinition = {
+      ...sshTarget,
+      executionBindingDigest: "a".repeat(64),
+      generation: 4,
+    };
+    let inspectCalls = 0;
+    let observeCalls = 0;
+    let prepareCalls = 0;
+    let executeCalls = 0;
+    const commits: string[] = [];
+    const records = createMemoryRecoveryRecords(
+      [],
+      [],
+      [durable(localTarget), durable(readySshTarget)],
+    );
+    const capabilities = createDesktopCapabilities({
+      id: () => "00000000-0000-4000-8000-000000000099",
+      recoveryRecords: {
+        commit(change) {
+          commits.push(change.type);
+          return records.commit(change);
+        },
+        restore: () => records.restore(),
+      },
+      skillsTargets: createSkillsTargetsCatalog({
+        id: () => "00000000-0000-4000-8000-000000000099",
+        initialTarget: localTarget,
+        processFor: () => ({
+          ...unusedProcess,
+          async executeConfirmed() {
+            executeCalls += 1;
+            return unusedProcess.executeConfirmed();
+          },
+          async observeInventory() {
+            observeCalls += 1;
+            return unusedProcess.observeInventory();
+          },
+          async prepareMutation() {
+            prepareCalls += 1;
+            return unusedProcess.prepareMutation();
+          },
+        }),
+        sshAccess: {
+          async confirm() {
+            throw new Error("SSH confirm must not run in V1 Local-only.");
+          },
+          async inspect() {
+            inspectCalls += 1;
+            throw new Error("SSH inspect must not run in V1 Local-only.");
+          },
+          pendingChallenge() {
+            return {
+              algorithm: "ssh-ed25519",
+              expiresAt: "2099-01-01T00:00:00.000Z",
+              fingerprint: "SHA256:restored",
+              id: "challenge-restored",
+              identity: "deploy@resolved.internal:2222",
+              kind: "first-use",
+              targetGeneration: readySshTarget.generation,
+              targetId: readySshTarget.id,
+            };
+          },
+        },
+      }),
+      v1LocalOnlyTargets: true,
+    });
+    await capabilities.initialize();
+    const session = capabilities.attach(
+      {
+        endpointId: "workspace-v1-restored-ssh",
+        role: "workspace",
+        sessionEpoch: "epoch-v1-restored-ssh",
+      },
+      () => undefined,
+    );
+    commits.length = 0;
+
+    await expect(session.snapshot()).resolves.toMatchObject({
+      targets: expect.arrayContaining([
+        expect.objectContaining({
+          target: expect.objectContaining({
+            id: readySshTarget.id,
+            kind: "ssh",
+          }),
+        }),
+      ]),
+    });
+
+    for (const request of [
+      {
+        targetId: readySshTarget.id,
+        type: "inventory.refresh" as const,
+        version: 1 as const,
+      },
+      {
+        intent: { names: ["tdd"], scope: "project" as const, type: "remove" as const },
+        targetId: readySshTarget.id,
+        type: "mutation.prepare" as const,
+        version: 1 as const,
+      },
+      {
+        targetId: readySshTarget.id,
+        type: "mutation.reconcile" as const,
+        version: 1 as const,
+      },
+      {
+        targetId: readySshTarget.id,
+        type: "host-trust.review" as const,
+        version: 1 as const,
+      },
+    ]) {
+      await expect(session.request(request)).resolves.toEqual({
+        ok: false,
+        error: sshRejectError,
+      });
+    }
+
+    expect(inspectCalls).toBe(0);
+    expect(observeCalls).toBe(0);
+    expect(prepareCalls).toBe(0);
+    expect(executeCalls).toBe(0);
+    expect(commits).toEqual([]);
+    await expect(records.restore()).resolves.toMatchObject({
+      mutationGuards: [],
+      targetDefinitions: expect.arrayContaining([
+        expect.objectContaining({
+          generation: readySshTarget.generation,
+          id: readySshTarget.id,
+          kind: "ssh",
+        }),
+      ]),
+    });
+  });
 });
