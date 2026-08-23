@@ -485,6 +485,57 @@ describe("SSH SkillsProcess observation contract", () => {
     });
   });
 
+  it("does not start a confirmed mutation when its signal is already aborted", async () => {
+    const runner = scriptedTransport();
+    let nextId = 0;
+    const skillsProcess = createSshSkillsProcess({
+      binding,
+      clock: () => new Date("2026-08-22T10:00:00.000Z"),
+      id: () => `request-${++nextId}`,
+      runner,
+    });
+    const observed = await skillsProcess.observeInventory({
+      signal: new AbortController().signal,
+    });
+    if (!observed.ok) throw new Error("fixture observation failed");
+    const prepared = await skillsProcess.prepareMutation({
+      freshness: "fresh",
+      intent: {
+        names: ["project-skill"],
+        scope: "project",
+        type: "remove",
+      },
+      inventory: observed.value,
+      inventoryId: "inventory-ssh-pre-aborted",
+    });
+    if (!prepared.ok) throw new Error("fixture preparation failed");
+    const controller = new AbortController();
+    controller.abort();
+
+    const executed = await skillsProcess.executeConfirmed({
+      confirmation: {
+        digest: prepared.value.digest,
+        preparedMutationId: prepared.value.id,
+      },
+      signal: controller.signal,
+    });
+
+    expect(executed).toMatchObject({
+      ok: true,
+      value: {
+        effects: { status: "not-observed" },
+        inventory: null,
+        preparedMutationId: prepared.value.id,
+        process: {
+          disposition: "cancelled",
+          exitCode: null,
+          termination: "known",
+        },
+      },
+    });
+    expect(runner.invocations).toHaveLength(1);
+  });
+
   it("returns an uncertain outcome without postflight or retry when cleanup is unproven", async () => {
     let mutationInvocations = 0;
     let markMutationStarted!: () => void;
