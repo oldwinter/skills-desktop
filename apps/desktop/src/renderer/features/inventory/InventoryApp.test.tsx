@@ -484,6 +484,245 @@ describe("Local Target Inventory shell", () => {
     );
   });
 
+  it("renders known evidence and distinguishes filtered-empty inventory", async () => {
+    render(
+      <InventoryApp
+        client={clientFor({
+          ...snapshot,
+          inventory: {
+            ...snapshot.inventory,
+            entries: [
+              {
+                ...snapshot.inventory.entries[0]!,
+                agents: ["Codex"],
+                contentFingerprint: {
+                  authority: "skills-cli",
+                  kind: "sha256",
+                  status: "known",
+                  value: "fingerprint-123",
+                },
+                revision: {
+                  authority: "git",
+                  kind: "commit",
+                  status: "known",
+                  value: "0123456789abcdef",
+                },
+              },
+            ],
+          },
+        })}
+      />,
+    );
+
+    expect(await screen.findByText("commit / 0123456789abcdef")).toBeInTheDocument();
+    expect(screen.getByText("sha256 / fingerprint-123")).toBeInTheDocument();
+    expect(screen.getAllByText("Codex").length).toBeGreaterThan(0);
+
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search inventory" }), {
+      target: { value: "no-such-skill" },
+    });
+
+    expect(
+      screen.getByRole("heading", { name: "No matching skills" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Change the current search or scope filter."),
+    ).toBeInTheDocument();
+  });
+
+  it("prepares scoped updates and exact GitHub additions through distinct intents", async () => {
+    const prepareMutation = vi.fn(
+      async (
+        _targetId: string,
+        intent: Parameters<DesktopBridge["prepareMutation"]>[1],
+      ) => {
+        if (intent.type === "update-all") {
+          return {
+            error: {
+              code: "invalid_intent" as const,
+              effects: "none" as const,
+              message: "The selected scope cannot be updated.",
+              phase: "prepare",
+              retryable: false,
+            },
+            ok: false as const,
+          };
+        }
+        return {
+          ok: true as const,
+          value: { operationId: "prepared-add" },
+        };
+      },
+    );
+    const client: DesktopBridge = {
+      ...clientFor(snapshot),
+      prepareMutation,
+    };
+    render(<InventoryApp client={client} />);
+
+    const inventoryScope = await screen.findByRole("group", {
+      name: "Inventory scope",
+    });
+    fireEvent.click(
+      within(inventoryScope).getByRole("button", { name: "Global scope" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Update scope" }));
+    await waitFor(() =>
+      expect(prepareMutation).toHaveBeenCalledWith(snapshot.target.id, {
+        scope: "global",
+        type: "update-all",
+      }),
+    );
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "The selected scope cannot be updated.",
+    );
+
+    fireEvent.change(screen.getByRole("textbox", { name: "GitHub source" }), {
+      target: { value: "example/skills" },
+    });
+    fireEvent.change(screen.getByRole("textbox", { name: "Exact skill name" }), {
+      target: { value: "find-skills" },
+    });
+    fireEvent.click(
+      within(screen.getByRole("group", { name: "Add scope" })).getByRole(
+        "button",
+        { name: "Global scope" },
+      ),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Prepare add" }));
+
+    await waitFor(() =>
+      expect(prepareMutation).toHaveBeenLastCalledWith(snapshot.target.id, {
+        names: ["find-skills"],
+        scope: "global",
+        source: { source: "example/skills", sourceType: "github" },
+        type: "add",
+      }),
+    );
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+  });
+
+  it("routes reconciliation failure through the visible action surface", async () => {
+    const reconcileMutation = vi.fn(async () => ({
+      error: {
+        code: "reconciliation_required" as const,
+        effects: "possible" as const,
+        message: "The recovery observation is still uncertain.",
+        phase: "reconcile",
+        retryable: true,
+      },
+      ok: false as const,
+    }));
+    render(
+      <InventoryApp
+        client={{
+          ...clientFor({
+            ...snapshot,
+            mutation: {
+              ...snapshot.mutation,
+              phase: "reconciliation-required",
+            },
+          }),
+          reconcileMutation,
+        }}
+      />,
+    );
+
+    expect(
+      await screen.findByText("This Target requires reconciliation."),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Reconcile" }));
+
+    await waitFor(() =>
+      expect(reconcileMutation).toHaveBeenCalledWith(snapshot.target.id),
+    );
+    expect(
+      screen.getByText("The recovery observation is still uncertain."),
+    ).toBeInTheDocument();
+  });
+
+  it("requires Trusted Review for cancellation and reports request failure", async () => {
+    const requestCancellationReview = vi.fn(async () => ({
+      error: {
+        code: "review_invalid" as const,
+        effects: "none" as const,
+        message: "The active mutation is no longer cancellable.",
+        phase: "review",
+        retryable: false,
+      },
+      ok: false as const,
+    }));
+    render(
+      <InventoryApp
+        client={{
+          ...clientFor({
+            ...snapshot,
+            mutation: {
+              ...snapshot.mutation,
+              activeOperationId: "mutation-running-1",
+              phase: "running",
+            },
+          }),
+          requestCancellationReview,
+        }}
+      />,
+    );
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Review cancellation" }),
+    );
+
+    await waitFor(() =>
+      expect(requestCancellationReview).toHaveBeenCalledWith(
+        "mutation-running-1",
+      ),
+    );
+    expect(
+      screen.getByText("The active mutation is no longer cancellable."),
+    ).toBeInTheDocument();
+  });
+
+  it("shows a completed command outcome without offering another review", async () => {
+    render(
+      <InventoryApp
+        client={clientFor({
+          ...snapshot,
+          mutation: {
+            activeOperationId: null,
+            commandPlan: {
+              harness: "Codex",
+              names: ["Case-Sensitive-Skill"],
+              operation: "update",
+              preview:
+                "npx skills@1.5.23 update Case-Sensitive-Skill --project --yes",
+              schemaVersion: 1,
+              scope: "project",
+              source: null,
+              targetId: snapshot.target.id,
+              timeoutMs: 600_000,
+            },
+            lastError: null,
+            outcome: {
+              effects: { status: "verified" },
+              process: {
+                disposition: "completed",
+                exitCode: 0,
+                termination: "known",
+              },
+            },
+            phase: "succeeded",
+            reconciliationDeadline: null,
+          },
+        })}
+      />,
+    );
+
+    expect(await screen.findByText("completed / verified")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Open Trusted Review" }),
+    ).toBeNull();
+  });
+
   it("cancels the active operation directly", async () => {
     const cancelInventory = vi.fn(async (operationId: string) => ({
       ok: true as const,
