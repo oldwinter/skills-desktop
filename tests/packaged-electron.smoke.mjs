@@ -1227,18 +1227,26 @@ try {
   console.log("packaged smoke: durable Targets and comparison verified");
 
   await first.page.setViewportSize(760, 820);
-  const narrowLayout = await first.page.evaluate(`({
-    documentWidth: document.documentElement.scrollWidth,
-    rowDisplay: getComputedStyle(document.querySelector(".inventory-table tbody tr")).display,
-    targetSummaryDisplay: getComputedStyle(document.querySelector(".mobile-target-summary")).display,
-    viewportWidth: window.innerWidth,
-    workspaceDisplay: getComputedStyle(document.querySelector(".workspace-layout")).display,
-  })`);
+  const narrowLayout = await first.page.evaluate(`(() => {
+    const row = document.querySelector(".inventory-table tbody tr");
+    const targetChooser = document.querySelector(".inventory-target-chooser");
+    const workspace = document.querySelector(".workspace-layout");
+    if (!(row instanceof HTMLTableRowElement)) throw new Error("Narrow Inventory row is unavailable.");
+    if (!(targetChooser instanceof HTMLLabelElement)) throw new Error("Narrow Target chooser is unavailable.");
+    if (!(workspace instanceof HTMLDivElement)) throw new Error("Narrow workspace is unavailable.");
+    return {
+      documentWidth: document.documentElement.scrollWidth,
+      rowDisplay: getComputedStyle(row).display,
+      targetChooserDisplay: getComputedStyle(targetChooser).display,
+      viewportWidth: window.innerWidth,
+      workspaceDisplay: getComputedStyle(workspace).display,
+    };
+  })()`);
   console.log("packaged smoke: narrow layout inspected");
   if (
     narrowLayout.documentWidth > narrowLayout.viewportWidth ||
     narrowLayout.rowDisplay !== "grid" ||
-    narrowLayout.targetSummaryDisplay !== "flex" ||
+    narrowLayout.targetChooserDisplay !== "grid" ||
     narrowLayout.workspaceDisplay !== "block"
   ) {
     throw new Error(`Narrow layout failed: ${JSON.stringify(narrowLayout)}`);
@@ -1259,7 +1267,8 @@ try {
   await first.page.setViewportSize(420, 820);
   const compactNavigation = await first.page.evaluate(`({
     labels: [...document.querySelectorAll(".nav-item")].map((button) => button.getAttribute("aria-label")),
-    targetSummary: document.querySelector(".mobile-target-summary")?.textContent ?? "",
+    selectedTarget: document.querySelector(".inventory-target-chooser select")?.selectedOptions[0]?.textContent?.trim() ?? "",
+    targetOptions: [...document.querySelectorAll(".inventory-target-chooser option")].map((option) => option.textContent?.trim()),
   })`);
   if (
     JSON.stringify(compactNavigation.labels) !==
@@ -1270,7 +1279,9 @@ try {
         "Targets",
         "About",
       ]) ||
-    !compactNavigation.targetSummary.includes("Codex")
+    compactNavigation.selectedTarget !== "This device" ||
+    JSON.stringify(compactNavigation.targetOptions) !==
+      JSON.stringify(["This device", "Second local"])
   ) {
     throw new Error(
       `Compact accessibility contract failed: ${JSON.stringify(compactNavigation)}`,
