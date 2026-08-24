@@ -68,6 +68,11 @@ interface RegisteredEndpoint {
   readonly webContents: WebContents;
 }
 
+export interface DesktopIpcAttachment {
+  readonly attachmentEpoch: string;
+  readonly webContentsId: number;
+}
+
 function internalFailure(): WorkspaceRequestResult {
   const error: RendererError = {
     code: "internal_error",
@@ -700,20 +705,25 @@ export function registerDesktopIpc(input: {
 
   const notifyReviewWindowClosed = (
     reviewId: string,
-    ownerWebContentsId: number,
+    owner: DesktopIpcAttachment,
   ) => {
     const parsed = reviewWindowClosedEventSchema.safeParse({
       reviewId,
       schemaVersion: 1,
     });
     if (!parsed.success) return;
-    const endpoint = endpoints.get(ownerWebContentsId);
+    const endpoint = endpoints.get(owner.webContentsId);
     if (
       endpoint?.role !== "workspace" ||
+      endpoint.attachmentEpoch !== owner.attachmentEpoch ||
       endpoint.webContents.isDestroyed()
     )
       return;
-    endpoint.webContents.send(CHANNELS.reviewWindowClosed, parsed.data);
+    try {
+      endpoint.webContents.send(CHANNELS.reviewWindowClosed, parsed.data);
+    } catch {
+      // The lifecycle hint is lossy when its owning renderer is being disposed.
+    }
   };
 
   const detach = (webContentsId: number) => {
@@ -762,7 +772,9 @@ export function registerDesktopIpc(input: {
       webContents.send(CHANNELS.attachmentEpoch, attachmentEpoch);
     } catch {
       detach(webContents.id);
+      return undefined;
     }
+    return { attachmentEpoch, webContentsId: webContents.id };
   };
 
   return {

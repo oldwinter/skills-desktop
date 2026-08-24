@@ -47,10 +47,11 @@ describe("Electron IPC sender authorization", () => {
     const capabilities = {
       attach: vi.fn(() => session),
     };
+    let nextEpoch = 1;
     const registration = registerDesktopIpc({
       capabilities: capabilities as never,
       ipcMain: ipcMain as never,
-      newEpoch: vi.fn(() => "epoch-1"),
+      newEpoch: vi.fn(() => `epoch-${nextEpoch++}`),
       updates: {
         exportDiagnostics: vi.fn(async () => "cancelled" as const),
         getSnapshot: vi.fn(),
@@ -77,17 +78,17 @@ describe("Electron IPC sender authorization", () => {
       mainFrame: { url: "skills-desktop://review/index.html" },
       send: vi.fn(),
     };
-    registration.attach(
+    const firstAttachment = registration.attach(
       firstWorkspace as never,
       "workspace",
       firstWorkspace.mainFrame.url,
     );
-    registration.attach(
+    const secondAttachment = registration.attach(
       secondWorkspace as never,
       "workspace",
       secondWorkspace.mainFrame.url,
     );
-    registration.attach(
+    const reviewAttachment = registration.attach(
       review as never,
       "review",
       review.mainFrame.url,
@@ -97,7 +98,10 @@ describe("Electron IPC sender authorization", () => {
     secondWorkspace.send.mockClear();
     review.send.mockClear();
 
-    registration.notifyReviewWindowClosed("review-1", 17);
+    expect(firstAttachment).toBeDefined();
+    expect(secondAttachment).toBeDefined();
+    expect(reviewAttachment).toBeDefined();
+    registration.notifyReviewWindowClosed("review-1", firstAttachment!);
     expect(firstWorkspace.send).toHaveBeenCalledWith(
       "workspace:review-window:closed",
       { reviewId: "review-1", schemaVersion: 1 },
@@ -107,20 +111,81 @@ describe("Electron IPC sender authorization", () => {
 
     firstWorkspace.send.mockClear();
     secondWorkspace.isDestroyed.mockReturnValue(true);
-    registration.notifyReviewWindowClosed("review-2", 19);
+    registration.notifyReviewWindowClosed("review-2", secondAttachment!);
     expect(firstWorkspace.send).not.toHaveBeenCalled();
     expect(secondWorkspace.send).not.toHaveBeenCalled();
 
-    registration.notifyReviewWindowClosed("review-2", 21);
+    registration.notifyReviewWindowClosed("review-2", reviewAttachment!);
     expect(review.send).not.toHaveBeenCalled();
 
     firstWorkspace.send.mockClear();
-    registration.notifyReviewWindowClosed("", 17);
+    registration.notifyReviewWindowClosed("", firstAttachment!);
     expect(firstWorkspace.send).not.toHaveBeenCalled();
 
     registration.detach(17);
-    registration.notifyReviewWindowClosed("review-3", 17);
+    registration.notifyReviewWindowClosed("review-3", firstAttachment!);
     expect(firstWorkspace.send).not.toHaveBeenCalled();
+
+    const replacementAttachment = registration.attach(
+      firstWorkspace as never,
+      "workspace",
+      firstWorkspace.mainFrame.url,
+    );
+    expect(replacementAttachment).toBeDefined();
+    firstWorkspace.send.mockClear();
+    registration.notifyReviewWindowClosed("review-old", firstAttachment!);
+    expect(firstWorkspace.send).not.toHaveBeenCalled();
+    registration.notifyReviewWindowClosed(
+      "review-current",
+      replacementAttachment!,
+    );
+    expect(firstWorkspace.send).toHaveBeenCalledWith(
+      "workspace:review-window:closed",
+      { reviewId: "review-current", schemaVersion: 1 },
+    );
+    firstWorkspace.send.mockImplementationOnce(() => {
+      throw new Error("renderer disposed");
+    });
+    expect(() =>
+      registration.notifyReviewWindowClosed(
+        "review-disposed",
+        replacementAttachment!,
+      ),
+    ).not.toThrow();
+
+    const destroyedWorkspace = {
+      id: 23,
+      isDestroyed: () => true,
+      mainFrame: { url: "skills-desktop://workspace/index.html" },
+      send: vi.fn(),
+    };
+    const teardownCount = session.teardown.mock.calls.length;
+    expect(
+      registration.attach(
+        destroyedWorkspace as never,
+        "workspace",
+        destroyedWorkspace.mainFrame.url,
+      ),
+    ).toBeUndefined();
+    expect(destroyedWorkspace.send).not.toHaveBeenCalled();
+    expect(session.teardown).toHaveBeenCalledTimes(teardownCount + 1);
+
+    const failingWorkspace = {
+      id: 25,
+      isDestroyed: () => false,
+      mainFrame: { url: "skills-desktop://workspace/index.html" },
+      send: vi.fn(() => {
+        throw new Error("send failed");
+      }),
+    };
+    expect(
+      registration.attach(
+        failingWorkspace as never,
+        "workspace",
+        failingWorkspace.mainFrame.url,
+      ),
+    ).toBeUndefined();
+    expect(session.teardown).toHaveBeenCalledTimes(teardownCount + 2);
   });
 
   it("returns bounded errors for hostile frames and invalid main output", async () => {
