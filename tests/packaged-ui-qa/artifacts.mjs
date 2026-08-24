@@ -52,6 +52,14 @@ const allowedErrorClasses = new Set([
   "Error",
   "PackagedUiQaScenarioError",
 ]);
+const allowedFailureDiagnostics = new Set([
+  "focus-state-unavailable",
+  "review-action-disabled",
+  "review-action-missing",
+  "review-action-not-active",
+  "unknown",
+  "workspace-unfocused",
+]);
 
 export function failureReceipt(error, fallbackStage = "unknown") {
   const proposedClass = error instanceof Error ? error.name : "Error";
@@ -63,12 +71,21 @@ export function failureReceipt(error, fallbackStage = "unknown") {
     error !== null && typeof error === "object" && "qaCheck" in error
       ? error.qaCheck
       : "unknown";
+  const proposedDiagnostic =
+    error !== null && typeof error === "object" && "qaDiagnostic" in error
+      ? error.qaDiagnostic
+      : "unknown";
   return {
     architecture: process.arch,
     check:
       typeof proposedCheck === "string" &&
       allowedFailureChecks.has(proposedCheck)
         ? proposedCheck
+        : "unknown",
+    diagnostic:
+      typeof proposedDiagnostic === "string" &&
+      allowedFailureDiagnostics.has(proposedDiagnostic)
+        ? proposedDiagnostic
         : "unknown",
     errorClass: allowedErrorClasses.has(proposedClass) ? proposedClass : "Error",
     platform: process.platform,
@@ -82,7 +99,7 @@ export function failureReceipt(error, fallbackStage = "unknown") {
 
 export function safeFailureSummary(error, fallbackStage = "unknown") {
   const receipt = failureReceipt(error, fallbackStage);
-  return `Packaged UI QA failed during ${receipt.stage}/${receipt.check} (${receipt.errorClass}).`;
+  return `Packaged UI QA failed during ${receipt.stage}/${receipt.check} (${receipt.errorClass}; ${receipt.diagnostic}).`;
 }
 
 export async function persistFailureArtifacts(error, destination, fallbackStage) {

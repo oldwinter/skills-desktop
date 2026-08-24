@@ -174,6 +174,7 @@ export async function runPackagedUiQa({
   const reviewErrors = [];
   let scenarioFailure;
   let failureCheck = "unknown";
+  let failureDiagnostic = "unknown";
   let failureStage = "unknown";
   let activeCheck = "executable-launch";
   let activeStage = "launch";
@@ -463,14 +464,34 @@ export async function runPackagedUiQa({
 
     activeStage = "focus-order";
     activeCheck = "workspace-focus-restore";
-    await page.waitFor(
-      `document.hasFocus() === true &&
-        document.activeElement instanceof HTMLButtonElement &&
-        !document.activeElement.disabled &&
-        document.activeElement.textContent?.trim() === "Open Trusted Review"`,
-      "workspace focus restoration after review cancellation",
-      5_000,
-    );
+    try {
+      await page.waitFor(
+        `document.hasFocus() === true &&
+          document.activeElement instanceof HTMLButtonElement &&
+          !document.activeElement.disabled &&
+          document.activeElement.textContent?.trim() === "Open Trusted Review"`,
+        "workspace focus restoration after review cancellation",
+        5_000,
+      );
+    } catch (error) {
+      const diagnostic = await page
+        .evaluate(`(() => {
+          if (!document.hasFocus()) return "workspace-unfocused";
+          const action = [...document.querySelectorAll("button")].find(
+            (button) => button.textContent?.trim() === "Open Trusted Review",
+          );
+          if (!(action instanceof HTMLButtonElement)) return "review-action-missing";
+          if (action.disabled) return "review-action-disabled";
+          return document.activeElement === action
+            ? "unknown"
+            : "review-action-not-active";
+        })()`)
+        .catch(() => "focus-state-unavailable");
+      if (error !== null && typeof error === "object") {
+        error.qaDiagnostic = diagnostic;
+      }
+      throw error;
+    }
 
     activeStage = "keyboard-workflow";
     activeCheck = "review-open";
@@ -592,6 +613,10 @@ export async function runPackagedUiQa({
   } catch (error) {
     scenarioFailure = error;
     failureCheck = activeCheck;
+    failureDiagnostic =
+      error !== null && typeof error === "object" && "qaDiagnostic" in error
+        ? error.qaDiagnostic
+        : "unknown";
     failureStage = activeStage;
   } finally {
     const finalizationFailures = [];
@@ -648,6 +673,7 @@ export async function runPackagedUiQa({
     });
     failure.name = "PackagedUiQaScenarioError";
     failure.qaCheck = failureCheck;
+    failure.qaDiagnostic = failureDiagnostic;
     failure.qaStage = failureStage;
     throw failure;
   }

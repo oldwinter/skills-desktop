@@ -883,26 +883,29 @@ describe("packaged UI QA scenario contract", () => {
     );
     error.name = "PackagedUiQaScenarioError";
     error.qaCheck = "error-state-render";
+    error.qaDiagnostic = "review-action-disabled";
     error.qaStage = "error-state";
     await persistFailureArtifacts(
       error,
       destination,
     );
     expect(safeFailureSummary(error)).toBe(
-      "Packaged UI QA failed during error-state/error-state-render (PackagedUiQaScenarioError).",
+      "Packaged UI QA failed during error-state/error-state-render (PackagedUiQaScenarioError; review-action-disabled).",
     );
     const untrusted = Object.assign(new Error("sk_live_untrusted"), {
       name: "sk_live_class",
       qaCheck: "sk_live_check",
+      qaDiagnostic: "sk_live_diagnostic",
       qaStage: "sk_live_stage",
     });
     expect(failureReceipt(untrusted)).toMatchObject({
       check: "unknown",
+      diagnostic: "unknown",
       errorClass: "Error",
       stage: "unknown",
     });
     expect(safeFailureSummary(untrusted)).toBe(
-      "Packaged UI QA failed during unknown/unknown (Error).",
+      "Packaged UI QA failed during unknown/unknown (Error; unknown).",
     );
     if (process.platform !== "win32") {
       expect((await stat(join(destination, "failure.json"))).mode & 0o777).toBe(
@@ -913,6 +916,7 @@ describe("packaged UI QA scenario contract", () => {
     expect(JSON.parse(artifact)).toEqual({
       architecture: process.arch,
       check: "error-state-render",
+      diagnostic: "review-action-disabled",
       errorClass: "PackagedUiQaScenarioError",
       platform: process.platform,
       schemaVersion: 1,
@@ -930,6 +934,7 @@ describe("packaged UI QA scenario contract", () => {
       "Alice",
       "dXNlcjpwYXNz",
       "unquoted-secret",
+      "sk_live_diagnostic",
       "sk_live_example",
     ]) {
       expect(artifact).not.toContain(secret);
