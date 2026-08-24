@@ -380,9 +380,9 @@ export function CollectionsView({
                     ))}
                   </ul>
                   {child.error === null ? null : (
-                    <p className="collection-child-error">
+                    <div className="collection-child-error">
                       <UserFacingErrorCopy error={child.error} />
-                    </p>
+                    </div>
                   )}
                   {child.status === "reconciliation-required" ? (
                     <button

@@ -36,6 +36,26 @@ const CURRENT_GUARD_SCHEMA_VERSION = 2 as const;
 const CURRENT_TARGET_SCHEMA_VERSION = 3 as const;
 const CURRENT_COLLECTION_SCHEMA_VERSION = 1 as const;
 const targetIdSchema = z.string().uuid();
+const legacyTargetIdSchema = z.string().min(1).max(256);
+
+function rejectDuplicateIdentities<Value>(
+  values: readonly Value[],
+  identity: (value: Value) => string,
+  context: z.RefinementCtx,
+) {
+  const seen = new Set<string>();
+  for (const value of values) {
+    const valueIdentity = identity(value);
+    if (seen.has(valueIdentity)) {
+      context.addIssue({
+        code: "custom",
+        message: "Stable Target identity must be unique.",
+      });
+    }
+    seen.add(valueIdentity);
+  }
+}
+
 const hostTrustRecordSchema = hostPublicKeySchema
   .extend({
     identity: z
@@ -101,7 +121,14 @@ const currentDocumentSchema = z
     schemaVersion: z.literal(CURRENT_SCHEMA_VERSION),
     snapshots: z.array(snapshotSchema).max(1_000),
   })
-  .strict();
+  .strict()
+  .superRefine((document, context) => {
+    rejectDuplicateIdentities(
+      [...document.legacySnapshots, ...document.snapshots],
+      ({ targetId }) => targetId,
+      context,
+    );
+  });
 
 const legacyCurrentDocumentSchema = z
   .object({
@@ -109,7 +136,10 @@ const legacyCurrentDocumentSchema = z
     schemaVersion: z.literal(2),
     snapshots: z.array(legacyCurrentSnapshotSchema).max(1_000),
   })
-  .strict();
+  .strict()
+  .superRefine((document, context) => {
+    rejectDuplicateIdentities(document.snapshots, ({ targetId }) => targetId, context);
+  });
 
 const legacyEntrySchema = z
   .object({
@@ -139,7 +169,10 @@ const legacyDocumentSchema = z
       .max(1_000),
     schemaVersion: z.literal(1),
   })
-  .strict();
+  .strict()
+  .superRefine((document, context) => {
+    rejectDuplicateIdentities(document.records, ({ target }) => target, context);
+  });
 
 const mutationGuardSchema = z
   .object({
@@ -173,7 +206,19 @@ const guardDocumentSchema = z
     legacyGuards: z.array(unboundLegacyGuardSchema).max(1_000).default([]),
     schemaVersion: z.literal(CURRENT_GUARD_SCHEMA_VERSION),
   })
-  .strict();
+  .strict()
+  .superRefine((document, context) => {
+    rejectDuplicateIdentities(
+      [...document.legacyGuards, ...document.guards],
+      ({ targetId }) => targetId,
+      context,
+    );
+    rejectDuplicateIdentities(
+      [...document.legacyGuards, ...document.guards],
+      ({ operationId }) => operationId,
+      context,
+    );
+  });
 
 const legacyGuardDocumentSchema = z
   .object({
@@ -181,7 +226,15 @@ const legacyGuardDocumentSchema = z
     kind: z.literal("mutation-guards"),
     schemaVersion: z.literal(1),
   })
-  .strict();
+  .strict()
+  .superRefine((document, context) => {
+    rejectDuplicateIdentities(document.guards, ({ targetId }) => targetId, context);
+    rejectDuplicateIdentities(
+      document.guards,
+      ({ operationId }) => operationId,
+      context,
+    );
+  });
 
 const targetDefinitionSchema = z
   .object({
@@ -218,7 +271,10 @@ const targetDocumentSchema = z
     schemaVersion: z.literal(CURRENT_TARGET_SCHEMA_VERSION),
     targets: z.array(targetDefinitionSchema).min(1).max(1_000),
   })
-  .strict();
+  .strict()
+  .superRefine((document, context) => {
+    rejectDuplicateIdentities(document.targets, ({ id }) => id, context);
+  });
 
 const legacyTargetDocumentSchema = z
   .object({
@@ -240,7 +296,10 @@ const legacyTargetDocumentSchema = z
       .min(1)
       .max(1_000),
   })
-  .strict();
+  .strict()
+  .superRefine((document, context) => {
+    rejectDuplicateIdentities(document.targets, ({ id }) => id, context);
+  });
 
 const legacyV2TargetDocumentSchema = z
   .object({
@@ -263,7 +322,10 @@ const legacyV2TargetDocumentSchema = z
       .min(1)
       .max(1_000),
   })
-  .strict();
+  .strict()
+  .superRefine((document, context) => {
+    rejectDuplicateIdentities(document.targets, ({ id }) => id, context);
+  });
 
 const guardFailureMarkerSchema = z
   .object({
@@ -428,7 +490,7 @@ export interface RecoveryFileSystem {
   ): Promise<void>;
   open(
     path: string,
-    flags: "r" | "wx",
+    flags: "r" | "r+" | "wx",
     mode?: number,
   ): Promise<RecoveryFileHandle>;
   readFile(path: string, encoding: "utf8"): Promise<string>;
@@ -530,6 +592,23 @@ function uniqueByTargetId<Value extends { readonly targetId: string }>(
   return [...byTarget.values()];
 }
 
+function isLegacyTargetId(targetId: string) {
+  return (
+    legacyTargetIdSchema.safeParse(targetId).success &&
+    !targetIdSchema.safeParse(targetId).success
+  );
+}
+
+function isValidTargetRemap(
+  fromTargetId: string,
+  toTargetId: string,
+) {
+  return (
+    isLegacyTargetId(fromTargetId) &&
+    targetIdSchema.safeParse(toTargetId).success
+  );
+}
+
 function remapTargetId<Value extends { readonly targetId: string }>(
   values: readonly Value[],
   fromTargetId: string,
@@ -541,6 +620,49 @@ function remapTargetId<Value extends { readonly targetId: string }>(
       .map((value) => ({ ...value, targetId: toTargetId })),
     ...values.filter(({ targetId }) => targetId !== fromTargetId),
   ]);
+}
+
+function remapMutationGuardTargetId(
+  values: readonly MutationGuard[],
+  fromTargetId: string,
+  toTargetId: string,
+): MutationGuard[] {
+  const source = values.find(({ targetId }) => targetId === fromTargetId);
+  const destination = values.find(({ targetId }) => targetId === toTargetId);
+  if (source === undefined) return [...values];
+  if (destination === undefined) {
+    return [
+      ...values
+        .filter(({ targetId }) => targetId === fromTargetId)
+        .map((guard) => ({ ...guard, targetId: toTargetId })),
+      ...values.filter(({ targetId }) => targetId !== fromTargetId),
+    ];
+  }
+
+  return [
+    ...values.filter(
+      ({ targetId }) =>
+        targetId !== fromTargetId && targetId !== toTargetId,
+    ),
+    {
+      ...destination,
+      deadline:
+        Date.parse(source.deadline) > Date.parse(destination.deadline)
+          ? source.deadline
+          : destination.deadline,
+      effects:
+        source.effects === "possible" || destination.effects === "possible"
+          ? "possible"
+          : "none",
+      generation: Math.max(source.generation, destination.generation),
+      phase:
+        source.phase === "reconciliation-required" ||
+        destination.phase === "reconciliation-required"
+          ? "reconciliation-required"
+          : "executing",
+      targetId: toTargetId,
+    },
+  ];
 }
 
 export function createMemoryRecoveryRecords(
@@ -573,8 +695,7 @@ export function createMemoryRecoveryRecords(
         collectionAcknowledgements = structuredClone(parsed.data);
       } else if (change.type === "target.remap") {
         if (
-          change.fromTargetId.length === 0 ||
-          !targetIdSchema.safeParse(change.toTargetId).success
+          !isValidTargetRemap(change.fromTargetId, change.toTargetId)
         ) {
           return commitFailure(
             "persist_failed",
@@ -586,7 +707,7 @@ export function createMemoryRecoveryRecords(
           change.fromTargetId,
           change.toTargetId,
         );
-        mutationGuards = remapTargetId(
+        mutationGuards = remapMutationGuardTargetId(
           mutationGuards,
           change.fromTargetId,
           change.toTargetId,
@@ -644,18 +765,18 @@ export function createMemoryRecoveryRecords(
           "No Mutation Guard corruption marker is present.",
         );
       } else if (change.type === "targets.replace") {
-        const parsed = z
-          .array(targetDefinitionSchema)
-          .min(1)
-          .max(1_000)
-          .safeParse(change.targets);
+        const parsed = targetDocumentSchema.safeParse({
+          kind: "target-definitions",
+          schemaVersion: CURRENT_TARGET_SCHEMA_VERSION,
+          targets: change.targets,
+        });
         if (!parsed.success) {
           return commitFailure(
             "persist_failed",
             "Target data did not pass durable validation.",
           );
         }
-        targetDefinitions = structuredClone(parsed.data);
+        targetDefinitions = structuredClone(parsed.data.targets);
       } else {
         const parsed = hostTrustRecordSchema.safeParse(change.record);
         if (!parsed.success) {
@@ -761,6 +882,7 @@ export function createJsonRecoveryRecords(
     COLLECTION_DOCUMENT_NAME,
   );
   const fileSystem = options.fileSystem ?? createNodeRecoveryFileSystem();
+  const platform = options.platform ?? process.platform;
   let document: CurrentDocument = {
     kind: "inventory-snapshots",
     legacySnapshots: [],
@@ -769,6 +891,7 @@ export function createJsonRecoveryRecords(
   };
   let pendingLegacySnapshots: InventorySnapshot[] | undefined;
   let pendingInventoryVersion: 1 | 2 | undefined;
+  let pendingLegacySnapshotRaw: string | undefined;
   let failures: RecoveryFailure[] = [];
   let guardDocument: GuardDocument = {
     guards: [],
@@ -777,6 +900,7 @@ export function createJsonRecoveryRecords(
     schemaVersion: CURRENT_GUARD_SCHEMA_VERSION,
   };
   let pendingLegacyGuards: MutationGuard[] | undefined;
+  let pendingLegacyGuardRaw: string | undefined;
   let guardFailures: RecoveryFailure[] = [];
   let guardsLoaded = false;
   let guardUnsupportedSchema = false;
@@ -790,6 +914,7 @@ export function createJsonRecoveryRecords(
   let targetsLoaded = false;
   let targetUnsupportedSchema = false;
   let targetWriteBlocked = false;
+  let targetStoreMissing = false;
   let hostTrustRecords: HostTrustRecord[] = [];
   let hostTrustFailures: RecoveryFailure[] = [];
   let hostTrustLoaded = false;
@@ -817,6 +942,44 @@ export function createJsonRecoveryRecords(
     return result;
   };
 
+  const syncPath = async (path: string, flags: "r" | "r+" = "r") => {
+    const handle = await fileSystem.open(path, flags);
+    try {
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+  };
+
+  const syncParentDirectory = async () => {
+    if (platform === "win32") return;
+    await syncPath(options.directory);
+  };
+
+  const createVerifiedBackup = async (
+    sourcePath: string,
+    backupPath: string,
+    sourceContents?: string,
+  ) => {
+    const expectedContents =
+      sourceContents ?? (await fileSystem.readFile(sourcePath, "utf8"));
+    try {
+      await fileSystem.copyFile(
+        sourcePath,
+        backupPath,
+        constants.COPYFILE_EXCL,
+      );
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    }
+    const backupContents = await fileSystem.readFile(backupPath, "utf8");
+    if (backupContents !== expectedContents) {
+      throw new Error("Pre-existing recovery backup does not match its source.");
+    }
+    await syncPath(backupPath, platform === "win32" ? "r+" : "r");
+    await syncParentDirectory();
+  };
+
   const writeUtf8 = async (
     contents: string,
     name = DOCUMENT_NAME,
@@ -842,14 +1005,7 @@ export function createJsonRecoveryRecords(
 
       await fileSystem.rename(temporaryPath, destinationPath);
       ownsTemporary = false;
-      if ((options.platform ?? process.platform) !== "win32") {
-        const directoryHandle = await fileSystem.open(options.directory, "r");
-        try {
-          await directoryHandle.sync();
-        } finally {
-          await directoryHandle.close();
-        }
-      }
+      await syncParentDirectory();
     } catch (error) {
       if (ownsTemporary)
         await fileSystem.unlink(temporaryPath).catch(() => undefined);
@@ -955,18 +1111,21 @@ export function createJsonRecoveryRecords(
     if (!migrated.success) {
       pendingLegacySnapshots = legacySnapshots;
       pendingInventoryVersion = legacyCurrent.success ? 2 : 1;
+      pendingLegacySnapshotRaw = raw;
       return;
     }
     try {
-      await fileSystem.copyFile(
+      await createVerifiedBackup(
         documentPath,
         `${documentPath}.v${legacyCurrent.success ? 2 : 1}.backup`,
-        constants.COPYFILE_EXCL,
+        raw,
       );
       await writeDocument(migrated.data);
       document = migrated.data;
     } catch {
-      await quarantine().catch(() => undefined);
+      pendingLegacySnapshots = legacySnapshots;
+      pendingInventoryVersion = legacyCurrent.success ? 2 : 1;
+      pendingLegacySnapshotRaw = raw;
       writeBlocked = true;
       failures = [{ code: "migration_failed", store: STORE_NAME }];
     }
@@ -1084,13 +1243,14 @@ export function createJsonRecoveryRecords(
     });
     if (!migrated.success) {
       pendingLegacyGuards = legacy.data.guards;
+      pendingLegacyGuardRaw = raw;
       return;
     }
     try {
-      await fileSystem.copyFile(
+      await createVerifiedBackup(
         guardDocumentPath,
         `${guardDocumentPath}.v1.backup`,
-        constants.COPYFILE_EXCL,
+        raw,
       );
       await writeDocument(
         migrated.data,
@@ -1141,6 +1301,7 @@ export function createJsonRecoveryRecords(
     if (targetsLoaded) return;
     targetsLoaded = true;
     targetFailures = [];
+    targetStoreMissing = false;
 
     try {
       const rawMarker = await fileSystem.readFile(
@@ -1168,7 +1329,10 @@ export function createJsonRecoveryRecords(
     try {
       raw = await fileSystem.readFile(targetDocumentPath, "utf8");
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        targetStoreMissing = true;
+        return;
+      }
       targetWriteBlocked = true;
       targetFailures = [{ code: "corrupt_store", store: TARGET_STORE_NAME }];
       return;
@@ -1236,10 +1400,10 @@ export function createJsonRecoveryRecords(
       return;
     }
     try {
-      await fileSystem.copyFile(
+      await createVerifiedBackup(
         targetDocumentPath,
         `${targetDocumentPath}.${legacyV2.success ? "v2" : "v1"}.backup`,
-        constants.COPYFILE_EXCL,
+        raw,
       );
       await writeDocument(
         migrated.data,
@@ -1251,6 +1415,19 @@ export function createJsonRecoveryRecords(
       await quarantineAndMarkTargets("migration_failed").catch(() => undefined);
       targetWriteBlocked = true;
       targetFailures = [{ code: "migration_failed", store: TARGET_STORE_NAME }];
+    }
+  };
+
+  const failWhenCurrentGuardsOutliveTargetStore = () => {
+    if (!targetStoreMissing || guardDocument.guards.length === 0) return;
+    targetWriteBlocked = true;
+    if (
+      !targetFailures.some(({ store }) => store === TARGET_STORE_NAME)
+    ) {
+      targetFailures = [
+        ...targetFailures,
+        { code: "corrupt_store", store: TARGET_STORE_NAME },
+      ];
     }
   };
 
@@ -1477,10 +1654,7 @@ export function createJsonRecoveryRecords(
           }
         }
         if (change.type === "target.remap") {
-          if (
-            change.fromTargetId.length === 0 ||
-            !targetIdSchema.safeParse(change.toTargetId).success
-          ) {
+          if (!isValidTargetRemap(change.fromTargetId, change.toTargetId)) {
             return commitFailure(
               "persist_failed",
               "Target identity migration did not pass durable validation.",
@@ -1488,13 +1662,15 @@ export function createJsonRecoveryRecords(
           }
           await load();
           await loadGuards();
+          await loadTargets();
+          failWhenCurrentGuardsOutliveTargetStore();
           if (unsupportedSchema || guardUnsupportedSchema) {
             return commitFailure(
               "unsupported_schema",
               "Recovery data was written by a newer unsupported application version.",
             );
           }
-          if (writeBlocked || guardWriteBlocked) {
+          if (writeBlocked || guardWriteBlocked || targetWriteBlocked) {
             return commitFailure(
               "persist_failed",
               "Recovery data could not be read safely and will not be overwritten.",
@@ -1514,7 +1690,7 @@ export function createJsonRecoveryRecords(
             change.fromTargetId,
             change.toTargetId,
           );
-          const remappedGuards = remapTargetId(
+          const remappedGuards = remapMutationGuardTargetId(
             sourceGuards,
             change.fromTargetId,
             change.toTargetId,
@@ -1548,32 +1724,24 @@ export function createJsonRecoveryRecords(
 
           try {
             if (pendingLegacySnapshots !== undefined) {
-              await fileSystem
-                .copyFile(
-                  documentPath,
-                  `${documentPath}.v${pendingInventoryVersion ?? 2}.backup`,
-                  constants.COPYFILE_EXCL,
-                )
-                .catch((error: NodeJS.ErrnoException) => {
-                  if (error.code !== "EEXIST") throw error;
-                });
+              await createVerifiedBackup(
+                documentPath,
+                `${documentPath}.v${pendingInventoryVersion ?? 2}.backup`,
+                pendingLegacySnapshotRaw,
+              );
+            }
+            if (pendingLegacyGuards !== undefined) {
+              await createVerifiedBackup(
+                guardDocumentPath,
+                `${guardDocumentPath}.v1.backup`,
+                pendingLegacyGuardRaw,
+              );
             }
             await writeDocument(nextDocument.data);
             document = nextDocument.data;
             pendingLegacySnapshots = undefined;
             pendingInventoryVersion = undefined;
-
-            if (pendingLegacyGuards !== undefined) {
-              await fileSystem
-                .copyFile(
-                  guardDocumentPath,
-                  `${guardDocumentPath}.v1.backup`,
-                  constants.COPYFILE_EXCL,
-                )
-                .catch((error: NodeJS.ErrnoException) => {
-                  if (error.code !== "EEXIST") throw error;
-                });
-            }
+            pendingLegacySnapshotRaw = undefined;
             await writeDocument(
               nextGuardDocument.data,
               GUARD_DOCUMENT_NAME,
@@ -1581,6 +1749,7 @@ export function createJsonRecoveryRecords(
             );
             guardDocument = nextGuardDocument.data;
             pendingLegacyGuards = undefined;
+            pendingLegacyGuardRaw = undefined;
             failures = [];
             guardFailures = [];
             return { ok: true, value: undefined };
@@ -1594,6 +1763,8 @@ export function createJsonRecoveryRecords(
 
         if (change.type === "targets.replace") {
           await loadTargets();
+          await loadGuards();
+          failWhenCurrentGuardsOutliveTargetStore();
           if (targetUnsupportedSchema) {
             return commitFailure(
               "unsupported_schema",
@@ -1606,29 +1777,25 @@ export function createJsonRecoveryRecords(
               "Target data could not be read safely and will not be overwritten.",
             );
           }
-          const parsedTargets = z
-            .array(targetDefinitionSchema)
-            .min(1)
-            .max(1_000)
-            .safeParse(change.targets);
-          if (!parsedTargets.success) {
+          const nextTargetDocument = targetDocumentSchema.safeParse({
+            kind: "target-definitions",
+            schemaVersion: CURRENT_TARGET_SCHEMA_VERSION,
+            targets: change.targets,
+          });
+          if (!nextTargetDocument.success) {
             return commitFailure(
               "persist_failed",
               "Target data did not pass durable validation.",
             );
           }
-          const nextTargetDocument: TargetDocument = {
-            kind: "target-definitions",
-            schemaVersion: CURRENT_TARGET_SCHEMA_VERSION,
-            targets: parsedTargets.data,
-          };
           try {
             await writeDocument(
-              nextTargetDocument,
+              nextTargetDocument.data,
               TARGET_DOCUMENT_NAME,
               targetDocumentPath,
             );
-            targetDocument = nextTargetDocument;
+            targetDocument = nextTargetDocument.data;
+            targetStoreMissing = false;
             targetFailures = [];
             return { ok: true, value: undefined };
           } catch {
@@ -1819,6 +1986,7 @@ export function createJsonRecoveryRecords(
         await load();
         await loadGuards();
         await loadTargets();
+        failWhenCurrentGuardsOutliveTargetStore();
         await loadHostTrust();
         await loadCollections();
         return {

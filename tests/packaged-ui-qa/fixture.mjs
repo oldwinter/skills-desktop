@@ -1,4 +1,12 @@
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  copyFile,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -23,7 +31,7 @@ function packageRootCandidate(root, platform, arch) {
       "Skills Desktop.app",
       "Contents",
       "MacOS",
-      "Skills Desktop",
+      "skills-desktop",
     );
   }
   return join(directory, `skills-desktop${platform === "win32" ? ".exe" : ""}`);
@@ -36,6 +44,21 @@ export function resolvePackagedExecutable({
   override = process.env.SKILLS_DESKTOP_PACKAGED_EXECUTABLE,
 } = {}) {
   return override ?? packageRootCandidate(root, platform, arch);
+}
+
+export function assertRuntimeArchitecture(
+  expected = process.env.SKILLS_DESKTOP_QA_ARCH,
+) {
+  if (expected === undefined || expected === "") return process.arch;
+  if (expected !== "x64" && expected !== "arm64") {
+    throw new Error(`Unsupported packaged QA architecture: ${expected}`);
+  }
+  if (process.arch !== expected) {
+    throw new Error(
+      `Packaged QA runtime architecture mismatch: expected ${expected}, got ${process.arch}.`,
+    );
+  }
+  return process.arch;
 }
 
 const projectEntry = (workspace) => ({
@@ -62,12 +85,14 @@ export async function createPackagedQaFixture({
   root: requestedRoot,
   platform = process.platform,
 } = {}) {
-  const root =
-    requestedRoot ?? (await mkdtemp(join(tmpdir(), "skills-desktop-ui-qa-")));
+  const parentRoot = requestedRoot ?? tmpdir();
+  await mkdir(parentRoot, { recursive: true });
+  const root = await mkdtemp(join(parentRoot, "skills-desktop-ui-qa-"));
   const home = join(root, "home");
   const workspace = join(root, "workspace");
   const config = join(root, "config");
   const cache = join(root, "cache");
+  const temporary = join(root, "tmp");
   const bin = join(root, "bin");
   const artifacts = join(root, "artifacts");
   const userData = join(config, "Skills Desktop");
@@ -76,9 +101,20 @@ export async function createPackagedQaFixture({
   const modePath = join(home, "process-mode");
   const invocationLog = join(home, "invocations.log");
   await Promise.all(
-    [home, workspace, config, cache, bin, artifacts, recovery, userData].map(
-      (path) => mkdir(path, { recursive: true }),
-    ),
+    [
+      home,
+      workspace,
+      config,
+      cache,
+      temporary,
+      bin,
+      artifacts,
+      recovery,
+      userData,
+      ...(platform === "win32"
+        ? [join(config, "Roaming"), join(config, "Local")]
+        : []),
+    ].map((path) => mkdir(path, { recursive: true })),
   );
   await writeFile(
     inventoryPath,
@@ -92,9 +128,10 @@ export async function createPackagedQaFixture({
 
   const npxScript = join(bin, platform === "win32" ? "npx.cmd" : "npx");
   const npxProgram = join(bin, "qa-npx.cjs");
-  await writeFile(
-    npxProgram,
-    `#!/usr/bin/env node
+  const windowsNode = join(bin, "node.exe");
+  const windowsNpxCli = join(bin, "node_modules", "npm", "bin", "npx-cli.js");
+  const windowsNpm = join(bin, "npm.cmd");
+  const qaNpxSource = `#!/usr/bin/env node
 const fs = require("node:fs");
 const path = require("node:path");
 const args = process.argv.slice(2);
@@ -111,14 +148,32 @@ if (args.at(-1) === "--version") {
   process.stdout.write(mode === "empty" ? "[]" : JSON.stringify(JSON.parse(fs.readFileSync(statePath, "utf8")).global));
 } else if (args.includes("list")) {
   process.stdout.write(mode === "empty" ? "[]" : JSON.stringify(JSON.parse(fs.readFileSync(statePath, "utf8")).project));
+} else if (args.includes("remove")) {
+  const state = JSON.parse(fs.readFileSync(statePath, "utf8"));
+  const name = args[args.indexOf("remove") + 1];
+  const scope = args.includes("--global") ? "global" : "project";
+  state[scope] = state[scope].filter((entry) => entry.name !== name);
+  fs.writeFileSync(statePath, JSON.stringify(state));
+  process.stdout.write("");
+} else if (args.includes("update")) {
+  process.stdout.write("");
 } else {
   process.exitCode = 2;
 }
-`,
-    { mode: 0o700 },
-  );
+`;
+  await writeFile(npxProgram, qaNpxSource, { mode: 0o700 });
   if (platform === "win32") {
-    await writeFile(npxScript, `@echo off\r\nnode "%~dp0qa-npx.cjs" %*\r\n`);
+    await mkdir(dirname(windowsNpxCli), { recursive: true });
+    await copyFile(process.execPath, windowsNode);
+    await writeFile(windowsNpxCli, qaNpxSource);
+    await writeFile(
+      npxScript,
+      `@echo off\r\n"%~dp0node.exe" "%~dp0node_modules\\npm\\bin\\npx-cli.js" %*\r\n`,
+    );
+    await writeFile(
+      windowsNpm,
+      `@echo off\r\n"%~dp0node.exe" "%~dp0node_modules\\npm\\bin\\npx-cli.js" %*\r\n`,
+    );
   } else {
     await writeFile(npxScript, `#!/bin/sh\nexec node "${npxProgram}" "$@"\n`, {
       mode: 0o700,
@@ -136,11 +191,7 @@ if (args.at(-1) === "--version") {
       "USERNAME",
       "SystemRoot",
       "ComSpec",
-      "APPDATA",
-      "LOCALAPPDATA",
-      "USERPROFILE",
-      "TEMP",
-      "TMP",
+      "PATHEXT",
     ].flatMap((name) => (process.env[name] ? [[name, process.env[name]]] : [])),
   );
   const environment = {
@@ -149,8 +200,18 @@ if (args.at(-1) === "--version") {
     NPM_CONFIG_CACHE: cache,
     PATH: `${bin}${platform === "win32" ? ";" : ":"}${process.env.PATH ?? ""}`,
     SKILLS_DESKTOP_WORKSPACE: workspace,
+    TMPDIR: temporary,
     XDG_CACHE_HOME: cache,
     XDG_CONFIG_HOME: config,
+    ...(platform === "win32"
+      ? {
+          APPDATA: join(config, "Roaming"),
+          LOCALAPPDATA: join(config, "Local"),
+          TEMP: temporary,
+          TMP: temporary,
+          USERPROFILE: home,
+        }
+      : {}),
   };
   let cleaned = false;
   return {
@@ -164,6 +225,7 @@ if (args.at(-1) === "--version") {
     inventoryPath,
     recovery,
     root,
+    temporary,
     userData,
     workspace,
     async readInventory() {
@@ -173,7 +235,10 @@ if (args.at(-1) === "--version") {
       const value = await readFile(invocationLog, "utf8");
       return value.trim() === ""
         ? []
-        : value.trim().split("\n").map((line) => JSON.parse(line));
+        : value
+            .trim()
+            .split("\n")
+            .map((line) => JSON.parse(line));
     },
     async readProcessMode() {
       return (await readFile(modePath, "utf8")).trim();

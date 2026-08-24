@@ -129,13 +129,23 @@ describe("disposable localhost OpenSSH integration", () => {
       const npx = join(bin, "npx");
       const pauseFile = join(root, "pause-observation");
       const observationStartedFile = join(root, "observation-started");
+      const observationPidFile = join(root, "observation-pid");
+      const observationSignalFile = join(root, "observation-signals");
+      const observationExitFile = join(root, "observation-exit");
       const removedFile = join(root, "remote-project-removed");
       await writeFile(
         npx,
         `#!/usr/bin/env node
-const { existsSync, writeFileSync } = require("node:fs");
+const { appendFileSync, existsSync, writeFileSync } = require("node:fs");
+const signalFile = ${JSON.stringify(observationSignalFile)};
+const exitFile = ${JSON.stringify(observationExitFile)};
+const markSignal = (signal) => appendFileSync(signalFile, signal + "\\n");
+process.on("SIGTERM", () => { markSignal("SIGTERM"); process.exit(143); });
+process.on("SIGHUP", () => { markSignal("SIGHUP"); process.exit(129); });
+process.on("exit", (code) => writeFileSync(exitFile, String(code)));
 const operation = process.argv.slice(2).slice(2).join(" ");
 if (operation === "list --json" && existsSync(${JSON.stringify(pauseFile)})) {
+  writeFileSync(${JSON.stringify(observationPidFile)}, String(process.pid));
   writeFileSync(${JSON.stringify(observationStartedFile)}, "started");
   setTimeout(() => process.stdout.write(JSON.stringify([{ name: "late-project", path: "/private/late", scope: "project", agents: ["Codex"], source: null, sourceType: null, sourceUrl: null }])), 30_000);
 }
@@ -367,6 +377,9 @@ exec /bin/sh -c "$SSH_ORIGINAL_COMMAND"
           error: { code: "cancelled", effects: "none" },
           ok: false,
         });
+        expect(await readFile(observationPidFile, "utf8")).toMatch(/^[1-9][0-9]*$/);
+        expect(await readFile(observationSignalFile, "utf8")).toBe("SIGTERM\n");
+        expect(await readFile(observationExitFile, "utf8")).toBe("143");
 
         const rotatedKey = (await readFile(`${clientKey}.pub`, "utf8"))
           .trim()

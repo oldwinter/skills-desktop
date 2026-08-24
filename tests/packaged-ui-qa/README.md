@@ -6,12 +6,19 @@ Isolated Local-only packaged Electron UI/UX suite for issue #85.
 
 The runner creates one disposable root and never reads developer skill state:
 
-- `HOME`, `XDG_CONFIG_HOME`, `XDG_CACHE_HOME`, and Electron `--user-data-dir`
+- `HOME`, platform profile/config/cache/temp directories, and Electron `--user-data-dir`
 - a unique loopback CDP port and session name
 - a stub `npx` on `PATH` that serves fixture inventory
+- a pinned `axe-core` source; an unavailable dependency fails the run closed
+- on Windows, `node.exe`, npm shims, and npm's `npx-cli.js` resolver layout
 - ephemeral logs and optional screenshots under `<fixture>/artifacts`
 
-Teardown deletes only that fixture root and the Electron process group it spawned.
+Teardown deletes only that fixture root. On POSIX, process ownership is the
+packaged Electron direct child and the detached process group created for it;
+on Windows it is the `taskkill /t` tree rooted at that child. A descendant that
+deliberately creates a new POSIX session is outside this portable ownership
+boundary. The harness never claims system-wide process-tree cleanup and fails
+closed when it cannot confirm cleanup inside its owned boundary.
 
 ## Setup
 
@@ -33,7 +40,9 @@ Linux one-shot:
 npm run qa:packaged-ui:linux
 ```
 
-Protected `main` runs the same runner on Linux x64, macOS arm64/x64, and Windows x64 via `.github/workflows/packaged-ui-qa.yml`. Failures upload only redacted logs from `SKILLS_DESKTOP_QA_ARTIFACTS`.
+Protected `main` runs the same runner on hosted Ubuntu x64, macOS arm64/x64, and Windows x64 via `.github/workflows/packaged-ui-qa.yml`, preserving the packaged Chromium sandbox posture. On Ubuntu 24.04, the workflow installs an executable-scoped AppArmor `userns` profile and removes both the loaded profile and its temporary file on success, failure, or interruption. Local AppArmor hosts need equivalent privilege or preconfiguration; the runner intentionally never passes `--no-sandbox`.
+
+Failures upload only `failure.json`, a mode-`0600` receipt containing allowlisted stage and check codes, error class, platform, architecture, and schema version. Raw exception text and Electron output stay in the disposable fixture and are never uploaded.
 
 Print commands without launching:
 

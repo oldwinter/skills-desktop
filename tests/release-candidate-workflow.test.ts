@@ -97,7 +97,7 @@ describe("unsigned candidate workflow contract", () => {
       {
         architecture: "x64",
         platform: "linux",
-        runner: '["self-hosted", "Linux", "X64", "skills-desktop"]',
+        runner: '"ubuntu-24.04"',
       },
     ]);
     const packageSteps = packageJob.steps;
@@ -105,11 +105,22 @@ describe("unsigned candidate workflow contract", () => {
       step.name?.startsWith("Check out"),
     );
     expect(checkout.with["persist-credentials"]).toBe(false);
+    const linuxPrerequisites = packageSteps.find(
+      (step: { name?: string }) =>
+        step.name === "Install official Linux maker prerequisites",
+    );
+    expect(linuxPrerequisites.if).toBe("matrix.platform == 'linux'");
+    expect(linuxPrerequisites.run).toBe(
+      "sudo apt-get install --no-install-recommends --yes fakeroot rpm",
+    );
     const generate = packageSteps.find(
       (step: { name?: string }) => step.name === "Generate unsigned candidate",
     );
     expect(generate.run).toContain("npm run candidate:build --");
     expect(generate.run).not.toMatch(/publish|release create|release upload/i);
+    expect(packageSteps.indexOf(linuxPrerequisites)).toBeLessThan(
+      packageSteps.indexOf(generate),
+    );
     const identify = packageSteps.find(
       (step: { name?: string }) => step.name === "Identify candidate package",
     );
@@ -141,6 +152,7 @@ describe("unsigned candidate workflow contract", () => {
     expect(packageUpload.with["retention-days"]).toBe(1);
 
     const evidenceJob = workflow.jobs.evidence;
+    expect(evidenceJob["runs-on"]).toBe("ubuntu-24.04");
     expect(evidenceJob.needs).toBe("package");
     expect(evidenceJob.if).toContain("github.event_name == 'workflow_dispatch'");
     expect(evidenceJob.if).toContain("github.ref == 'refs/heads/main'");
@@ -204,20 +216,27 @@ describe("unsigned candidate workflow contract", () => {
     );
 
     const verifyJob = workflow.jobs.verify;
+    expect(verifyJob["runs-on"]).toBe("ubuntu-24.04");
     expect(verifyJob.needs).toBe("evidence");
     expect(verifyJob.if).toContain("github.ref == 'refs/heads/main'");
     expect(verifyJob.permissions).toEqual({
       attestations: "read",
       contents: "read",
     });
+    const attestationVerificationSteps = verifyJob.steps.filter(
+      (step: { run?: string }) => step.run?.includes("gh attestation verify"),
+    );
+    expect(attestationVerificationSteps).toHaveLength(2);
+    for (const step of attestationVerificationSteps) {
+      expect(step.run).toContain("--signer-workflow");
+      expect(step.run).toContain("--source-digest");
+      expect(step.run).toContain("--source-ref");
+      expect(step.run).toContain("--deny-self-hosted-runners");
+    }
     const verifySource = verifyJob.steps
       .map((step: { run?: string }) => step.run ?? "")
       .join("\n");
     expect(verifySource).toContain("gh attestation verify");
-    expect(verifySource).toContain("--signer-workflow");
-    expect(verifySource).toContain("--source-digest");
-    expect(verifySource).toContain("--source-ref");
-    expect(verifySource).not.toContain("--deny-self-hosted-runners");
     expect(verifySource).toContain("release-integrity-cli.mjs verify-attestation");
     expect(verifySource).toContain("release-integrity-cli.mjs assemble");
     const verifiedUpload = verifyJob.steps.find(
@@ -229,6 +248,7 @@ describe("unsigned candidate workflow contract", () => {
     );
 
     const draftJob = workflow.jobs["draft-assembly"];
+    expect(draftJob["runs-on"]).toBe("ubuntu-24.04");
     expect(draftJob.needs).toBe("verify");
     expect(draftJob.permissions).toEqual({ contents: "write" });
     expect(draftJob.if).toContain("github.event_name == 'workflow_dispatch'");
@@ -246,6 +266,7 @@ describe("unsigned candidate workflow contract", () => {
     expect(draftSource).not.toMatch(/gh release edit|draft=false|make_latest=true/i);
 
     const publishJob = workflow.jobs["publish-preview"];
+    expect(publishJob["runs-on"]).toBe("ubuntu-24.04");
     expect(publishJob.needs).toEqual(["verify", "draft-assembly"]);
     expect(publishJob.permissions).toEqual({ contents: "write" });
     expect(publishJob.if.replace(/\s+/g, " ").trim()).toBe(
@@ -275,13 +296,26 @@ describe("unsigned candidate workflow contract", () => {
     );
 
     for (const job of Object.values(workflow.jobs) as Array<{
-      steps: Array<{ uses?: string }>;
+      steps: Array<{
+        uses?: string;
+        with?: Record<string, unknown>;
+      }>;
     }>) {
       for (const step of job.steps) {
         if (step.uses !== undefined) {
           expect(step.uses).toMatch(pinnedAction);
         }
       }
+      const checkoutStep = job.steps.find((step) =>
+        step.uses?.startsWith("actions/checkout@"),
+      );
+      expect(checkoutStep?.with?.["persist-credentials"]).toBe(false);
+    }
+    for (const job of [evidenceJob, verifyJob, draftJob, publishJob]) {
+      const setupNode = job.steps.find((step: { uses?: string }) =>
+        step.uses?.startsWith("actions/setup-node@"),
+      );
+      expect(setupNode?.with?.["node-version"]).toBe(24);
     }
     const laterJobSource = [evidenceJob, verifyJob, draftJob, publishJob]
       .flatMap((job) => job.steps)
@@ -291,6 +325,7 @@ describe("unsigned candidate workflow contract", () => {
       /\bnpm\s+(ci|exec|run)\b|electron-forge|xvfb|candidate:build/i,
     );
     expect(source).not.toContain("secrets.");
+    expect(source).not.toMatch(/runs-on:\s*\[[^\n]*self-hosted/i);
     expect(source).not.toMatch(
       /environment:\s*(release-signing|production-release)/,
     );

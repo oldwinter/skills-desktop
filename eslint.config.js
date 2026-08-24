@@ -10,6 +10,7 @@ export default [
       "**/dist/**",
       "**/node_modules/**",
       "**/out/**",
+      "coverage/**",
       "release-candidates/**",
     ],
   },

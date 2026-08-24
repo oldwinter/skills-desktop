@@ -259,6 +259,7 @@ async function createHostTrustRoleFixture(options?: {
       now = new Date(value);
     },
     skillsTargets,
+    workspace,
   };
 }
 
@@ -3512,13 +3513,58 @@ describe("DesktopCapabilities SSH host-trust role-session contract", () => {
         version: 1,
       }),
     ).resolves.toMatchObject({
-      error: { code: "mutation_conflict" },
+      error: { code: "unauthorized" },
       ok: false,
     });
     expect(fixture.commitHostTrust).not.toHaveBeenCalled();
 
     releaseCommit();
     await expect(first).resolves.toMatchObject({ ok: true });
+    expect(fixture.commitHostTrust).toHaveBeenCalledTimes(1);
+    expect(fixture.replaceDefinitions).toHaveBeenCalledTimes(1);
+  });
+
+  it("consumes host-trust approval before deferred persistence allows a reject", async () => {
+    let releaseCommit!: () => void;
+    let commitStarted!: () => void;
+    const blocked = new Promise<void>((resolve) => {
+      releaseCommit = resolve;
+    });
+    const started = new Promise<void>((resolve) => {
+      commitStarted = resolve;
+    });
+    const fixture = await createHostTrustRoleFixture({
+      async commit() {
+        commitStarted();
+        await blocked;
+        return { ok: true, value: undefined };
+      },
+    });
+    const competingReview = fixture.capabilities.attach(
+      {
+        endpointId: "competing-host-trust-reject",
+        reviewId: "host-trust-review",
+        role: "review",
+        sessionEpoch: "competing-reject-epoch",
+      },
+      () => undefined,
+    );
+
+    const approval = fixture.approve();
+    await started;
+    await expect(
+      competingReview.request({
+        decision: "reject",
+        type: "review.decide",
+        version: 1,
+      }),
+    ).resolves.toMatchObject({
+      error: { code: "unauthorized" },
+      ok: false,
+    });
+
+    releaseCommit();
+    await expect(approval).resolves.toMatchObject({ ok: true });
     expect(fixture.commitHostTrust).toHaveBeenCalledTimes(1);
     expect(fixture.replaceDefinitions).toHaveBeenCalledTimes(1);
   });
@@ -3548,9 +3594,288 @@ describe("DesktopCapabilities SSH host-trust role-session contract", () => {
     expect(fixture.commitHostTrust).not.toHaveBeenCalled();
     expect(fixture.replaceDefinitions).not.toHaveBeenCalled();
   });
+
+  it("settles an owned host-trust review when its workspace tears down", async () => {
+    const fixture = await createHostTrustRoleFixture();
+    fixture.workspace.teardown();
+
+    await expect(fixture.review.snapshot()).resolves.toEqual({
+      decision: "reject",
+      schemaVersion: 1,
+      status: "settled",
+    });
+    await expect(fixture.approve()).resolves.toMatchObject({
+      error: { code: "unauthorized" },
+      ok: false,
+    });
+    expect(fixture.commit).not.toHaveBeenCalled();
+    expect(fixture.commitHostTrust).not.toHaveBeenCalled();
+    expect(fixture.replaceDefinitions).not.toHaveBeenCalled();
+  });
 });
 
 describe("DesktopCapabilities mutation role-session contract", () => {
+  it("workspace teardown rejects only its owned pending mutation review", async () => {
+    const process: SkillsProcess = {
+      ...mutationNotExercised,
+      async observeInventory() {
+        return { ok: true, value: freshInventory };
+      },
+      async prepareMutation(input) {
+        return {
+          ok: true,
+          value: {
+            commandPlan: {
+              harness: target.harness,
+              names: ["tdd"],
+              operation: "remove",
+              preview: "review-only preview",
+              schemaVersion: 1,
+              scope: "project",
+              source: null,
+              targetId: target.id,
+              timeoutMs: 30_000,
+            },
+            digest: "a".repeat(64),
+            expiresAt: "2099-01-01T00:10:00.000Z",
+            id: "prepared-owner-review",
+            inventoryId: input.inventoryId,
+            targetGeneration: target.generation,
+            targetId: target.id,
+          },
+        };
+      },
+    };
+    const capabilities = createDesktopCapabilities({
+      id: () => "review-owner",
+      recoveryRecords: createMemoryRecoveryRecords(),
+      skillsTargets: targetsWith(process),
+    });
+    await capabilities.initialize();
+    const owner = capabilities.attach(
+      {
+        endpointId: "workspace-review-owner",
+        role: "workspace",
+        sessionEpoch: "review-owner-epoch",
+      },
+      () => undefined,
+    );
+    const otherWorkspace = capabilities.attach(
+      {
+        endpointId: "workspace-review-other",
+        role: "workspace",
+        sessionEpoch: "review-other-epoch",
+      },
+      () => undefined,
+    );
+    await owner.request({
+      targetId: target.id,
+      type: "inventory.refresh",
+      version: 1,
+    });
+    await owner.request({
+      intent: { names: ["tdd"], scope: "project", type: "remove" },
+      targetId: target.id,
+      type: "mutation.prepare",
+      version: 1,
+    });
+    await expect(
+      owner.request({
+        preparedMutationId: "prepared-owner-review",
+        type: "review.request",
+        version: 1,
+      }),
+    ).resolves.toEqual({ ok: true, value: { operationId: "review-owner" } });
+    const review = capabilities.attach(
+      {
+        endpointId: "review-owner-window",
+        reviewId: "review-owner",
+        role: "review",
+        sessionEpoch: "review-owner-window-epoch",
+      },
+      () => undefined,
+    );
+
+    await expect(review.snapshot()).resolves.toMatchObject({ status: "pending" });
+    expect(capabilities.restartSafety()).toEqual({
+      guardReasons: ["trusted-review-active"],
+    });
+
+    otherWorkspace.teardown();
+    await expect(review.snapshot()).resolves.toMatchObject({ status: "pending" });
+    expect(capabilities.restartSafety()).toEqual({
+      guardReasons: ["trusted-review-active"],
+    });
+
+    owner.teardown();
+    await expect(review.snapshot()).resolves.toEqual({
+      decision: "reject",
+      schemaVersion: 1,
+      status: "settled",
+    });
+    const replacement = capabilities.attach(
+      {
+        endpointId: "workspace-review-replacement",
+        role: "workspace",
+        sessionEpoch: "review-replacement-epoch",
+      },
+      () => undefined,
+    );
+    await expect(replacement.snapshot()).resolves.toMatchObject({
+      mutation: {
+        commandPlan: { names: ["tdd"] },
+        phase: "planned",
+      },
+    });
+    expect(capabilities.restartSafety()).toEqual({ guardReasons: [] });
+  });
+
+  it("workspace teardown rejects an owned cancellation review without aborting the mutation", async () => {
+    let markStarted!: () => void;
+    let finishMutation!: () => void;
+    let mutationSignal: AbortSignal | undefined;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    const process: SkillsProcess = {
+      async executeConfirmed({ signal }) {
+        mutationSignal = signal;
+        markStarted();
+        await new Promise<void>((resolve) => {
+          finishMutation = resolve;
+        });
+        return {
+          ok: true,
+          value: {
+            effects: { status: "verified" },
+            inventory: freshInventory,
+            preparedMutationId: "prepared-cancellation-owner",
+            process: {
+              disposition: "completed",
+              exitCode: 0,
+              termination: "known",
+            },
+          },
+        };
+      },
+      async observeInventory() {
+        return { ok: true, value: freshInventory };
+      },
+      async prepareMutation(input) {
+        return {
+          ok: true,
+          value: {
+            commandPlan: {
+              harness: target.harness,
+              names: ["tdd"],
+              operation: "remove",
+              preview: "review-only preview",
+              schemaVersion: 1,
+              scope: "project",
+              source: null,
+              targetId: target.id,
+              timeoutMs: 30_000,
+            },
+            digest: "b".repeat(64),
+            expiresAt: "2099-01-01T00:10:00.000Z",
+            id: "prepared-cancellation-owner",
+            inventoryId: input.inventoryId,
+            targetGeneration: target.generation,
+            targetId: target.id,
+          },
+        };
+      },
+    };
+    const capabilities = createDesktopCapabilities({
+      clock: () => new Date("2026-08-21T10:00:00.000Z"),
+      id: (() => {
+        const ids = [
+          "refresh-cancellation-owner",
+          "inventory-cancellation-owner",
+          "execute-review-cancellation-owner",
+          "mutation-cancellation-owner",
+          "cancel-review-cancellation-owner",
+        ];
+        return () => ids.shift() ?? "unexpected-cancellation-owner-id";
+      })(),
+      recoveryRecords: createMemoryRecoveryRecords(),
+      skillsTargets: targetsWith(process),
+    });
+    await capabilities.initialize();
+    const owner = capabilities.attach(
+      {
+        endpointId: "workspace-cancellation-owner",
+        role: "workspace",
+        sessionEpoch: "cancellation-owner-epoch",
+      },
+      () => undefined,
+    );
+    await owner.request({
+      targetId: target.id,
+      type: "inventory.refresh",
+      version: 1,
+    });
+    await owner.request({
+      intent: { names: ["tdd"], scope: "project", type: "remove" },
+      targetId: target.id,
+      type: "mutation.prepare",
+      version: 1,
+    });
+    await owner.request({
+      preparedMutationId: "prepared-cancellation-owner",
+      type: "review.request",
+      version: 1,
+    });
+    const executionReview = capabilities.attach(
+      {
+        endpointId: "review-cancellation-owner-execution",
+        reviewId: "execute-review-cancellation-owner",
+        role: "review",
+        sessionEpoch: "cancellation-owner-execution-epoch",
+      },
+      () => undefined,
+    );
+    const execution = executionReview.request({
+      decision: "approve",
+      type: "review.decide",
+      version: 1,
+    });
+    await started;
+    await expect(
+      owner.request({
+        operationId: "mutation-cancellation-owner",
+        type: "review.cancel-request",
+        version: 1,
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      value: { operationId: "cancel-review-cancellation-owner" },
+    });
+    const cancellationReview = capabilities.attach(
+      {
+        endpointId: "review-cancellation-owner-cancellation",
+        reviewId: "cancel-review-cancellation-owner",
+        role: "review",
+        sessionEpoch: "cancellation-owner-cancellation-epoch",
+      },
+      () => undefined,
+    );
+
+    owner.teardown();
+    await expect(cancellationReview.snapshot()).resolves.toEqual({
+      decision: "reject",
+      schemaVersion: 1,
+      status: "settled",
+    });
+    expect(mutationSignal?.aborted).toBe(false);
+    await expect(owner.snapshot()).resolves.toMatchObject({
+      mutation: { activeOperationId: "mutation-cancellation-owner", phase: "running" },
+    });
+
+    finishMutation();
+    await expect(execution).resolves.toMatchObject({ ok: true });
+  });
+
   it("keeps review approval pending while a Target update is reserved", async () => {
     let releaseCanonicalization!: () => void;
     let canonicalizationStarted!: () => void;
@@ -5228,6 +5553,145 @@ describe("DesktopCapabilities Official Collection contract", () => {
         ]),
       },
     });
+  });
+
+  it("workspace teardown rejects its owned Collection review and discards the plan", async () => {
+    const reviewedSource = {
+      revision: "0123456789abcdef0123456789abcdef01234567",
+      source: "vercel-labs/skills",
+      sourceType: "github" as const,
+    };
+    const process: SkillsProcess = {
+      ...mutationNotExercised,
+      async observeInventory() {
+        return { ok: true, value: freshInventory };
+      },
+      async prepareMutation(input) {
+        expect(input.intent).toEqual({
+          names: ["find-skills"],
+          scope: "project",
+          source: reviewedSource,
+          type: "add",
+        });
+        return {
+          ok: true,
+          value: {
+            commandPlan: {
+              harness: target.harness,
+              names: ["find-skills"],
+              operation: "add",
+              preview: "review-only collection preview",
+              schemaVersion: 1,
+              scope: "project",
+              source: reviewedSource,
+              targetId: target.id,
+              timeoutMs: 30_000,
+            },
+            digest: "c".repeat(64),
+            expiresAt: "2099-01-01T00:10:00.000Z",
+            id: "collection-prepared-owner",
+            inventoryId: input.inventoryId,
+            targetGeneration: target.generation,
+            targetId: target.id,
+          },
+        };
+      },
+    };
+    const capabilities = createDesktopCapabilities({
+      id: (() => {
+        const ids = [
+          "refresh-collection-owner",
+          "inventory-collection-owner",
+          "collection-plan-owner",
+          "collection-review-owner",
+        ];
+        return () => ids.shift() ?? "unexpected-collection-owner-id";
+      })(),
+      officialCollectionCatalog: validCatalog,
+      platform: "linux",
+      recoveryRecords: createMemoryRecoveryRecords(),
+      skillsTargets: targetsWith(process),
+    });
+    await capabilities.initialize();
+    const owner = capabilities.attach(
+      {
+        endpointId: "workspace-collection-owner",
+        role: "workspace",
+        sessionEpoch: "collection-owner-epoch",
+      },
+      () => undefined,
+    );
+    const otherWorkspace = capabilities.attach(
+      {
+        endpointId: "workspace-collection-other",
+        role: "workspace",
+        sessionEpoch: "collection-other-epoch",
+      },
+      () => undefined,
+    );
+    await owner.request({
+      targetId: target.id,
+      type: "inventory.refresh",
+      version: 1,
+    });
+    await expect(
+      owner.request({
+        collectionId: "skills-desktop-starter",
+        manifestDigest,
+        releaseNumber: 1,
+        scope: "project",
+        selections: [{ mode: "add", name: "find-skills" }],
+        targetId: target.id,
+        type: "collection.prepare",
+        version: 1,
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      value: { operationId: "collection-plan-owner" },
+    });
+    await expect(
+      owner.request({
+        collectionPlanId: "collection-plan-owner",
+        type: "collection.review.request",
+        version: 1,
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      value: { operationId: "collection-review-owner" },
+    });
+    const review = capabilities.attach(
+      {
+        endpointId: "review-collection-owner",
+        reviewId: "collection-review-owner",
+        role: "review",
+        sessionEpoch: "collection-review-owner-epoch",
+      },
+      () => undefined,
+    );
+    await expect(review.snapshot()).resolves.toMatchObject({ status: "pending" });
+
+    otherWorkspace.teardown();
+    await expect(review.snapshot()).resolves.toMatchObject({ status: "pending" });
+
+    owner.teardown();
+    await expect(review.snapshot()).resolves.toEqual({
+      decision: "reject",
+      schemaVersion: 1,
+      status: "settled",
+    });
+    const replacement = capabilities.attach(
+      {
+        endpointId: "workspace-collection-replacement",
+        role: "workspace",
+        sessionEpoch: "collection-replacement-epoch",
+      },
+      () => undefined,
+    );
+    await expect(replacement.snapshot()).resolves.toMatchObject({
+      collections: { plan: null },
+      mutation: { phase: "planned" },
+    });
+    expect(capabilities.restartSafety()).toEqual({ guardReasons: [] });
   });
 
   it("projects and prepares a Collection for a selected non-active Local Target", async () => {

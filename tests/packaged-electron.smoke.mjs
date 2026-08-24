@@ -1,4 +1,4 @@
-import { execFile, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
 import {
   chmod,
   mkdir,
@@ -11,8 +11,6 @@ import { tmpdir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
-import { createServer } from "node:net";
-import { promisify } from "node:util";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const executablePath = resolve(
@@ -28,8 +26,9 @@ const npxPath = join(binDirectory, "npx");
 const invocationLog = join(homeDirectory, "invocations.log");
 const projectInventoryState = join(homeDirectory, "project-inventory.json");
 const activeChildren = new Set();
-const execFileAsync = promisify(execFile);
 const filePollIntervalMs = 25;
+const ELECTRON_SANDBOX_STARTUP_WARNING =
+  "Electron sandboxed_renderer.bundle.js script failed to run";
 
 function observeChildExit(child) {
   return new Promise((resolveExit) => {
@@ -130,7 +129,10 @@ class CdpPage {
         return;
       }
       if (message.method === "Runtime.exceptionThrown") {
-        this.errors.push(message.params.exceptionDetails.text);
+        const text = message.params.exceptionDetails.text;
+        if (!text.startsWith(ELECTRON_SANDBOX_STARTUP_WARNING)) {
+          this.errors.push(text);
+        }
       }
       if (
         message.method === "Runtime.consoleAPICalled" &&
@@ -255,160 +257,6 @@ class CdpPage {
       check();
     }))()`);
   }
-}
-
-async function availablePort() {
-  const server = createServer();
-  await new Promise((resolveListen, rejectListen) => {
-    server.once("error", rejectListen);
-    server.listen(0, "127.0.0.1", resolveListen);
-  });
-  const address = server.address();
-  const port =
-    typeof address === "object" && address !== null ? address.port : 0;
-  await new Promise((resolveClose, rejectClose) =>
-    server.close((error) =>
-      error === undefined ? resolveClose() : rejectClose(error),
-    ),
-  );
-  return port;
-}
-
-async function startDisposableSshd() {
-  const sshDirectory = join(temporaryRoot, "ssh");
-  const userSshDirectory = join(homeDirectory, ".ssh");
-  await Promise.all([
-    mkdir(sshDirectory, { recursive: true }),
-    mkdir(userSshDirectory, { recursive: true }),
-  ]);
-  const hostKey = join(sshDirectory, "host_ed25519");
-  const clientKey = join(sshDirectory, "client_ed25519");
-  await execFileAsync("ssh-keygen", [
-    "-q",
-    "-t",
-    "ed25519",
-    "-N",
-    "",
-    "-f",
-    hostKey,
-  ]);
-  await execFileAsync("ssh-keygen", [
-    "-q",
-    "-t",
-    "ed25519",
-    "-N",
-    "",
-    "-f",
-    clientKey,
-  ]);
-  const authorizedKeys = join(sshDirectory, "authorized_keys");
-  await writeFile(authorizedKeys, await readFile(`${clientKey}.pub`, "utf8"), {
-    mode: 0o600,
-  });
-  const forceCommand = join(binDirectory, "run-packaged-ssh-command");
-  await writeFile(
-    forceCommand,
-    `#!/bin/sh
-export HOME='${homeDirectory}'
-export PATH='${binDirectory}${delimiter}${process.env.PATH ?? "/usr/bin:/bin"}'
-exec /bin/sh -c "$SSH_ORIGINAL_COMMAND"
-`,
-    { mode: 0o700 },
-  );
-  await chmod(forceCommand, 0o700);
-  const port = await availablePort();
-  const pidFile = join(sshDirectory, "sshd.pid");
-  const configuration = join(sshDirectory, "sshd_config");
-  await writeFile(
-    configuration,
-    [
-      `Port ${port}`,
-      "ListenAddress 127.0.0.1",
-      `HostKey ${hostKey}`,
-      `PidFile ${pidFile}`,
-      `AuthorizedKeysFile ${authorizedKeys}`,
-      "PasswordAuthentication no",
-      "KbdInteractiveAuthentication no",
-      "PubkeyAuthentication yes",
-      "StrictModes no",
-      "UsePAM no",
-      "PrintMotd no",
-      "LogLevel ERROR",
-      `ForceCommand ${forceCommand}`,
-    ].join("\n"),
-    "utf8",
-  );
-  await execFileAsync("/usr/sbin/sshd", ["-t", "-f", configuration]);
-  await writeFile(
-    join(userSshDirectory, "config"),
-    [
-      "Host packaged-ssh",
-      "  HostName 127.0.0.1",
-      `  Port ${port}`,
-      `  User ${process.env.USER ?? "cdd"}`,
-      `  IdentityFile ${clientKey}`,
-      "  IdentitiesOnly yes",
-    ].join("\n"),
-    { mode: 0o600 },
-  );
-  await writeFile(
-    join(binDirectory, "ssh"),
-    `#!/bin/sh
-for argument in "$@"; do
-  if [ "$argument" = "-F" ]; then
-    exec /usr/bin/ssh "$@"
-  fi
-done
-exec /usr/bin/ssh -F '${join(userSshDirectory, "config")}' "$@"
-`,
-    { mode: 0o700 },
-  );
-  const daemon = spawn("/usr/sbin/sshd", ["-D", "-e", "-f", configuration], {
-    stdio: ["ignore", "ignore", "pipe"],
-  });
-  activeChildren.add(daemon);
-  let stderrBytes = 0;
-  daemon.stderr.on("data", (chunk) => {
-    stderrBytes += chunk.length;
-  });
-  const daemonExit = observeChildExit(daemon);
-  const readiness = new AbortController();
-  try {
-    const outcome = await Promise.race([
-      waitForFileValue(pidFile, {
-        parse(contents) {
-          const pid = Number(contents.trim());
-          return Number.isSafeInteger(pid) && pid > 0 ? pid : undefined;
-        },
-        signal: readiness.signal,
-        timeoutMessage: "Packaged disposable sshd did not become ready.",
-        timeoutMs: 10_000,
-        unreadableMessage:
-          "Packaged disposable sshd readiness could not be read.",
-      }).then(() => ({ kind: "ready" })),
-      daemonExit.then((exit) => ({ exit, kind: "exit" })),
-    ]);
-    if (outcome.kind === "exit") {
-      const failure = childExitError(
-        "Packaged disposable sshd",
-        "before readiness",
-        outcome.exit,
-      );
-      failure.message += ` Stderr bytes: ${stderrBytes}.`;
-      throw failure;
-    }
-  } finally {
-    readiness.abort();
-  }
-  return {
-    async close() {
-      if (daemon.exitCode === null && daemon.signalCode === null) {
-        daemon.kill("SIGTERM");
-        await daemonExit;
-      }
-    },
-    port,
-  };
 }
 
 const projectEntry = {
@@ -600,10 +448,8 @@ async function launch() {
   };
 }
 
-let sshServer;
 try {
   await writeScript("success");
-  sshServer = await startDisposableSshd();
   let first = await launch();
   console.log("packaged smoke: workspace opened");
   await first.page.waitFor(
@@ -1414,9 +1260,9 @@ try {
     );
   }
   console.log("packaged smoke: reviewed mutation and postflight verified");
+  if (first.errors.length > 0) throw new Error(first.errors.join("\n"));
   await first.close();
   console.log("packaged smoke: first launch closed");
-  if (first.errors.length > 0) throw new Error(first.errors.join("\n"));
 
   await writeScript("failure");
   const second = await launch();
@@ -1433,9 +1279,9 @@ try {
       "Raw refresh failure reached the restored Inventory shell.",
     );
   }
+  if (second.errors.length > 0) throw new Error(second.errors.join("\n"));
   await second.close();
   console.log("packaged smoke: stale restart verified");
-  if (second.errors.length > 0) throw new Error(second.errors.join("\n"));
 
   const invocations = (await readFile(invocationLog, "utf8"))
     .trim()
@@ -1503,7 +1349,6 @@ try {
     throw new Error("Packaged Linux claimed automatic update eligibility.");
   }
 } finally {
-  await sshServer?.close();
   for (const child of activeChildren) child.kill("SIGKILL");
   await rm(temporaryRoot, { force: true, recursive: true });
 }

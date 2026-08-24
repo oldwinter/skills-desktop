@@ -23,10 +23,10 @@ async function readJson(path) {
   return JSON.parse(await readFile(path, "utf8"));
 }
 
-function run(command, args, options = {}) {
+export function runCandidateCommand(command, args, options = {}) {
   return new Promise((resolveRun, rejectRun) => {
-    const child = spawn(command, args, {
-      cwd: repositoryRoot,
+    const child = (options.spawn ?? spawn)(command, args, {
+      cwd: options.cwd ?? repositoryRoot,
       env: options.environment ?? process.env,
       shell: false,
       stdio: options.capture ? ["ignore", "pipe", "inherit"] : "inherit",
@@ -57,18 +57,51 @@ function run(command, args, options = {}) {
   });
 }
 
-async function runNpm(args, environment) {
-  const npmExecutable = process.env.npm_execpath;
+export async function runCandidateNpm(
+  args,
+  environment,
+  {
+    npmExecutable = process.env.npm_execpath,
+    root = repositoryRoot,
+    runCommand = runCandidateCommand,
+  } = {},
+) {
   if (npmExecutable === undefined || npmExecutable === "") {
     throw new Error("Candidate generation must run through npm.");
   }
-  await run(process.execPath, [npmExecutable, ...args], { environment });
+  await runCommand(process.execPath, [npmExecutable, ...args], {
+    cwd: root,
+    environment,
+  });
 }
 
-async function main() {
-  const options = parseCandidateArguments(process.argv.slice(2));
-  assertUnsignedCandidateEnvironment(process.env);
-  if (process.platform !== options.platform) {
+export async function buildCandidate({
+  argv = process.argv.slice(2),
+  environment = process.env,
+  nativePlatform = process.platform,
+  nodeVersion = process.versions.node,
+  root = repositoryRoot,
+  services = {},
+} = {}) {
+  const readJsonFile = services.readJson ?? readJson;
+  const remove = services.remove ?? rm;
+  const runCommand = services.runCommand ?? runCandidateCommand;
+  const runNpm =
+    services.runNpm ??
+    ((args, candidateEnvironment) =>
+      runCandidateNpm(args, candidateEnvironment, { root, runCommand }));
+  const loadBootstrap =
+    services.loadBootstrap ??
+    ((path) => import(pathToFileURL(path).href));
+  const collectBuildOutputs =
+    services.collectBuildOutputs ?? collectBuildOutputEvidence;
+  const stageArtifacts = services.stageArtifacts ?? stageCandidateArtifacts;
+  const write = services.writeFile ?? writeFile;
+  const writeOutput =
+    services.writeOutput ?? ((value) => process.stdout.write(value));
+  const options = parseCandidateArguments(argv);
+  assertUnsignedCandidateEnvironment(environment);
+  if (nativePlatform !== options.platform) {
     throw new Error(
       "Release candidates must be generated on their native platform.",
     );
@@ -76,10 +109,10 @@ async function main() {
 
   const [rootPackage, desktopPackage, bootstrapPackage, runtimePackage] =
     await Promise.all([
-      readJson(join(repositoryRoot, "package.json")),
-      readJson(join(repositoryRoot, "apps/desktop/package.json")),
-      readJson(join(repositoryRoot, "packages/remote-bootstrap/package.json")),
-      readJson(join(repositoryRoot, "packages/skills-runtime/package.json")),
+      readJsonFile(join(root, "package.json")),
+      readJsonFile(join(root, "apps/desktop/package.json")),
+      readJsonFile(join(root, "packages/remote-bootstrap/package.json")),
+      readJsonFile(join(root, "packages/skills-runtime/package.json")),
     ]);
   const versions = new Set([
     rootPackage.version,
@@ -90,37 +123,39 @@ async function main() {
   if (versions.size !== 1 || typeof rootPackage.version !== "string") {
     throw new Error("Release workspaces must share one immutable version.");
   }
-  const checkedOutCommit = await run("git", ["rev-parse", "HEAD"], {
+  const checkedOutCommit = await runCommand("git", ["rev-parse", "HEAD"], {
     capture: true,
+    cwd: root,
+    environment,
   });
   if (checkedOutCommit !== options.sourceCommit) {
     throw new Error(
       "Candidate source commit does not match the checked-out commit.",
     );
   }
-  const trackedChanges = await run(
+  const trackedChanges = await runCommand(
     "git",
     ["status", "--short", "--untracked-files=all"],
-    { capture: true },
+    { capture: true, cwd: root, environment },
   );
   if (trackedChanges !== "") {
     throw new Error("Release candidates require a clean tracked source tree.");
   }
-  const packageLockBytes = await run(
+  const packageLockBytes = await runCommand(
     "git",
     ["cat-file", "blob", `${options.sourceCommit}:package-lock.json`],
-    { capture: "buffer" },
+    { capture: "buffer", cwd: root, environment },
   );
   const packageLockDigest = createHash("sha256")
     .update(packageLockBytes)
     .digest("hex");
 
   const candidateEnvironment = {
-    ...process.env,
+    ...environment,
     CSC_IDENTITY_AUTO_DISCOVERY: "false",
   };
-  const desktopDistDirectory = join(repositoryRoot, "apps/desktop/dist");
-  await rm(desktopDistDirectory, { force: true, recursive: true });
+  const desktopDistDirectory = join(root, "apps/desktop/dist");
+  await remove(desktopDistDirectory, { force: true, recursive: true });
   await runNpm(
     ["run", "build", "--workspace", "@skills-desktop/skills-runtime"],
     candidateEnvironment,
@@ -135,10 +170,10 @@ async function main() {
   );
 
   const bootstrapBundlePath = join(
-    repositoryRoot,
+    root,
     "packages/remote-bootstrap/dist/release/index.js",
   );
-  const bootstrap = await import(pathToFileURL(bootstrapBundlePath).href);
+  const bootstrap = await loadBootstrap(bootstrapBundlePath);
   const bootstrapDescription = bootstrap.describeRemoteBootstrap();
   const calculatedBootstrapDigest = createHash("sha256")
     .update(bootstrap.REMOTE_BOOTSTRAP_PROGRAM)
@@ -147,7 +182,7 @@ async function main() {
     throw new Error("Remote Bootstrap build digest does not bind its program.");
   }
 
-  const buildOutputs = await collectBuildOutputEvidence({
+  const buildOutputs = await collectBuildOutputs({
     desktopDistDirectory,
     remoteBootstrapProgram: bootstrap.REMOTE_BOOTSTRAP_PROGRAM,
   });
@@ -156,14 +191,14 @@ async function main() {
     protocolVersion: bootstrapDescription.protocolVersion,
     schemaVersion: 1,
   };
-  await writeFile(
+  await write(
     join(desktopDistDirectory, "main", "remote-bootstrap.json"),
     `${JSON.stringify(packagedBootstrapReceipt, null, 2)}\n`,
     { flag: "wx" },
   );
 
-  const forgeOutDirectory = join(repositoryRoot, "apps/desktop/out");
-  await rm(forgeOutDirectory, { force: true, recursive: true });
+  const forgeOutDirectory = join(root, "apps/desktop/out");
+  await remove(forgeOutDirectory, { force: true, recursive: true });
   await runNpm(
     [
       "exec",
@@ -178,12 +213,12 @@ async function main() {
     candidateEnvironment,
   );
 
-  const outputRoot = resolve(repositoryRoot, options.outputDirectory);
+  const outputRoot = resolve(root, options.outputDirectory);
   const candidateDirectory = join(
     outputRoot,
     `skills-desktop-${rootPackage.version}-${options.platform}-${options.architecture}`,
   );
-  const artifacts = await stageCandidateArtifacts({
+  const artifacts = await stageArtifacts({
     architecture: options.architecture,
     candidateDirectory,
     makeDirectory: join(forgeOutDirectory, "make"),
@@ -197,7 +232,7 @@ async function main() {
       electronVersion: desktopPackage.devDependencies.electron,
       forgeVersion: desktopPackage.devDependencies["@electron-forge/cli"],
       lockfileSha256: packageLockDigest,
-      nodeVersion: process.versions.node,
+      nodeVersion,
       remoteBootstrapDigest: bootstrapDescription.digest,
       remoteBootstrapProtocolVersion: bootstrapDescription.protocolVersion,
     },
@@ -217,21 +252,26 @@ async function main() {
   });
   const manifestName = "candidate-manifest-v1.json";
   const manifestBytes = serializeCandidateManifest(manifest);
-  await writeFile(join(candidateDirectory, manifestName), manifestBytes, {
+  await write(join(candidateDirectory, manifestName), manifestBytes, {
     flag: "wx",
   });
   const manifestDigest = createHash("sha256")
     .update(manifestBytes)
     .digest("hex");
-  await writeFile(
+  await write(
     join(candidateDirectory, "candidate-manifest-v1.sha256"),
     `${manifestDigest}  ${manifestName}\n`,
     { flag: "wx" },
   );
 
-  process.stdout.write(
-    `${JSON.stringify({ candidateDirectory, manifestDigest })}\n`,
-  );
+  const result = { candidateDirectory, manifestDigest };
+  writeOutput(`${JSON.stringify(result)}\n`);
+  return result;
 }
 
-await main();
+if (
+  process.argv[1] !== undefined &&
+  resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+) {
+  await buildCandidate();
+}

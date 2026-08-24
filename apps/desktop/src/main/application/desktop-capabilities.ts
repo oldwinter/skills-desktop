@@ -131,6 +131,7 @@ interface TrustedReview {
   readonly collectionPlan?: CollectionPlan;
   decision: "approve" | "reject" | undefined;
   readonly id: string;
+  readonly ownerEndpointId: string;
   readonly prepared: PreparedMutation;
   readonly purpose: "cancel" | "execute";
 }
@@ -144,6 +145,7 @@ interface HostTrustReview {
   readonly challenge: HostTrustChallenge;
   decision: "approve" | "reject" | undefined;
   readonly id: string;
+  readonly ownerEndpointId: string;
   readonly targetId: string;
 }
 
@@ -754,6 +756,16 @@ export function createDesktopCapabilities(
         phase: "planned",
       });
     }
+  };
+
+  const rejectTrustedReview = (review: TrustedReview) => {
+    if (review.decision !== undefined) return;
+    review.decision = "reject";
+    if (review.purpose !== "execute") return;
+    if (review.collectionPlan !== undefined) {
+      discardCollectionPlan(review.collectionPlan);
+    }
+    rejectReviewState(review);
   };
 
   const runPreparation = (
@@ -1804,6 +1816,7 @@ export function createDesktopCapabilities(
                   hostTrustReview.challenge.id,
                 );
                 if (!proposed.ok) return requestFailure(proposed.error);
+                hostTrustReview.decision = "approve";
                 const committed = await options.recoveryRecords.commit({
                   targets: proposed.value.definitions.map(durableTarget),
                   type: "targets.replace",
@@ -1845,7 +1858,6 @@ export function createDesktopCapabilities(
                   publish({ ...inventoryState });
                   return requestFailure(confirmed.error);
                 }
-                hostTrustReview.decision = "approve";
                 publish({ ...inventoryState });
                 return {
                   ok: true,
@@ -3060,6 +3072,7 @@ export function createDesktopCapabilities(
               collectionPlan: plan,
               decision: undefined,
               id: reviewId,
+              ownerEndpointId: endpointState.endpointId,
               prepared,
               purpose: "execute",
             });
@@ -3296,6 +3309,7 @@ export function createDesktopCapabilities(
               challenge,
               decision: undefined,
               id: reviewId,
+              ownerEndpointId: endpointState.endpointId,
               targetId: reviewedTarget.id,
             });
             options.onReviewRequested?.(reviewId);
@@ -3339,6 +3353,7 @@ export function createDesktopCapabilities(
             reviews.set(reviewId, {
               decision: undefined,
               id: reviewId,
+              ownerEndpointId: endpointState.endpointId,
               prepared,
               purpose: "execute",
             });
@@ -3378,6 +3393,7 @@ export function createDesktopCapabilities(
             reviews.set(reviewId, {
               decision: undefined,
               id: reviewId,
+              ownerEndpointId: endpointState.endpointId,
               prepared: activePrepared,
               purpose: "cancel",
             });
@@ -3618,10 +3634,20 @@ export function createDesktopCapabilities(
               hostTrustReview.decision = "reject";
             }
             const review = reviews.get(endpointState.reviewId);
-            if (review !== undefined && review.decision === undefined) {
-              review.decision = "reject";
-              if (review.purpose === "execute") {
-                rejectReviewState(review);
+            if (review !== undefined) rejectTrustedReview(review);
+          }
+          if (endpointState.role === "workspace") {
+            for (const review of reviews.values()) {
+              if (review.ownerEndpointId === endpointState.endpointId) {
+                rejectTrustedReview(review);
+              }
+            }
+            for (const review of hostTrustReviews.values()) {
+              if (
+                review.ownerEndpointId === endpointState.endpointId &&
+                review.decision === undefined
+              ) {
+                review.decision = "reject";
               }
             }
           }

@@ -1,4 +1,3 @@
-import { TextDecoder } from "node:util";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -490,14 +489,18 @@ describe("Wire request validators", () => {
   });
 
   it("encodes multi-byte JSON and rejects oversized frames", () => {
-    const framed = encodeWireFramePayload({ emoji: "🙂", cjk: "技能" }, 1024);
+    const request = {
+      harness: "Codex 技能 🙂",
+      operation: "observe" as const,
+      protocolVersion: WIRE_PROTOCOL_VERSION,
+      requestId: "observe-multi-byte",
+      type: "request" as const,
+      workspace: "/srv/技能/🙂",
+    };
+    const framed = encodeWireFramePayload(request, 1024);
     expect(framed.byteLength).toBeGreaterThan(4);
-    const payload = decodeSingleWireFramePayload(framed, 1024);
-    expect(payload).toBeDefined();
-    expect(JSON.parse(new TextDecoder().decode(payload!))).toEqual({
-      emoji: "🙂",
-      cjk: "技能",
-    });
+    expect(decodeSingleWireFramePayload(framed, 1024)).toBeDefined();
+    expect(decodeWireFrames(framed)).toEqual({ ok: true, value: [request] });
     expect(decodeSingleWireFramePayload(new Uint8Array([0, 0]), 1024)).toBe(
       undefined,
     );

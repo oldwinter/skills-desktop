@@ -66,15 +66,16 @@ if (!app.requestSingleInstanceLock()) {
           ),
         );
         secureWindow(window, WORKSPACE_URL);
-        desktopIpc.attach(window.webContents, "workspace", WORKSPACE_URL);
-        window.webContents.on(
-          "did-start-navigation",
-          (_event, _url, _inPlace, isMainFrame) => {
-            if (isMainFrame) {
-              desktopIpc.attach(window.webContents, "workspace", WORKSPACE_URL);
-            }
-          },
-        );
+        window.webContents.on("did-start-navigation", (details) => {
+          if (details.isMainFrame && !details.isSameDocument) {
+            desktopIpc.detach(window.webContents.id);
+          }
+        });
+        window.webContents.on("dom-ready", () => {
+          if (window.webContents.getURL() === WORKSPACE_URL) {
+            desktopIpc.attach(window.webContents, "workspace", WORKSPACE_URL);
+          }
+        });
         window.once("ready-to-show", () => window.show());
         onWindowClosed(window, (webContentsId) => {
           desktopIpc.detach(webContentsId);
@@ -86,32 +87,38 @@ if (!app.requestSingleInstanceLock()) {
 
       presentReview = (reviewId) => {
         if (reviewWindow !== undefined) reviewWindow.close();
+        const ownerWindow = workspaceWindow;
         const window = new BrowserWindow(
           reviewWindowOptions(
             resolve(currentDirectory, "../preload/review.cjs"),
             app.isPackaged,
-            workspaceWindow,
+            ownerWindow,
             appIcon,
           ),
         );
         secureWindow(window, REVIEW_URL);
-        window.webContents.on(
-          "did-start-navigation",
-          (_event, _url, _inPlace, isMainFrame) => {
-            if (isMainFrame) {
-              desktopIpc.attach(
-                window.webContents,
-                "review",
-                REVIEW_URL,
-                reviewId,
-              );
-            }
-          },
-        );
+        window.webContents.on("did-start-navigation", (details) => {
+          if (details.isMainFrame && !details.isSameDocument) {
+            desktopIpc.detach(window.webContents.id);
+          }
+        });
+        window.webContents.on("dom-ready", () => {
+          if (window.webContents.getURL() === REVIEW_URL) {
+            desktopIpc.attach(
+              window.webContents,
+              "review",
+              REVIEW_URL,
+              reviewId,
+            );
+          }
+        });
         window.once("ready-to-show", () => window.show());
         onWindowClosed(window, (webContentsId) => {
           desktopIpc.detach(webContentsId);
           if (reviewWindow === window) reviewWindow = undefined;
+          if (ownerWindow !== undefined && !ownerWindow.isDestroyed()) {
+            ownerWindow.focus();
+          }
         });
         void window.loadURL(REVIEW_URL);
         reviewWindow = window;

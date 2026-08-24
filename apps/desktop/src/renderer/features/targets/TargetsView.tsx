@@ -209,9 +209,9 @@ export function TargetsView({
                 </dl>
               </details>
               {state.inventory.lastError !== null ? (
-                <p className="target-state-error" role="status">
+                <div className="target-state-error" role="status">
                   <UserFacingErrorCopy error={state.inventory.lastError} />
-                </p>
+                </div>
               ) : null}
               <div className="target-item-actions">
                 <button

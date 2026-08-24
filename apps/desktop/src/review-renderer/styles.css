@@ -45,7 +45,9 @@ h1, h2, p, dl, dd { margin: 0; }
 .user-facing-error-details { color: #5f6368; font-size: 11px; text-align: left; }
 .user-facing-error-details summary { cursor: pointer; user-select: none; text-align: center; }
 .user-facing-error-details code { display: block; margin-top: 4px; white-space: pre-wrap; word-break: break-word; }
-.review-settled { color: #176b4b; }
+.review-settled { flex-direction: column; color: #176b4b; }
+.review-settled__message { display: inline-flex; align-items: center; gap: 8px; }
+.review-settled .review-button { width: min(100%, 180px); color: #202124; }
 @media (max-width: 420px) {
   .review-surface { padding: 16px; }
   .review-facts, .review-actions { grid-template-columns: 1fr; }

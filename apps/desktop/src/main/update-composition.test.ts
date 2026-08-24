@@ -3,9 +3,13 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createElectronUpdateComposition } from "./update-composition.js";
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 describe("packaged Electron update composition", () => {
   it.each([
@@ -152,4 +156,86 @@ describe("packaged Electron update composition", () => {
       }
     },
   );
+
+  it("uses the built-in scheduler and safe optional defaults", async () => {
+    const userData = await mkdtemp(
+      join(tmpdir(), "skills-update-defaults-composition-"),
+    );
+    const updater = new EventEmitter() as EventEmitter & {
+      checkForUpdates: ReturnType<typeof vi.fn>;
+      quitAndInstall: ReturnType<typeof vi.fn>;
+      setFeedURL: ReturnType<typeof vi.fn>;
+    };
+    updater.checkForUpdates = vi.fn();
+    updater.quitAndInstall = vi.fn();
+    updater.setFeedURL = vi.fn();
+    vi.useFakeTimers();
+
+    try {
+      const updates = await createElectronUpdateComposition({
+        app: {
+          getPath: () => userData,
+          getVersion: () => "0.1.0",
+          isPackaged: true,
+        },
+        architecture: "x64",
+        autoUpdater: updater as never,
+        platform: "darwin",
+        releaseChannel: "stable",
+      });
+
+      expect(vi.getTimerCount()).toBe(1);
+      expect(updates.getSnapshot()).toMatchObject({
+        policy: { channel: "stable", mode: "automatic" },
+        restart: { guardReasons: [] },
+      });
+      await expect(updates.exportDiagnostics()).resolves.toBe("cancelled");
+      updates.dispose();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      await rm(userData, { force: true, recursive: true });
+    }
+  });
+
+  it("contains an unexpected scheduled-check rejection", async () => {
+    const userData = await mkdtemp(
+      join(tmpdir(), "skills-update-scheduler-error-"),
+    );
+    const updater = new EventEmitter() as EventEmitter & {
+      checkForUpdates: ReturnType<typeof vi.fn>;
+      quitAndInstall: ReturnType<typeof vi.fn>;
+      setFeedURL: ReturnType<typeof vi.fn>;
+    };
+    updater.checkForUpdates = vi.fn();
+    updater.quitAndInstall = vi.fn();
+    updater.setFeedURL = vi.fn();
+    let clockCalls = 0;
+    const clock = () => {
+      clockCalls += 1;
+      if (clockCalls >= 3) throw new Error("clock failure");
+      return new Date("2026-08-22T06:00:00.000Z");
+    };
+    vi.useFakeTimers();
+
+    try {
+      const updates = await createElectronUpdateComposition({
+        app: {
+          getPath: () => userData,
+          getVersion: () => "0.1.0",
+          isPackaged: true,
+        },
+        architecture: "x64",
+        autoUpdater: updater as never,
+        clock,
+        platform: "darwin",
+        releaseChannel: "stable",
+      });
+
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(clockCalls).toBe(3);
+      updates.dispose();
+    } finally {
+      await rm(userData, { force: true, recursive: true });
+    }
+  });
 });

@@ -753,7 +753,189 @@ else process.exitCode = 2;
   );
 
   it.skipIf(process.platform === "win32")(
-    "rejects a second frame for observation before invoking npx",
+    "accepts an immediate matching observation cancellation without invoking npx",
+    async () => {
+      const directory = await mkdtemp(
+        join(tmpdir(), "skills-bootstrap-observe-cancel-immediate-"),
+      );
+      temporaryDirectories.push(directory);
+      const executable = join(directory, "npx");
+      const invocationLog = join(directory, "invoked");
+      await writeFile(
+        executable,
+        `#!/usr/bin/env node
+require("node:fs").writeFileSync(${JSON.stringify(invocationLog)}, "invoked");
+`,
+        "utf8",
+      );
+      await chmod(executable, 0o700);
+      const requestId = "observe-cancel-immediate";
+      const observation = encodeWireFrame({
+        harness: "Codex",
+        operation: "observe",
+        protocolVersion: WIRE_PROTOCOL_VERSION,
+        requestId,
+        type: "request",
+        workspace: directory,
+      });
+      const cancellation = encodeWireFrame({
+        operation: "cancel",
+        protocolVersion: WIRE_PROTOCOL_VERSION,
+        requestId,
+        type: "request",
+      });
+
+      const outcome = await runBootstrap(
+        new Uint8Array(
+          Buffer.concat([
+            Buffer.from(observation),
+            Buffer.from(cancellation),
+          ]),
+        ),
+        {
+          HOME: directory,
+          PATH: `${directory}${delimiter}${process.env.PATH ?? ""}`,
+        },
+      );
+
+      expect(outcome).toMatchObject({ exitCode: 0, stderr: "" });
+      expect(decodeWireFrames(outcome.stdout)).toMatchObject({
+        ok: true,
+        value: [
+          { type: "hello" },
+          {
+            code: "remote_operation_failed",
+            phase: "observe",
+            requestId,
+            type: "failure",
+          },
+        ],
+      });
+      await expect(readFile(invocationLog, "utf8")).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+    },
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "terminates an in-flight observation child before acknowledging cancellation",
+    async () => {
+      const directory = await mkdtemp(
+        join(tmpdir(), "skills-bootstrap-observe-cancel-active-"),
+      );
+      temporaryDirectories.push(directory);
+      const executable = join(directory, "npx");
+      const invocationLog = join(directory, "invocations.ndjson");
+      const observationStarted = join(directory, "observation-started");
+      const observationPid = join(directory, "observation-pid");
+      const observationSignals = join(directory, "observation-signals");
+      const observationExit = join(directory, "observation-exit");
+      await writeFile(
+        executable,
+        `#!/usr/bin/env node
+const { appendFileSync, writeFileSync } = require("node:fs");
+const operation = process.argv.slice(2).slice(2).join(" ");
+appendFileSync(${JSON.stringify(invocationLog)}, JSON.stringify(operation) + "\\n");
+if (operation === "--version") process.stdout.write("1.5.23\\n");
+else if (operation === "list --json") {
+  const markSignal = (signal) => appendFileSync(${JSON.stringify(observationSignals)}, signal + "\\n");
+  process.on("SIGTERM", () => { markSignal("SIGTERM"); process.exit(143); });
+  process.on("SIGHUP", () => { markSignal("SIGHUP"); process.exit(129); });
+  process.on("exit", (code) => writeFileSync(${JSON.stringify(observationExit)}, String(code)));
+  writeFileSync(${JSON.stringify(observationPid)}, String(process.pid));
+  writeFileSync(${JSON.stringify(observationStarted)}, "started");
+  setInterval(() => {}, 30_000);
+}
+else if (operation === "list --global --json") process.stdout.write("[]");
+else process.exitCode = 2;
+`,
+        "utf8",
+      );
+      await chmod(executable, 0o700);
+      const requestId = "observe-cancel-active";
+      const child = spawn("sh", ["-c", REMOTE_BOOTSTRAP_COMMAND], {
+        detached: true,
+        env: {
+          HOME: directory,
+          PATH: `${directory}${delimiter}${process.env.PATH ?? ""}`,
+        },
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+      const stdout: Buffer[] = [];
+      const stderr: Buffer[] = [];
+      child.stdout.on("data", (chunk: Buffer) => stdout.push(chunk));
+      child.stderr.on("data", (chunk: Buffer) => stderr.push(chunk));
+      const closed = new Promise<number | null>((resolve, reject) => {
+        child.once("error", reject);
+        child.once("close", resolve);
+      });
+
+      try {
+        child.stdin.write(
+          encodeWireFrame({
+            harness: "Codex",
+            operation: "observe",
+            protocolVersion: WIRE_PROTOCOL_VERSION,
+            requestId,
+            type: "request",
+            workspace: directory,
+          }),
+        );
+        await waitForFile(observationStarted);
+        child.stdin.end(
+          encodeWireFrame({
+            operation: "cancel",
+            protocolVersion: WIRE_PROTOCOL_VERSION,
+            requestId,
+            type: "request",
+          }),
+        );
+        const exitCode = await closed;
+        const frames = decodeWireFrames(
+          new Uint8Array(Buffer.concat(stdout)),
+        );
+
+        expect({
+          exitCode,
+          stderr: Buffer.concat(stderr).toString("utf8"),
+        }).toEqual({ exitCode: 0, stderr: "" });
+        expect(frames).toMatchObject({
+          ok: true,
+          value: [
+            { type: "hello" },
+            {
+              code: "remote_operation_failed",
+              phase: "observe",
+              requestId,
+              type: "failure",
+            },
+          ],
+        });
+        expect(await readFile(observationPid, "utf8")).toMatch(
+          /^[1-9][0-9]*$/,
+        );
+        expect(await readFile(observationSignals, "utf8")).toBe("SIGTERM\n");
+        expect(await readFile(observationExit, "utf8")).toBe("143");
+        expect(
+          (await readFile(invocationLog, "utf8"))
+            .trim()
+            .split("\n")
+            .map((line) => JSON.parse(line)),
+        ).toEqual(["--version", "list --json"]);
+      } finally {
+        if (child.exitCode === null && child.signalCode === null) {
+          try {
+            process.kill(-child.pid!, "SIGKILL");
+          } catch {
+            // The detached fixture may already have closed between the checks.
+          }
+        }
+      }
+    },
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "rejects a mismatched second observation frame before invoking npx",
     async () => {
       const directory = await mkdtemp(
         join(tmpdir(), "skills-bootstrap-observe-extra-"),
@@ -784,7 +966,7 @@ else process.exitCode = 2;
       const extra = encodeWireFrame({
         operation: "cancel",
         protocolVersion: WIRE_PROTOCOL_VERSION,
-        requestId: "observe-extra",
+        requestId: "another-observation",
         type: "request",
       });
 

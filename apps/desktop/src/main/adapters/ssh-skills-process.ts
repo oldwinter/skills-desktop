@@ -160,19 +160,37 @@ export function createSshTransportRunner(options?: {
           let interruption: SshTransportOutcome["interruption"];
           let windowsTreeTermination: Promise<Error | undefined> | undefined;
 
-          const signalProcess = (signal: NodeJS.Signals) => {
-            if (child.pid === undefined) return;
+          const signalProcess = (
+            signal: NodeJS.Signals,
+          ): SshTransportBoundaryError | undefined => {
+            if (child.pid === undefined) return undefined;
             try {
               if (platform === "win32") child.kill(signal);
               else process.kill(-child.pid, signal);
             } catch (error) {
               if ((error as NodeJS.ErrnoException).code !== "ESRCH") {
-                boundaryError ??= new SshTransportBoundaryError(
+                return new SshTransportBoundaryError(
                   "SSH transport termination failed.",
                   "failed",
                 );
               }
             }
+            return undefined;
+          };
+          const expectCloseWithin = (
+            milliseconds: number,
+            disposition: SshTransportBoundaryError["disposition"],
+          ) => {
+            closeTimer ??= setTimeout(
+              () =>
+                rejectOnce(
+                  new SshTransportBoundaryError(
+                    "SSH process did not close after termination was requested.",
+                    disposition,
+                  ),
+                ),
+              milliseconds,
+            );
           };
           const terminate = (error: SshTransportBoundaryError) => {
             boundaryError ??= error;
@@ -193,24 +211,42 @@ export function createSshTransportRunner(options?: {
                   );
                   return;
                 }
-                closeTimer ??= setTimeout(
-                  () =>
-                    rejectOnce(
-                      new SshTransportBoundaryError(
-                        "SSH process tree termination could not be confirmed.",
-                        error.disposition,
-                      ),
-                    ),
+                expectCloseWithin(
                   windowsTreeTerminationTimeoutMs,
+                  error.disposition,
                 );
               });
               return;
             }
-            signalProcess("SIGTERM");
-            forceTimer ??= setTimeout(
-              () => signalProcess("SIGKILL"),
-              cancellationGraceMs,
-            );
+            const terminationFailure = signalProcess("SIGTERM");
+            if (terminationFailure !== undefined) {
+              const forceFailure = signalProcess("SIGKILL");
+              if (forceFailure !== undefined) {
+                rejectOnce(
+                  new SshTransportBoundaryError(
+                    forceFailure.message,
+                    error.disposition,
+                  ),
+                );
+                return;
+              }
+              expectCloseWithin(cancellationGraceMs, error.disposition);
+              return;
+            }
+            forceTimer ??= setTimeout(() => {
+              const forceFailure = signalProcess("SIGKILL");
+              if (forceFailure !== undefined) {
+                rejectOnce(
+                  new SshTransportBoundaryError(
+                    forceFailure.message,
+                    error.disposition,
+                  ),
+                );
+                return;
+              }
+              expectCloseWithin(cancellationGraceMs, error.disposition);
+            }, cancellationGraceMs);
+            forceTimer.unref();
           };
           const requestRemoteCleanup = (
             disposition: "cancelled" | "timed-out",
@@ -273,6 +309,9 @@ export function createSshTransportRunner(options?: {
             if (remoteCleanupTimer !== undefined)
               clearTimeout(remoteCleanupTimer);
             invocation.signal.removeEventListener("abort", onAbort);
+            child.stdin.destroy();
+            child.stdout.destroy();
+            child.stderr.destroy();
           };
           const rejectOnce = (error: Error) => {
             if (settled) return;
@@ -469,6 +508,21 @@ export function createSshSkillsProcess(options: {
           "Another operation is active for this Target.",
         );
       }
+      if (signal.aborted) {
+        return {
+          ok: true,
+          value: {
+            effects: { status: "not-observed" },
+            inventory: null,
+            preparedMutationId: privatePlan.prepared.id,
+            process: {
+              disposition: "cancelled",
+              exitCode: null,
+              termination: "known",
+            },
+          },
+        };
+      }
       mutating = true;
       const requestId = options.id();
       const uncertainOutcome = (
@@ -615,6 +669,12 @@ export function createSshSkillsProcess(options: {
               requestId,
               type: "request",
               workspace: options.binding.workspace,
+            }),
+            cancellationInput: encodeWireFrame({
+              operation: "cancel",
+              protocolVersion: options.binding.ssh.wireDialect.protocolVersion,
+              requestId,
+              type: "request",
             }),
             maxStderrBytes: MAX_SSH_STDERR_BYTES,
             maxStdoutBytes: MAX_SSH_STDOUT_BYTES,
