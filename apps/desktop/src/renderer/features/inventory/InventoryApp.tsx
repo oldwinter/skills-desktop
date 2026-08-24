@@ -257,6 +257,7 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
         };
   const mutationPhaseRef = useRef(snapshot?.mutation.phase);
   mutationPhaseRef.current = snapshot?.mutation.phase;
+  const scheduleReviewFocusRestoreRef = useRef<() => void>(() => undefined);
   const inventory = snapshot?.inventory;
 
   useEffect(() => {
@@ -320,44 +321,49 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
   }, [bootstrapAttempt, client]);
 
   useEffect(() => {
-    const restoreReviewFocus = () => {
-      const opener = reviewReturnFocusRef.current;
-      if (opener === null) return;
-      if (opener.isConnected && !opener.disabled) {
-        reviewReturnFocusRef.current = null;
-        opener.focus();
-        return;
-      }
-      if (mutationPhaseRef.current === "reviewing") return;
-      reviewReturnFocusRef.current = null;
-      const target =
-        mutationOutcomeRef.current ??
-        document.querySelector<HTMLButtonElement>(
-          'button[aria-label="Inventory"]',
-        );
-      target?.focus();
+    let pendingRestore: number | undefined;
+    const scheduleReviewFocusRestore = () => {
+      if (pendingRestore !== undefined) window.clearTimeout(pendingRestore);
+      pendingRestore = window.setTimeout(() => {
+        pendingRestore = undefined;
+        const opener = reviewReturnFocusRef.current;
+        if (opener === null || !document.hasFocus()) return;
+        if (opener.isConnected && !opener.disabled) {
+          opener.focus();
+          if (document.activeElement === opener) {
+            reviewReturnFocusRef.current = null;
+          }
+          return;
+        }
+        if (mutationPhaseRef.current === "reviewing") return;
+        const target =
+          mutationOutcomeRef.current ??
+          document.querySelector<HTMLButtonElement>(
+            'button[aria-label="Inventory"]',
+          );
+        target?.focus();
+        if (target !== null && document.activeElement === target) {
+          reviewReturnFocusRef.current = null;
+        }
+      }, 0);
     };
-    window.addEventListener("focus", restoreReviewFocus);
-    return () => window.removeEventListener("focus", restoreReviewFocus);
+    const handleWindowFocus = () => {
+      if (mutationPhaseRef.current === "reviewing") return;
+      scheduleReviewFocusRestore();
+    };
+    scheduleReviewFocusRestoreRef.current = scheduleReviewFocusRestore;
+    window.addEventListener("focus", handleWindowFocus);
+    return () => {
+      window.removeEventListener("focus", handleWindowFocus);
+      scheduleReviewFocusRestoreRef.current = () => undefined;
+      if (pendingRestore !== undefined) window.clearTimeout(pendingRestore);
+    };
   }, []);
 
   useEffect(() => {
     if (snapshot?.mutation.phase !== "planned") return;
-    const opener = reviewReturnFocusRef.current;
-    if (opener !== null && !document.hasFocus()) return;
-    if (opener?.isConnected && !opener.disabled) {
-      reviewReturnFocusRef.current = null;
-      opener.focus();
-      return;
-    }
-    if (opener === null) return;
-    reviewReturnFocusRef.current = null;
-    const target =
-      mutationOutcomeRef.current ??
-      document.querySelector<HTMLButtonElement>(
-        'button[aria-label="Inventory"]',
-      );
-    target?.focus();
+    if (reviewReturnFocusRef.current === null) return;
+    scheduleReviewFocusRestoreRef.current();
   }, [snapshot?.mutation.phase]);
 
   const filteredEntries = useMemo(() => {

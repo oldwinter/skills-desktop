@@ -118,6 +118,7 @@ if (!app.requestSingleInstanceLock()) {
           if (reviewWindow === window) reviewWindow = undefined;
           if (ownerWindow !== undefined && !ownerWindow.isDestroyed()) {
             ownerWindow.focus();
+            ownerWindow.webContents.focus();
           }
         });
         void window.loadURL(REVIEW_URL);

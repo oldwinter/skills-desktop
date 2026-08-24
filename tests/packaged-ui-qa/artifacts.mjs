@@ -43,6 +43,8 @@ const allowedFailureChecks = new Set([
   "workspace-axe",
   "workspace-focus-precondition",
   "workspace-focus-restore",
+  "workspace-outcome-focus-restore",
+  "workspace-review-focus-restore",
   "workspace-semantics",
 ]);
 const allowedErrorClasses = new Set([
@@ -51,6 +53,37 @@ const allowedErrorClasses = new Set([
   "CdpRequestTimeoutError",
   "Error",
   "PackagedUiQaScenarioError",
+]);
+const focusDiagnostics = new Map([
+  [
+    "workspace-focus-restore",
+    new Set([
+      "focus-state-unavailable",
+      "review-action-disabled",
+      "review-action-missing",
+      "review-action-not-active",
+      "workspace-unfocused",
+    ]),
+  ],
+  [
+    "workspace-outcome-focus-restore",
+    new Set([
+      "focus-state-unavailable",
+      "mutation-outcome-missing",
+      "mutation-outcome-not-active",
+      "workspace-unfocused",
+    ]),
+  ],
+  [
+    "workspace-review-focus-restore",
+    new Set([
+      "focus-state-unavailable",
+      "review-action-disabled",
+      "review-action-missing",
+      "review-action-not-active",
+      "workspace-unfocused",
+    ]),
+  ],
 ]);
 
 export function failureReceipt(error, fallbackStage = "unknown") {
@@ -63,12 +96,22 @@ export function failureReceipt(error, fallbackStage = "unknown") {
     error !== null && typeof error === "object" && "qaCheck" in error
       ? error.qaCheck
       : "unknown";
+  const proposedDiagnostic =
+    error !== null && typeof error === "object" && "qaDiagnostic" in error
+      ? error.qaDiagnostic
+      : "unknown";
+  const check =
+    typeof proposedCheck === "string" && allowedFailureChecks.has(proposedCheck)
+      ? proposedCheck
+      : "unknown";
   return {
     architecture: process.arch,
-    check:
-      typeof proposedCheck === "string" &&
-      allowedFailureChecks.has(proposedCheck)
-        ? proposedCheck
+    check,
+    diagnostic:
+      typeof proposedDiagnostic === "string" &&
+      (proposedDiagnostic === "unknown" ||
+        focusDiagnostics.get(check)?.has(proposedDiagnostic) === true)
+        ? proposedDiagnostic
         : "unknown",
     errorClass: allowedErrorClasses.has(proposedClass) ? proposedClass : "Error",
     platform: process.platform,
@@ -82,7 +125,7 @@ export function failureReceipt(error, fallbackStage = "unknown") {
 
 export function safeFailureSummary(error, fallbackStage = "unknown") {
   const receipt = failureReceipt(error, fallbackStage);
-  return `Packaged UI QA failed during ${receipt.stage}/${receipt.check} (${receipt.errorClass}).`;
+  return `Packaged UI QA failed during ${receipt.stage}/${receipt.check} (${receipt.errorClass}; ${receipt.diagnostic}).`;
 }
 
 export async function persistFailureArtifacts(error, destination, fallbackStage) {

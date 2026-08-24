@@ -37,8 +37,11 @@ import {
 } from "./launch.mjs";
 import {
   PACKAGED_UI_QA_SCENARIOS,
+  createPackagedUiQaScenarioError,
+  mutationOutcomeFocusDiagnostic,
   requireAxeSource,
   packagedUiQaHelp,
+  reviewActionFocusDiagnostic,
   runPackagedUiQa,
 } from "./scenarios.mjs";
 
@@ -102,6 +105,77 @@ afterEach(async () => {
 });
 
 describe("packaged UI QA CDP seam", () => {
+  it("ignores only Electron's internal sandbox startup diagnostic", () => {
+    const socket = new FakeSocket();
+    const page = new CdpPage(socket);
+    const sandboxStartupDiagnostic = [
+      "Electron sandboxed_renderer.bundle.js script failed to run",
+      "TypeError: Cannot destructure property 'preloadScripts' of 'binding.startupData' as it is null.",
+      "    at node:electron/js2c/sandbox_bundle:2:132134",
+      "    at ___electron_webpack_init__ (node:electron/js2c/sandbox_bundle:2:133242)",
+    ].join("\n");
+
+    socket.emit("message", {
+      data: JSON.stringify({
+        method: "Runtime.consoleAPICalled",
+        params: {
+          args: [{ value: sandboxStartupDiagnostic }],
+          type: "error",
+        },
+      }),
+    });
+    expect(page.errors).toEqual([]);
+
+    socket.emit("message", {
+      data: JSON.stringify({
+        method: "Runtime.exceptionThrown",
+        params: {
+          exceptionDetails: {
+            text: "Electron sandboxed_renderer.bundle.js script failed to run",
+          },
+        },
+      }),
+    });
+    expect(page.errors).toEqual([]);
+
+    socket.emit("message", {
+      data: JSON.stringify({
+        method: "Runtime.consoleAPICalled",
+        params: {
+          args: [
+            {
+              value:
+                "Electron sandboxed_renderer.bundle.js script failed to run\nError: application failure",
+            },
+          ],
+          type: "error",
+        },
+      }),
+    });
+    expect(page.errors).toEqual([
+      "Electron sandboxed_renderer.bundle.js script failed to run\nError: application failure",
+    ]);
+
+    socket.emit("message", {
+      data: JSON.stringify({
+        method: "Runtime.consoleAPICalled",
+        params: {
+          args: [
+            {
+              value: [
+                "Electron sandboxed_renderer.bundle.js script failed to run",
+                "TypeError: Cannot destructure property 'preloadScripts' of 'binding.startupData' as it is null.",
+                "    at https://renderer.example.test/app.js:1:2",
+              ].join("\n"),
+            },
+          ],
+          type: "error",
+        },
+      }),
+    });
+    expect(page.errors).toHaveLength(2);
+  });
+
   it("waits for the expected document title before attaching to a page", () => {
     const expectedUrl = "skills-desktop://review/index.html";
     const expectedTitle = "Skills Desktop Trusted Review";
@@ -845,6 +919,65 @@ describe("packaged Electron launcher seam", () => {
 });
 
 describe("packaged UI QA scenario contract", () => {
+  it("classifies only bounded focus-restoration state", () => {
+    expect(reviewActionFocusDiagnostic(undefined)).toBe(
+      "focus-state-unavailable",
+    );
+    expect(
+      reviewActionFocusDiagnostic({
+        documentFocused: false,
+        targetActive: false,
+        targetDisabled: false,
+        targetPresent: true,
+      }),
+    ).toBe("workspace-unfocused");
+    expect(
+      reviewActionFocusDiagnostic({
+        documentFocused: true,
+        targetActive: false,
+        targetDisabled: true,
+        targetPresent: true,
+      }),
+    ).toBe("review-action-disabled");
+    expect(
+      reviewActionFocusDiagnostic({
+        documentFocused: true,
+        targetActive: false,
+        targetDisabled: false,
+        targetPresent: true,
+      }),
+    ).toBe("review-action-not-active");
+    expect(
+      mutationOutcomeFocusDiagnostic({
+        documentFocused: true,
+        targetActive: false,
+        targetPresent: false,
+      }),
+    ).toBe("mutation-outcome-missing");
+    expect(
+      mutationOutcomeFocusDiagnostic({
+        documentFocused: true,
+        targetActive: false,
+        targetPresent: true,
+      }),
+    ).toBe("mutation-outcome-not-active");
+  });
+
+  it("propagates only context-bound diagnostics through scenario errors", () => {
+    const failure = createPackagedUiQaScenarioError(new Error("untrusted"), {
+      check: "workspace-review-focus-restore",
+      diagnostic: "review-action-disabled",
+      stage: "focus-order",
+    });
+    expect(failureReceipt(failure)).toMatchObject({
+      check: "workspace-review-focus-restore",
+      diagnostic: "review-action-disabled",
+      stage: "focus-order",
+    });
+    failure.qaCheck = "error-state-render";
+    expect(failureReceipt(failure).diagnostic).toBe("unknown");
+  });
+
   it("documents the required Local-only scenarios and setup commands", () => {
     expect(PACKAGED_UI_QA_SCENARIOS).toEqual([
       "keyboard-workflow",
@@ -882,27 +1015,30 @@ describe("packaged UI QA scenario contract", () => {
       'qa failed at /tmp/fixture and C:\\Users\\Alice with https://example.test/path, Authorization: Basic dXNlcjpwYXNz, --token unquoted-secret, and sk_live_example',
     );
     error.name = "PackagedUiQaScenarioError";
-    error.qaCheck = "error-state-render";
-    error.qaStage = "error-state";
+    error.qaCheck = "workspace-review-focus-restore";
+    error.qaDiagnostic = "review-action-disabled";
+    error.qaStage = "focus-order";
     await persistFailureArtifacts(
       error,
       destination,
     );
     expect(safeFailureSummary(error)).toBe(
-      "Packaged UI QA failed during error-state/error-state-render (PackagedUiQaScenarioError).",
+      "Packaged UI QA failed during focus-order/workspace-review-focus-restore (PackagedUiQaScenarioError; review-action-disabled).",
     );
     const untrusted = Object.assign(new Error("sk_live_untrusted"), {
       name: "sk_live_class",
       qaCheck: "sk_live_check",
+      qaDiagnostic: "sk_live_diagnostic",
       qaStage: "sk_live_stage",
     });
     expect(failureReceipt(untrusted)).toMatchObject({
       check: "unknown",
+      diagnostic: "unknown",
       errorClass: "Error",
       stage: "unknown",
     });
     expect(safeFailureSummary(untrusted)).toBe(
-      "Packaged UI QA failed during unknown/unknown (Error).",
+      "Packaged UI QA failed during unknown/unknown (Error; unknown).",
     );
     if (process.platform !== "win32") {
       expect((await stat(join(destination, "failure.json"))).mode & 0o777).toBe(
@@ -912,11 +1048,12 @@ describe("packaged UI QA scenario contract", () => {
     const artifact = await readFile(join(destination, "failure.json"), "utf8");
     expect(JSON.parse(artifact)).toEqual({
       architecture: process.arch,
-      check: "error-state-render",
+      check: "workspace-review-focus-restore",
+      diagnostic: "review-action-disabled",
       errorClass: "PackagedUiQaScenarioError",
       platform: process.platform,
       schemaVersion: 1,
-      stage: "error-state",
+      stage: "focus-order",
     });
     for (const secret of [
       "/Users/alice/skills-desktop",
@@ -930,6 +1067,7 @@ describe("packaged UI QA scenario contract", () => {
       "Alice",
       "dXNlcjpwYXNz",
       "unquoted-secret",
+      "sk_live_diagnostic",
       "sk_live_example",
     ]) {
       expect(artifact).not.toContain(secret);
