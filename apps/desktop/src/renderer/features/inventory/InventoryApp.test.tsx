@@ -1333,6 +1333,7 @@ describe("Local Target Inventory shell", () => {
   });
 
   it("prepares exact selected-skill intents and requests review of the main-owned plan", async () => {
+    vi.spyOn(document, "hasFocus").mockReturnValue(true);
     const prepareMutation = vi.fn(async () => ({
       ok: true as const,
       value: { operationId: "prepared-1" },

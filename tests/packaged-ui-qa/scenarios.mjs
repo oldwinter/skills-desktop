@@ -69,6 +69,33 @@ async function focusNamedButton(page, name) {
   if (!focused) throw new Error(`Button could not receive focus: ${name}`);
 }
 
+export function reviewActionFocusDiagnostic(state) {
+  if (state === undefined) return "focus-state-unavailable";
+  if (state.documentFocused !== true) return "workspace-unfocused";
+  if (state.targetPresent !== true) return "review-action-missing";
+  if (state.targetDisabled === true) return "review-action-disabled";
+  return state.targetActive === true ? "unknown" : "review-action-not-active";
+}
+
+export function mutationOutcomeFocusDiagnostic(state) {
+  if (state === undefined) return "focus-state-unavailable";
+  if (state.documentFocused !== true) return "workspace-unfocused";
+  if (state.targetPresent !== true) return "mutation-outcome-missing";
+  return state.targetActive === true ? "unknown" : "mutation-outcome-not-active";
+}
+
+export function createPackagedUiQaScenarioError(
+  cause,
+  { check = "unknown", diagnostic = "unknown", stage = "unknown" } = {},
+) {
+  const failure = new Error("Packaged UI QA scenario failed.", { cause });
+  failure.name = "PackagedUiQaScenarioError";
+  failure.qaCheck = check;
+  failure.qaDiagnostic = diagnostic;
+  failure.qaStage = stage;
+  return failure;
+}
+
 async function scanWithAxe(page, axeSource, label) {
   const installed = await page.evaluate(
     `${axeSource}; typeof window.axe?.run === "function"`,
@@ -463,7 +490,7 @@ export async function runPackagedUiQa({
     reviewPage = undefined;
 
     activeStage = "focus-order";
-    activeCheck = "workspace-focus-restore";
+    activeCheck = "workspace-review-focus-restore";
     try {
       await page.waitFor(
         `document.hasFocus() === true &&
@@ -474,22 +501,20 @@ export async function runPackagedUiQa({
         5_000,
       );
     } catch (error) {
-      const diagnostic = await page
+      const state = await page
         .evaluate(`(() => {
-          if (!document.hasFocus()) return "workspace-unfocused";
           const action = [...document.querySelectorAll("button")].find(
             (button) => button.textContent?.trim() === "Open Trusted Review",
           );
-          if (!(action instanceof HTMLButtonElement)) return "review-action-missing";
-          if (action.disabled) return "review-action-disabled";
-          return document.activeElement === action
-            ? "unknown"
-            : "review-action-not-active";
+          return {
+            documentFocused: document.hasFocus(),
+            targetActive: document.activeElement === action,
+            targetDisabled: action instanceof HTMLButtonElement && action.disabled,
+            targetPresent: action instanceof HTMLButtonElement,
+          };
         })()`)
-        .catch(() => "focus-state-unavailable");
-      if (error !== null && typeof error === "object") {
-        error.qaDiagnostic = diagnostic;
-      }
+        .catch(() => undefined);
+      failureDiagnostic = reviewActionFocusDiagnostic(state);
       throw error;
     }
 
@@ -555,15 +580,30 @@ export async function runPackagedUiQa({
     );
     await reviewPage.disconnect();
     reviewPage = undefined;
-    activeCheck = "workspace-focus-restore";
-    await page.waitFor(
-      `document.hasFocus() === true &&
-        document.activeElement instanceof HTMLParagraphElement &&
-        document.activeElement.classList.contains("mutation-outcome") &&
-        document.activeElement.textContent?.trim() === "completed / verified"`,
-      "workspace focus restoration",
-      5_000,
-    );
+    activeCheck = "workspace-outcome-focus-restore";
+    try {
+      await page.waitFor(
+        `document.hasFocus() === true &&
+          document.activeElement instanceof HTMLParagraphElement &&
+          document.activeElement.classList.contains("mutation-outcome") &&
+          document.activeElement.textContent?.trim() === "completed / verified"`,
+        "workspace focus restoration",
+        5_000,
+      );
+    } catch (error) {
+      const state = await page
+        .evaluate(`(() => {
+          const outcome = document.querySelector("p.mutation-outcome");
+          return {
+            documentFocused: document.hasFocus(),
+            targetActive: document.activeElement === outcome,
+            targetPresent: outcome instanceof HTMLParagraphElement,
+          };
+        })()`)
+        .catch(() => undefined);
+      failureDiagnostic = mutationOutcomeFocusDiagnostic(state);
+      throw error;
+    }
 
     activeStage = "empty-state";
     activeCheck = "empty-state-render";
@@ -613,10 +653,12 @@ export async function runPackagedUiQa({
   } catch (error) {
     scenarioFailure = error;
     failureCheck = activeCheck;
-    failureDiagnostic =
-      error !== null && typeof error === "object" && "qaDiagnostic" in error
-        ? error.qaDiagnostic
-        : "unknown";
+    if (failureDiagnostic === "unknown") {
+      failureDiagnostic =
+        error !== null && typeof error === "object" && "qaDiagnostic" in error
+          ? error.qaDiagnostic
+          : "unknown";
+    }
     failureStage = activeStage;
   } finally {
     const finalizationFailures = [];
@@ -668,14 +710,11 @@ export async function runPackagedUiQa({
     scenarioFailure = appendFailures(scenarioFailure, finalizationFailures);
   }
   if (scenarioFailure !== undefined) {
-    const failure = new Error("Packaged UI QA scenario failed.", {
-      cause: scenarioFailure,
+    throw createPackagedUiQaScenarioError(scenarioFailure, {
+      check: failureCheck,
+      diagnostic: failureDiagnostic,
+      stage: failureStage,
     });
-    failure.name = "PackagedUiQaScenarioError";
-    failure.qaCheck = failureCheck;
-    failure.qaDiagnostic = failureDiagnostic;
-    failure.qaStage = failureStage;
-    throw failure;
   }
   return result;
 }

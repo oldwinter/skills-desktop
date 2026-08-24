@@ -37,8 +37,11 @@ import {
 } from "./launch.mjs";
 import {
   PACKAGED_UI_QA_SCENARIOS,
+  createPackagedUiQaScenarioError,
+  mutationOutcomeFocusDiagnostic,
   requireAxeSource,
   packagedUiQaHelp,
+  reviewActionFocusDiagnostic,
   runPackagedUiQa,
 } from "./scenarios.mjs";
 
@@ -845,6 +848,65 @@ describe("packaged Electron launcher seam", () => {
 });
 
 describe("packaged UI QA scenario contract", () => {
+  it("classifies only bounded focus-restoration state", () => {
+    expect(reviewActionFocusDiagnostic(undefined)).toBe(
+      "focus-state-unavailable",
+    );
+    expect(
+      reviewActionFocusDiagnostic({
+        documentFocused: false,
+        targetActive: false,
+        targetDisabled: false,
+        targetPresent: true,
+      }),
+    ).toBe("workspace-unfocused");
+    expect(
+      reviewActionFocusDiagnostic({
+        documentFocused: true,
+        targetActive: false,
+        targetDisabled: true,
+        targetPresent: true,
+      }),
+    ).toBe("review-action-disabled");
+    expect(
+      reviewActionFocusDiagnostic({
+        documentFocused: true,
+        targetActive: false,
+        targetDisabled: false,
+        targetPresent: true,
+      }),
+    ).toBe("review-action-not-active");
+    expect(
+      mutationOutcomeFocusDiagnostic({
+        documentFocused: true,
+        targetActive: false,
+        targetPresent: false,
+      }),
+    ).toBe("mutation-outcome-missing");
+    expect(
+      mutationOutcomeFocusDiagnostic({
+        documentFocused: true,
+        targetActive: false,
+        targetPresent: true,
+      }),
+    ).toBe("mutation-outcome-not-active");
+  });
+
+  it("propagates only context-bound diagnostics through scenario errors", () => {
+    const failure = createPackagedUiQaScenarioError(new Error("untrusted"), {
+      check: "workspace-review-focus-restore",
+      diagnostic: "review-action-disabled",
+      stage: "focus-order",
+    });
+    expect(failureReceipt(failure)).toMatchObject({
+      check: "workspace-review-focus-restore",
+      diagnostic: "review-action-disabled",
+      stage: "focus-order",
+    });
+    failure.qaCheck = "error-state-render";
+    expect(failureReceipt(failure).diagnostic).toBe("unknown");
+  });
+
   it("documents the required Local-only scenarios and setup commands", () => {
     expect(PACKAGED_UI_QA_SCENARIOS).toEqual([
       "keyboard-workflow",
@@ -882,15 +944,15 @@ describe("packaged UI QA scenario contract", () => {
       'qa failed at /tmp/fixture and C:\\Users\\Alice with https://example.test/path, Authorization: Basic dXNlcjpwYXNz, --token unquoted-secret, and sk_live_example',
     );
     error.name = "PackagedUiQaScenarioError";
-    error.qaCheck = "error-state-render";
+    error.qaCheck = "workspace-review-focus-restore";
     error.qaDiagnostic = "review-action-disabled";
-    error.qaStage = "error-state";
+    error.qaStage = "focus-order";
     await persistFailureArtifacts(
       error,
       destination,
     );
     expect(safeFailureSummary(error)).toBe(
-      "Packaged UI QA failed during error-state/error-state-render (PackagedUiQaScenarioError; review-action-disabled).",
+      "Packaged UI QA failed during focus-order/workspace-review-focus-restore (PackagedUiQaScenarioError; review-action-disabled).",
     );
     const untrusted = Object.assign(new Error("sk_live_untrusted"), {
       name: "sk_live_class",
@@ -915,12 +977,12 @@ describe("packaged UI QA scenario contract", () => {
     const artifact = await readFile(join(destination, "failure.json"), "utf8");
     expect(JSON.parse(artifact)).toEqual({
       architecture: process.arch,
-      check: "error-state-render",
+      check: "workspace-review-focus-restore",
       diagnostic: "review-action-disabled",
       errorClass: "PackagedUiQaScenarioError",
       platform: process.platform,
       schemaVersion: 1,
-      stage: "error-state",
+      stage: "focus-order",
     });
     for (const secret of [
       "/Users/alice/skills-desktop",

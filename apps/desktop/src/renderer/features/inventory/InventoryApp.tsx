@@ -322,17 +322,12 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
 
   useEffect(() => {
     let pendingRestore: number | undefined;
-    const scheduleReviewFocusRestore = (nativeFocusEvent = false) => {
+    const scheduleReviewFocusRestore = () => {
       if (pendingRestore !== undefined) window.clearTimeout(pendingRestore);
       pendingRestore = window.setTimeout(() => {
         pendingRestore = undefined;
         const opener = reviewReturnFocusRef.current;
-        if (
-          opener === null ||
-          (!nativeFocusEvent && !document.hasFocus())
-        ) {
-          return;
-        }
+        if (opener === null || !document.hasFocus()) return;
         if (opener.isConnected && !opener.disabled) {
           opener.focus();
           if (document.activeElement === opener) {
@@ -354,10 +349,9 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
     };
     const handleWindowFocus = () => {
       if (mutationPhaseRef.current === "reviewing") return;
-      scheduleReviewFocusRestore(true);
+      scheduleReviewFocusRestore();
     };
-    scheduleReviewFocusRestoreRef.current = () =>
-      scheduleReviewFocusRestore(false);
+    scheduleReviewFocusRestoreRef.current = scheduleReviewFocusRestore;
     window.addEventListener("focus", handleWindowFocus);
     return () => {
       window.removeEventListener("focus", handleWindowFocus);
