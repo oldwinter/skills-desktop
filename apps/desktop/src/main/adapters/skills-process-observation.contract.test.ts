@@ -77,6 +77,7 @@ function localProcess(): SkillsProcess {
     clock: () => new Date("2026-08-22T10:00:00.000Z"),
     id: () => "prepared-local",
     platform: "linux",
+    posixNpxCommand: { executable: "npx", path: "/usr/bin:/bin" },
     runner,
     workspace: "/workspace",
   });

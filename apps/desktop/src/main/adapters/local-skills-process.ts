@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import {
+  constants,
   closeSync,
   fstatSync,
   mkdtempSync,
@@ -8,7 +9,7 @@ import {
   rmSync,
   unlinkSync,
 } from "node:fs";
-import { access } from "node:fs/promises";
+import { access, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, win32 } from "node:path";
 
@@ -91,6 +92,7 @@ export interface LocalSkillsProcessOptions {
   readonly environment?: Readonly<Record<string, string | undefined>>;
   readonly id?: () => string;
   readonly platform: NodeJS.Platform;
+  readonly posixNpxCommand?: PosixNpxCommand;
   readonly runner: ProcessRunner;
   readonly windowsNpxCommand?: WindowsNpxCommand;
   readonly workspace: string;
@@ -107,6 +109,17 @@ export interface SpawnProcessRunnerOptions {
 export interface WindowsNpxCommand {
   readonly executable: string;
   readonly npxCliPath: string;
+}
+
+export interface PosixNpxCommand {
+  readonly executable: string;
+  readonly path: string;
+}
+
+interface ResolvedNpxCommand {
+  readonly executable: string;
+  readonly npxCliPath?: string;
+  readonly path?: string;
 }
 
 function processBoundaryError(
@@ -154,6 +167,105 @@ export async function resolveWindowsNpxCommand(
   throw processBoundaryError(
     "The Windows Node.js and npx entry points are unavailable.",
   );
+}
+
+export async function resolvePosixNpxCommand(
+  environment: Readonly<Record<string, string>>,
+  platform: NodeJS.Platform,
+  isExecutable: (path: string) => Promise<boolean> = async (path) =>
+    access(path, constants.X_OK).then(
+      () => true,
+      () => false,
+    ),
+): Promise<PosixNpxCommand> {
+  const inheritedDirectories = (environment.PATH ?? "")
+    .split(":")
+    .map((directory) => directory.trim())
+    .filter((directory) => directory !== "");
+  const home = environment.HOME;
+  const versionedDirectories = async (
+    root: string,
+    ...suffix: readonly string[]
+  ) => {
+    try {
+      return (await readdir(root, { withFileTypes: true }))
+        .filter((entry) => entry.isDirectory() || entry.isSymbolicLink())
+        .sort((left, right) =>
+          right.name.localeCompare(left.name, "en", { numeric: true }),
+        )
+        .map((entry) => join(root, entry.name, ...suffix));
+    } catch {
+      return [];
+    }
+  };
+  const managedVersionDirectories =
+    home === undefined
+      ? []
+      : (
+          await Promise.all([
+            versionedDirectories(join(home, ".nvm", "versions", "node"), "bin"),
+            versionedDirectories(
+              join(home, ".local", "share", "fnm", "node-versions"),
+              "installation",
+              "bin",
+            ),
+            versionedDirectories(
+              join(
+                home,
+                "Library",
+                "Application Support",
+                "fnm",
+                "node-versions",
+              ),
+              "installation",
+              "bin",
+            ),
+          ])
+        ).flat();
+  const fallbackDirectories = [
+    ...(home === undefined
+      ? []
+      : [
+          join(home, ".local", "bin"),
+          join(home, ".volta", "bin"),
+          join(home, ".asdf", "bin"),
+          join(home, ".asdf", "shims"),
+          join(home, ".nodenv", "bin"),
+          join(home, ".nodenv", "shims"),
+          join(home, ".local", "share", "mise", "shims"),
+          join(home, ".nix-profile", "bin"),
+        ]),
+    ...managedVersionDirectories,
+    ...(platform === "darwin"
+      ? ["/opt/homebrew/bin", "/usr/local/bin", "/opt/local/bin"]
+      : []),
+  ];
+  const directories = [...new Set([...inheritedDirectories, ...fallbackDirectories])];
+
+  let npxDirectory: string | undefined;
+  let hasNode = false;
+  for (const directory of directories) {
+    const [npxExists, nodeExists] = await Promise.all([
+      isExecutable(join(directory, "npx")),
+      isExecutable(join(directory, "node")),
+    ]);
+    if (npxDirectory === undefined && npxExists) npxDirectory = directory;
+    hasNode ||= nodeExists;
+  }
+  if (npxDirectory === undefined || !hasNode) {
+    throw processBoundaryError(
+      "Node.js and npx are unavailable. Install Node.js, then refresh this Target.",
+    );
+  }
+  return {
+    executable: inheritedDirectories.includes(npxDirectory)
+      ? "npx"
+      : join(npxDirectory, "npx"),
+    path: [
+      npxDirectory,
+      ...directories.filter((directory) => directory !== npxDirectory),
+    ].join(":"),
+  };
 }
 
 export function createSpawnProcessRunner(
@@ -585,12 +697,19 @@ export function createLocalSkillsProcess(
     options.environment ?? process.env,
     options.platform,
   );
-  const command =
+  const command: Promise<ResolvedNpxCommand> =
     options.platform === "win32"
       ? Promise.resolve(
           options.windowsNpxCommand ?? resolveWindowsNpxCommand(environment),
         )
-      : Promise.resolve({ executable: "npx", npxCliPath: undefined });
+      : Promise.resolve(
+          options.posixNpxCommand ??
+            resolvePosixNpxCommand(environment, options.platform),
+        ).then(({ executable, path }) => ({
+          executable,
+          npxCliPath: undefined,
+          path,
+        }));
   let dialectVerification: Promise<Result<void, ObservationError>> | undefined;
   const privatePlans = new Map<
     string,
@@ -616,7 +735,10 @@ export function createLocalSkillsProcess(
         ...args,
       ],
       cwd: options.workspace,
-      env: environment,
+      env:
+        resolved.path === undefined
+          ? environment
+          : { ...environment, PATH: resolved.path },
       executable: resolved.executable,
       maxOutputBytes: MAX_CLI_OUTPUT_BYTES,
       shell: false,

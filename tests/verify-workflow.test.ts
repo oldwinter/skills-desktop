@@ -18,7 +18,11 @@ describe("verify workflow contract", () => {
     );
 
     expect(workflow.name).toBe("Verify");
-    expect(Object.keys(workflow.on).sort()).toEqual(["pull_request", "push"]);
+    expect(Object.keys(workflow.on).sort()).toEqual([
+      "pull_request",
+      "push",
+      "workflow_call",
+    ]);
     expect(workflow.on.push.branches).toEqual(["main"]);
     expect(workflow.permissions).toEqual({ contents: "read" });
 

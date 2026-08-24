@@ -11,14 +11,15 @@ Download the artifact for your platform together with `SHA256SUMS`. Confirm the
 artifact's SHA-256 value matches its line in that file.
 
 With GitHub CLI installed, also verify the build provenance. Replace
-`<artifact>` and `<source-commit>` with the values from the release notes:
+`<artifact>`, `<source-commit>`, and `<source-ref>` with the values from the
+release notes:
 
 ```bash
 gh attestation verify "<artifact>" \
   --repo oldwinter/skills-desktop \
   --signer-workflow oldwinter/skills-desktop/.github/workflows/release-candidates.yml \
   --source-digest "<source-commit>" \
-  --source-ref refs/heads/main \
+  --source-ref "<source-ref>" \
   --deny-self-hosted-runners
 ```
 

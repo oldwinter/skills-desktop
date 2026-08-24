@@ -90,6 +90,10 @@ const config: ForgeConfig = {
     appBundleId: "dev.skillsdesktop.app",
     asar: true,
     executableName: "skills-desktop",
+    extendHelperInfo: {
+      LSBackgroundOnly: true,
+      LSUIElement: true,
+    },
     extraResource: APP_ICON_PNG_PATH,
     icon: APP_ICON_BASE_PATH,
     ignore: shouldIgnorePackagerPath,

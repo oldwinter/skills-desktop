@@ -216,6 +216,10 @@ describe("unsigned release candidate contract", () => {
       ),
     ).toMatchObject({ config: { options: { license: "Proprietary" } } });
     expect(forgeConfig.packagerConfig).toMatchObject({
+      extendHelperInfo: {
+        LSBackgroundOnly: true,
+        LSUIElement: true,
+      },
       extraResource: APP_ICON_PNG_PATH,
       icon: APP_ICON_BASE_PATH,
     });

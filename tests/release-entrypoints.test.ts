@@ -539,6 +539,8 @@ describe("release integrity executable entrypoint", () => {
         "oldwinter/skills-desktop",
         "--source-commit",
         sourceCommit,
+        "--source-ref",
+        "refs/heads/main",
         "--version",
         "0.1.0",
         "--workflow-run-url",
@@ -558,6 +560,34 @@ describe("release integrity executable entrypoint", () => {
       `release-name=${result.name}\nrelease-tag=${result.tag}\n`,
     );
     expect(output).toEqual([`${JSON.stringify(result)}\n`]);
+  });
+
+  it("validates the real workspace versions against an exact tag", async () => {
+    const root = await mkdtemp(join(tmpdir(), "skills-release-cli-tag-"));
+    temporaryDirectories.push(root);
+    const githubOutputPath = join(root, "github-output");
+    vi.stubEnv("GITHUB_OUTPUT", githubOutputPath);
+
+    const result = await runReleaseIntegrityCommand([
+      "validate-tag",
+      "--desktop-package",
+      "apps/desktop/package.json",
+      "--package-lock",
+      "package-lock.json",
+      "--remote-bootstrap-package",
+      "packages/remote-bootstrap/package.json",
+      "--root-package",
+      "package.json",
+      "--skills-runtime-package",
+      "packages/skills-runtime/package.json",
+      "--source-ref",
+      "refs/tags/v0.1.0",
+    ]);
+
+    expect(result).toEqual({ tag: "v0.1.0", version: "0.1.0" });
+    expect(await readFile(githubOutputPath, "utf8")).toBe(
+      "release-tag=v0.1.0\nversion=0.1.0\n",
+    );
   });
 
   it("preflights the exact staged payload bytes through the real command", async () => {

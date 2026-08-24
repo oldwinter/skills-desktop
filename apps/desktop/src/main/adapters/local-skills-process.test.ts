@@ -57,6 +57,11 @@ const globalOutput = JSON.stringify([
   },
 ]);
 
+const scriptedPosixNpxCommand = {
+  executable: "npx",
+  path: "/usr/bin:/bin",
+} as const;
+
 function scriptedRunner(): ProcessRunner & {
   invocations: ProcessInvocation[];
 } {
@@ -86,6 +91,58 @@ function scriptedRunner(): ProcessRunner & {
 }
 
 describe("Local SkillsProcess inventory contract", () => {
+  it.skipIf(process.platform === "win32")(
+    "resolves a user-installed npx outside the macOS GUI launch PATH",
+    async () => {
+      const home = await mkdtemp(
+        join(tmpdir(), "skills-desktop-macos-path-"),
+      );
+      const bin = join(home, ".local", "bin");
+      const executable = join(bin, "npx");
+      await mkdir(bin, { recursive: true });
+      await copyFile(process.execPath, join(bin, "node"));
+      await writeFile(
+        executable,
+        `#!/usr/bin/env node
+const args = process.argv.slice(2);
+if (args.at(-1) === "--version") process.stdout.write("1.5.23\\n");
+else if (args.join(" ").endsWith("list --json")) process.stdout.write(${JSON.stringify(projectOutput)});
+else if (args.join(" ").endsWith("list --global --json")) process.stdout.write(${JSON.stringify(globalOutput)});
+else process.exitCode = 2;
+`,
+        { mode: 0o700 },
+      );
+
+      try {
+        const localProcess = createLocalSkillsProcess({
+          clock: () => new Date("2026-08-21T10:00:00.000Z"),
+          environment: {
+            HOME: home,
+            PATH: "/usr/bin:/bin:/usr/sbin:/sbin",
+          },
+          platform: "darwin",
+          runner: createSpawnProcessRunner({ platform: "darwin" }),
+          workspace: home,
+        });
+
+        const result = await localProcess.observeInventory({
+          signal: new AbortController().signal,
+        });
+        expect(result).toMatchObject({
+          ok: true,
+          value: {
+            entries: [
+              { name: "project-skill", scope: "project" },
+              { name: "global-skill", scope: "global" },
+            ],
+          },
+        });
+      } finally {
+        await rm(home, { force: true, recursive: true });
+      }
+    },
+  );
+
   it("reports pinned archive installs with absent CLI provenance as content-unverified", () => {
     expect(
       observedMutationEffects(
@@ -129,6 +186,7 @@ describe("Local SkillsProcess inventory contract", () => {
       const process = createLocalSkillsProcess({
         clock: () => new Date("2026-08-21T10:00:00.000Z"),
         platform,
+        posixNpxCommand: scriptedPosixNpxCommand,
         runner,
         workspace: "/workspace",
       });
@@ -204,6 +262,7 @@ describe("Local SkillsProcess inventory contract", () => {
     const skillsProcess = createLocalSkillsProcess({
       clock: () => new Date("2026-08-21T10:00:00.000Z"),
       platform: "linux",
+      posixNpxCommand: scriptedPosixNpxCommand,
       runner,
       workspace: "/workspace",
     });
@@ -788,6 +847,7 @@ describe("Local SkillsProcess mutation contract", () => {
       clock: () => new Date("2026-08-21T10:00:00.000Z"),
       id: () => "prepared-1",
       platform: "linux",
+      posixNpxCommand: scriptedPosixNpxCommand,
       runner,
       workspace: "/workspace",
     });
@@ -864,6 +924,7 @@ describe("Local SkillsProcess mutation contract", () => {
       clock: () => new Date("2026-08-21T10:00:00.000Z"),
       id: () => "prepared-remove",
       platform: "linux",
+      posixNpxCommand: scriptedPosixNpxCommand,
       runner,
       workspace: "/workspace",
     });
@@ -978,6 +1039,7 @@ describe("Local SkillsProcess mutation contract", () => {
       clock: () => new Date("2026-08-21T10:00:00.000Z"),
       id: () => "prepared-cancelled",
       platform: "linux",
+      posixNpxCommand: scriptedPosixNpxCommand,
       runner,
       workspace: "/workspace",
     });
@@ -1062,6 +1124,7 @@ describe("Local SkillsProcess mutation contract", () => {
         clock: () => new Date("2026-08-21T10:00:00.000Z"),
         id: () => `prepared-${termination}`,
         platform: "linux",
+        posixNpxCommand: scriptedPosixNpxCommand,
         runner,
         workspace: "/workspace",
       });
@@ -1141,6 +1204,7 @@ describe("Local SkillsProcess mutation contract", () => {
       clock: () => new Date("2026-08-21T10:00:00.000Z"),
       id: () => `prepared-${++nextId}`,
       platform: "linux",
+      posixNpxCommand: scriptedPosixNpxCommand,
       runner,
       workspace: "/workspace",
     });
@@ -1205,6 +1269,7 @@ describe("Local SkillsProcess mutation contract", () => {
       clock: () => new Date("2026-08-21T10:00:00.000Z"),
       id: () => `prepared-${++nextId}`,
       platform: "linux",
+      posixNpxCommand: scriptedPosixNpxCommand,
       runner,
       workspace: "/workspace",
     });
@@ -1295,6 +1360,7 @@ describe("Local SkillsProcess mutation contract", () => {
         clock: () => new Date("2026-08-21T10:00:00.000Z"),
         id: () => `prepared-${intent.type}`,
         platform: "linux",
+        posixNpxCommand: scriptedPosixNpxCommand,
         runner,
         workspace: "/workspace",
       });

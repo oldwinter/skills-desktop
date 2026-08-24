@@ -16,6 +16,7 @@ const { COPYFILE_EXCL } = constants;
 const sha256Pattern = /^[a-f0-9]{64}$/;
 const commitPattern = /^[a-f0-9]{40}$/;
 const versionPattern = /^\d+\.\d+\.\d+$/;
+const versionTagRefPattern = /^refs\/tags\/(v(\d+\.\d+\.\d+))$/;
 const repositoryPattern = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 
 const targetArtifacts = new Map([
@@ -785,19 +786,51 @@ export const SPDX_PREDICATE_TYPE = "https://spdx.dev/Document/v2.3";
 export const CANDIDATE_IDENTITY_PREDICATE_TYPE =
   "https://github.com/oldwinter/skills-desktop/attestations/unsigned-candidate/v1";
 
-export function previewReleaseTag({ sourceCommit, version }) {
+export function assertTaggedPreviewVersions({ sourceRef, versions }) {
+  const match =
+    typeof sourceRef === "string" ? versionTagRefPattern.exec(sourceRef) : null;
+  if (match === null || !isPlainObject(versions)) {
+    fail("Unsigned preview tag identity is invalid.");
+  }
+  const entries = Object.entries(versions);
+  if (
+    entries.length === 0 ||
+    entries.some(
+      ([name, version]) =>
+        name.length === 0 ||
+        typeof version !== "string" ||
+        !versionPattern.test(version),
+    )
+  ) {
+    fail("Unsigned preview package versions are invalid.");
+  }
+  const version = match[2];
+  if (entries.some(([, candidate]) => candidate !== version)) {
+    fail("Unsigned preview tag must match every package version.");
+  }
+  return { tag: match[1], version };
+}
+
+export function previewReleaseTag({ sourceCommit, sourceRef, version }) {
   assertString(
     sourceCommit,
     commitPattern,
     "Preview release identity is invalid.",
   );
   assertString(version, versionPattern, "Preview release identity is invalid.");
+  if (sourceRef !== "refs/heads/main") {
+    return assertTaggedPreviewVersions({
+      sourceRef,
+      versions: { release: version },
+    }).tag;
+  }
   return `preview-v${version}-${sourceCommit}`;
 }
 
-export function previewReleaseName({ sourceCommit, version }) {
+export function previewReleaseName({ sourceCommit, sourceRef, version }) {
   return `Skills Desktop ${version} unsigned developer preview ${previewReleaseTag({
     sourceCommit,
+    sourceRef,
     version,
   }).slice(-12)}`;
 }
@@ -808,6 +841,7 @@ export function createPreviewReleaseNotes({
   payloadDigest,
   repository,
   sourceCommit,
+  sourceRef,
   version,
   workflowRunUrl,
 }) {
@@ -829,6 +863,7 @@ export function createPreviewReleaseNotes({
     "Preview release notes are invalid.",
   );
   assertString(version, versionPattern, "Preview release notes are invalid.");
+  previewReleaseTag({ sourceCommit, sourceRef, version });
   assertWorkflowRunUrl(
     workflowRunUrl,
     repository,
@@ -842,6 +877,7 @@ export function createPreviewReleaseNotes({
     "",
     `- Version: \`${version}\``,
     `- Source commit: \`${sourceCommit}\``,
+    `- Source ref: \`${sourceRef}\``,
     `- Candidate set SHA-256: \`${candidateSetDigest}\``,
     `- Evidence set SHA-256: \`${evidenceSetDigest}\``,
     `- Verified payload SHA-256: \`${payloadDigest}\``,
@@ -909,6 +945,7 @@ function assertGitHubCandidateInput(expected, message) {
       "payloadDigest",
       "repository",
       "sourceCommit",
+      "sourceRef",
       "version",
       "workflowRunUrl",
     ],
@@ -920,6 +957,7 @@ function assertGitHubCandidateInput(expected, message) {
   assertString(expected.repository, repositoryPattern, message);
   assertString(expected.sourceCommit, commitPattern, message);
   assertString(expected.version, versionPattern, message);
+  previewReleaseTag(expected);
   assertWorkflowRunUrl(expected.workflowRunUrl, expected.repository, message);
 }
 
@@ -934,6 +972,7 @@ function assertGitHubCandidateIdentity({ expected, release, tag }, message) {
     !release.body.includes(expected.evidenceSetDigest) ||
     !release.body.includes(expected.payloadDigest) ||
     !release.body.includes(expected.sourceCommit) ||
+    !release.body.includes(expected.sourceRef) ||
     !release.body.includes(expected.workflowRunUrl) ||
     !release.body.includes("unsigned, not notarized") ||
     !release.body.includes("macOS and Windows may block it") ||

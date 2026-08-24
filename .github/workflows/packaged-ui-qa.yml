@@ -3,6 +3,7 @@ name: Packaged UI QA
 on:
   push:
     branches: [main]
+  workflow_call:
   workflow_dispatch:
 
 concurrency:
@@ -15,7 +16,11 @@ permissions:
 jobs:
   packaged-ui-qa:
     name: Packaged UI QA ${{ matrix.platform }} ${{ matrix.architecture }}
-    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    if: >-
+      github.ref == 'refs/heads/main' ||
+      github.ref_type == 'tag' ||
+      github.event_name == 'workflow_call' ||
+      github.event_name == 'workflow_dispatch'
     runs-on: ${{ fromJSON(matrix.runner) }}
     timeout-minutes: 35
     strategy:

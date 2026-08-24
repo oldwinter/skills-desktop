@@ -16,6 +16,7 @@ describe("packaged UI QA workflow contract", () => {
     expect(workflow.name).toBe("Packaged UI QA");
     expect(Object.keys(workflow.on).sort()).toEqual([
       "push",
+      "workflow_call",
       "workflow_dispatch",
     ]);
     expect(workflow.on.push.branches).toEqual(["main"]);
@@ -29,7 +30,7 @@ describe("packaged UI QA workflow contract", () => {
 
     const job = workflow.jobs["packaged-ui-qa"];
     expect(job.if).toBe(
-      "github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'",
+      "github.ref == 'refs/heads/main' || github.ref_type == 'tag' || github.event_name == 'workflow_call' || github.event_name == 'workflow_dispatch'",
     );
     expect(
       job.strategy.matrix.include.map(
