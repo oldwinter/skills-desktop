@@ -1255,9 +1255,9 @@ try {
     );
   }
   console.log("packaged smoke: reviewed mutation and postflight verified");
+  if (first.errors.length > 0) throw new Error(first.errors.join("\n"));
   await first.close();
   console.log("packaged smoke: first launch closed");
-  if (first.errors.length > 0) throw new Error(first.errors.join("\n"));
 
   await writeScript("failure");
   const second = await launch();
@@ -1274,9 +1274,9 @@ try {
       "Raw refresh failure reached the restored Inventory shell.",
     );
   }
+  if (second.errors.length > 0) throw new Error(second.errors.join("\n"));
   await second.close();
   console.log("packaged smoke: stale restart verified");
-  if (second.errors.length > 0) throw new Error(second.errors.join("\n"));
 
   const invocations = (await readFile(invocationLog, "utf8"))
     .trim()
