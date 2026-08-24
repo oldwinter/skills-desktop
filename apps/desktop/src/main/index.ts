@@ -12,7 +12,10 @@ import {
   workspaceWindowOptions,
   WORKSPACE_URL,
 } from "./adapters/electron-security.js";
-import { registerDesktopIpc } from "./adapters/electron-ipc.js";
+import {
+  registerDesktopIpc,
+  type DesktopIpcAttachment,
+} from "./adapters/electron-ipc.js";
 import { onWindowClosed } from "./adapters/electron-window-lifecycle.js";
 import { createCompositionRoot } from "./composition-root.js";
 
@@ -35,6 +38,7 @@ if (!app.requestSingleInstanceLock()) {
     ? resolve(process.resourcesPath, "app-icon.png")
     : resolve(currentDirectory, "../../assets/app-icon.png");
   let workspaceWindow: BrowserWindow | undefined;
+  let workspaceAttachment: DesktopIpcAttachment | undefined;
   let reviewWindow: BrowserWindow | undefined;
 
   void app
@@ -69,20 +73,30 @@ if (!app.requestSingleInstanceLock()) {
         window.webContents.on("did-start-navigation", (details) => {
           if (details.isMainFrame && !details.isSameDocument) {
             desktopIpc.detach(window.webContents.id);
+            if (workspaceWindow === window) workspaceAttachment = undefined;
           }
         });
         window.webContents.on("dom-ready", () => {
           if (window.webContents.getURL() === WORKSPACE_URL) {
-            desktopIpc.attach(window.webContents, "workspace", WORKSPACE_URL);
+            const attachment = desktopIpc.attach(
+              window.webContents,
+              "workspace",
+              WORKSPACE_URL,
+            );
+            if (workspaceWindow === window) workspaceAttachment = attachment;
           }
         });
         window.once("ready-to-show", () => window.show());
         onWindowClosed(window, (webContentsId) => {
           desktopIpc.detach(webContentsId);
-          if (workspaceWindow === window) workspaceWindow = undefined;
+          if (workspaceWindow === window) {
+            workspaceWindow = undefined;
+            workspaceAttachment = undefined;
+          }
         });
-        void window.loadURL(WORKSPACE_URL);
         workspaceWindow = window;
+        workspaceAttachment = undefined;
+        void window.loadURL(WORKSPACE_URL);
       };
 
       presentReview = (reviewId) => {
@@ -90,6 +104,7 @@ if (!app.requestSingleInstanceLock()) {
         reviewWindow = undefined;
         priorReviewWindow?.close();
         const ownerWindow = workspaceWindow;
+        const ownerAttachment = workspaceAttachment;
         const window = new BrowserWindow(
           reviewWindowOptions(
             resolve(currentDirectory, "../preload/review.cjs"),
@@ -122,15 +137,18 @@ if (!app.requestSingleInstanceLock()) {
           if (
             wasActiveReview &&
             ownerWindow !== undefined &&
+            ownerAttachment !== undefined &&
+            workspaceAttachment !== undefined &&
             !ownerWindow.isDestroyed() &&
-            workspaceWindow === ownerWindow
+            workspaceWindow === ownerWindow &&
+            workspaceAttachment.webContentsId ===
+              ownerAttachment.webContentsId &&
+            workspaceAttachment.attachmentEpoch ===
+              ownerAttachment.attachmentEpoch
           ) {
             ownerWindow.focus();
             ownerWindow.webContents.focus();
-            desktopIpc.notifyReviewWindowClosed(
-              reviewId,
-              ownerWindow.webContents.id,
-            );
+            desktopIpc.notifyReviewWindowClosed(reviewId, ownerAttachment);
           }
         });
         void window.loadURL(REVIEW_URL);

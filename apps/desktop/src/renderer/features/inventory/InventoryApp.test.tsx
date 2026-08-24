@@ -1525,12 +1525,16 @@ describe("Local Target Inventory shell", () => {
 
     act(() => focusTimers.runTick());
     expect(outcome).toHaveFocus();
+    act(() => focusTimers.runTick());
+    act(() => focusTimers.runTick());
     inventoryButton.focus();
     act(() => focusTimers.runTick());
     expect(outcome).toHaveFocus();
-    for (let tick = 0; tick < 12; tick += 1) {
+    for (let tick = 0; tick < 11; tick += 1) {
       act(() => focusTimers.runTick());
     }
+    expect(focusTimers.pendingCount()).toBe(1);
+    act(() => focusTimers.runTick());
     expect(focusTimers.pendingCount()).toBe(0);
 
     inventoryButton.focus();
@@ -1747,6 +1751,7 @@ describe("Local Target Inventory shell", () => {
     );
     expect(focusTimers.pendingCount()).toBe(1);
     unmount();
+    expect(reviewClose.listener).toBeUndefined();
     expect(focusTimers.pendingCount()).toBe(0);
     act(() => focusTimers.runTick());
     expect(focusTimers.pendingCount()).toBe(0);
@@ -1805,6 +1810,70 @@ describe("Local Target Inventory shell", () => {
     await waitFor(() => expect(focusTimers.pendingCount()).toBe(1));
   });
 
+  it("ignores a stale failed request after a newer review owns focus recovery", async () => {
+    vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    const reviewClose = { listener: undefined } as ReviewCloseHarness;
+    let resolveFirst:
+      | ((result: Awaited<ReturnType<DesktopBridge["requestReview"]>>) => void)
+      | undefined;
+    const requestReview = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise<Awaited<ReturnType<DesktopBridge["requestReview"]>>>(
+            (resolve) => {
+              resolveFirst = resolve;
+            },
+          ),
+      )
+      .mockResolvedValueOnce({
+        ok: true as const,
+        value: { operationId: "review-current" },
+      });
+    render(
+      <InventoryApp
+        client={{
+          ...clientFor(reviewableSnapshot, reviewClose),
+          requestReview,
+        }}
+      />,
+    );
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Prepare update" }),
+    );
+    const reviewButton = await screen.findByRole("button", {
+      name: "Open Trusted Review",
+    });
+    fireEvent.click(reviewButton);
+    fireEvent.click(reviewButton);
+    await waitFor(() => expect(requestReview).toHaveBeenCalledTimes(2));
+
+    const focusTimers = installFocusTimerHarness();
+    act(() =>
+      reviewClose.listener?.({ reviewId: "review-current", schemaVersion: 1 }),
+    );
+    await waitFor(() => expect(focusTimers.pendingCount()).toBe(1));
+
+    await act(async () => {
+      resolveFirst?.({
+        error: {
+          code: "review_invalid",
+          effects: "none",
+          message: "The stale review failed.",
+          phase: "review",
+          retryable: false,
+        },
+        ok: false,
+      });
+      await Promise.resolve();
+    });
+    expect(focusTimers.pendingCount()).toBe(1);
+    expect(
+      screen.queryByText("The stale review failed."),
+    ).not.toBeInTheDocument();
+  });
+
   it("cancels a close intent on user input and on a failed replacement request", async () => {
     vi.spyOn(document, "hasFocus").mockReturnValue(true);
     const reviewClose = { listener: undefined } as ReviewCloseHarness;
@@ -1812,7 +1881,15 @@ describe("Local Target Inventory shell", () => {
       .fn()
       .mockResolvedValueOnce({
         ok: true as const,
-        value: { operationId: "review-input" },
+        value: { operationId: "review-key-input" },
+      })
+      .mockResolvedValueOnce({
+        ok: true as const,
+        value: { operationId: "review-pointer-input" },
+      })
+      .mockResolvedValueOnce({
+        ok: true as const,
+        value: { operationId: "review-click-input" },
       })
       .mockResolvedValueOnce({
         error: {
@@ -1847,13 +1924,19 @@ describe("Local Target Inventory shell", () => {
     await waitFor(() => expect(requestReview).toHaveBeenCalledTimes(1));
     const focusTimers = installFocusTimerHarness();
     act(() =>
-      reviewClose.listener?.({ reviewId: "review-input", schemaVersion: 1 }),
+      reviewClose.listener?.({
+        reviewId: "review-key-input",
+        schemaVersion: 1,
+      }),
     );
     expect(focusTimers.pendingCount()).toBe(1);
     fireEvent.keyDown(document, { key: "Escape" });
     expect(focusTimers.pendingCount()).toBe(0);
     act(() =>
-      reviewClose.listener?.({ reviewId: "review-input", schemaVersion: 1 }),
+      reviewClose.listener?.({
+        reviewId: "review-key-input",
+        schemaVersion: 1,
+      }),
     );
     expect(focusTimers.pendingCount()).toBe(0);
 
@@ -1861,6 +1944,34 @@ describe("Local Target Inventory shell", () => {
       screen.getByRole("button", { name: "Open Trusted Review" }),
     );
     await waitFor(() => expect(requestReview).toHaveBeenCalledTimes(2));
+    act(() =>
+      reviewClose.listener?.({
+        reviewId: "review-pointer-input",
+        schemaVersion: 1,
+      }),
+    );
+    expect(focusTimers.pendingCount()).toBe(1);
+    fireEvent.pointerDown(document);
+    expect(focusTimers.pendingCount()).toBe(0);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open Trusted Review" }),
+    );
+    await waitFor(() => expect(requestReview).toHaveBeenCalledTimes(3));
+    act(() =>
+      reviewClose.listener?.({
+        reviewId: "review-click-input",
+        schemaVersion: 1,
+      }),
+    );
+    expect(focusTimers.pendingCount()).toBe(1);
+    fireEvent.click(document);
+    expect(focusTimers.pendingCount()).toBe(0);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open Trusted Review" }),
+    );
+    await waitFor(() => expect(requestReview).toHaveBeenCalledTimes(4));
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "The review is no longer available.",
     );

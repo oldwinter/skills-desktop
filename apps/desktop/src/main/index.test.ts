@@ -26,6 +26,7 @@ const mocks = vi.hoisted(() => {
   const updaterListeners = new Map<string, Listener[]>();
   const windows: WindowLike[] = [];
   let nextWebContentsId = 1;
+  let nextAttachmentEpoch = 1;
   let reviewRequested: ((reviewId: string) => void) | undefined;
 
   const addListener = (
@@ -125,7 +126,10 @@ const mocks = vi.hoisted(() => {
     prepareNormalQuit: vi.fn(() => true),
   };
   const desktopIpc = {
-    attach: vi.fn(),
+    attach: vi.fn((webContents: { readonly id: number }) => ({
+      attachmentEpoch: `attachment-${nextAttachmentEpoch++}`,
+      webContentsId: webContents.id,
+    })),
     detach: vi.fn(),
     dispose: vi.fn(),
     notifyReviewWindowClosed: vi.fn(),
@@ -167,6 +171,7 @@ const mocks = vi.hoisted(() => {
     updaterListeners.clear();
     windows.length = 0;
     nextWebContentsId = 1;
+    nextAttachmentEpoch = 1;
     reviewRequested = undefined;
 
     app.isPackaged = false;
@@ -372,6 +377,7 @@ describe("desktop main entrypoint", () => {
     );
     workspace?.webContents.emit("dom-ready");
     expect(mocks.desktopIpc.attach).toHaveBeenCalledTimes(2);
+    const ownerAttachment = mocks.desktopIpc.attach.mock.results[1]?.value;
     workspace?.emit("ready-to-show");
     expect(workspace?.show).toHaveBeenCalledTimes(1);
 
@@ -436,7 +442,7 @@ describe("desktop main entrypoint", () => {
     expect(workspace?.webContents.focus).toHaveBeenCalledTimes(1);
     expect(mocks.desktopIpc.notifyReviewWindowClosed).toHaveBeenCalledWith(
       "review-2",
-      workspace?.webContents.id,
+      ownerAttachment,
     );
     expect(mocks.desktopIpc.notifyReviewWindowClosed).toHaveBeenCalledTimes(1);
     expect(workspace?.focus.mock.invocationCallOrder.at(-1)).toBeLessThan(
@@ -480,6 +486,51 @@ describe("desktop main entrypoint", () => {
     mocks.emitApp("window-all-closed");
     expect(mocks.app.quit).not.toHaveBeenCalled();
     platform.mockRestore();
+  });
+
+  it("does not notify a replacement workspace when the review owner closes", async () => {
+    await loadEntrypoint();
+    await waitForStartup();
+    const owner = mocks.windows[0];
+    owner?.webContents.emit("dom-ready");
+    mocks.reviewRequested()?.("orphaned-review");
+    const review = mocks.windows[1];
+
+    (owner?.close as unknown as (() => void) | undefined)?.();
+    mocks.emitApp("activate");
+    const replacement = mocks.windows[2];
+    expect(replacement?.options).toEqual({ kind: "workspace" });
+
+    (review?.close as unknown as (() => void) | undefined)?.();
+    expect(owner?.focus).not.toHaveBeenCalled();
+    expect(owner?.webContents.focus).not.toHaveBeenCalled();
+    expect(replacement?.focus).not.toHaveBeenCalled();
+    expect(replacement?.webContents.focus).not.toHaveBeenCalled();
+    expect(mocks.desktopIpc.notifyReviewWindowClosed).not.toHaveBeenCalled();
+  });
+
+  it("keeps review closure bound to the attachment that opened it", async () => {
+    await loadEntrypoint();
+    await waitForStartup();
+    const workspace = mocks.windows[0];
+    workspace?.webContents.emit("dom-ready");
+    const openingAttachment = mocks.desktopIpc.attach.mock.results[0]?.value;
+    mocks.reviewRequested()?.("reload-review");
+    const review = mocks.windows[1];
+
+    workspace?.webContents.emit("did-start-navigation", {
+      isMainFrame: true,
+      isSameDocument: false,
+    });
+    workspace?.webContents.emit("dom-ready");
+    const replacementAttachment =
+      mocks.desktopIpc.attach.mock.results[1]?.value;
+    expect(replacementAttachment).not.toEqual(openingAttachment);
+
+    (review?.close as unknown as (() => void) | undefined)?.();
+    expect(workspace?.focus).not.toHaveBeenCalled();
+    expect(workspace?.webContents.focus).not.toHaveBeenCalled();
+    expect(mocks.desktopIpc.notifyReviewWindowClosed).not.toHaveBeenCalled();
   });
 
   it("shuts down once for a normal quit and ignores reentrant quit events", async () => {
