@@ -209,16 +209,20 @@ describe("release candidate executable entrypoint", () => {
           options.cwd === harness.root && options.environment === environment,
       ),
     ).toBe(true);
-    expect(harness.npmCalls).toHaveLength(4);
-    expect(harness.npmCalls.at(-1)?.args).toEqual([
-      "exec",
-      "--workspace",
-      "@skills-desktop/desktop",
-      "electron-forge",
-      "make",
-      "--",
-      "--platform=linux",
-      "--arch=x64",
+    expect(harness.npmCalls.map(({ args }) => args)).toEqual([
+      ["run", "build", "--workspace", "@skills-desktop/skills-runtime"],
+      ["run", "build", "--workspace", "@skills-desktop/remote-bootstrap"],
+      ["run", "build", "--workspace", "@skills-desktop/desktop"],
+      [
+        "exec",
+        "--workspace",
+        "@skills-desktop/desktop",
+        "electron-forge",
+        "make",
+        "--",
+        "--platform=linux",
+        "--arch=x64",
+      ],
     ]);
     expect(
       harness.npmCalls.every(
@@ -238,6 +242,7 @@ describe("release candidate executable entrypoint", () => {
     const manifestWrite = harness.writes.find(({ path }) =>
       path.endsWith("candidate-manifest-v1.json"),
     );
+    if (manifestWrite === undefined) throw new Error("Manifest write is missing.");
     expect(JSON.parse(String(manifestWrite?.data))).toMatchObject({
       buildInputs: {
         lockfileSha256: createHash("sha256")
@@ -248,6 +253,31 @@ describe("release candidate executable entrypoint", () => {
       candidateUse: "unsigned-preview-only",
       signingStatus: "unsigned",
       source: { commit: sourceCommit },
+    });
+    expect(
+      createHash("sha256").update(manifestWrite.data).digest("hex"),
+    ).toBe(result.manifestDigest);
+    expect(
+      harness.writes.find(({ path }) =>
+        path.endsWith("candidate-manifest-v1.sha256"),
+      ),
+    ).toMatchObject({
+      data: `${result.manifestDigest}  candidate-manifest-v1.json\n`,
+    });
+    expect(
+      harness.writes.find(({ path }) => path.endsWith("remote-bootstrap.json")),
+    ).toMatchObject({
+      data: `${JSON.stringify(
+        {
+          digest: createHash("sha256")
+            .update("console.log('fixed bootstrap')")
+            .digest("hex"),
+          protocolVersion: 1,
+          schemaVersion: 1,
+        },
+        null,
+        2,
+      )}\n`,
     });
     expect(harness.output).toEqual([`${JSON.stringify(result)}\n`]);
   });

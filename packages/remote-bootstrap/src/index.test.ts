@@ -818,7 +818,7 @@ require("node:fs").writeFileSync(${JSON.stringify(invocationLog)}, "invoked");
   );
 
   it.skipIf(process.platform === "win32")(
-    "terminates an in-flight observation child before acknowledging cancellation",
+    "terminates an in-flight observation child and prioritizes protocol contamination",
     async () => {
       const directory = await mkdtemp(
         join(tmpdir(), "skills-bootstrap-observe-cancel-active-"),
@@ -882,13 +882,19 @@ else process.exitCode = 2;
           }),
         );
         await waitForFile(observationStarted);
+        const cancellation = encodeWireFrame({
+          operation: "cancel",
+          protocolVersion: WIRE_PROTOCOL_VERSION,
+          requestId,
+          type: "request",
+        });
         child.stdin.end(
-          encodeWireFrame({
-            operation: "cancel",
-            protocolVersion: WIRE_PROTOCOL_VERSION,
-            requestId,
-            type: "request",
-          }),
+          new Uint8Array(
+            Buffer.concat([
+              Buffer.from(cancellation),
+              Buffer.from(cancellation),
+            ]),
+          ),
         );
         const exitCode = await closed;
         const frames = decodeWireFrames(
@@ -904,8 +910,8 @@ else process.exitCode = 2;
           value: [
             { type: "hello" },
             {
-              code: "remote_operation_failed",
-              phase: "observe",
+              code: "remote_protocol_violation",
+              phase: "wire",
               requestId,
               type: "failure",
             },
