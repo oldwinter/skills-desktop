@@ -41,11 +41,13 @@ import { TargetsView } from "../targets/TargetsView.js";
 type ScopeFilter = "all" | "global" | "project";
 type SelectedIdentity = Pick<PublicInventoryEntry, "name" | "scope">;
 type WorkspaceView =
-  | "about"
-  | "collections"
-  | "comparison"
-  | "inventory"
-  | "targets";
+  "about" | "collections" | "comparison" | "inventory" | "targets";
+
+interface ReviewFocusIntent {
+  closed: boolean;
+  exhausted: boolean;
+  reviewId: string | undefined;
+}
 
 // Windows may briefly reassign DOM focus after a native modal closes.
 const REVIEW_FOCUS_INTERVAL_MS = 16;
@@ -264,6 +266,8 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
   mutationPhaseRef.current = snapshot?.mutation.phase;
   const cancelReviewFocusRestoreRef = useRef<() => void>(() => undefined);
   const scheduleReviewFocusRestoreRef = useRef<() => void>(() => undefined);
+  const reviewFocusIntentRef = useRef<ReviewFocusIntent | null>(null);
+  const lastClosedReviewIdRef = useRef<string | undefined>(undefined);
   const inventory = snapshot?.inventory;
 
   useEffect(() => {
@@ -339,14 +343,23 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
     const cancelReviewFocusRestore = () => {
       cancelScheduledRestore();
       reviewReturnFocusRef.current = null;
+      reviewFocusIntentRef.current = null;
+      lastClosedReviewIdRef.current = undefined;
     };
     const scheduleReviewFocusRestore = () => {
+      const intent = reviewFocusIntentRef.current;
+      if (intent === null || !intent.closed) return;
       cancelScheduledRestore();
+      intent.exhausted = false;
       const generation = restoreGeneration;
       let expectedTarget: HTMLElement | null = null;
       let focusChecks = 0;
       let stableChecks = 0;
       const scheduleNextCheck = () => {
+        if (focusChecks >= REVIEW_FOCUS_MAX_CHECKS) {
+          intent.exhausted = true;
+          return;
+        }
         pendingRestore = window.setTimeout(
           restoreFocus,
           REVIEW_FOCUS_INTERVAL_MS,
@@ -355,16 +368,17 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
       const restoreFocus = () => {
         pendingRestore = undefined;
         if (generation !== restoreGeneration) return;
+        if (reviewFocusIntentRef.current !== intent || !intent.closed) return;
         const opener = reviewReturnFocusRef.current;
         if (opener === null) return;
 
+        focusChecks += 1;
         const workspaceFocused =
           document.hasFocus() && mutationPhaseRef.current !== "reviewing";
         if (!workspaceFocused) {
           scheduleNextCheck();
           return;
         }
-        focusChecks += 1;
         const target =
           opener.isConnected && !opener.disabled
             ? opener
@@ -372,7 +386,11 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
               document.querySelector<HTMLButtonElement>(
                 'button[aria-label="Inventory"]',
               ));
-        if (target === null) return;
+        if (target === null) {
+          if (focusChecks >= REVIEW_FOCUS_MAX_CHECKS) intent.exhausted = true;
+          else scheduleNextCheck();
+          return;
+        }
 
         if (target !== expectedTarget) {
           expectedTarget = target;
@@ -386,10 +404,12 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
         }
         if (stableChecks >= REVIEW_FOCUS_STABLE_CHECKS) {
           reviewReturnFocusRef.current = null;
+          reviewFocusIntentRef.current = null;
+          lastClosedReviewIdRef.current = undefined;
           return;
         }
         if (focusChecks >= REVIEW_FOCUS_MAX_CHECKS) {
-          reviewReturnFocusRef.current = null;
+          intent.exhausted = true;
           return;
         }
         scheduleNextCheck();
@@ -397,7 +417,6 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
       scheduleNextCheck();
     };
     const handleWindowFocus = () => {
-      if (mutationPhaseRef.current === "reviewing") return;
       scheduleReviewFocusRestore();
     };
     const handleWorkspaceInput = () => {
@@ -414,16 +433,36 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
       window.removeEventListener("focus", handleWindowFocus);
       window.removeEventListener("keydown", handleWorkspaceInput, true);
       window.removeEventListener("pointerdown", handleWorkspaceInput, true);
+      cancelReviewFocusRestore();
       cancelReviewFocusRestoreRef.current = () => undefined;
       scheduleReviewFocusRestoreRef.current = () => undefined;
-      cancelScheduledRestore();
     };
   }, []);
 
   useEffect(() => {
-    if (snapshot?.mutation.phase === "reviewing") return;
-    if (reviewReturnFocusRef.current === null) return;
-    scheduleReviewFocusRestoreRef.current();
+    const unsubscribe = client.subscribeReviewWindowClosed(({ reviewId }) => {
+      const intent = reviewFocusIntentRef.current;
+      if (intent === null) return;
+      if (intent.reviewId === undefined) {
+        lastClosedReviewIdRef.current = reviewId;
+        return;
+      }
+      if (intent.reviewId !== reviewId) return;
+      intent.closed = true;
+      scheduleReviewFocusRestoreRef.current();
+    });
+    return unsubscribe;
+  }, [client]);
+
+  useEffect(() => {
+    const intent = reviewFocusIntentRef.current;
+    if (
+      intent?.closed &&
+      intent.exhausted &&
+      snapshot?.mutation.phase !== "reviewing"
+    ) {
+      scheduleReviewFocusRestoreRef.current();
+    }
   }, [snapshot?.mutation.phase]);
 
   const filteredEntries = useMemo(() => {
@@ -535,6 +574,7 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
     });
     if (result.ok) {
       setActionError(undefined);
+      cancelReviewFocusRestoreRef.current();
       setPreparedMutationId(result.value.operationId);
     } else setActionError(result.error);
   };
@@ -546,6 +586,7 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
     });
     if (result.ok) {
       setActionError(undefined);
+      cancelReviewFocusRestoreRef.current();
       setPreparedMutationId(result.value.operationId);
     } else setActionError(result.error);
   };
@@ -559,6 +600,7 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
     });
     if (result.ok) {
       setActionError(undefined);
+      cancelReviewFocusRestoreRef.current();
       setPreparedMutationId(result.value.operationId);
     } else setActionError(result.error);
   };
@@ -566,11 +608,26 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
     if (preparedMutationId === undefined) return;
     cancelReviewFocusRestoreRef.current();
     reviewReturnFocusRef.current = returnFocus;
+    const intent: ReviewFocusIntent = {
+      closed: false,
+      exhausted: false,
+      reviewId: undefined,
+    };
+    reviewFocusIntentRef.current = intent;
     const result = await client.requestReview(preparedMutationId);
+    if (reviewFocusIntentRef.current !== intent) return;
     if (result.ok) setActionError(undefined);
     else {
       cancelReviewFocusRestoreRef.current();
       setActionError(result.error);
+      return;
+    }
+    intent.reviewId = result.value.operationId;
+    const lastClosedReviewId = lastClosedReviewIdRef.current;
+    lastClosedReviewIdRef.current = undefined;
+    if (lastClosedReviewId === intent.reviewId) {
+      intent.closed = true;
+      scheduleReviewFocusRestoreRef.current();
     }
   };
   const reconcileMutation = async () => {
@@ -809,7 +866,8 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                 >
                   <Server aria-hidden="true" size={16} />
                   <span>
-                    SSH · 未在 V1 开放。远程 Target 仅保留只读痕迹，不能作为变更工作区。
+                    SSH · 未在 V1 开放。远程 Target
+                    仅保留只读痕迹，不能作为变更工作区。
                   </span>
                   <strong>未开放</strong>
                 </div>

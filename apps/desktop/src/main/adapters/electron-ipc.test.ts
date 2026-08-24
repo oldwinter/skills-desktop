@@ -34,6 +34,95 @@ describe("Electron IPC sender authorization", () => {
     ).toBe(false);
   });
 
+  it("notifies only the exact live workspace that owned the review", () => {
+    const session = {
+      request: vi.fn(),
+      snapshot: vi.fn(),
+      teardown: vi.fn(),
+    };
+    const ipcMain = {
+      handle: vi.fn(),
+      removeHandler: vi.fn(),
+    };
+    const capabilities = {
+      attach: vi.fn(() => session),
+    };
+    const registration = registerDesktopIpc({
+      capabilities: capabilities as never,
+      ipcMain: ipcMain as never,
+      newEpoch: vi.fn(() => "epoch-1"),
+      updates: {
+        exportDiagnostics: vi.fn(async () => "cancelled" as const),
+        getSnapshot: vi.fn(),
+        requestCheck: vi.fn(async () => undefined),
+        requestRestart: vi.fn(async () => "stale" as const),
+        subscribe: vi.fn(() => () => undefined),
+      },
+    });
+    const firstWorkspace = {
+      id: 17,
+      isDestroyed: vi.fn(() => false),
+      mainFrame: { url: "skills-desktop://workspace/index.html" },
+      send: vi.fn(),
+    };
+    const secondWorkspace = {
+      id: 19,
+      isDestroyed: vi.fn(() => false),
+      mainFrame: { url: "skills-desktop://workspace/index.html" },
+      send: vi.fn(),
+    };
+    const review = {
+      id: 21,
+      isDestroyed: vi.fn(() => false),
+      mainFrame: { url: "skills-desktop://review/index.html" },
+      send: vi.fn(),
+    };
+    registration.attach(
+      firstWorkspace as never,
+      "workspace",
+      firstWorkspace.mainFrame.url,
+    );
+    registration.attach(
+      secondWorkspace as never,
+      "workspace",
+      secondWorkspace.mainFrame.url,
+    );
+    registration.attach(
+      review as never,
+      "review",
+      review.mainFrame.url,
+      "review-1",
+    );
+    firstWorkspace.send.mockClear();
+    secondWorkspace.send.mockClear();
+    review.send.mockClear();
+
+    registration.notifyReviewWindowClosed("review-1", 17);
+    expect(firstWorkspace.send).toHaveBeenCalledWith(
+      "workspace:review-window:closed",
+      { reviewId: "review-1", schemaVersion: 1 },
+    );
+    expect(secondWorkspace.send).not.toHaveBeenCalled();
+    expect(review.send).not.toHaveBeenCalled();
+
+    firstWorkspace.send.mockClear();
+    secondWorkspace.isDestroyed.mockReturnValue(true);
+    registration.notifyReviewWindowClosed("review-2", 19);
+    expect(firstWorkspace.send).not.toHaveBeenCalled();
+    expect(secondWorkspace.send).not.toHaveBeenCalled();
+
+    registration.notifyReviewWindowClosed("review-2", 21);
+    expect(review.send).not.toHaveBeenCalled();
+
+    firstWorkspace.send.mockClear();
+    registration.notifyReviewWindowClosed("", 17);
+    expect(firstWorkspace.send).not.toHaveBeenCalled();
+
+    registration.detach(17);
+    registration.notifyReviewWindowClosed("review-3", 17);
+    expect(firstWorkspace.send).not.toHaveBeenCalled();
+  });
+
   it("returns bounded errors for hostile frames and invalid main output", async () => {
     const handlers = new Map<
       string,

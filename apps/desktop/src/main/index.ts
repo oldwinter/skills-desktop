@@ -86,7 +86,9 @@ if (!app.requestSingleInstanceLock()) {
       };
 
       presentReview = (reviewId) => {
-        if (reviewWindow !== undefined) reviewWindow.close();
+        const priorReviewWindow = reviewWindow;
+        reviewWindow = undefined;
+        priorReviewWindow?.close();
         const ownerWindow = workspaceWindow;
         const window = new BrowserWindow(
           reviewWindowOptions(
@@ -120,10 +122,15 @@ if (!app.requestSingleInstanceLock()) {
           if (
             wasActiveReview &&
             ownerWindow !== undefined &&
-            !ownerWindow.isDestroyed()
+            !ownerWindow.isDestroyed() &&
+            workspaceWindow === ownerWindow
           ) {
             ownerWindow.focus();
             ownerWindow.webContents.focus();
+            desktopIpc.notifyReviewWindowClosed(
+              reviewId,
+              ownerWindow.webContents.id,
+            );
           }
         });
         void window.loadURL(REVIEW_URL);

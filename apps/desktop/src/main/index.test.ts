@@ -128,6 +128,7 @@ const mocks = vi.hoisted(() => {
     attach: vi.fn(),
     detach: vi.fn(),
     dispose: vi.fn(),
+    notifyReviewWindowClosed: vi.fn(),
   };
 
   const registerAssetProtocol = vi.fn();
@@ -187,6 +188,7 @@ const mocks = vi.hoisted(() => {
     desktopIpc.attach.mockClear();
     desktopIpc.detach.mockClear();
     desktopIpc.dispose.mockClear();
+    desktopIpc.notifyReviewWindowClosed.mockClear();
     registerAssetProtocol.mockClear();
     registerDesktopIpc.mockClear();
     secureWindow.mockClear();
@@ -417,6 +419,7 @@ describe("desktop main entrypoint", () => {
     expect(review?.close).toHaveBeenCalledTimes(1);
     expect(workspace?.focus).toHaveBeenCalledTimes(2);
     expect(workspace?.webContents.focus).not.toHaveBeenCalled();
+    expect(mocks.desktopIpc.notifyReviewWindowClosed).not.toHaveBeenCalled();
     const activeReview = mocks.windows[2];
     expect(activeReview?.options).toEqual({ kind: "review" });
 
@@ -426,12 +429,25 @@ describe("desktop main entrypoint", () => {
     );
     expect(workspace?.focus).toHaveBeenCalledTimes(2);
     expect(workspace?.webContents.focus).not.toHaveBeenCalled();
+    expect(mocks.desktopIpc.notifyReviewWindowClosed).not.toHaveBeenCalled();
 
     (activeReview?.close as unknown as (() => void) | undefined)?.();
     expect(workspace?.focus).toHaveBeenCalledTimes(3);
     expect(workspace?.webContents.focus).toHaveBeenCalledTimes(1);
+    expect(mocks.desktopIpc.notifyReviewWindowClosed).toHaveBeenCalledWith(
+      "review-2",
+      workspace?.webContents.id,
+    );
+    expect(mocks.desktopIpc.notifyReviewWindowClosed).toHaveBeenCalledTimes(1);
     expect(workspace?.focus.mock.invocationCallOrder.at(-1)).toBeLessThan(
       workspace?.webContents.focus.mock.invocationCallOrder.at(-1) ?? 0,
+    );
+    expect(
+      workspace?.webContents.focus.mock.invocationCallOrder.at(-1),
+    ).toBeLessThan(
+      mocks.desktopIpc.notifyReviewWindowClosed.mock.invocationCallOrder.at(
+        -1,
+      ) ?? 0,
     );
 
     (workspace?.close as unknown as (() => void) | undefined)?.();
@@ -447,6 +463,7 @@ describe("desktop main entrypoint", () => {
     (activeReview?.close as unknown as (() => void) | undefined)?.();
     expect(replacement?.focus).toHaveBeenCalledTimes(1);
     expect(replacement?.webContents.focus).not.toHaveBeenCalled();
+    expect(mocks.desktopIpc.notifyReviewWindowClosed).toHaveBeenCalledTimes(1);
     const platform = vi.spyOn(process, "platform", "get");
     platform.mockReturnValue("linux");
     mocks.emitApp("window-all-closed");
