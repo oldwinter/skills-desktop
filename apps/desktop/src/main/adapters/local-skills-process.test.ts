@@ -613,7 +613,12 @@ if (args.at(-1) === "--version") {
           },
         });
       } finally {
-        await rm(directory, { force: true, recursive: true });
+        await rm(directory, {
+          force: true,
+          maxRetries: 10,
+          recursive: true,
+          retryDelay: 100,
+        });
       }
     },
   );
@@ -681,7 +686,12 @@ setInterval(() => undefined, 1000);
             // The production tree kill already removed the process.
           }
         }
-        await rm(directory, { force: true, recursive: true });
+        await rm(directory, {
+          force: true,
+          maxRetries: 10,
+          recursive: true,
+          retryDelay: 100,
+        });
       }
     },
   );
