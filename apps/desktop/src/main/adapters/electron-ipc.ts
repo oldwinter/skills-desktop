@@ -11,6 +11,7 @@ import {
   type AboutUpdateResult,
   type AboutUpdateSnapshot,
 } from "../../contracts/about.js";
+import { reviewWindowClosedEventSchema } from "../../contracts/desktop.js";
 import {
   desktopEventSchema,
   workspaceRequestResultSchema,
@@ -43,6 +44,7 @@ const CHANNELS = {
   collectionPrepareMany: "workspace:collection:prepare-many",
   collectionReview: "workspace:collection:review-request",
   event: "workspace:event",
+  reviewWindowClosed: "workspace:review-window:closed",
   hostTrustReview: "workspace:host-trust:review",
   refresh: "workspace:inventory:refresh",
   mutationPrepare: "workspace:mutation:prepare",
@@ -696,6 +698,24 @@ export function registerDesktopIpc(input: {
     }
   });
 
+  const notifyReviewWindowClosed = (
+    reviewId: string,
+    ownerWebContentsId: number,
+  ) => {
+    const parsed = reviewWindowClosedEventSchema.safeParse({
+      reviewId,
+      schemaVersion: 1,
+    });
+    if (!parsed.success) return;
+    const endpoint = endpoints.get(ownerWebContentsId);
+    if (
+      endpoint?.role !== "workspace" ||
+      endpoint.webContents.isDestroyed()
+    )
+      return;
+    endpoint.webContents.send(CHANNELS.reviewWindowClosed, parsed.data);
+  };
+
   const detach = (webContentsId: number) => {
     const prior = endpoints.get(webContentsId);
     if (prior === undefined) return;
@@ -748,6 +768,7 @@ export function registerDesktopIpc(input: {
   return {
     attach,
     detach,
+    notifyReviewWindowClosed,
     dispose() {
       unsubscribeUpdates();
       for (const webContentsId of endpoints.keys()) detach(webContentsId);

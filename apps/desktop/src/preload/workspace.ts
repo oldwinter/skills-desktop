@@ -6,7 +6,11 @@ import {
   aboutUpdateSnapshotSchema,
   type AboutBridge,
 } from "../contracts/about.js";
-import type { DesktopBridge } from "../contracts/desktop.js";
+import {
+  reviewWindowClosedEventSchema,
+  type DesktopBridge,
+  type ReviewWindowClosedEvent,
+} from "../contracts/desktop.js";
 import {
   desktopEventSchema,
   workspaceRequestResultSchema,
@@ -169,6 +173,16 @@ const bridge: DesktopBridge = Object.freeze({
     return workspaceRequestResultSchema.parse(
       await invoke("workspace:review:request", preparedMutationId),
     );
+  },
+  subscribeReviewWindowClosed(
+    listener: (event: ReviewWindowClosedEvent) => void,
+  ) {
+    const receive = (_event: Electron.IpcRendererEvent, value: unknown) => {
+      listener(reviewWindowClosedEventSchema.parse(value));
+    };
+    ipcRenderer.on("workspace:review-window:closed", receive);
+    return () =>
+      ipcRenderer.removeListener("workspace:review-window:closed", receive);
   },
   subscribe(listener: (event: DesktopEvent) => void) {
     const receive = (_event: Electron.IpcRendererEvent, value: unknown) => {

@@ -113,6 +113,7 @@ async function loadBridge() {
     requestCollectionReview(collectionPlanId: string): Promise<unknown>;
     requestHostTrustReview(targetId: string): Promise<unknown>;
     requestReview(preparedMutationId: string): Promise<unknown>;
+    subscribeReviewWindowClosed(listener: (event: unknown) => void): () => void;
     subscribe(listener: (event: unknown) => void): () => void;
     updateTarget(
       targetId: string,
@@ -293,6 +294,29 @@ describe("workspace preload authority", () => {
     electron.invoke.mockResolvedValue({ ok: true });
     await expect(bridge.getSnapshot()).rejects.toThrow();
     expect(() => receive({}, { type: "unexpected" })).toThrow();
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
+
+  it("parses review-window close events and removes the exact listener", async () => {
+    const bridge = await loadBridge();
+    const listener = vi.fn();
+    const cleanup = bridge.subscribeReviewWindowClosed(listener);
+    const receive = electron.on.mock.calls.find(
+      ([channel]) => channel === "workspace:review-window:closed",
+    )?.[1] as (event: unknown, value: unknown) => void;
+    const closed = { reviewId: "review-1", schemaVersion: 1 };
+
+    receive({}, closed);
+    expect(listener).toHaveBeenCalledWith(closed);
+    cleanup();
+    expect(electron.removeListener).toHaveBeenCalledWith(
+      "workspace:review-window:closed",
+      receive,
+    );
+    expect(() => receive({}, { reviewId: "", schemaVersion: 1 })).toThrow();
+    expect(() =>
+      receive({}, { reviewId: "review-1", schemaVersion: 2 }),
+    ).toThrow();
     expect(listener).toHaveBeenCalledTimes(1);
   });
 

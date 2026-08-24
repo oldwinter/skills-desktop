@@ -17,7 +17,10 @@ import {
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { AboutBridge } from "../../../contracts/about.js";
-import type { DesktopBridge } from "../../../contracts/desktop.js";
+import type {
+  DesktopBridge,
+  ReviewWindowClosedEvent,
+} from "../../../contracts/desktop.js";
 import type {
   DesktopEvent,
   WorkspaceSnapshot,
@@ -63,6 +66,25 @@ const snapshot: WorkspaceSnapshot = {
     kind: "local",
     label: "This device",
     workspaceLabel: "skills-desktop",
+  },
+};
+
+const reviewableSnapshot: WorkspaceSnapshot = {
+  ...snapshot,
+  mutation: {
+    ...snapshot.mutation,
+    commandPlan: {
+      harness: "Codex",
+      names: ["Case-Sensitive-Skill"],
+      operation: "update",
+      preview: "npx skills@1.5.23 update Case-Sensitive-Skill --project --yes",
+      schemaVersion: 1,
+      scope: "project",
+      source: null,
+      targetId: snapshot.target.id,
+      timeoutMs: 600_000,
+    },
+    phase: "planned",
   },
 };
 
@@ -159,7 +181,14 @@ const collectionSnapshot: WorkspaceSnapshot = {
   },
 };
 
-function clientFor(value: WorkspaceSnapshot): DesktopBridge {
+interface ReviewCloseHarness {
+  listener: ((event: ReviewWindowClosedEvent) => void) | undefined;
+}
+
+function clientFor(
+  value: WorkspaceSnapshot,
+  reviewCloseHarness?: ReviewCloseHarness,
+): DesktopBridge {
   return {
     about: aboutClient,
     async cancelInventory(operationId) {
@@ -206,6 +235,16 @@ function clientFor(value: WorkspaceSnapshot): DesktopBridge {
     },
     async requestReview() {
       return { ok: true, value: { operationId: "review-1" } };
+    },
+    subscribeReviewWindowClosed(listener) {
+      if (reviewCloseHarness !== undefined) {
+        reviewCloseHarness.listener = listener;
+      }
+      return () => {
+        if (reviewCloseHarness?.listener === listener) {
+          reviewCloseHarness.listener = undefined;
+        }
+      };
     },
     subscribe() {
       return () => undefined;
@@ -393,21 +432,20 @@ describe("Local Target Inventory shell", () => {
       "Project scope",
       "Global scope",
     ]);
-    expect(inventoryButtons.map((button) => button.getAttribute("aria-pressed"))).toEqual([
-      "true",
-      "false",
-      "false",
-    ]);
+    expect(
+      inventoryButtons.map((button) => button.getAttribute("aria-pressed")),
+    ).toEqual(["true", "false", "false"]);
     expect(addButtons.map((button) => button.textContent)).toEqual([
       "Project scope",
       "Global scope",
     ]);
-    expect(addButtons.map((button) => button.getAttribute("aria-pressed"))).toEqual([
-      "true",
-      "false",
-    ]);
+    expect(
+      addButtons.map((button) => button.getAttribute("aria-pressed")),
+    ).toEqual(["true", "false"]);
 
-    expect(inventoryButtons.every((button) => button.tabIndex === 0)).toBe(true);
+    expect(inventoryButtons.every((button) => button.tabIndex === 0)).toBe(
+      true,
+    );
     expect(addButtons.every((button) => button.tabIndex === 0)).toBe(true);
   });
 
@@ -518,7 +556,9 @@ describe("Local Target Inventory shell", () => {
     const primary = alert.querySelector(".user-facing-error > span");
     expect(primary).toHaveTextContent("本地进程执行失败。请刷新后重试。");
     expect(primary).not.toHaveTextContent("ENOENT");
-    expect(alert.querySelector(".user-facing-error-details code")).toHaveTextContent(
+    expect(
+      alert.querySelector(".user-facing-error-details code"),
+    ).toHaveTextContent(
       "Inventory observation failed with Error: ENOENT /tmp/x",
     );
   });
@@ -553,13 +593,18 @@ describe("Local Target Inventory shell", () => {
       />,
     );
 
-    expect(await screen.findByText("commit / 0123456789abcdef")).toBeInTheDocument();
+    expect(
+      await screen.findByText("commit / 0123456789abcdef"),
+    ).toBeInTheDocument();
     expect(screen.getByText("sha256 / fingerprint-123")).toBeInTheDocument();
     expect(screen.getAllByText("Codex").length).toBeGreaterThan(0);
 
-    fireEvent.change(screen.getByRole("searchbox", { name: "Search inventory" }), {
-      target: { value: "no-such-skill" },
-    });
+    fireEvent.change(
+      screen.getByRole("searchbox", { name: "Search inventory" }),
+      {
+        target: { value: "no-such-skill" },
+      },
+    );
 
     expect(
       screen.getByRole("heading", { name: "No matching skills" }),
@@ -619,9 +664,12 @@ describe("Local Target Inventory shell", () => {
     fireEvent.change(screen.getByRole("textbox", { name: "GitHub source" }), {
       target: { value: "example/skills" },
     });
-    fireEvent.change(screen.getByRole("textbox", { name: "Exact skill name" }), {
-      target: { value: "find-skills" },
-    });
+    fireEvent.change(
+      screen.getByRole("textbox", { name: "Exact skill name" }),
+      {
+        target: { value: "find-skills" },
+      },
+    );
     fireEvent.click(
       within(screen.getByRole("group", { name: "Add scope" })).getByRole(
         "button",
@@ -889,10 +937,12 @@ describe("Local Target Inventory shell", () => {
     }
 
     expect(
-      screen.getByRole("checkbox", { name: "Include This device" }).parentElement,
+      screen.getByRole("checkbox", { name: "Include This device" })
+        .parentElement,
     ).toHaveClass("collection-checkbox-hit-area");
     expect(
-      screen.getByRole("checkbox", { name: "Select find-skills" }).parentElement,
+      screen.getByRole("checkbox", { name: "Select find-skills" })
+        .parentElement,
     ).toHaveClass("collection-checkbox-hit-area");
 
     expect(rendererStyles).toMatch(
@@ -1378,6 +1428,7 @@ describe("Local Target Inventory shell", () => {
       ok: true as const,
       value: { operationId: "review-1" },
     }));
+    const reviewClose = { listener: undefined } as ReviewCloseHarness;
     const plannedSnapshot: WorkspaceSnapshot = {
       ...snapshot,
       mutation: {
@@ -1401,7 +1452,7 @@ describe("Local Target Inventory shell", () => {
       },
     };
     const client: DesktopBridge = {
-      ...clientFor(plannedSnapshot),
+      ...clientFor(plannedSnapshot, reviewClose),
       prepareMutation,
       requestReview,
     };
@@ -1445,26 +1496,31 @@ describe("Local Target Inventory shell", () => {
     const focusTimers = installFocusTimerHarness();
     rerender(
       <InventoryApp
-        client={clientFor({
-          ...plannedSnapshot,
-          mutation: {
-            ...plannedSnapshot.mutation,
-            outcome: {
-              effects: { status: "verified" },
-              process: {
-                disposition: "completed",
-                exitCode: 0,
-                termination: "known",
+        client={clientFor(
+          {
+            ...plannedSnapshot,
+            mutation: {
+              ...plannedSnapshot.mutation,
+              outcome: {
+                effects: { status: "verified" },
+                process: {
+                  disposition: "completed",
+                  exitCode: 0,
+                  termination: "known",
+                },
               },
+              phase: "succeeded",
             },
-            phase: "succeeded",
           },
-        })}
+          reviewClose,
+        )}
       />,
     );
     const outcome = await screen.findByText("completed / verified");
     const inventoryButton = screen.getByRole("button", { name: "Inventory" });
-    act(() => window.dispatchEvent(new Event("focus")));
+    act(() =>
+      reviewClose.listener?.({ reviewId: "review-1", schemaVersion: 1 }),
+    );
     expect(focusTimers.pendingCount()).toBe(1);
 
     act(() => focusTimers.runTick());
@@ -1488,26 +1544,30 @@ describe("Local Target Inventory shell", () => {
     await waitFor(() => expect(requestReview).toHaveBeenCalledTimes(2));
     rerender(
       <InventoryApp
-        client={clientFor({
-          ...plannedSnapshot,
-          mutation: {
-            ...plannedSnapshot.mutation,
-            outcome: {
-              effects: { status: "verified" },
-              process: {
-                disposition: "completed",
-                exitCode: 0,
-                termination: "known",
+        client={clientFor(
+          {
+            ...plannedSnapshot,
+            mutation: {
+              ...plannedSnapshot.mutation,
+              outcome: {
+                effects: { status: "verified" },
+                process: {
+                  disposition: "completed",
+                  exitCode: 0,
+                  termination: "known",
+                },
               },
+              phase: "succeeded",
             },
-            phase: "succeeded",
           },
-        })}
+          reviewClose,
+        )}
       />,
     );
     const restoredOutcome = await screen.findByText("completed / verified");
-    inventoryButton.focus();
-    act(() => window.dispatchEvent(new Event("focus")));
+    act(() =>
+      reviewClose.listener?.({ reviewId: "review-1", schemaVersion: 1 }),
+    );
     expect(focusTimers.pendingCount()).toBe(1);
     fireEvent.keyDown(inventoryButton, { key: "Tab" });
     expect(focusTimers.pendingCount()).toBe(0);
@@ -1526,6 +1586,7 @@ describe("Local Target Inventory shell", () => {
       ok: true as const,
       value: { operationId: "review-cancel-1" },
     }));
+    const reviewClose = { listener: undefined } as ReviewCloseHarness;
     const plannedSnapshot: WorkspaceSnapshot = {
       ...snapshot,
       mutation: {
@@ -1555,15 +1616,12 @@ describe("Local Target Inventory shell", () => {
         phase: "reviewing",
       },
     };
-    const { rerender } = render(
-      <InventoryApp
-        client={{
-          ...clientFor(plannedSnapshot),
-          prepareMutation,
-          requestReview,
-        }}
-      />,
-    );
+    const client: DesktopBridge = {
+      ...clientFor(plannedSnapshot, reviewClose),
+      prepareMutation,
+      requestReview,
+    };
+    const { rerender } = render(<InventoryApp client={client} />);
 
     fireEvent.click(
       (
@@ -1572,58 +1630,72 @@ describe("Local Target Inventory shell", () => {
         })
       )[0]!,
     );
-    fireEvent.click(await screen.findByRole("button", { name: "Prepare removal" }));
-    await waitFor(() => expect(prepareMutation).toHaveBeenCalledWith(
-      snapshot.target.id,
-      {
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Prepare removal" }),
+    );
+    await waitFor(() =>
+      expect(prepareMutation).toHaveBeenCalledWith(snapshot.target.id, {
         names: ["Case-Sensitive-Skill"],
         scope: "project",
         type: "remove",
-      },
-    ));
+      }),
+    );
 
     const reviewButton = screen.getByRole("button", {
       name: "Open Trusted Review",
     });
     fireEvent.click(reviewButton);
-    await waitFor(() => expect(requestReview).toHaveBeenCalledWith(
-      "prepared-cancel-1",
-    ));
+    await waitFor(() =>
+      expect(requestReview).toHaveBeenCalledWith("prepared-cancel-1"),
+    );
 
-    rerender(<InventoryApp client={clientFor(reviewingSnapshot)} />);
+    rerender(
+      <InventoryApp client={clientFor(reviewingSnapshot, reviewClose)} />,
+    );
     await waitFor(() =>
       expect(
         screen.getByRole("button", { name: "Open Trusted Review" }),
       ).toBeDisabled(),
     );
-    act(() => window.dispatchEvent(new Event("focus")));
-    expect(
-      screen.getByRole("button", { name: "Inventory" }),
-    ).not.toHaveFocus();
+    expect(screen.getByRole("button", { name: "Inventory" })).not.toHaveFocus();
 
     const inventoryButton = screen.getByRole("button", { name: "Inventory" });
     inventoryButton.focus();
     hasFocus.mockReturnValue(false);
     const focusTimers = installFocusTimerHarness();
-    rerender(<InventoryApp client={clientFor(plannedSnapshot)} />);
-    await waitFor(() =>
-      expect(
-        screen.getByRole("button", { name: "Open Trusted Review" }),
-      ).toBeEnabled(),
-    );
     expect(inventoryButton).toHaveFocus();
     expect(
       screen.getByRole("button", { name: "Open Trusted Review" }),
     ).not.toHaveFocus();
 
+    act(() =>
+      reviewClose.listener?.({
+        reviewId: "review-cancel-1",
+        schemaVersion: 1,
+      }),
+    );
     expect(focusTimers.pendingCount()).toBe(1);
-    for (let tick = 0; tick < 65; tick += 1) {
+    for (let tick = 0; tick < 60; tick += 1) {
       act(() => focusTimers.runTick());
     }
     expect(inventoryButton).toHaveFocus();
+    expect(focusTimers.pendingCount()).toBe(0);
+
+    rerender(<InventoryApp client={clientFor(plannedSnapshot, reviewClose)} />);
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Open Trusted Review" }),
+      ).toBeEnabled(),
+    );
     expect(focusTimers.pendingCount()).toBe(1);
+    for (let tick = 0; tick < 60; tick += 1) {
+      act(() => focusTimers.runTick());
+    }
+    expect(focusTimers.pendingCount()).toBe(0);
 
     hasFocus.mockReturnValue(true);
+    act(() => window.dispatchEvent(new Event("focus")));
+    expect(focusTimers.pendingCount()).toBe(1);
     act(() => focusTimers.runTick());
     expect(
       screen.getByRole("button", { name: "Open Trusted Review" }),
@@ -1631,6 +1703,173 @@ describe("Local Target Inventory shell", () => {
     for (let tick = 0; tick < 12; tick += 1) {
       act(() => focusTimers.runTick());
     }
+    expect(focusTimers.pendingCount()).toBe(0);
+  });
+
+  it("ignores stale close ids and starts only for the matching review", async () => {
+    vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    const reviewClose = { listener: undefined } as ReviewCloseHarness;
+    const requestReview = vi.fn(async () => ({
+      ok: true as const,
+      value: { operationId: "review-current" },
+    }));
+    const { unmount } = render(
+      <InventoryApp
+        client={{
+          ...clientFor(reviewableSnapshot, reviewClose),
+          requestReview,
+        }}
+      />,
+    );
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Prepare update" }),
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Open Trusted Review" }),
+      ).toBeEnabled(),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open Trusted Review" }),
+    );
+    await waitFor(() =>
+      expect(requestReview).toHaveBeenCalledWith("prepared-1"),
+    );
+
+    const focusTimers = installFocusTimerHarness();
+    act(() =>
+      reviewClose.listener?.({ reviewId: "review-stale", schemaVersion: 1 }),
+    );
+    expect(focusTimers.pendingCount()).toBe(0);
+    act(() =>
+      reviewClose.listener?.({ reviewId: "review-current", schemaVersion: 1 }),
+    );
+    expect(focusTimers.pendingCount()).toBe(1);
+    unmount();
+    expect(focusTimers.pendingCount()).toBe(0);
+    act(() => focusTimers.runTick());
+    expect(focusTimers.pendingCount()).toBe(0);
+  });
+
+  it("buffers one close id that arrives before the review request resolves", async () => {
+    vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    const reviewClose = { listener: undefined } as ReviewCloseHarness;
+    let resolveRequest:
+      | ((result: Awaited<ReturnType<DesktopBridge["requestReview"]>>) => void)
+      | undefined;
+    const requestReview = vi.fn(
+      () =>
+        new Promise<Awaited<ReturnType<DesktopBridge["requestReview"]>>>(
+          (resolve) => {
+            resolveRequest = resolve;
+          },
+        ),
+    );
+    render(
+      <InventoryApp
+        client={{
+          ...clientFor(reviewableSnapshot, reviewClose),
+          requestReview,
+        }}
+      />,
+    );
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Prepare update" }),
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Open Trusted Review" }),
+      ).toBeEnabled(),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open Trusted Review" }),
+    );
+    await waitFor(() =>
+      expect(requestReview).toHaveBeenCalledWith("prepared-1"),
+    );
+    const focusTimers = installFocusTimerHarness();
+    act(() =>
+      reviewClose.listener?.({
+        reviewId: "review-before-response",
+        schemaVersion: 1,
+      }),
+    );
+    expect(focusTimers.pendingCount()).toBe(0);
+
+    resolveRequest?.({
+      ok: true,
+      value: { operationId: "review-before-response" },
+    });
+    await waitFor(() => expect(focusTimers.pendingCount()).toBe(1));
+  });
+
+  it("cancels a close intent on user input and on a failed replacement request", async () => {
+    vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    const reviewClose = { listener: undefined } as ReviewCloseHarness;
+    const requestReview = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true as const,
+        value: { operationId: "review-input" },
+      })
+      .mockResolvedValueOnce({
+        error: {
+          code: "review_invalid" as const,
+          effects: "none" as const,
+          message: "The review is no longer available.",
+          phase: "review" as const,
+          retryable: false,
+        },
+        ok: false as const,
+      });
+    render(
+      <InventoryApp
+        client={{
+          ...clientFor(reviewableSnapshot, reviewClose),
+          requestReview,
+        }}
+      />,
+    );
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Prepare update" }),
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Open Trusted Review" }),
+      ).toBeEnabled(),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open Trusted Review" }),
+    );
+    await waitFor(() => expect(requestReview).toHaveBeenCalledTimes(1));
+    const focusTimers = installFocusTimerHarness();
+    act(() =>
+      reviewClose.listener?.({ reviewId: "review-input", schemaVersion: 1 }),
+    );
+    expect(focusTimers.pendingCount()).toBe(1);
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(focusTimers.pendingCount()).toBe(0);
+    act(() =>
+      reviewClose.listener?.({ reviewId: "review-input", schemaVersion: 1 }),
+    );
+    expect(focusTimers.pendingCount()).toBe(0);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open Trusted Review" }),
+    );
+    await waitFor(() => expect(requestReview).toHaveBeenCalledTimes(2));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "The review is no longer available.",
+    );
+    act(() =>
+      reviewClose.listener?.({
+        reviewId: "review-replacement",
+        schemaVersion: 1,
+      }),
+    );
     expect(focusTimers.pendingCount()).toBe(0);
   });
 
@@ -2184,7 +2423,6 @@ describe("Local Target Inventory shell", () => {
     ).toBeInTheDocument();
   });
 
-
   it("keeps No skill selected when inventory still has rows (#111)", async () => {
     let listener: ((event: DesktopEvent) => void) | undefined;
     let snapshots = 0;
@@ -2343,7 +2581,6 @@ describe("Local Target Inventory shell", () => {
     expect(await screen.findByText("Target created")).toBeInTheDocument();
   });
 
-
   it("does not offer operable host-key Trusted Review under SSH V1-unavailable chrome", async () => {
     const requestHostTrustReview = vi.fn(async () => ({
       ok: true as const,
@@ -2394,7 +2631,6 @@ describe("Local Target Inventory shell", () => {
     ).not.toBeInTheDocument();
     expect(requestHostTrustReview).not.toHaveBeenCalled();
   });
-
 
   it("hard-disables Inventory mutation CTAs and shows SSH-active banner for SSH Targets", async () => {
     const prepareMutation = vi.fn(async () => ({
@@ -2460,7 +2696,9 @@ describe("Local Target Inventory shell", () => {
         })
       )[0]!,
     );
-    const prepareUpdate = screen.getByRole("button", { name: "Prepare update" });
+    const prepareUpdate = screen.getByRole("button", {
+      name: "Prepare update",
+    });
     const prepareRemoval = screen.getByRole("button", {
       name: "Prepare removal",
     });
@@ -2546,11 +2784,8 @@ describe("Local Target Inventory shell", () => {
     for (const option of sshOptions) {
       expect(option).toBeDisabled();
     }
-    expect(
-      screen.getByRole("button", { name: "Compare" }),
-    ).not.toBeDisabled();
+    expect(screen.getByRole("button", { name: "Compare" })).not.toBeDisabled();
   });
-
 
   it("explains stale freshness blocked mutation controls with Refresh next step (#70)", async () => {
     const refreshInventory = vi.fn(async () => ({
@@ -2589,7 +2824,9 @@ describe("Local Target Inventory shell", () => {
       "inventory-refresh-cta",
     );
 
-    const prepareUpdate = screen.getByRole("button", { name: "Prepare update" });
+    const prepareUpdate = screen.getByRole("button", {
+      name: "Prepare update",
+    });
     const prepareAdd = screen.getByRole("button", { name: "Prepare add" });
     expect(prepareUpdate).toBeDisabled();
     expect(prepareAdd).toBeDisabled();

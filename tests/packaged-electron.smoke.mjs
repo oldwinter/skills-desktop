@@ -536,6 +536,7 @@ try {
       "requestHostTrustReview",
       "requestReview",
       "subscribe",
+      "subscribeReviewWindowClosed",
       "updateTarget",
     ]) ||
     JSON.stringify(rendererBoundary.aboutBridgeKeys) !==
