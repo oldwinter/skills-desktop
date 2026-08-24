@@ -216,24 +216,41 @@ function clientFor(value: WorkspaceSnapshot): DesktopBridge {
   };
 }
 
-function installAnimationFrameHarness() {
-  let nextFrameId = 1;
-  const callbacks = new Map<number, FrameRequestCallback>();
-  vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
-    const frameId = nextFrameId;
-    nextFrameId += 1;
-    callbacks.set(frameId, callback);
-    return frameId;
-  });
-  vi.spyOn(window, "cancelAnimationFrame").mockImplementation((frameId) => {
-    callbacks.delete(frameId);
+function installFocusTimerHarness() {
+  const nativeSetTimeout = window.setTimeout.bind(window);
+  const nativeClearTimeout = window.clearTimeout.bind(window);
+  type WindowTimer = ReturnType<typeof window.setTimeout>;
+  let currentTime = performance.now();
+  let nextTimerId = 1_000_000;
+  const callbacks = new Map<WindowTimer, () => void>();
+  vi.spyOn(performance, "now").mockImplementation(() => currentTime);
+  const setTimeoutImplementation = (
+    ...parameters: Parameters<typeof window.setTimeout>
+  ): WindowTimer => {
+    const [handler, timeout, ...args] = parameters;
+    if (timeout !== 16 || typeof handler !== "function") {
+      return nativeSetTimeout(
+        handler,
+        timeout,
+        ...args,
+      ) as unknown as WindowTimer;
+    }
+    const timerId = nextTimerId as unknown as WindowTimer;
+    nextTimerId += 1;
+    callbacks.set(timerId, () => handler(...args));
+    return timerId;
+  };
+  vi.spyOn(window, "setTimeout").mockImplementation(setTimeoutImplementation);
+  vi.spyOn(window, "clearTimeout").mockImplementation((timerId) => {
+    if (!callbacks.delete(timerId as WindowTimer)) nativeClearTimeout(timerId);
   });
   return {
     pendingCount: () => callbacks.size,
-    runFrame: () => {
-      const frameCallbacks = [...callbacks.values()];
+    runTick: (elapsedMs = 16) => {
+      currentTime += elapsedMs;
+      const timerCallbacks = [...callbacks.values()];
       callbacks.clear();
-      for (const callback of frameCallbacks) callback(performance.now());
+      for (const callback of timerCallbacks) callback();
     },
   };
 }
@@ -1355,7 +1372,6 @@ describe("Local Target Inventory shell", () => {
   });
 
   it("prepares exact selected-skill intents and stabilizes approved review focus", async () => {
-    const animationFrames = installAnimationFrameHarness();
     vi.spyOn(document, "hasFocus").mockReturnValue(true);
     const prepareMutation = vi.fn(async () => ({
       ok: true as const,
@@ -1429,6 +1445,7 @@ describe("Local Target Inventory shell", () => {
       expect(requestReview).toHaveBeenCalledWith("prepared-1"),
     );
 
+    const focusTimers = installFocusTimerHarness();
     rerender(
       <InventoryApp
         client={clientFor({
@@ -1451,27 +1468,20 @@ describe("Local Target Inventory shell", () => {
     const outcome = await screen.findByText("completed / verified");
     const inventoryButton = screen.getByRole("button", { name: "Inventory" });
     act(() => window.dispatchEvent(new Event("focus")));
-    expect(animationFrames.pendingCount()).toBe(1);
+    expect(focusTimers.pendingCount()).toBe(1);
 
-    act(() => animationFrames.runFrame());
+    act(() => focusTimers.runTick());
     expect(outcome).toHaveFocus();
+    act(() => focusTimers.runTick());
     inventoryButton.focus();
-    act(() => animationFrames.runFrame());
+    act(() => focusTimers.runTick());
     expect(outcome).toHaveFocus();
-    act(() => animationFrames.runFrame());
-    act(() => animationFrames.runFrame());
-    expect(animationFrames.pendingCount()).toBe(1);
-
-    inventoryButton.focus();
-    act(() => animationFrames.runFrame());
-    expect(outcome).toHaveFocus();
-    for (let frame = 0; frame < 12; frame += 1) {
-      act(() => animationFrames.runFrame());
-    }
-    expect(animationFrames.pendingCount()).toBe(0);
+    act(() => focusTimers.runTick());
+    act(() => focusTimers.runTick());
+    expect(focusTimers.pendingCount()).toBe(0);
 
     inventoryButton.focus();
-    act(() => animationFrames.runFrame());
+    act(() => focusTimers.runTick());
     expect(inventoryButton).toHaveFocus();
 
     rerender(<InventoryApp client={client} />);
@@ -1501,16 +1511,15 @@ describe("Local Target Inventory shell", () => {
     const restoredOutcome = await screen.findByText("completed / verified");
     inventoryButton.focus();
     act(() => window.dispatchEvent(new Event("focus")));
-    expect(animationFrames.pendingCount()).toBe(1);
+    expect(focusTimers.pendingCount()).toBe(1);
     fireEvent.keyDown(inventoryButton, { key: "Tab" });
-    expect(animationFrames.pendingCount()).toBe(0);
-    act(() => animationFrames.runFrame());
+    expect(focusTimers.pendingCount()).toBe(0);
+    act(() => focusTimers.runTick(300));
     expect(restoredOutcome).not.toHaveFocus();
     expect(inventoryButton).toHaveFocus();
   });
 
   it("waits for native focus before restoring a cancelled review opener", async () => {
-    const animationFrames = installAnimationFrameHarness();
     const hasFocus = vi.spyOn(document, "hasFocus").mockReturnValue(true);
     const prepareMutation = vi.fn(async () => ({
       ok: true as const,
@@ -1598,6 +1607,7 @@ describe("Local Target Inventory shell", () => {
     const inventoryButton = screen.getByRole("button", { name: "Inventory" });
     inventoryButton.focus();
     hasFocus.mockReturnValue(false);
+    const focusTimers = installFocusTimerHarness();
     rerender(<InventoryApp client={clientFor(plannedSnapshot)} />);
     await waitFor(() =>
       expect(
@@ -1609,24 +1619,21 @@ describe("Local Target Inventory shell", () => {
       screen.getByRole("button", { name: "Open Trusted Review" }),
     ).not.toHaveFocus();
 
-    act(() => {
-      window.dispatchEvent(new Event("focus"));
-      inventoryButton.focus();
-    });
-    expect(animationFrames.pendingCount()).toBe(1);
-    act(() => animationFrames.runFrame());
+    expect(focusTimers.pendingCount()).toBe(1);
+    act(() => focusTimers.runTick());
+    act(() => focusTimers.runTick());
+    act(() => focusTimers.runTick());
     expect(inventoryButton).toHaveFocus();
-    expect(animationFrames.pendingCount()).toBe(1);
+    expect(focusTimers.pendingCount()).toBe(1);
 
     hasFocus.mockReturnValue(true);
-    act(() => animationFrames.runFrame());
+    act(() => focusTimers.runTick());
     expect(
       screen.getByRole("button", { name: "Open Trusted Review" }),
     ).toHaveFocus();
-    for (let frame = 0; frame < 12; frame += 1) {
-      act(() => animationFrames.runFrame());
-    }
-    expect(animationFrames.pendingCount()).toBe(0);
+    act(() => focusTimers.runTick());
+    act(() => focusTimers.runTick());
+    expect(focusTimers.pendingCount()).toBe(0);
   });
 
   it("shows bounded mutation request errors at the action surface", async () => {

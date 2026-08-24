@@ -115,8 +115,13 @@ if (!app.requestSingleInstanceLock()) {
         window.once("ready-to-show", () => window.show());
         onWindowClosed(window, (webContentsId) => {
           desktopIpc.detach(webContentsId);
-          if (reviewWindow === window) reviewWindow = undefined;
-          if (ownerWindow !== undefined && !ownerWindow.isDestroyed()) {
+          const wasActiveReview = reviewWindow === window;
+          if (wasActiveReview) reviewWindow = undefined;
+          if (
+            wasActiveReview &&
+            ownerWindow !== undefined &&
+            !ownerWindow.isDestroyed()
+          ) {
             ownerWindow.focus();
             ownerWindow.webContents.focus();
           }
