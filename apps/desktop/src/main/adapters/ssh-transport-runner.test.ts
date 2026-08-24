@@ -3,7 +3,7 @@ import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 
-import { expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   decodeWireFrames,
@@ -16,76 +16,90 @@ import {
   SshTransportBoundaryError,
 } from "./ssh-skills-process.js";
 
-async function waitForFile(path: string) {
+async function waitForFile(
+  path: string,
+  accepts: (contents: string) => boolean = () => true,
+) {
   await new Promise<void>((resolve, reject) => {
     const watcher = watch(dirname(path));
-    const timeout = setTimeout(() => {
+    let settled = false;
+    const finish = (callback: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
       watcher.close();
-      reject(new Error("Timed out waiting for fake SSH input."));
+      callback();
+    };
+    const timeout = setTimeout(() => {
+      finish(() => reject(new Error("Timed out waiting for fake SSH input.")));
     }, 5_000);
     const inspect = () => {
-      void readFile(path).then(
-        () => {
-          clearTimeout(timeout);
-          watcher.close();
-          resolve();
+      void readFile(path, "utf8").then(
+        (contents) => {
+          if (accepts(contents)) finish(resolve);
         },
         (error: NodeJS.ErrnoException) => {
           if (error.code !== "ENOENT") {
-            clearTimeout(timeout);
-            watcher.close();
-            reject(error);
+            finish(() => reject(error));
           }
         },
       );
     };
     watcher.on("change", inspect);
     watcher.on("rename", inspect);
-    watcher.on("error", reject);
+    watcher.on("error", (error) => finish(() => reject(error)));
     inspect();
   });
 }
 
-async function killOwnedHelper(path: string) {
-  let pid: number;
+async function readOwnedHelperPid(path: string) {
   try {
-    pid = Number(await readFile(path, "utf8"));
+    const pid = Number((await readFile(path, "utf8")).trim());
+    return Number.isInteger(pid) && pid > 0 ? pid : undefined;
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
     throw error;
   }
-  if (!Number.isInteger(pid) || pid <= 0) {
-    throw new Error("Detached helper PID was invalid.");
+}
+
+async function waitForOwnedHelperPid(path: string) {
+  await waitForFile(path, (contents) => {
+    const pid = Number(contents.trim());
+    return Number.isInteger(pid) && pid > 0;
+  });
+  const pid = await readOwnedHelperPid(path);
+  if (pid === undefined) {
+    throw new Error("Detached helper PID disappeared after publication.");
   }
+  return pid;
+}
+
+async function killOwnedHelper(path: string, knownPid?: number) {
+  const pid = knownPid ?? (await readOwnedHelperPid(path));
+  if (pid === undefined) return;
   try {
     process.kill(pid, "SIGKILL");
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ESRCH") return;
     throw error;
   }
-  const deadline = Date.now() + 1_000;
-  while (Date.now() < deadline) {
-    try {
-      process.kill(pid, 0);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ESRCH") return;
-      throw error;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-  throw new Error("Detached helper did not terminate.");
+  // SIGKILL cannot be caught or ignored. The PID may remain observable while
+  // the kernel is waiting to reap a zombie, so kill(pid, 0) is not a useful
+  // postcondition here and would add up to a second per retained-stream case.
 }
 
 const detachedHelperScript = `
 const { spawn } = require("node:child_process");
-const { writeFileSync } = require("node:fs");
+const { renameSync, writeFileSync } = require("node:fs");
 const helper = spawn(
   process.env.TEST_NODE_EXECUTABLE,
-  ["-e", "setInterval(() => undefined, 1000)"],
+  ["-e", "setTimeout(() => process.exit(0), 4000)"],
   { detached: true, stdio: ["ignore", "inherit", "inherit"] },
 );
 helper.unref();
-writeFileSync(process.env.TEST_HELPER_PID_FILE, String(helper.pid));
+const pendingPidFile = process.env.TEST_HELPER_PID_FILE + ".pending";
+writeFileSync(pendingPidFile, String(helper.pid));
+renameSync(pendingPidFile, process.env.TEST_HELPER_PID_FILE);
 if (process.env.TEST_OUTPUT_STREAM === "stdout") process.stdout.write("overflow");
 if (process.env.TEST_OUTPUT_STREAM === "stderr") process.stderr.write("overflow");
 process.stdin.resume();
@@ -98,10 +112,7 @@ async function boundedRunnerResult(
   let timeout: NodeJS.Timeout | undefined;
   try {
     return await Promise.race([
-      pending.then(
-        () => ({ kind: "resolved" as const }),
-        (error: unknown) => ({ error, kind: "rejected" as const }),
-      ),
+      observeRunnerResult(pending),
       new Promise<{ kind: "timeout" }>((resolve) => {
         timeout = setTimeout(() => resolve({ kind: "timeout" }), timeoutMs);
       }),
@@ -109,6 +120,13 @@ async function boundedRunnerResult(
   } finally {
     if (timeout !== undefined) clearTimeout(timeout);
   }
+}
+
+function observeRunnerResult(pending: Promise<unknown>) {
+  return pending.then(
+    () => ({ kind: "resolved" as const }),
+    (error: unknown) => ({ error, kind: "rejected" as const }),
+  );
 }
 
 it.skipIf(process.platform === "win32")(
@@ -358,18 +376,24 @@ process.stdin.resume();
   },
 );
 
-it.skipIf(process.platform === "win32")(
-  "settles POSIX cancellation, timeout, and output-limit termination when an owned helper retains the streams",
-  async () => {
-    for (const scenario of [
+describe.skipIf(process.platform === "win32")(
+  "retained POSIX transport streams",
+  () => {
+    it.each([
       { disposition: "cancelled" as const, outputStream: undefined },
       { disposition: "timed-out" as const, outputStream: undefined },
       { disposition: "failed" as const, outputStream: "stdout" as const },
       { disposition: "failed" as const, outputStream: "stderr" as const },
-    ]) {
+    ])(
+      "settles $disposition termination with $outputStream retained",
+      async (scenario) => {
       const directory = await mkdtemp(join(tmpdir(), "skills-ssh-runner-"));
       const helperPidFile = join(directory, "helper.pid");
+      const useControlledTimeout = scenario.disposition === "timed-out";
+      const controller = new AbortController();
+      let helperPid: number | undefined;
       let pending: Promise<unknown> | undefined;
+      if (useControlledTimeout) vi.useFakeTimers();
       try {
         const executable = join(directory, "ssh");
         await writeFile(executable, `#!/usr/bin/env node\n${detachedHelperScript}`, {
@@ -388,7 +412,6 @@ it.skipIf(process.platform === "win32")(
           },
           platform: "linux",
         });
-        const controller = new AbortController();
         pending = runner.run({
           args: ["fixed-command"],
           cancellationGraceMs: 20,
@@ -416,12 +439,18 @@ it.skipIf(process.platform === "win32")(
           maxStderrBytes: 1,
           maxStdoutBytes: 1,
           signal: controller.signal,
-          timeoutMs: scenario.disposition === "timed-out" ? 20 : 30_000,
+          timeoutMs: 30_000,
         });
-        await waitForFile(helperPidFile);
+        const settled = useControlledTimeout
+          ? observeRunnerResult(pending)
+          : boundedRunnerResult(pending, 2_000);
+        helperPid = await waitForOwnedHelperPid(helperPidFile);
         if (scenario.disposition === "cancelled") controller.abort();
+        if (useControlledTimeout) {
+          await vi.advanceTimersByTimeAsync(30_100);
+        }
 
-        const result = await boundedRunnerResult(pending, 500);
+        const result = await settled;
         expect(result).toMatchObject({
           error: {
             disposition: scenario.disposition,
@@ -430,10 +459,16 @@ it.skipIf(process.platform === "win32")(
           kind: "rejected",
         });
       } finally {
-        await killOwnedHelper(helperPidFile);
+        controller.abort();
+        if (useControlledTimeout) {
+          await vi.advanceTimersByTimeAsync(100);
+        }
+        await killOwnedHelper(helperPidFile, helperPid);
         await pending?.catch(() => undefined);
         await rm(directory, { force: true, recursive: true });
+        if (useControlledTimeout) vi.useRealTimers();
       }
-    }
+      },
+    );
   },
 );

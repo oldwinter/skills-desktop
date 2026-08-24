@@ -1,4 +1,5 @@
-import { readFile, stat } from "node:fs/promises";
+import { constants } from "node:fs";
+import { open, realpath } from "node:fs/promises";
 import { extname, resolve, sep } from "node:path";
 
 import type { BrowserWindow, BrowserWindowConstructorOptions, Protocol } from "electron";
@@ -92,6 +93,10 @@ export function registerAssetProtocol(
   protocol: Protocol,
   roots: { readonly review: string; readonly workspace: string },
 ) {
+  const canonicalRoots = {
+    review: realpath(roots.review),
+    workspace: realpath(roots.workspace),
+  };
   protocol.handle("skills-desktop", async (request) => {
     let url: URL;
     try {
@@ -99,8 +104,14 @@ export function registerAssetProtocol(
     } catch {
       return new Response("Not found", { status: 404 });
     }
-    const root = url.hostname === "workspace" ? roots.workspace : url.hostname === "review" ? roots.review : null;
-    if (root === null) return new Response("Not found", { status: 404 });
+    const rootName =
+      url.hostname === "workspace"
+        ? "workspace"
+        : url.hostname === "review"
+          ? "review"
+          : null;
+    if (rootName === null) return new Response("Not found", { status: 404 });
+    const root = roots[rootName];
 
     let relativePath: string;
     try {
@@ -114,12 +125,29 @@ export function registerAssetProtocol(
     }
 
     try {
-      const details = await stat(candidate);
-      if (!details.isFile() || details.size > 20 * 1024 * 1024) {
+      const canonicalRoot = await canonicalRoots[rootName];
+      const canonicalCandidate = await realpath(candidate);
+      if (
+        canonicalCandidate === canonicalRoot ||
+        !canonicalCandidate.startsWith(`${canonicalRoot}${sep}`)
+      ) {
         return new Response("Not found", { status: 404 });
       }
-      const body = await readFile(candidate);
-      return new Response(body, {
+      const file = await open(
+        canonicalCandidate,
+        constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0),
+      );
+      let body: Buffer;
+      try {
+        const details = await file.stat();
+        if (!details.isFile() || details.size > 20 * 1024 * 1024) {
+          return new Response("Not found", { status: 404 });
+        }
+        body = await file.readFile();
+      } finally {
+        await file.close();
+      }
+      return new Response(new Uint8Array(body), {
         headers: {
           "Content-Security-Policy": CONTENT_SECURITY_POLICY,
           "Content-Type": MIME_TYPES[extname(candidate)] ?? "application/octet-stream",

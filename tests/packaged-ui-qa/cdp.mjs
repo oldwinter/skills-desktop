@@ -306,24 +306,43 @@ export class CdpPage {
   async waitFor(expression, label, timeoutMs = 30_000) {
     await this.evaluate(
       `(() => new Promise((resolve, reject) => {
+        let settled = false;
+        let interval;
+        let observer;
+        let timeout;
+        const cleanup = () => {
+          observer?.disconnect();
+          clearInterval(interval);
+          clearTimeout(timeout);
+        };
+        const settle = (callback, value) => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          callback(value);
+        };
         const check = () => {
-          if (${expression}) {
-            observer.disconnect();
-            clearTimeout(timeout);
-            resolve(true);
+          try {
+            if (${expression}) settle(resolve, true);
+          } catch (error) {
+            settle(reject, error);
           }
         };
-        const observer = new MutationObserver(check);
-        const timeout = setTimeout(() => {
-          observer.disconnect();
-          reject(new Error(${JSON.stringify(`Timed out waiting for ${label}.`)}));
-        }, ${timeoutMs});
+        observer = new MutationObserver(check);
         observer.observe(document, {
           attributes: true,
           characterData: true,
           childList: true,
           subtree: true,
         });
+        interval = setInterval(check, 25);
+        timeout = setTimeout(
+          () => settle(
+            reject,
+            new Error(${JSON.stringify(`Timed out waiting for ${label}.`)}),
+          ),
+          ${timeoutMs},
+        );
         check();
       }))()`,
       { timeoutMs: timeoutMs + 1_000 },

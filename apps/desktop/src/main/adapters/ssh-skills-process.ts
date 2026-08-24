@@ -670,6 +670,12 @@ export function createSshSkillsProcess(options: {
               type: "request",
               workspace: options.binding.workspace,
             }),
+            cancellationInput: encodeWireFrame({
+              operation: "cancel",
+              protocolVersion: options.binding.ssh.wireDialect.protocolVersion,
+              requestId,
+              type: "request",
+            }),
             maxStderrBytes: MAX_SSH_STDERR_BYTES,
             maxStdoutBytes: MAX_SSH_STDOUT_BYTES,
             signal,

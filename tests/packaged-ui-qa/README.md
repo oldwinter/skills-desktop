@@ -13,7 +13,12 @@ The runner creates one disposable root and never reads developer skill state:
 - on Windows, `node.exe`, npm shims, and npm's `npx-cli.js` resolver layout
 - ephemeral logs and optional screenshots under `<fixture>/artifacts`
 
-Teardown deletes only that fixture root and the Electron process group it spawned.
+Teardown deletes only that fixture root. On POSIX, process ownership is the
+packaged Electron direct child and the detached process group created for it;
+on Windows it is the `taskkill /t` tree rooted at that child. A descendant that
+deliberately creates a new POSIX session is outside this portable ownership
+boundary. The harness never claims system-wide process-tree cleanup and fails
+closed when it cannot confirm cleanup inside its owned boundary.
 
 ## Setup
 

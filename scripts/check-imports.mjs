@@ -59,26 +59,39 @@ function moduleSpecifiers(source, path) {
   return specifiers;
 }
 
-function violationsFor(path, specifier) {
-  const violations = [];
-  const resolvedImport = specifier.startsWith(".") ? resolve(dirname(path), specifier) : undefined;
+function normalizePath(path) {
+  return path.replaceAll("\\", "/");
+}
 
-  if (path.includes("/packages/skills-runtime/") && isRuntimePrimitive(specifier)) {
+export function violationsFor(path, specifier) {
+  const violations = [];
+  const normalizedPath = normalizePath(path);
+  const resolvedImport = specifier.startsWith(".")
+    ? normalizePath(resolve(dirname(normalizedPath), specifier))
+    : undefined;
+
+  if (
+    normalizedPath.includes("/packages/skills-runtime/") &&
+    isRuntimePrimitive(specifier)
+  ) {
     violations.push("skills-runtime must stay runtime-neutral");
   }
   if (
-    path.includes("/packages/remote-bootstrap/") &&
+    normalizedPath.includes("/packages/remote-bootstrap/") &&
     !specifier.startsWith(".") &&
     specifier !== "@skills-desktop/skills-runtime"
   ) {
     violations.push("remote-bootstrap may depend only on skills-runtime");
   }
-  if (path.includes("/apps/desktop/src/contracts/") && isRuntimePrimitive(specifier)) {
+  if (
+    normalizedPath.includes("/apps/desktop/src/contracts/") &&
+    isRuntimePrimitive(specifier)
+  ) {
     violations.push("public contracts must stay runtime-neutral");
   }
   if (
-    path.includes("/apps/desktop/src/renderer/") ||
-    path.includes("/apps/desktop/src/review-renderer/")
+    normalizedPath.includes("/apps/desktop/src/renderer/") ||
+    normalizedPath.includes("/apps/desktop/src/review-renderer/")
   ) {
     if (
       isRuntimePrimitive(specifier) ||
@@ -89,7 +102,7 @@ function violationsFor(path, specifier) {
       violations.push("renderers may depend only on public contracts and renderer code");
     }
   }
-  if (path.includes("/apps/desktop/src/preload/")) {
+  if (normalizedPath.includes("/apps/desktop/src/preload/")) {
     const isContract = resolvedImport?.includes("/apps/desktop/src/contracts/") ?? false;
     if (specifier !== "electron" && !isContract) {
       violations.push("preloads may depend only on Electron and public contracts");
@@ -98,18 +111,29 @@ function violationsFor(path, specifier) {
   return violations;
 }
 
-const files = (await Promise.all(sourceRoots.map(sourceFiles))).flat();
-const violations = [];
-for (const path of files) {
-  for (const specifier of moduleSpecifiers(await readFile(path, "utf8"), path)) {
-    for (const reason of violationsFor(path, specifier)) {
-      violations.push(`${path.slice(repositoryRoot.length + 1)} -> ${specifier}: ${reason}`);
+async function main() {
+  const files = (await Promise.all(sourceRoots.map(sourceFiles))).flat();
+  const violations = [];
+  for (const path of files) {
+    for (const specifier of moduleSpecifiers(await readFile(path, "utf8"), path)) {
+      for (const reason of violationsFor(path, specifier)) {
+        violations.push(
+          `${path.slice(repositoryRoot.length + 1)} -> ${specifier}: ${reason}`,
+        );
+      }
     }
   }
+
+  if (violations.length > 0) {
+    throw new Error(`Import boundary violations:\n${violations.join("\n")}`);
+  }
+
+  console.log(`Import boundaries verified across ${files.length} production modules.`);
 }
 
-if (violations.length > 0) {
-  throw new Error(`Import boundary violations:\n${violations.join("\n")}`);
+if (
+  process.argv[1] &&
+  resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+) {
+  await main();
 }
-
-console.log(`Import boundaries verified across ${files.length} production modules.`);

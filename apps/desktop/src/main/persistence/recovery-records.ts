@@ -490,7 +490,7 @@ export interface RecoveryFileSystem {
   ): Promise<void>;
   open(
     path: string,
-    flags: "r" | "wx",
+    flags: "r" | "r+" | "wx",
     mode?: number,
   ): Promise<RecoveryFileHandle>;
   readFile(path: string, encoding: "utf8"): Promise<string>;
@@ -882,6 +882,7 @@ export function createJsonRecoveryRecords(
     COLLECTION_DOCUMENT_NAME,
   );
   const fileSystem = options.fileSystem ?? createNodeRecoveryFileSystem();
+  const platform = options.platform ?? process.platform;
   let document: CurrentDocument = {
     kind: "inventory-snapshots",
     legacySnapshots: [],
@@ -941,8 +942,8 @@ export function createJsonRecoveryRecords(
     return result;
   };
 
-  const syncPath = async (path: string) => {
-    const handle = await fileSystem.open(path, "r");
+  const syncPath = async (path: string, flags: "r" | "r+" = "r") => {
+    const handle = await fileSystem.open(path, flags);
     try {
       await handle.sync();
     } finally {
@@ -951,7 +952,7 @@ export function createJsonRecoveryRecords(
   };
 
   const syncParentDirectory = async () => {
-    if ((options.platform ?? process.platform) === "win32") return;
+    if (platform === "win32") return;
     await syncPath(options.directory);
   };
 
@@ -975,7 +976,7 @@ export function createJsonRecoveryRecords(
     if (backupContents !== expectedContents) {
       throw new Error("Pre-existing recovery backup does not match its source.");
     }
-    await syncPath(backupPath);
+    await syncPath(backupPath, platform === "win32" ? "r+" : "r");
     await syncParentDirectory();
   };
 

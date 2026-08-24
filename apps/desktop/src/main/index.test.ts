@@ -1,3 +1,5 @@
+import { join } from "node:path";
+
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => {
@@ -279,12 +281,12 @@ describe("desktop main entrypoint", () => {
     mocks.reviewRequested()?.("packaged-review");
 
     expect(mocks.workspaceWindowOptions).toHaveBeenCalledWith(
-      expect.stringContaining("preload/workspace.cjs"),
+      expect.stringContaining(join("preload", "workspace.cjs")),
       true,
       expect.stringContaining("app-icon.png"),
     );
     expect(mocks.reviewWindowOptions).toHaveBeenCalledWith(
-      expect.stringContaining("preload/review.cjs"),
+      expect.stringContaining(join("preload", "review.cjs")),
       true,
       mocks.windows[0],
       expect.stringContaining("app-icon.png"),
@@ -321,7 +323,7 @@ describe("desktop main entrypoint", () => {
     );
     expect(mocks.registerDesktopIpc).toHaveBeenCalledTimes(1);
     expect(mocks.workspaceWindowOptions).toHaveBeenCalledWith(
-      expect.stringContaining("preload/workspace.cjs"),
+      expect.stringContaining(join("preload", "workspace.cjs")),
       false,
       expect.stringContaining("app-icon.png"),
     );
@@ -373,7 +375,7 @@ describe("desktop main entrypoint", () => {
     const review = mocks.windows[1];
     expect(review?.options).toEqual({ kind: "review" });
     expect(mocks.reviewWindowOptions).toHaveBeenCalledWith(
-      expect.stringContaining("preload/review.cjs"),
+      expect.stringContaining(join("preload", "review.cjs")),
       false,
       workspace,
       expect.stringContaining("app-icon.png"),
@@ -428,8 +430,11 @@ describe("desktop main entrypoint", () => {
     expect(replacement?.focus).toHaveBeenCalledTimes(1);
     (mocks.windows[2]?.close as unknown as (() => void) | undefined)?.();
     expect(replacement?.focus).toHaveBeenCalledTimes(1);
+    const platform = vi.spyOn(process, "platform", "get");
+    platform.mockReturnValue("linux");
     mocks.emitApp("window-all-closed");
     expect(mocks.app.quit).toHaveBeenCalledTimes(1);
+    platform.mockRestore();
   });
 
   it("keeps the application alive when macOS owns window-all-closed", async () => {
@@ -440,10 +445,6 @@ describe("desktop main entrypoint", () => {
     platform.mockReturnValue("darwin");
     mocks.emitApp("window-all-closed");
     expect(mocks.app.quit).not.toHaveBeenCalled();
-
-    platform.mockReturnValue("linux");
-    mocks.emitApp("window-all-closed");
-    expect(mocks.app.quit).toHaveBeenCalledTimes(1);
     platform.mockRestore();
   });
 

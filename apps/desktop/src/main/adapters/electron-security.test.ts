@@ -1,6 +1,13 @@
-import { mkdtemp, mkdir, rm, truncate, writeFile } from "node:fs/promises";
+import {
+  mkdtemp,
+  mkdir,
+  rm,
+  symlink,
+  truncate,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -173,6 +180,26 @@ describe("skills-desktop asset protocol", () => {
     ]) {
       await expect(handle({ url })).resolves.toMatchObject({ status: 404 });
     }
+  });
+
+  it("does not follow an allowlisted-root link to an outside asset", async () => {
+    const roots = await createRoots();
+    const outside = join(dirname(roots.workspace), "outside");
+    await mkdir(outside);
+    await writeFile(join(outside, "secret.html"), "outside-secret");
+    await symlink(
+      outside,
+      join(roots.workspace, "linked"),
+      process.platform === "win32" ? "junction" : "dir",
+    );
+    const handle = register(roots);
+
+    const response = await handle({
+      url: "skills-desktop://workspace/linked/secret.html",
+    });
+
+    expect(response.status).toBe(404);
+    expect(await response.text()).toBe("Not found");
   });
 });
 

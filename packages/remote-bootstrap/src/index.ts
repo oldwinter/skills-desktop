@@ -45,7 +45,21 @@ const isWireRequest = (value) => validateWireRequest(
   const children = new Set();
   const mutationGroups = new Set();
   let requestMutationCleanup;
+  let requestObservationCleanup;
+  let observationInterruption;
   let transportLost = false;
+
+  const interruptObservation = (code) => {
+    if (observationInterruption === undefined) {
+      observationInterruption = {
+        code,
+        phase: code === "remote_protocol_violation" ? "wire" : "observe",
+      };
+    }
+    if (requestObservationCleanup !== undefined) {
+      requestObservationCleanup(observationInterruption.code);
+    }
+  };
 
   const writeFrame = (value) => {
     process.stdout.write(Buffer.from(encodeWireFramePayload(value, MAX_WIRE_FRAME_BYTES)));
@@ -166,18 +180,38 @@ const isWireRequest = (value) => validateWireRequest(
     return;
   }
   if (request.operation === "observe") {
-    let extraRequest;
-    try {
-      extraRequest = await nextRequest();
-    } catch {
-      failure("remote_protocol_violation", "The observation request framing is invalid.", "wire", request.requestId);
-      stopReading();
-      return;
-    }
-    if (extraRequest !== undefined) {
-      failure("remote_protocol_violation", "Observation accepts exactly one Wire request.", "wire", request.requestId);
-      stopReading();
-      return;
+    if (requestQueue.length > 0 || inputEnded) {
+      let extraRequest;
+      try {
+        extraRequest = await nextRequest();
+      } catch {
+        interruptObservation("remote_protocol_violation");
+      }
+      if (extraRequest !== undefined) {
+        interruptObservation(
+          extraRequest.operation === "cancel" &&
+          extraRequest.requestId === request.requestId
+            ? "remote_operation_failed"
+            : "remote_protocol_violation",
+        );
+      }
+    } else {
+      void nextRequest().then(
+        (extraRequest) => {
+          if (extraRequest === undefined) return;
+          if (
+            extraRequest.operation === "cancel" &&
+            extraRequest.requestId === request.requestId
+          ) {
+            interruptObservation("remote_operation_failed");
+            return;
+          }
+          interruptObservation("remote_protocol_violation");
+        },
+        () => {
+          interruptObservation("remote_protocol_violation");
+        },
+      );
     }
   }
 
@@ -186,6 +220,17 @@ const isWireRequest = (value) => validateWireRequest(
     if (typeof process.env[name] === "string") environment[name] = process.env[name];
   }
   const invoke = (args, timeoutMs = 60_000) => new Promise((resolve, reject) => {
+    if (
+      transportLost ||
+      (request.operation === "observe" && observationInterruption !== undefined)
+    ) {
+      reject({
+        code: observationInterruption === undefined
+          ? "remote_operation_failed"
+          : observationInterruption.code,
+      });
+      return;
+    }
     let captureDirectory;
     let stdoutFile;
     try {
@@ -215,6 +260,7 @@ const isWireRequest = (value) => validateWireRequest(
     let outputExceeded = false;
     let processFailure;
     let timeout;
+    let observationCleanup;
 
     const cleanup = () => {
       if (timeout !== undefined) clearTimeout(timeout);
@@ -222,6 +268,12 @@ const isWireRequest = (value) => validateWireRequest(
       if (forceTimer !== undefined) clearTimeout(forceTimer);
       if (outputTimer !== undefined) clearInterval(outputTimer);
       if (child !== undefined) children.delete(child);
+      if (
+        observationCleanup !== undefined &&
+        requestObservationCleanup === observationCleanup
+      ) {
+        requestObservationCleanup = undefined;
+      }
       let failed = false;
       try { fileSystem.closeSync(stdoutFile); } catch { failed = true; }
       try {
@@ -270,6 +322,13 @@ const isWireRequest = (value) => validateWireRequest(
       }, 1_000);
       closeTimer = setTimeout(() => rejectOnce(code), 2_000);
     };
+    if (request.operation === "observe") {
+      observationCleanup = requestTermination;
+      requestObservationCleanup = requestTermination;
+      if (observationInterruption !== undefined) {
+        requestTermination(observationInterruption.code);
+      }
+    }
     timeout = setTimeout(() => {
       requestTermination("remote_operation_failed");
     }, timeoutMs);
@@ -555,22 +614,28 @@ const isWireRequest = (value) => validateWireRequest(
     phase = "observe";
     projectJson = (await invoke(["list", "--json"])).stdout;
     globalJson = (await invoke(["list", "--global", "--json"])).stdout;
+    if (observationInterruption !== undefined) throw observationInterruption;
   } catch (error) {
     const code = error && typeof error === "object" && typeof error.code === "string"
       ? error.code
       : "remote_operation_failed";
-    const phaseLabel = phase === "postflight"
+    const failurePhase = observationInterruption === undefined
+      ? phase
+      : observationInterruption.phase;
+    const phaseLabel = failurePhase === "postflight"
       ? "mutation postflight"
-      : phase === "mutation"
+      : failurePhase === "mutation"
         ? "mutation"
-        : phase === "version"
+        : failurePhase === "version"
           ? "runtime verification"
+          : failurePhase === "wire"
+            ? "Wire framing"
           : "Inventory observation";
     failure(code, code === "output_limit_exceeded"
       ? "Remote " + phaseLabel + " output exceeds its byte limit."
       : code === "remote_runtime_unavailable"
         ? "The remote runtime is unavailable."
-        : "Remote " + phaseLabel + " failed.", phase, request.requestId);
+        : "Remote " + phaseLabel + " failed.", failurePhase, request.requestId);
     stopReading();
     return;
   }

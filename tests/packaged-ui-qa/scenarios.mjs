@@ -55,6 +55,20 @@ async function clickNamedButton(page, name, { focus = false } = {}) {
   if (!clicked) throw new Error(`Button not found: ${name}`);
 }
 
+async function focusNamedButton(page, name) {
+  const focused = await page.evaluate(`(() => {
+    const button = [...document.querySelectorAll("button")].find(
+      (candidate) =>
+        candidate.getAttribute("aria-label") === ${JSON.stringify(name)} ||
+        candidate.textContent?.trim() === ${JSON.stringify(name)},
+    );
+    if (!(button instanceof HTMLButtonElement) || button.disabled) return false;
+    button.focus();
+    return document.activeElement === button;
+  })()`);
+  if (!focused) throw new Error(`Button could not receive focus: ${name}`);
+}
+
 async function scanWithAxe(page, axeSource, label) {
   const installed = await page.evaluate(
     `${axeSource}; typeof window.axe?.run === "function"`,
@@ -342,8 +356,25 @@ export async function runPackagedUiQa({
       `document.body?.textContent?.includes("Open Trusted Review") === true`,
       "prepared mutation review action",
     );
+    activeStage = "focus-order";
+    activeCheck = "workspace-focus-precondition";
+    await page.send("Page.bringToFront");
+    await page.waitFor(
+      `document.hasFocus() === true`,
+      "workspace native focus before opening Trusted Review",
+      5_000,
+    );
+    await focusNamedButton(page, "Open Trusted Review");
+    await page.waitFor(
+      `document.hasFocus() === true &&
+        document.activeElement instanceof HTMLButtonElement &&
+        document.activeElement.textContent?.trim() === "Open Trusted Review"`,
+      "workspace review opener focus",
+      5_000,
+    );
+    activeStage = "keyboard-workflow";
     activeCheck = "review-open";
-    await clickNamedButton(page, "Open Trusted Review");
+    await page.dispatchKey("Enter");
     reviewPage = await CdpPage.connect(
       session.port,
       "skills-desktop://review/index.html",

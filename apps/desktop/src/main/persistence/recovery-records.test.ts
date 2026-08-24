@@ -163,6 +163,19 @@ function backupSyncFaultingFileSystem(
   };
 }
 
+function recordingOpenFileSystem() {
+  const delegate = createNodeRecoveryFileSystem();
+  const opens: Array<{ readonly flags: "r" | "r+" | "wx"; readonly path: string }> = [];
+  const fileSystem: RecoveryFileSystem = {
+    ...delegate,
+    async open(path, flags, mode) {
+      opens.push({ flags, path });
+      return delegate.open(path, flags, mode);
+    },
+  };
+  return { fileSystem, opens };
+}
+
 describe("RecoveryRecords Inventory Snapshot contract", () => {
   it("allowlists evidence in memory", async () => {
     await recoveryContract(() => createMemoryRecoveryRecords());
@@ -248,6 +261,46 @@ describe("RecoveryRecords Inventory Snapshot contract", () => {
         "utf8",
       ),
     ).toContain('"schemaVersion":1');
+  });
+
+  it("uses a writable non-truncating backup handle on Windows migration", async () => {
+    const directory = await temporaryDirectory();
+    const snapshotPath = join(directory, "inventory-snapshots.json");
+    const backupPath = `${snapshotPath}.v1.backup`;
+    await writeFile(
+      snapshotPath,
+      JSON.stringify({
+        kind: "inventory-snapshots",
+        schemaVersion: 1,
+        records: [
+          {
+            capturedAt: "2026-08-20T08:00:00.000Z",
+            cliVersion: "1.5.23",
+            generation: 2,
+            skills: [],
+            target: "00000000-0000-4000-8000-000000000001",
+          },
+        ],
+      }),
+      "utf8",
+    );
+    const { fileSystem, opens } = recordingOpenFileSystem();
+
+    const restored = await createJsonRecoveryRecords({
+      directory,
+      fileSystem,
+      id: () => "windows-migration",
+      platform: "win32",
+    }).restore();
+
+    expect(restored.failures).toEqual([]);
+    expect(restored.inventorySnapshots).toHaveLength(1);
+    expect(opens.filter(({ path }) => path === backupPath)).toEqual([
+      { flags: "r+", path: backupPath },
+    ]);
+    expect(JSON.parse(await readFile(snapshotPath, "utf8"))).toMatchObject({
+      schemaVersion: 3,
+    });
   });
 
   it.each(["backup", "write"] as const)(
@@ -404,6 +457,7 @@ describe("RecoveryRecords Inventory Snapshot contract", () => {
           directory,
           fileSystem: backupSyncFaultingFileSystem(directory, fault),
           id: () => `snapshot-backup-sync-${fault}`,
+          platform: "linux",
         }).restore(),
       ).resolves.toMatchObject({
         failures: [{ code: "migration_failed", store: "inventorySnapshots" }],
@@ -1040,7 +1094,7 @@ describe("RecoveryRecords Inventory Snapshot contract", () => {
       },
       ok: false,
     });
-    expect(
+    await expect(
       (await import("node:fs/promises"))
         .stat(path)
         .then((details) => details.isDirectory()),
@@ -1926,7 +1980,7 @@ describe("RecoveryRecords Mutation Guard contract", () => {
         type: "guard.clear",
       }),
     ).toMatchObject({ error: { code: "persist_failed" }, ok: false });
-    expect(
+    await expect(
       (await import("node:fs/promises"))
         .stat(path)
         .then((details) => details.isDirectory()),

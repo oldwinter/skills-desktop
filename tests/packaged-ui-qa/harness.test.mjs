@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   CdpDisconnectedError,
   CdpPage,
@@ -11,10 +11,12 @@ import {
   readFile,
   rm,
   stat,
+  symlink,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join, relative, sep } from "node:path";
+import { runInNewContext } from "node:vm";
 
 import {
   failureReceipt,
@@ -29,6 +31,7 @@ import {
 import {
   findAvailablePort,
   launchPackagedElectron,
+  packagedLaunchEnvironment,
   stopChild,
   terminateWindowsProcessTree,
 } from "./launch.mjs";
@@ -87,6 +90,13 @@ class FakeSocket {
 
 const fixtures = [];
 
+function expectDescendant(root, candidate) {
+  const descendant = relative(root, candidate);
+  expect(descendant).not.toBe("");
+  expect(descendant).not.toBe("..");
+  expect(descendant.startsWith(`..${sep}`)).toBe(false);
+}
+
 afterEach(async () => {
   await Promise.all(fixtures.splice(0).map((fixture) => fixture.cleanup()));
 });
@@ -128,6 +138,35 @@ describe("packaged UI QA CDP seam", () => {
 
     await new Promise((resolve) => setTimeout(resolve, 30));
     socket.respond(1, { result: { value: true } });
+
+    await expect(waiting).resolves.toBeUndefined();
+  });
+
+  it("rechecks semantic waits when focus changes without a DOM mutation", async () => {
+    const socket = new FakeSocket();
+    const page = new CdpPage(socket, { requestTimeoutMs: 500 });
+    const waiting = page.waitFor(
+      "document.hasFocus() === true",
+      "native focus",
+      200,
+    );
+    const state = { focused: false };
+    const evaluated = runInNewContext(socket.sent[0].params.expression, {
+      clearInterval,
+      clearTimeout,
+      document: { hasFocus: () => state.focused },
+      MutationObserver: class {
+        disconnect() {}
+        observe() {}
+      },
+      setInterval,
+      setTimeout,
+    });
+
+    setTimeout(() => {
+      state.focused = true;
+    }, 30);
+    socket.respond(1, { result: { value: await evaluated } });
 
     await expect(waiting).resolves.toBeUndefined();
   });
@@ -252,7 +291,7 @@ describe("packaged UI QA fixture seam", () => {
       fixture.bin,
       fixture.artifacts,
     ]) {
-      expect(path.startsWith(`${fixture.root}/`)).toBe(true);
+      expectDescendant(fixture.root, path);
     }
     expect(fixture.environment.HOME).toBe(fixture.home);
     expect(fixture.environment.SKILLS_DESKTOP_WORKSPACE).toBe(
@@ -279,7 +318,7 @@ describe("packaged UI QA fixture seam", () => {
     });
 
     expect(fixture.root).not.toBe(parent);
-    expect(fixture.root.startsWith(`${parent}/`)).toBe(true);
+    expectDescendant(parent, fixture.root);
     await fixture.cleanup();
 
     await expect(access(fixture.root)).rejects.toThrow();
@@ -314,8 +353,8 @@ describe("packaged UI QA fixture seam", () => {
     fixtures.push(fixture);
 
     expect(fixture.environment.NPM_CONFIG_CACHE).toBe(fixture.cache);
-    expect(fixture.userData).toBe(`${fixture.config}/Skills Desktop`);
-    expect(fixture.userData.startsWith(`${fixture.root}/`)).toBe(true);
+    expect(fixture.userData).toBe(join(fixture.config, "Skills Desktop"));
+    expectDescendant(fixture.root, fixture.userData);
   });
 
   it("resolves a packaged executable from an explicit override or platform candidates", () => {
@@ -333,29 +372,60 @@ describe("packaged UI QA fixture seam", () => {
         platform: "darwin",
         arch: "arm64",
       }),
-    ).toContain("Skills Desktop.app/Contents/MacOS/skills-desktop");
+    ).toBe(
+      join(
+        "/repo",
+        "apps",
+        "desktop",
+        "out",
+        "Skills Desktop-darwin-arm64",
+        "Skills Desktop.app",
+        "Contents",
+        "MacOS",
+        "skills-desktop",
+      ),
+    );
     expect(
       resolvePackagedExecutable({
         root: "C:\\repo",
         platform: "win32",
         arch: "x64",
       }),
-    ).toContain("skills-desktop.exe");
+    ).toBe(
+      join(
+        "C:\\repo",
+        "apps",
+        "desktop",
+        "out",
+        "Skills Desktop-win32-x64",
+        "skills-desktop.exe",
+      ),
+    );
   });
 
   it("creates the Windows node/npm/npx layout used by the production resolver", async () => {
     const fixture = await createPackagedQaFixture({ platform: "win32" });
     fixtures.push(fixture);
 
-    await expect(access(`${fixture.bin}/node.exe`)).resolves.toBeUndefined();
     await expect(
-      access(`${fixture.bin}/node_modules/npm/bin/npx-cli.js`),
+      access(join(fixture.bin, "node.exe")),
     ).resolves.toBeUndefined();
-    await expect(access(`${fixture.bin}/npm.cmd`)).resolves.toBeUndefined();
-    await expect(access(`${fixture.bin}/npx.cmd`)).resolves.toBeUndefined();
+    await expect(
+      access(join(fixture.bin, "node_modules", "npm", "bin", "npx-cli.js")),
+    ).resolves.toBeUndefined();
+    await expect(
+      access(join(fixture.bin, "npm.cmd")),
+    ).resolves.toBeUndefined();
+    await expect(
+      access(join(fixture.bin, "npx.cmd")),
+    ).resolves.toBeUndefined();
     expect(fixture.environment.PATH?.split(";")[0]).toBe(fixture.bin);
-    expect(fixture.environment.APPDATA).toBe(`${fixture.config}/Roaming`);
-    expect(fixture.environment.LOCALAPPDATA).toBe(`${fixture.config}/Local`);
+    expect(fixture.environment.APPDATA).toBe(
+      join(fixture.config, "Roaming"),
+    );
+    expect(fixture.environment.LOCALAPPDATA).toBe(
+      join(fixture.config, "Local"),
+    );
     expect(fixture.environment.USERPROFILE).toBe(fixture.home);
     expect(fixture.environment.TEMP).toBe(fixture.temporary);
     expect(fixture.environment.TMP).toBe(fixture.temporary);
@@ -370,6 +440,20 @@ describe("packaged UI QA fixture seam", () => {
 });
 
 describe("packaged Electron launcher seam", () => {
+  it("launches with only fixture-approved environment variables", () => {
+    const environment = packagedLaunchEnvironment({
+      ELECTRON_RUN_AS_NODE: "1",
+      HOME: "/fixture/home",
+      PATH: "/fixture/bin",
+    });
+
+    expect(environment).toEqual({
+      HOME: "/fixture/home",
+      PATH: "/fixture/bin",
+    });
+    expect(environment).not.toHaveProperty("GITHUB_TOKEN");
+  });
+
   it("allocates loopback-only ports", async () => {
     const port = await findAvailablePort();
     expect(port).toBeGreaterThan(0);
@@ -383,6 +467,119 @@ describe("packaged Electron launcher seam", () => {
       }),
     ).rejects.toThrow(/fixture/i);
   });
+
+  it("rejects fixture paths outside the owned root before writing logs", async () => {
+    const fixture = await createPackagedQaFixture();
+    fixtures.push(fixture);
+    const outside = await mkdtemp(join(tmpdir(), "skills-desktop-qa-outside-"));
+    fixtures.push({
+      cleanup: () => rm(outside, { force: true, recursive: true }),
+    });
+
+    for (const field of ["artifacts", "userData", "workspace"]) {
+      await expect(
+        launchPackagedElectron({
+          executable: "/missing/skills-desktop",
+          fixture: { ...fixture, [field]: outside },
+        }),
+      ).rejects.toThrow(/inside the fixture-owned root/i);
+    }
+    for (const name of ["HOME", "SKILLS_DESKTOP_WORKSPACE", "TMPDIR"]) {
+      await expect(
+        launchPackagedElectron({
+          executable: "/missing/skills-desktop",
+          fixture: {
+            ...fixture,
+            environment: { ...fixture.environment, [name]: outside },
+          },
+        }),
+      ).rejects.toThrow(/environment must stay inside/i);
+    }
+    await expect(
+      launchPackagedElectron({
+        executable: "/missing/skills-desktop",
+        fixture: {
+          ...fixture,
+          environment: {
+            ...fixture.environment,
+            PATH: `${outside}${delimiter}${fixture.environment.PATH}`,
+          },
+        },
+      }),
+    ).rejects.toThrow(/environment must stay inside/i);
+    await expect(
+      launchPackagedElectron({
+        executable: "/missing/skills-desktop",
+        fixture: {
+          ...fixture,
+          environment: {
+            ...fixture.environment,
+            NPM_CONFIG_USERCONFIG: join(outside, "npmrc"),
+          },
+        },
+      }),
+    ).rejects.toThrow(/environment must stay inside/i);
+    await expect(
+      access(join(outside, "electron.stdout.log")),
+    ).rejects.toThrow();
+    await expect(
+      access(join(outside, "electron.stderr.log")),
+    ).rejects.toThrow();
+  });
+
+  it.skipIf(process.platform === "win32")(
+    "rejects a fixture environment symlink that resolves outside its root",
+    async () => {
+      const fixture = await createPackagedQaFixture();
+      fixtures.push(fixture);
+      const outside = await mkdtemp(
+        join(tmpdir(), "skills-desktop-qa-symlink-outside-"),
+      );
+      fixtures.push({
+        cleanup: () => rm(outside, { force: true, recursive: true }),
+      });
+      const escapedHome = join(fixture.root, "escaped-home");
+      await symlink(outside, escapedHome, "dir");
+
+      await expect(
+        launchPackagedElectron({
+          executable: "/missing/skills-desktop",
+          fixture: {
+            ...fixture,
+            environment: { ...fixture.environment, HOME: escapedHome },
+          },
+        }),
+      ).rejects.toThrow(/inside the fixture-owned root/i);
+    },
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "rejects a symlinked fixture ancestor before creating an outside directory",
+    async () => {
+      const fixture = await createPackagedQaFixture();
+      fixtures.push(fixture);
+      const outside = await mkdtemp(
+        join(tmpdir(), "skills-desktop-qa-ancestor-outside-"),
+      );
+      fixtures.push({
+        cleanup: () => rm(outside, { force: true, recursive: true }),
+      });
+      const escapedAncestor = join(fixture.root, "escaped-artifacts");
+      const outsideArtifacts = join(outside, "nested-artifacts");
+      await symlink(outside, escapedAncestor, "dir");
+
+      await expect(
+        launchPackagedElectron({
+          executable: "/missing/skills-desktop",
+          fixture: {
+            ...fixture,
+            artifacts: join(escapedAncestor, "nested-artifacts"),
+          },
+        }),
+      ).rejects.toThrow(/inside the fixture-owned root/i);
+      await expect(access(outsideArtifacts)).rejects.toThrow();
+    },
+  );
 
   it("stops a Windows process tree through the injected terminator", async () => {
     const directKills = [];
@@ -513,6 +710,89 @@ describe("packaged Electron launcher seam", () => {
     expect(signals).toEqual(["SIGTERM", "SIGKILL"]);
   });
 
+  it("accepts an observed Darwin child exit while a dead group remains observable", async () => {
+    const signals = [];
+    let groupProbeCount = 0;
+    const child = {
+      exitCode: null,
+      kill: () => {
+        throw new Error("direct child termination is not allowed");
+      },
+      pid: 4646,
+      signalCode: null,
+    };
+    const childExit = new Promise((resolve) => {
+      queueMicrotask(() => resolve({ code: 0, kind: "exit" }));
+    });
+
+    await stopChild(child, childExit, {
+      platform: "darwin",
+      posixProcessGroupAlive: () => {
+        groupProbeCount += 1;
+        return true;
+      },
+      signalPosixProcessGroup: (_pid, signal) => signals.push(signal),
+      stopTimeoutMs: 20,
+    });
+
+    expect(signals).toEqual(["SIGTERM", "SIGKILL"]);
+    expect(groupProbeCount).toBeGreaterThan(1);
+  });
+
+  it("fails closed when forced Darwin process-group SIGKILL delivery fails", async () => {
+    const signals = [];
+    const child = {
+      exitCode: null,
+      kill: () => {
+        throw new Error("direct child termination is not allowed");
+      },
+      pid: 4747,
+      signalCode: null,
+    };
+    const signalError = Object.assign(
+      new Error("permission denied for process-group SIGKILL"),
+      { code: "EPERM" },
+    );
+
+    await expect(
+      stopChild(child, new Promise(() => {}), {
+        platform: "darwin",
+        posixProcessGroupAlive: () => true,
+        signalPosixProcessGroup: (_pid, signal) => {
+          signals.push(signal);
+          if (signal === "SIGKILL") throw signalError;
+        },
+        stopTimeoutMs: 20,
+      }),
+    ).rejects.toBe(signalError);
+    expect(signals).toEqual(["SIGTERM", "SIGKILL"]);
+  });
+
+  it("bounds a Darwin process-group stop when direct-child exit is unobserved", async () => {
+    const signals = [];
+    const child = {
+      exitCode: null,
+      kill: () => {
+        throw new Error("direct child termination is not allowed");
+      },
+      pid: 4848,
+      signalCode: null,
+    };
+    const startedAt = Date.now();
+
+    await expect(
+      stopChild(child, new Promise(() => {}), {
+        platform: "darwin",
+        posixProcessGroupAlive: () => true,
+        signalPosixProcessGroup: (_pid, signal) => signals.push(signal),
+        stopTimeoutMs: 20,
+      }),
+    ).rejects.toThrow(/direct child did not exit/i);
+
+    expect(signals).toEqual(["SIGTERM", "SIGKILL"]);
+    expect(Date.now() - startedAt).toBeLessThan(500);
+  });
+
   it("invokes taskkill with an argument-array process-tree contract", async () => {
     const calls = [];
     const completion = terminateWindowsProcessTree(4444, {
@@ -531,6 +811,21 @@ describe("packaged Electron launcher seam", () => {
         options: expect.objectContaining({ shell: false }),
       },
     ]);
+  });
+
+  it("clears a Windows tree timeout after immediate termination", async () => {
+    vi.useFakeTimers();
+    try {
+      const completion = terminateWindowsProcessTree(4546, {
+        execFileImpl: (_file, _args, _options, callback) => callback(null),
+        timeoutMs: 3_000,
+      });
+
+      await completion;
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("fails closed when taskkill cannot prove the process tree was removed", async () => {
@@ -571,18 +866,18 @@ describe("packaged UI QA scenario contract", () => {
     const fixture = await createPackagedQaFixture();
     fixtures.push(fixture);
     await writeFile(
-      `${fixture.artifacts}/electron.stdout.log`,
+      join(fixture.artifacts, "electron.stdout.log"),
       "/Users/alice/skills-desktop\nhttps://example.test/?token=top-secret\n",
     );
     await writeFile(
-      `${fixture.artifacts}/electron.stderr.log`,
+      join(fixture.artifacts, "electron.stderr.log"),
       'Authorization: Bearer secret-value\nAPI_KEY=another-secret\nAWS_SECRET_ACCESS_KEY=env-secret\npassword="my secret value"\npath=C:\\Users\\Alice Smith\\repo\n',
     );
     const destination = await mkdtemp(join(tmpdir(), "skills-desktop-qa-art-"));
     fixtures.push({
       cleanup: () => rm(destination, { force: true, recursive: true }),
     });
-    await writeFile(`${destination}/error.txt`, "stale artifact");
+    await writeFile(join(destination, "error.txt"), "stale artifact");
     const error = new Error(
       'qa failed at /tmp/fixture and C:\\Users\\Alice with https://example.test/path, Authorization: Basic dXNlcjpwYXNz, --token unquoted-secret, and sk_live_example',
     );
@@ -609,10 +904,12 @@ describe("packaged UI QA scenario contract", () => {
     expect(safeFailureSummary(untrusted)).toBe(
       "Packaged UI QA failed during unknown/unknown (Error).",
     );
-    expect((await stat(`${destination}/failure.json`)).mode & 0o777).toBe(
-      0o600,
-    );
-    const artifact = await readFile(`${destination}/failure.json`, "utf8");
+    if (process.platform !== "win32") {
+      expect((await stat(join(destination, "failure.json"))).mode & 0o777).toBe(
+        0o600,
+      );
+    }
+    const artifact = await readFile(join(destination, "failure.json"), "utf8");
     expect(JSON.parse(artifact)).toEqual({
       architecture: process.arch,
       check: "error-state-render",
@@ -638,10 +935,10 @@ describe("packaged UI QA scenario contract", () => {
       expect(artifact).not.toContain(secret);
     }
     await expect(
-      access(`${destination}/electron.stdout.log`),
+      access(join(destination, "electron.stdout.log")),
     ).rejects.toThrow();
     await expect(
-      access(`${destination}/electron.stderr.log`),
+      access(join(destination, "electron.stderr.log")),
     ).rejects.toThrow();
   });
 

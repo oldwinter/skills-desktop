@@ -1,7 +1,8 @@
 import { execFile, spawn } from "node:child_process";
 import { createWriteStream } from "node:fs";
-import { access, mkdir } from "node:fs/promises";
+import { access, lstat, realpath } from "node:fs/promises";
 import { createServer } from "node:net";
+import { delimiter, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { finished } from "node:stream/promises";
 import { setTimeout as delay } from "node:timers/promises";
 
@@ -12,6 +13,122 @@ const DEFAULT_CONNECT_TIMEOUT_MS = 30_000;
 const DEFAULT_STOP_TIMEOUT_MS = 3_000;
 const DEFAULT_WINDOWS_TREE_TIMEOUT_MS = DEFAULT_STOP_TIMEOUT_MS;
 export const EXPECTED_URL = "skills-desktop://workspace/index.html";
+const ALLOWED_FIXTURE_ENVIRONMENT_NAMES = new Set([
+  "APPDATA",
+  "ComSpec",
+  "DISPLAY",
+  "ELECTRON_RUN_AS_NODE",
+  "HOME",
+  "LOCALAPPDATA",
+  "NPM_CONFIG_CACHE",
+  "PATH",
+  "PATHEXT",
+  "SKILLS_DESKTOP_WORKSPACE",
+  "SystemRoot",
+  "TEMP",
+  "TMP",
+  "TMPDIR",
+  "USER",
+  "USERNAME",
+  "USERPROFILE",
+  "WAYLAND_DISPLAY",
+  "XAUTHORITY",
+  "XDG_CACHE_HOME",
+  "XDG_CONFIG_HOME",
+]);
+const REQUIRED_FIXTURE_ENVIRONMENT_NAMES = [
+  "HOME",
+  "NPM_CONFIG_CACHE",
+  "PATH",
+  "SKILLS_DESKTOP_WORKSPACE",
+  "TMPDIR",
+  "XDG_CACHE_HOME",
+  "XDG_CONFIG_HOME",
+];
+const OWNED_FIXTURE_ENVIRONMENT_NAMES = [
+  "APPDATA",
+  "HOME",
+  "LOCALAPPDATA",
+  "NPM_CONFIG_CACHE",
+  "SKILLS_DESKTOP_WORKSPACE",
+  "TEMP",
+  "TMP",
+  "TMPDIR",
+  "USERPROFILE",
+  "XDG_CACHE_HOME",
+  "XDG_CONFIG_HOME",
+];
+
+function isStrictDescendant(root, candidate) {
+  const descendant = relative(resolve(root), resolve(candidate));
+  return (
+    descendant !== "" &&
+    descendant !== ".." &&
+    !descendant.startsWith(`..${sep}`) &&
+    !isAbsolute(descendant)
+  );
+}
+
+function assertFixtureOwnedPaths(fixture) {
+  if (
+    typeof fixture.root !== "string" ||
+    typeof fixture.userData !== "string" ||
+    typeof fixture.workspace !== "string" ||
+    typeof fixture.artifacts !== "string" ||
+    fixture.environment === null ||
+    typeof fixture.environment !== "object" ||
+    !isStrictDescendant(fixture.root, fixture.userData) ||
+    !isStrictDescendant(fixture.root, fixture.workspace) ||
+    !isStrictDescendant(fixture.root, fixture.artifacts)
+  ) {
+    throw new Error("Fixture paths must stay inside the fixture-owned root.");
+  }
+  const environmentEntries = Object.entries(fixture.environment);
+  if (
+    environmentEntries.some(
+      ([name, value]) =>
+        !ALLOWED_FIXTURE_ENVIRONMENT_NAMES.has(name) ||
+        typeof value !== "string",
+    ) ||
+    REQUIRED_FIXTURE_ENVIRONMENT_NAMES.some(
+      (name) => typeof fixture.environment[name] !== "string",
+    ) ||
+    OWNED_FIXTURE_ENVIRONMENT_NAMES.some(
+      (name) =>
+        fixture.environment[name] !== undefined &&
+        !isStrictDescendant(fixture.root, fixture.environment[name]),
+    )
+  ) {
+    throw new Error(
+      "Fixture environment must stay inside the fixture-owned root.",
+    );
+  }
+  const firstPathEntry = fixture.environment.PATH.split(delimiter)[0];
+  if (!isStrictDescendant(fixture.root, firstPathEntry)) {
+    throw new Error(
+      "Fixture environment must stay inside the fixture-owned root.",
+    );
+  }
+}
+
+async function settleBeforeTimeout(promise, timeoutMs, onTimeout) {
+  let timer;
+  const timeout = new Promise((resolve, reject) => {
+    timer = setTimeout(() => {
+      try {
+        resolve(onTimeout());
+      } catch (error) {
+        reject(error);
+      }
+    }, timeoutMs);
+    timer.unref?.();
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 function isPosixProcessGroupAlive(pid) {
   try {
@@ -31,6 +148,16 @@ async function waitForPosixProcessGroupExit(pid, timeoutMs, isAlive) {
     await delay(Math.min(25, remaining));
   }
   return true;
+}
+
+async function waitForDirectChildExit(child, childExit, timeoutMs) {
+  if (child.exitCode !== null || child.signalCode !== null) return true;
+  const observed = await settleBeforeTimeout(
+    childExit.then((result) => result?.kind === "exit"),
+    timeoutMs,
+    () => false,
+  );
+  return observed || child.exitCode !== null || child.signalCode !== null;
 }
 
 async function closeOutputStreams(child, stdout, stderr) {
@@ -62,6 +189,12 @@ export async function findAvailablePort() {
     throw new Error("Could not allocate a loopback CDP port.");
   }
   return port;
+}
+
+export function packagedLaunchEnvironment(fixtureEnvironment) {
+  const environment = { ...fixtureEnvironment };
+  delete environment.ELECTRON_RUN_AS_NODE;
+  return environment;
 }
 
 function observeExit(child) {
@@ -148,14 +281,15 @@ export function terminateWindowsProcessTree(
       reject(error);
     }
   });
-  return Promise.race([
+  return settleBeforeTimeout(
     termination,
-    delay(timeoutMs).then(() => {
+    timeoutMs,
+    () => {
       throw new Error(
         `Windows process-tree termination timed out for PID ${pid}.`,
       );
-    }),
-  ]);
+    },
+  );
 }
 
 export async function stopChild(
@@ -176,23 +310,25 @@ export async function stopChild(
         ? child.pid
         : undefined;
     if (childPid !== undefined) {
-      await Promise.race([
+      await settleBeforeTimeout(
         Promise.resolve().then(() => killWindowsTree(childPid)),
-        delay(treeTerminationTimeoutMs).then(() => {
+        treeTerminationTimeoutMs,
+        () => {
           throw new Error(
             `Windows process-tree termination timed out for PID ${childPid}.`,
           );
-        }),
-      ]);
+        },
+      );
     } else if (child.exitCode === null && child.signalCode === null) {
       child.kill("SIGTERM");
     } else return;
 
     if (child.exitCode !== null || child.signalCode !== null) return;
-    const stopped = await Promise.race([
+    const stopped = await settleBeforeTimeout(
       childExit.then(() => true),
-      delay(stopTimeoutMs).then(() => false),
-    ]);
+      stopTimeoutMs,
+      () => false,
+    );
     if (stopped || child.exitCode !== null || child.signalCode !== null) return;
     throw new Error(
       `Windows process tree did not exit after forced termination for PID ${childPid}.`,
@@ -219,15 +355,9 @@ export async function stopChild(
     } catch (error) {
       if (error?.code !== "ESRCH") throw error;
     }
-    if (
-      !(await waitForPosixProcessGroupExit(
-        child.pid,
-        stopTimeoutMs,
-        posixProcessGroupAlive,
-      ))
-    ) {
+    if (!(await waitForDirectChildExit(child, childExit, stopTimeoutMs))) {
       throw new Error(
-        "Packaged Electron process group did not exit after forced termination.",
+        "Packaged Electron direct child did not exit after forced termination.",
       );
     }
     return;
@@ -239,20 +369,22 @@ export async function stopChild(
   } catch (error) {
     if (error?.code !== "ESRCH") throw error;
   }
-  const stopped = await Promise.race([
+  const stopped = await settleBeforeTimeout(
     childExit.then(() => true),
-    delay(stopTimeoutMs).then(() => false),
-  ]);
+    stopTimeoutMs,
+    () => false,
+  );
   if (stopped || child.exitCode !== null || child.signalCode !== null) return;
   try {
     child.kill("SIGKILL");
   } catch (error) {
     if (error?.code !== "ESRCH") throw error;
   }
-  const killed = await Promise.race([
+  const killed = await settleBeforeTimeout(
     childExit.then(() => true),
-    delay(stopTimeoutMs).then(() => false),
-  ]);
+    stopTimeoutMs,
+    () => false,
+  );
   if (!killed && child.exitCode === null && child.signalCode === null) {
     throw new Error("Packaged Electron did not exit after forced termination.");
   }
@@ -268,19 +400,42 @@ export async function launchPackagedElectron({
 } = {}) {
   if (
     fixture === undefined ||
-    typeof fixture.root !== "string" ||
-    typeof fixture.userData !== "string" ||
     fixture.environment === undefined
   ) {
     throw new Error(
       "A fixture-owned root is required to launch packaged Electron.",
     );
   }
+  assertFixtureOwnedPaths(fixture);
   if (typeof executable !== "string" || executable.length === 0) {
     throw new Error("A packaged Electron executable is required.");
   }
   if (signal?.aborted)
     throw new Error("Packaged Electron launch was interrupted.");
+  const rootMetadata = await lstat(fixture.root).catch(() => undefined);
+  if (rootMetadata?.isDirectory() !== true || rootMetadata.isSymbolicLink()) {
+    throw new Error("The fixture-owned root must be an existing real directory.");
+  }
+  const canonicalRoot = await realpath(fixture.root);
+  const environmentPaths = OWNED_FIXTURE_ENVIRONMENT_NAMES.flatMap((name) => {
+    const value = fixture.environment[name];
+    return value === undefined ? [] : [value];
+  });
+  for (const path of [
+    fixture.userData,
+    fixture.workspace,
+    fixture.artifacts,
+    ...environmentPaths,
+    fixture.environment.PATH.split(delimiter)[0],
+  ]) {
+    const canonicalPath = await realpath(path).catch(() => undefined);
+    if (
+      canonicalPath === undefined ||
+      !isStrictDescendant(canonicalRoot, canonicalPath)
+    ) {
+      throw new Error("Fixture paths must stay inside the fixture-owned root.");
+    }
+  }
   await access(executable).catch(() => {
     throw new Error(
       `Packaged Electron executable is unavailable: ${executable}`,
@@ -291,18 +446,15 @@ export async function launchPackagedElectron({
   if (!Number.isSafeInteger(port) || port <= 0 || port > 65_535) {
     throw new Error("Packaged Electron CDP port must be a valid TCP port.");
   }
-  await mkdir(fixture.userData, { recursive: true });
-  await mkdir(fixture.artifacts, { recursive: true });
-  const stdout = createWriteStream(`${fixture.artifacts}/electron.stdout.log`, {
+  const stdout = createWriteStream(join(fixture.artifacts, "electron.stdout.log"), {
     flags: "a",
     mode: 0o600,
   });
-  const stderr = createWriteStream(`${fixture.artifacts}/electron.stderr.log`, {
+  const stderr = createWriteStream(join(fixture.artifacts, "electron.stderr.log"), {
     flags: "a",
     mode: 0o600,
   });
-  const environment = { ...process.env, ...fixture.environment };
-  delete environment.ELECTRON_RUN_AS_NODE;
+  const environment = packagedLaunchEnvironment(fixture.environment);
   const child = spawn(
     executable,
     [`--remote-debugging-port=${port}`, `--user-data-dir=${fixture.userData}`],

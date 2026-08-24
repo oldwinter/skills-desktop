@@ -200,6 +200,19 @@ describe("SSH SkillsProcess observation contract", () => {
     expect(runner.invocations[0]!.args).not.toContain(
       "skills-desktop-frozen-target",
     );
+    expect(
+      decodeWireFrames(runner.invocations[0]!.cancellationInput!),
+    ).toEqual({
+      ok: true,
+      value: [
+        {
+          operation: "cancel",
+          protocolVersion: WIRE_PROTOCOL_VERSION,
+          requestId: "request-1",
+          type: "request",
+        },
+      ],
+    });
     expect(REMOTE_BOOTSTRAP_COMMAND).not.toMatch(
       /build-host|srv\/workspace|Codex|project-skill/,
     );

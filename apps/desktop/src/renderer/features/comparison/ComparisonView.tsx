@@ -453,7 +453,7 @@ export function ComparisonView({
         <div className="paired-status" aria-live="polite">
           {[leftTarget, rightTarget].map((state, index) =>
             state === undefined ? null : (
-              <div key={state.target.id}>
+              <div key={`${index}:${state.target.id}`}>
                 <span>{index === 0 ? "Left" : "Right"}</span>
                 <strong>{state.target.label}</strong>
                 <code>{state.target.workspaceLabel}</code>

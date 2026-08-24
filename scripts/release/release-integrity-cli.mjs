@@ -1,4 +1,6 @@
 import { appendFile, readFile, writeFile } from "node:fs/promises";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import {
   CANDIDATE_IDENTITY_PREDICATE_TYPE,
@@ -27,7 +29,7 @@ const commonContextOptions = [
   "--workflow-run-id",
 ];
 
-function parseOptions(argv, allowedNames) {
+export function parseReleaseIntegrityOptions(argv, allowedNames) {
   const allowed = new Set(allowedNames);
   const values = new Map();
   for (let index = 0; index < argv.length; index += 2) {
@@ -58,7 +60,7 @@ function parseOptions(argv, allowedNames) {
   return Object.fromEntries(values);
 }
 
-function releaseContext(options) {
+export function releaseContext(options) {
   return {
     repository: options["--repository"],
     sourceCommit: options["--source-commit"],
@@ -69,8 +71,13 @@ function releaseContext(options) {
   };
 }
 
-async function emitOutputs(outputs) {
-  const outputPath = process.env.GITHUB_OUTPUT;
+export async function emitReleaseOutputs(
+  outputs,
+  {
+    append = appendFile,
+    outputPath = process.env.GITHUB_OUTPUT,
+  } = {},
+) {
   if (outputPath !== undefined && outputPath !== "") {
     const lines = [];
     for (const [name, value] of Object.entries(outputs)) {
@@ -88,11 +95,11 @@ async function emitOutputs(outputs) {
         lines.push(`${name}=${text}\n`);
       }
     }
-    await appendFile(outputPath, lines.join(""));
+    await append(outputPath, lines.join(""));
   }
 }
 
-async function readJson(path, message) {
+export async function readReleaseJson(path, message) {
   try {
     return JSON.parse(await readFile(path, "utf8"));
   } catch {
@@ -101,7 +108,7 @@ async function readJson(path, message) {
 }
 
 async function identify(argv) {
-  const options = parseOptions(argv, [
+  const options = parseReleaseIntegrityOptions(argv, [
     "--architecture",
     "--candidate-root",
     "--package-lock",
@@ -115,7 +122,7 @@ async function identify(argv) {
     expectedPlatform: options["--platform"],
     packageLockPath: options["--package-lock"],
   });
-  await emitOutputs({
+  await emitReleaseOutputs({
     "candidate-directory": result.candidateDirectory,
     "manifest-digest": result.manifestDigest,
     version: result.version,
@@ -124,7 +131,7 @@ async function identify(argv) {
 }
 
 async function generate(argv) {
-  const options = parseOptions(argv, [
+  const options = parseReleaseIntegrityOptions(argv, [
     "--candidate-root",
     "--created-at",
     "--output-root",
@@ -138,7 +145,7 @@ async function generate(argv) {
     outputRoot: options["--output-root"],
     packageLockPath: options["--package-lock"],
   });
-  await emitOutputs({
+  await emitReleaseOutputs({
     "candidate-set-digest": result.candidateSetDigest,
     "predicate-path": `${options["--output-root"]}/candidate-provenance-v1.json`,
     "sbom-path": `${options["--output-root"]}/skills-desktop-${result.version}.spdx.json`,
@@ -149,7 +156,7 @@ async function generate(argv) {
 }
 
 async function finalize(argv) {
-  const options = parseOptions(argv, [
+  const options = parseReleaseIntegrityOptions(argv, [
     "--candidate-identity-bundle",
     "--candidate-set-digest",
     "--evidence-root",
@@ -165,7 +172,7 @@ async function finalize(argv) {
     evidenceRoot: options["--evidence-root"],
     expectedCandidateSetDigest: options["--candidate-set-digest"],
   });
-  await emitOutputs({
+  await emitReleaseOutputs({
     "candidate-set-digest": result.candidateSetDigest,
     "evidence-artifact-digest": result.evidenceArtifactDigest,
     "evidence-set-digest": result.evidenceSetDigest,
@@ -175,7 +182,7 @@ async function finalize(argv) {
 }
 
 async function subjects(argv) {
-  const options = parseOptions(argv, [
+  const options = parseReleaseIntegrityOptions(argv, [
     "--candidate-root",
     "--output-path",
     "--package-lock",
@@ -209,8 +216,8 @@ async function verifyAttestation(argv) {
   const required = providedNames.has("--expected-predicate")
     ? allowed
     : allowed.filter((name) => name !== "--expected-predicate");
-  const options = parseOptions(argv, required);
-  const subjectEvidence = await readJson(
+  const options = parseReleaseIntegrityOptions(argv, required);
+  const subjectEvidence = await readReleaseJson(
     options["--subjects-json"],
     "Candidate subject evidence is invalid.",
   );
@@ -218,12 +225,12 @@ async function verifyAttestation(argv) {
     expectedPredicate:
       options["--expected-predicate"] === undefined
         ? undefined
-        : await readJson(
+        : await readReleaseJson(
             options["--expected-predicate"],
             "Expected attestation predicate is invalid.",
           ),
     predicateType: options["--predicate-type"],
-    result: await readJson(
+    result: await readReleaseJson(
       options["--result-json"],
       "Verified attestation result JSON is invalid.",
     ),
@@ -233,7 +240,7 @@ async function verifyAttestation(argv) {
 }
 
 async function assemble(argv) {
-  const options = parseOptions(argv, [
+  const options = parseReleaseIntegrityOptions(argv, [
     "--candidate-root",
     "--evidence-artifact-digest",
     "--evidence-root",
@@ -264,7 +271,7 @@ async function assemble(argv) {
     packageLockPath: options["--package-lock"],
     verifiedAt: options["--verified-at"],
   });
-  await emitOutputs({
+  await emitReleaseOutputs({
     "candidate-set-digest": result.candidateSetDigest,
     "evidence-artifact-digest": result.evidenceArtifactDigest,
     "evidence-set-digest": result.evidenceSetDigest,
@@ -275,7 +282,7 @@ async function assemble(argv) {
 }
 
 async function notes(argv) {
-  const options = parseOptions(argv, [
+  const options = parseReleaseIntegrityOptions(argv, [
     "--candidate-set-digest",
     "--evidence-set-digest",
     "--output-path",
@@ -305,7 +312,7 @@ async function notes(argv) {
     name: previewReleaseName(identity),
     tag: previewReleaseTag(identity),
   };
-  await emitOutputs({
+  await emitReleaseOutputs({
     "release-name": result.name,
     "release-tag": result.tag,
   });
@@ -316,7 +323,7 @@ async function verifyGitHubReleaseCommand(
   argv,
   { missingMessage, outputPrefix, verify },
 ) {
-  const options = parseOptions(argv, [
+  const options = parseReleaseIntegrityOptions(argv, [
     "--candidate-set-digest",
     "--evidence-set-digest",
     "--payload-digest",
@@ -337,7 +344,7 @@ async function verifyGitHubReleaseCommand(
     workflowRunUrl: options["--workflow-run-url"],
   };
   const tag = previewReleaseTag(expected);
-  const releases = await readJson(
+  const releases = await readReleaseJson(
     options["--release-list-json"],
     "GitHub release response is invalid.",
   );
@@ -353,7 +360,7 @@ async function verifyGitHubReleaseCommand(
     payloadRoot: options["--payload-root"],
     release: matches[0],
   });
-  await emitOutputs({
+  await emitReleaseOutputs({
     [`${outputPrefix}-state`]: result.state,
     [`${outputPrefix}-tag`]: result.tag,
     [`${outputPrefix}-url`]: result.url,
@@ -378,7 +385,10 @@ async function verifyPreviewRelease(argv) {
 }
 
 async function preflightDraft(argv) {
-  const options = parseOptions(argv, ["--payload-digest", "--payload-root"]);
+  const options = parseReleaseIntegrityOptions(argv, [
+    "--payload-digest",
+    "--payload-root",
+  ]);
   const result = await verifyDraftPayload({
     expectedPayloadDigest: options["--payload-digest"],
     payloadRoot: options["--payload-root"],
@@ -402,10 +412,25 @@ const commands = new Map([
   ["verify-release", verifyRelease],
 ]);
 
-const [commandName, ...argv] = process.argv.slice(2);
-const command = commands.get(commandName);
-if (command === undefined) {
-  throw new Error(`Unknown release integrity command: ${commandName}`);
+export async function runReleaseIntegrityCommand(
+  [commandName, ...argv],
+  {
+    commandHandlers = commands,
+    writeOutput = (value) => process.stdout.write(value),
+  } = {},
+) {
+  const command = commandHandlers.get(commandName);
+  if (command === undefined) {
+    throw new Error(`Unknown release integrity command: ${commandName}`);
+  }
+  const result = await command(argv);
+  writeOutput(`${JSON.stringify(result)}\n`);
+  return result;
 }
-const result = await command(argv);
-process.stdout.write(`${JSON.stringify(result)}\n`);
+
+if (
+  process.argv[1] !== undefined &&
+  resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+) {
+  await runReleaseIntegrityCommand(process.argv.slice(2));
+}

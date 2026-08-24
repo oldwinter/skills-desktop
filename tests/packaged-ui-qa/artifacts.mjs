@@ -41,6 +41,7 @@ const allowedFailureChecks = new Set([
   "settled-focus",
   "unknown",
   "workspace-axe",
+  "workspace-focus-precondition",
   "workspace-focus-restore",
   "workspace-semantics",
 ]);
