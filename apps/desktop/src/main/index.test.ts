@@ -412,14 +412,27 @@ describe("desktop main entrypoint", () => {
     mocks.emitApp("second-instance");
     expect(workspace?.focus).toHaveBeenCalledTimes(2);
 
+    review?.close.mockImplementationOnce(() => undefined);
     mocks.reviewRequested()?.("review-2");
     expect(review?.close).toHaveBeenCalledTimes(1);
-    expect(workspace?.focus).toHaveBeenCalledTimes(3);
-    expect(workspace?.webContents.focus).toHaveBeenCalledTimes(1);
+    expect(workspace?.focus).toHaveBeenCalledTimes(2);
+    expect(workspace?.webContents.focus).not.toHaveBeenCalled();
+    const activeReview = mocks.windows[2];
+    expect(activeReview?.options).toEqual({ kind: "review" });
+
+    review?.emit("closed");
     expect(mocks.desktopIpc.detach).toHaveBeenCalledWith(
       review?.webContents.id,
     );
-    expect(mocks.windows[2]?.options).toEqual({ kind: "review" });
+    expect(workspace?.focus).toHaveBeenCalledTimes(2);
+    expect(workspace?.webContents.focus).not.toHaveBeenCalled();
+
+    (activeReview?.close as unknown as (() => void) | undefined)?.();
+    expect(workspace?.focus).toHaveBeenCalledTimes(3);
+    expect(workspace?.webContents.focus).toHaveBeenCalledTimes(1);
+    expect(workspace?.focus.mock.invocationCallOrder.at(-1)).toBeLessThan(
+      workspace?.webContents.focus.mock.invocationCallOrder.at(-1) ?? 0,
+    );
 
     (workspace?.close as unknown as (() => void) | undefined)?.();
     expect(mocks.desktopIpc.detach).toHaveBeenCalledWith(
@@ -431,7 +444,7 @@ describe("desktop main entrypoint", () => {
     expect(mocks.BrowserWindow).toHaveBeenCalledTimes(4);
     mocks.emitApp("second-instance");
     expect(replacement?.focus).toHaveBeenCalledTimes(1);
-    (mocks.windows[2]?.close as unknown as (() => void) | undefined)?.();
+    (activeReview?.close as unknown as (() => void) | undefined)?.();
     expect(replacement?.focus).toHaveBeenCalledTimes(1);
     expect(replacement?.webContents.focus).not.toHaveBeenCalled();
     const platform = vi.spyOn(process, "platform", "get");

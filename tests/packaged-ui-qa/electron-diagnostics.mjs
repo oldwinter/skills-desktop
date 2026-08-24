@@ -8,9 +8,11 @@ const SANDBOX_STARTUP_FRAME =
 export function isElectronSandboxStartupDiagnostic(text) {
   if (text === SANDBOX_STARTUP_HEADING) return true;
 
-  const [heading, cause, ...frames] = text.split(/\r?\n/);
+  const lines = text.split(/\r?\n/);
+  const causeIndex = lines[0] === SANDBOX_STARTUP_HEADING ? 1 : 0;
+  const cause = lines[causeIndex];
+  const frames = lines.slice(causeIndex + 1);
   return (
-    heading === SANDBOX_STARTUP_HEADING &&
     cause === SANDBOX_STARTUP_CAUSE &&
     frames.length > 0 &&
     frames.every((frame) => SANDBOX_STARTUP_FRAME.test(frame))

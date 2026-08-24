@@ -140,6 +140,18 @@ describe("packaged UI QA CDP seam", () => {
 
     socket.emit("message", {
       data: JSON.stringify({
+        method: "Runtime.exceptionThrown",
+        params: {
+          exceptionDetails: {
+            text: sandboxStartupDiagnostic.split("\n").slice(1).join("\n"),
+          },
+        },
+      }),
+    });
+    expect(page.errors).toEqual([]);
+
+    socket.emit("message", {
+      data: JSON.stringify({
         method: "Runtime.consoleAPICalled",
         params: {
           args: [
@@ -174,6 +186,21 @@ describe("packaged UI QA CDP seam", () => {
       }),
     });
     expect(page.errors).toHaveLength(2);
+
+    socket.emit("message", {
+      data: JSON.stringify({
+        method: "Runtime.exceptionThrown",
+        params: {
+          exceptionDetails: {
+            text: [
+              "TypeError: Cannot destructure property 'preloadScripts' of 'binding.startupData' as it is null.",
+              "    at https://renderer.example.test/app.js:1:2",
+            ].join("\n"),
+          },
+        },
+      }),
+    });
+    expect(page.errors).toHaveLength(3);
   });
 
   it("waits for the expected document title before attaching to a page", () => {

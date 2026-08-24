@@ -47,9 +47,10 @@ type WorkspaceView =
   | "inventory"
   | "targets";
 
-// Windows may reassign DOM focus for several frames after a native modal closes.
-const REVIEW_FOCUS_MAX_FRAMES = 60;
-const REVIEW_FOCUS_STABLE_FRAMES = 12;
+// Windows may briefly reassign DOM focus after a native modal closes.
+const REVIEW_FOCUS_INTERVAL_MS = 16;
+const REVIEW_FOCUS_MAX_CHECKS = 60;
+const REVIEW_FOCUS_STABLE_CHECKS = 12;
 
 function freshnessLabel(
   freshness: WorkspaceSnapshot["inventory"]["freshness"],
@@ -331,7 +332,7 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
     const cancelScheduledRestore = () => {
       restoreGeneration += 1;
       if (pendingRestore !== undefined) {
-        window.cancelAnimationFrame(pendingRestore);
+        window.clearTimeout(pendingRestore);
         pendingRestore = undefined;
       }
     };
@@ -342,25 +343,28 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
     const scheduleReviewFocusRestore = () => {
       cancelScheduledRestore();
       const generation = restoreGeneration;
-      let checkedFrames = 0;
       let expectedTarget: HTMLElement | null = null;
-      let stableFrames = 0;
+      let focusChecks = 0;
+      let stableChecks = 0;
+      const scheduleNextCheck = () => {
+        pendingRestore = window.setTimeout(
+          restoreFocus,
+          REVIEW_FOCUS_INTERVAL_MS,
+        );
+      };
       const restoreFocus = () => {
         pendingRestore = undefined;
         if (generation !== restoreGeneration) return;
         const opener = reviewReturnFocusRef.current;
         if (opener === null) return;
 
-        checkedFrames += 1;
-        if (
-          !document.hasFocus() ||
-          mutationPhaseRef.current === "reviewing"
-        ) {
-          if (checkedFrames < REVIEW_FOCUS_MAX_FRAMES) {
-            pendingRestore = window.requestAnimationFrame(restoreFocus);
-          }
+        const workspaceFocused =
+          document.hasFocus() && mutationPhaseRef.current !== "reviewing";
+        if (!workspaceFocused) {
+          scheduleNextCheck();
           return;
         }
+        focusChecks += 1;
         const target =
           opener.isConnected && !opener.disabled
             ? opener
@@ -372,23 +376,25 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
 
         if (target !== expectedTarget) {
           expectedTarget = target;
-          stableFrames = 0;
+          stableChecks = 0;
         }
         if (document.activeElement === target) {
-          stableFrames += 1;
+          stableChecks += 1;
         } else {
-          target.focus();
-          stableFrames = 0;
+          target.focus({ preventScroll: true });
+          stableChecks = 0;
         }
-        if (stableFrames >= REVIEW_FOCUS_STABLE_FRAMES) {
+        if (stableChecks >= REVIEW_FOCUS_STABLE_CHECKS) {
           reviewReturnFocusRef.current = null;
           return;
         }
-        if (checkedFrames < REVIEW_FOCUS_MAX_FRAMES) {
-          pendingRestore = window.requestAnimationFrame(restoreFocus);
+        if (focusChecks >= REVIEW_FOCUS_MAX_CHECKS) {
+          reviewReturnFocusRef.current = null;
+          return;
         }
+        scheduleNextCheck();
       };
-      pendingRestore = window.requestAnimationFrame(restoreFocus);
+      scheduleNextCheck();
     };
     const handleWindowFocus = () => {
       if (mutationPhaseRef.current === "reviewing") return;
@@ -399,10 +405,12 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
     };
     cancelReviewFocusRestoreRef.current = cancelReviewFocusRestore;
     scheduleReviewFocusRestoreRef.current = scheduleReviewFocusRestore;
+    window.addEventListener("click", handleWorkspaceInput, true);
     window.addEventListener("focus", handleWindowFocus);
     window.addEventListener("keydown", handleWorkspaceInput, true);
     window.addEventListener("pointerdown", handleWorkspaceInput, true);
     return () => {
+      window.removeEventListener("click", handleWorkspaceInput, true);
       window.removeEventListener("focus", handleWindowFocus);
       window.removeEventListener("keydown", handleWorkspaceInput, true);
       window.removeEventListener("pointerdown", handleWorkspaceInput, true);
@@ -561,7 +569,7 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
     const result = await client.requestReview(preparedMutationId);
     if (result.ok) setActionError(undefined);
     else {
-      reviewReturnFocusRef.current = null;
+      cancelReviewFocusRestoreRef.current();
       setActionError(result.error);
     }
   };
