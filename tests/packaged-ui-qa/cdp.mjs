@@ -1,3 +1,5 @@
+import { isElectronSandboxStartupDiagnostic } from "./electron-diagnostics.mjs";
+
 const DEFAULT_REQUEST_TIMEOUT_MS = 5_000;
 const DEFAULT_CONNECT_TIMEOUT_MS = 30_000;
 
@@ -161,19 +163,22 @@ export class CdpPage {
       return;
     }
     if (message.method === "Runtime.exceptionThrown") {
-      this.errors.push(
-        message.params?.exceptionDetails?.text ?? "Runtime exception",
-      );
+      const diagnostic =
+        message.params?.exceptionDetails?.text ?? "Runtime exception";
+      if (!isElectronSandboxStartupDiagnostic(diagnostic)) {
+        this.errors.push(diagnostic);
+      }
     }
     if (
       message.method === "Runtime.consoleAPICalled" &&
       message.params?.type === "error"
     ) {
-      this.errors.push(
-        (message.params.args ?? [])
-          .map((argument) => argument.value ?? argument.description ?? "Error")
-          .join(" "),
-      );
+      const diagnostic = (message.params.args ?? [])
+        .map((argument) => argument.value ?? argument.description ?? "Error")
+        .join(" ");
+      if (!isElectronSandboxStartupDiagnostic(diagnostic)) {
+        this.errors.push(diagnostic);
+      }
     }
   }
 

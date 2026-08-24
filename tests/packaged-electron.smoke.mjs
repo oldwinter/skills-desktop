@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
+import { isElectronSandboxStartupDiagnostic } from "./packaged-ui-qa/electron-diagnostics.mjs";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const executablePath = resolve(
@@ -27,8 +28,6 @@ const invocationLog = join(homeDirectory, "invocations.log");
 const projectInventoryState = join(homeDirectory, "project-inventory.json");
 const activeChildren = new Set();
 const filePollIntervalMs = 25;
-const ELECTRON_SANDBOX_STARTUP_WARNING =
-  "Electron sandboxed_renderer.bundle.js script failed to run";
 
 function observeChildExit(child) {
   return new Promise((resolveExit) => {
@@ -130,7 +129,7 @@ class CdpPage {
       }
       if (message.method === "Runtime.exceptionThrown") {
         const text = message.params.exceptionDetails.text;
-        if (!text.startsWith(ELECTRON_SANDBOX_STARTUP_WARNING)) {
+        if (!isElectronSandboxStartupDiagnostic(text)) {
           this.errors.push(text);
         }
       }
@@ -138,13 +137,14 @@ class CdpPage {
         message.method === "Runtime.consoleAPICalled" &&
         message.params.type === "error"
       ) {
-        this.errors.push(
-          message.params.args
-            .map(
-              (argument) => argument.value ?? argument.description ?? "Error",
-            )
-            .join(" "),
-        );
+        const diagnostic = message.params.args
+          .map(
+            (argument) => argument.value ?? argument.description ?? "Error",
+          )
+          .join(" ");
+        if (!isElectronSandboxStartupDiagnostic(diagnostic)) {
+          this.errors.push(diagnostic);
+        }
       }
     });
   }

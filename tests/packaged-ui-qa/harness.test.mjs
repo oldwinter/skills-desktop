@@ -105,6 +105,77 @@ afterEach(async () => {
 });
 
 describe("packaged UI QA CDP seam", () => {
+  it("ignores only Electron's internal sandbox startup diagnostic", () => {
+    const socket = new FakeSocket();
+    const page = new CdpPage(socket);
+    const sandboxStartupDiagnostic = [
+      "Electron sandboxed_renderer.bundle.js script failed to run",
+      "TypeError: Cannot destructure property 'preloadScripts' of 'binding.startupData' as it is null.",
+      "    at node:electron/js2c/sandbox_bundle:2:132134",
+      "    at ___electron_webpack_init__ (node:electron/js2c/sandbox_bundle:2:133242)",
+    ].join("\n");
+
+    socket.emit("message", {
+      data: JSON.stringify({
+        method: "Runtime.consoleAPICalled",
+        params: {
+          args: [{ value: sandboxStartupDiagnostic }],
+          type: "error",
+        },
+      }),
+    });
+    expect(page.errors).toEqual([]);
+
+    socket.emit("message", {
+      data: JSON.stringify({
+        method: "Runtime.exceptionThrown",
+        params: {
+          exceptionDetails: {
+            text: "Electron sandboxed_renderer.bundle.js script failed to run",
+          },
+        },
+      }),
+    });
+    expect(page.errors).toEqual([]);
+
+    socket.emit("message", {
+      data: JSON.stringify({
+        method: "Runtime.consoleAPICalled",
+        params: {
+          args: [
+            {
+              value:
+                "Electron sandboxed_renderer.bundle.js script failed to run\nError: application failure",
+            },
+          ],
+          type: "error",
+        },
+      }),
+    });
+    expect(page.errors).toEqual([
+      "Electron sandboxed_renderer.bundle.js script failed to run\nError: application failure",
+    ]);
+
+    socket.emit("message", {
+      data: JSON.stringify({
+        method: "Runtime.consoleAPICalled",
+        params: {
+          args: [
+            {
+              value: [
+                "Electron sandboxed_renderer.bundle.js script failed to run",
+                "TypeError: Cannot destructure property 'preloadScripts' of 'binding.startupData' as it is null.",
+                "    at https://renderer.example.test/app.js:1:2",
+              ].join("\n"),
+            },
+          ],
+          type: "error",
+        },
+      }),
+    });
+    expect(page.errors).toHaveLength(2);
+  });
+
   it("waits for the expected document title before attaching to a page", () => {
     const expectedUrl = "skills-desktop://review/index.html";
     const expectedTitle = "Skills Desktop Trusted Review";
