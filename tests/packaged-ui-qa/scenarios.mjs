@@ -499,6 +499,7 @@ export async function runPackagedUiQa({
           document.activeElement.textContent?.trim() === "Open Trusted Review"`,
         "workspace focus restoration after review cancellation",
         5_000,
+        { stableMs: 50 },
       );
     } catch (error) {
       const state = await page
@@ -589,6 +590,7 @@ export async function runPackagedUiQa({
           document.activeElement.textContent?.trim() === "completed / verified"`,
         "workspace focus restoration",
         5_000,
+        { stableMs: 50 },
       );
     } catch (error) {
       const state = await page

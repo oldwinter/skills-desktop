@@ -216,6 +216,28 @@ function clientFor(value: WorkspaceSnapshot): DesktopBridge {
   };
 }
 
+function installAnimationFrameHarness() {
+  let nextFrameId = 1;
+  const callbacks = new Map<number, FrameRequestCallback>();
+  vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+    const frameId = nextFrameId;
+    nextFrameId += 1;
+    callbacks.set(frameId, callback);
+    return frameId;
+  });
+  vi.spyOn(window, "cancelAnimationFrame").mockImplementation((frameId) => {
+    callbacks.delete(frameId);
+  });
+  return {
+    pendingCount: () => callbacks.size,
+    runFrame: () => {
+      const frameCallbacks = [...callbacks.values()];
+      callbacks.clear();
+      for (const callback of frameCallbacks) callback(performance.now());
+    },
+  };
+}
+
 const aboutClient: AboutBridge = {
   async exportDiagnostics() {
     return { ok: true, value: { status: "saved" } };
@@ -1332,7 +1354,8 @@ describe("Local Target Inventory shell", () => {
     expect(within(inspector).getByText("global/source")).toBeInTheDocument();
   });
 
-  it("prepares exact selected-skill intents and requests review of the main-owned plan", async () => {
+  it("prepares exact selected-skill intents and stabilizes approved review focus", async () => {
+    const animationFrames = installAnimationFrameHarness();
     vi.spyOn(document, "hasFocus").mockReturnValue(true);
     const prepareMutation = vi.fn(async () => ({
       ok: true as const,
@@ -1426,11 +1449,68 @@ describe("Local Target Inventory shell", () => {
       />,
     );
     const outcome = await screen.findByText("completed / verified");
-    window.dispatchEvent(new Event("focus"));
-    await waitFor(() => expect(outcome).toHaveFocus());
+    const inventoryButton = screen.getByRole("button", { name: "Inventory" });
+    act(() => window.dispatchEvent(new Event("focus")));
+    expect(animationFrames.pendingCount()).toBe(1);
+
+    act(() => animationFrames.runFrame());
+    expect(outcome).toHaveFocus();
+    inventoryButton.focus();
+    act(() => animationFrames.runFrame());
+    expect(outcome).toHaveFocus();
+    act(() => animationFrames.runFrame());
+    act(() => animationFrames.runFrame());
+    expect(animationFrames.pendingCount()).toBe(1);
+
+    inventoryButton.focus();
+    act(() => animationFrames.runFrame());
+    expect(outcome).toHaveFocus();
+    for (let frame = 0; frame < 12; frame += 1) {
+      act(() => animationFrames.runFrame());
+    }
+    expect(animationFrames.pendingCount()).toBe(0);
+
+    inventoryButton.focus();
+    act(() => animationFrames.runFrame());
+    expect(inventoryButton).toHaveFocus();
+
+    rerender(<InventoryApp client={client} />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Open Trusted Review" }),
+    );
+    await waitFor(() => expect(requestReview).toHaveBeenCalledTimes(2));
+    rerender(
+      <InventoryApp
+        client={clientFor({
+          ...plannedSnapshot,
+          mutation: {
+            ...plannedSnapshot.mutation,
+            outcome: {
+              effects: { status: "verified" },
+              process: {
+                disposition: "completed",
+                exitCode: 0,
+                termination: "known",
+              },
+            },
+            phase: "succeeded",
+          },
+        })}
+      />,
+    );
+    const restoredOutcome = await screen.findByText("completed / verified");
+    inventoryButton.focus();
+    act(() => window.dispatchEvent(new Event("focus")));
+    expect(animationFrames.pendingCount()).toBe(1);
+    fireEvent.keyDown(inventoryButton, { key: "Tab" });
+    expect(animationFrames.pendingCount()).toBe(0);
+    act(() => animationFrames.runFrame());
+    expect(restoredOutcome).not.toHaveFocus();
+    expect(inventoryButton).toHaveFocus();
   });
 
   it("waits for native focus before restoring a cancelled review opener", async () => {
+    const animationFrames = installAnimationFrameHarness();
     const hasFocus = vi.spyOn(document, "hasFocus").mockReturnValue(true);
     const prepareMutation = vi.fn(async () => ({
       ok: true as const,
@@ -1532,13 +1612,21 @@ describe("Local Target Inventory shell", () => {
     act(() => {
       window.dispatchEvent(new Event("focus"));
       inventoryButton.focus();
-      hasFocus.mockReturnValue(true);
     });
-    await waitFor(() =>
-      expect(
-        screen.getByRole("button", { name: "Open Trusted Review" }),
-      ).toHaveFocus(),
-    );
+    expect(animationFrames.pendingCount()).toBe(1);
+    act(() => animationFrames.runFrame());
+    expect(inventoryButton).toHaveFocus();
+    expect(animationFrames.pendingCount()).toBe(1);
+
+    hasFocus.mockReturnValue(true);
+    act(() => animationFrames.runFrame());
+    expect(
+      screen.getByRole("button", { name: "Open Trusted Review" }),
+    ).toHaveFocus();
+    for (let frame = 0; frame < 12; frame += 1) {
+      act(() => animationFrames.runFrame());
+    }
+    expect(animationFrames.pendingCount()).toBe(0);
   });
 
   it("shows bounded mutation request errors at the action surface", async () => {
