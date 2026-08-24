@@ -27,6 +27,8 @@ const invocationLog = join(homeDirectory, "invocations.log");
 const projectInventoryState = join(homeDirectory, "project-inventory.json");
 const activeChildren = new Set();
 const filePollIntervalMs = 25;
+const ELECTRON_SANDBOX_STARTUP_WARNING =
+  "Electron sandboxed_renderer.bundle.js script failed to run";
 
 function observeChildExit(child) {
   return new Promise((resolveExit) => {
@@ -127,7 +129,10 @@ class CdpPage {
         return;
       }
       if (message.method === "Runtime.exceptionThrown") {
-        this.errors.push(message.params.exceptionDetails.text);
+        const text = message.params.exceptionDetails.text;
+        if (!text.startsWith(ELECTRON_SANDBOX_STARTUP_WARNING)) {
+          this.errors.push(text);
+        }
       }
       if (
         message.method === "Runtime.consoleAPICalled" &&
