@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => {
     readonly options: unknown;
     readonly webContents: {
       readonly id: number;
+      focus: ReturnType<typeof vi.fn>;
       getURL: ReturnType<typeof vi.fn>;
       on: ReturnType<typeof vi.fn>;
       emit(event: string, ...args: unknown[]): void;
@@ -51,6 +52,7 @@ const mocks = vi.hoisted(() => {
     const webContentsListeners = new Map<string, Listener[]>();
     const webContents = {
       id: nextWebContentsId++,
+      focus: vi.fn(),
       getURL: vi.fn(() => currentUrl),
       on: vi.fn((event: string, listener: Listener) => {
         addListener(webContentsListeners, event, listener);
@@ -413,6 +415,7 @@ describe("desktop main entrypoint", () => {
     mocks.reviewRequested()?.("review-2");
     expect(review?.close).toHaveBeenCalledTimes(1);
     expect(workspace?.focus).toHaveBeenCalledTimes(3);
+    expect(workspace?.webContents.focus).toHaveBeenCalledTimes(1);
     expect(mocks.desktopIpc.detach).toHaveBeenCalledWith(
       review?.webContents.id,
     );
@@ -430,6 +433,7 @@ describe("desktop main entrypoint", () => {
     expect(replacement?.focus).toHaveBeenCalledTimes(1);
     (mocks.windows[2]?.close as unknown as (() => void) | undefined)?.();
     expect(replacement?.focus).toHaveBeenCalledTimes(1);
+    expect(replacement?.webContents.focus).not.toHaveBeenCalled();
     const platform = vi.spyOn(process, "platform", "get");
     platform.mockReturnValue("linux");
     mocks.emitApp("window-all-closed");

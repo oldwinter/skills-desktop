@@ -1528,8 +1528,11 @@ describe("Local Target Inventory shell", () => {
       screen.getByRole("button", { name: "Open Trusted Review" }),
     ).not.toHaveFocus();
 
-    hasFocus.mockReturnValue(true);
-    act(() => window.dispatchEvent(new Event("focus")));
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+      inventoryButton.focus();
+      hasFocus.mockReturnValue(true);
+    });
     await waitFor(() =>
       expect(
         screen.getByRole("button", { name: "Open Trusted Review" }),
