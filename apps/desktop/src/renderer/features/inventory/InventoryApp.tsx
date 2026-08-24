@@ -49,8 +49,8 @@ type WorkspaceView =
 
 // Windows may briefly reassign DOM focus after a native modal closes.
 const REVIEW_FOCUS_INTERVAL_MS = 16;
-const REVIEW_FOCUS_MAX_DURATION_MS = 250;
-const REVIEW_FOCUS_STABLE_CHECKS = 2;
+const REVIEW_FOCUS_MAX_CHECKS = 60;
+const REVIEW_FOCUS_STABLE_CHECKS = 12;
 
 function freshnessLabel(
   freshness: WorkspaceSnapshot["inventory"]["freshness"],
@@ -343,12 +343,10 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
     const scheduleReviewFocusRestore = () => {
       cancelScheduledRestore();
       const generation = restoreGeneration;
-      const deadline = performance.now() + REVIEW_FOCUS_MAX_DURATION_MS;
       let expectedTarget: HTMLElement | null = null;
-      let observedWorkspaceFocus = false;
+      let focusChecks = 0;
       let stableChecks = 0;
       const scheduleNextCheck = () => {
-        if (performance.now() >= deadline) return;
         pendingRestore = window.setTimeout(
           restoreFocus,
           REVIEW_FOCUS_INTERVAL_MS,
@@ -362,15 +360,11 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
 
         const workspaceFocused =
           document.hasFocus() && mutationPhaseRef.current !== "reviewing";
-        observedWorkspaceFocus ||= workspaceFocused;
-        if (performance.now() >= deadline) {
-          if (observedWorkspaceFocus) reviewReturnFocusRef.current = null;
-          return;
-        }
         if (!workspaceFocused) {
           scheduleNextCheck();
           return;
         }
+        focusChecks += 1;
         const target =
           opener.isConnected && !opener.disabled
             ? opener
@@ -391,6 +385,10 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
           stableChecks = 0;
         }
         if (stableChecks >= REVIEW_FOCUS_STABLE_CHECKS) {
+          reviewReturnFocusRef.current = null;
+          return;
+        }
+        if (focusChecks >= REVIEW_FOCUS_MAX_CHECKS) {
           reviewReturnFocusRef.current = null;
           return;
         }

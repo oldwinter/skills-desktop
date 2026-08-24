@@ -220,10 +220,8 @@ function installFocusTimerHarness() {
   const nativeSetTimeout = window.setTimeout.bind(window);
   const nativeClearTimeout = window.clearTimeout.bind(window);
   type WindowTimer = ReturnType<typeof window.setTimeout>;
-  let currentTime = performance.now();
   let nextTimerId = 1_000_000;
   const callbacks = new Map<WindowTimer, () => void>();
-  vi.spyOn(performance, "now").mockImplementation(() => currentTime);
   const setTimeoutImplementation = (
     ...parameters: Parameters<typeof window.setTimeout>
   ): WindowTimer => {
@@ -246,8 +244,7 @@ function installFocusTimerHarness() {
   });
   return {
     pendingCount: () => callbacks.size,
-    runTick: (elapsedMs = 16) => {
-      currentTime += elapsedMs;
+    runTick: () => {
       const timerCallbacks = [...callbacks.values()];
       callbacks.clear();
       for (const callback of timerCallbacks) callback();
@@ -1472,12 +1469,12 @@ describe("Local Target Inventory shell", () => {
 
     act(() => focusTimers.runTick());
     expect(outcome).toHaveFocus();
-    act(() => focusTimers.runTick());
     inventoryButton.focus();
     act(() => focusTimers.runTick());
     expect(outcome).toHaveFocus();
-    act(() => focusTimers.runTick());
-    act(() => focusTimers.runTick());
+    for (let tick = 0; tick < 12; tick += 1) {
+      act(() => focusTimers.runTick());
+    }
     expect(focusTimers.pendingCount()).toBe(0);
 
     inventoryButton.focus();
@@ -1514,7 +1511,7 @@ describe("Local Target Inventory shell", () => {
     expect(focusTimers.pendingCount()).toBe(1);
     fireEvent.keyDown(inventoryButton, { key: "Tab" });
     expect(focusTimers.pendingCount()).toBe(0);
-    act(() => focusTimers.runTick(300));
+    act(() => focusTimers.runTick());
     expect(restoredOutcome).not.toHaveFocus();
     expect(inventoryButton).toHaveFocus();
   });
@@ -1620,9 +1617,9 @@ describe("Local Target Inventory shell", () => {
     ).not.toHaveFocus();
 
     expect(focusTimers.pendingCount()).toBe(1);
-    act(() => focusTimers.runTick());
-    act(() => focusTimers.runTick());
-    act(() => focusTimers.runTick());
+    for (let tick = 0; tick < 65; tick += 1) {
+      act(() => focusTimers.runTick());
+    }
     expect(inventoryButton).toHaveFocus();
     expect(focusTimers.pendingCount()).toBe(1);
 
@@ -1631,8 +1628,9 @@ describe("Local Target Inventory shell", () => {
     expect(
       screen.getByRole("button", { name: "Open Trusted Review" }),
     ).toHaveFocus();
-    act(() => focusTimers.runTick());
-    act(() => focusTimers.runTick());
+    for (let tick = 0; tick < 12; tick += 1) {
+      act(() => focusTimers.runTick());
+    }
     expect(focusTimers.pendingCount()).toBe(0);
   });
 
