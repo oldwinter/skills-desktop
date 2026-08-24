@@ -14,6 +14,11 @@
     "electron-winstaller@5.4.4": true,
     "electron@43.4.1": true
   },
+  "overrides": {
+    "extract-zip": "npm:@electron-internal/extract-zip@1.0.5",
+    "tar": "7.5.22",
+    "tmp": "0.2.7"
+  },
   "scripts": {
     "build": "npm run build --workspaces --if-present",
     "candidate:build": "node scripts/release/build-candidate.mjs",
