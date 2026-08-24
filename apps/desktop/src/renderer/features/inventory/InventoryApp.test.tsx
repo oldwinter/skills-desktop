@@ -268,7 +268,10 @@ const aboutClient: AboutBridge = {
   },
 };
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
 
 const rendererStyles = readFileSync(
   resolve(process.cwd(), "apps/desktop/src/renderer/styles.css"),
@@ -1426,7 +1429,8 @@ describe("Local Target Inventory shell", () => {
     await waitFor(() => expect(outcome).toHaveFocus());
   });
 
-  it("restores the review opener after a window-close cancellation returns to planned", async () => {
+  it("waits for native focus before restoring a cancelled review opener", async () => {
+    const hasFocus = vi.spyOn(document, "hasFocus").mockReturnValue(true);
     const prepareMutation = vi.fn(async () => ({
       ok: true as const,
       value: { operationId: "prepared-cancel-1" },
@@ -1510,7 +1514,22 @@ describe("Local Target Inventory shell", () => {
       screen.getByRole("button", { name: "Inventory" }),
     ).not.toHaveFocus();
 
+    const inventoryButton = screen.getByRole("button", { name: "Inventory" });
+    inventoryButton.focus();
+    hasFocus.mockReturnValue(false);
     rerender(<InventoryApp client={clientFor(plannedSnapshot)} />);
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Open Trusted Review" }),
+      ).toBeEnabled(),
+    );
+    expect(inventoryButton).toHaveFocus();
+    expect(
+      screen.getByRole("button", { name: "Open Trusted Review" }),
+    ).not.toHaveFocus();
+
+    hasFocus.mockReturnValue(true);
+    act(() => window.dispatchEvent(new Event("focus")));
     await waitFor(() =>
       expect(
         screen.getByRole("button", { name: "Open Trusted Review" }),

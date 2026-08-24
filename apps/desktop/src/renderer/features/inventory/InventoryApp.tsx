@@ -255,6 +255,8 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
           mutation: selectedTargetState.mutation,
           target: selectedTargetState.target,
         };
+  const mutationPhaseRef = useRef(snapshot?.mutation.phase);
+  mutationPhaseRef.current = snapshot?.mutation.phase;
   const inventory = snapshot?.inventory;
 
   useEffect(() => {
@@ -326,7 +328,7 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
         opener.focus();
         return;
       }
-      if (snapshot?.mutation.phase === "reviewing") return;
+      if (mutationPhaseRef.current === "reviewing") return;
       reviewReturnFocusRef.current = null;
       const target =
         mutationOutcomeRef.current ??
@@ -337,11 +339,12 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
     };
     window.addEventListener("focus", restoreReviewFocus);
     return () => window.removeEventListener("focus", restoreReviewFocus);
-  }, [snapshot?.mutation.phase]);
+  }, []);
 
   useEffect(() => {
     if (snapshot?.mutation.phase !== "planned") return;
     const opener = reviewReturnFocusRef.current;
+    if (opener !== null && !document.hasFocus()) return;
     if (opener?.isConnected && !opener.disabled) {
       reviewReturnFocusRef.current = null;
       opener.focus();
