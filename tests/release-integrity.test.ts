@@ -24,6 +24,7 @@ import {
   SPDX_PREDICATE_TYPE,
   SLSA_PROVENANCE_PREDICATE_TYPE,
   assembleVerifiedDraft,
+  assertTaggedPreviewVersions,
   assertVerifiedAttestationResult,
   createPreviewReleaseNotes,
   finalizeReleaseEvidence,
@@ -749,6 +750,7 @@ describe("release integrity evidence contract", () => {
       const version = "0.1.0";
       const tag = previewReleaseTag({
         sourceCommit: releaseContext.sourceCommit,
+        sourceRef: "refs/heads/main",
         version,
       });
       const expected = {
@@ -757,6 +759,7 @@ describe("release integrity evidence contract", () => {
         payloadDigest,
         repository: releaseContext.repository,
         sourceCommit: releaseContext.sourceCommit,
+        sourceRef: "refs/heads/main",
         version,
         workflowRunUrl:
           "https://github.com/oldwinter/skills-desktop/actions/runs/123456",
@@ -781,6 +784,7 @@ describe("release integrity evidence contract", () => {
           "https://github.com/oldwinter/skills-desktop/releases/tag/candidate",
         name: previewReleaseName({
           sourceCommit: releaseContext.sourceCommit,
+          sourceRef: "refs/heads/main",
           version,
         }),
         prerelease: true,
@@ -831,6 +835,7 @@ describe("release integrity evidence contract", () => {
       for (const requiredEvidence of [
         expected.candidateSetDigest,
         expected.evidenceSetDigest,
+        expected.sourceRef,
         expected.workflowRunUrl,
         "unsigned, not notarized",
         "macOS and Windows may block it",
@@ -874,9 +879,68 @@ describe("release integrity evidence contract", () => {
       ).rejects.toThrow(
         "GitHub candidate release is not a public developer preview.",
       );
+
+      const taggedExpected = {
+        ...expected,
+        sourceRef: "refs/tags/v0.1.0",
+      };
+      const taggedRelease = {
+        ...release,
+        body: createPreviewReleaseNotes(taggedExpected),
+        name: previewReleaseName(taggedExpected),
+        tag_name: "v0.1.0",
+      };
+      await expect(
+        verifyGitHubDraftRelease({
+          expected: taggedExpected,
+          payloadRoot,
+          release: taggedRelease,
+        }),
+      ).resolves.toMatchObject({ state: "draft", tag: "v0.1.0" });
     } finally {
       await rm(root, { force: true, recursive: true });
     }
+  });
+
+  it("binds an exact version tag to every package version", () => {
+    const versions = {
+      desktop: "0.1.0",
+      lockfile: "0.1.0",
+      root: "0.1.0",
+      runtime: "0.1.0",
+    };
+
+    expect(
+      assertTaggedPreviewVersions({
+        sourceRef: "refs/tags/v0.1.0",
+        versions,
+      }),
+    ).toEqual({ tag: "v0.1.0", version: "0.1.0" });
+    expect(
+      previewReleaseTag({
+        sourceCommit: releaseContext.sourceCommit,
+        sourceRef: "refs/tags/v0.1.0",
+        version: "0.1.0",
+      }),
+    ).toBe("v0.1.0");
+    expect(() =>
+      assertTaggedPreviewVersions({
+        sourceRef: "refs/tags/v0.2.0",
+        versions,
+      }),
+    ).toThrow("Unsigned preview tag must match every package version.");
+    expect(() =>
+      assertTaggedPreviewVersions({
+        sourceRef: "refs/tags/v0.1",
+        versions,
+      }),
+    ).toThrow("Unsigned preview tag identity is invalid.");
+    expect(() =>
+      assertTaggedPreviewVersions({
+        sourceRef: "refs/tags/v0.1.0-beta.1",
+        versions,
+      }),
+    ).toThrow("Unsigned preview tag identity is invalid.");
   });
 
   it("accepts only verified attestation statements with the complete exact subject set", () => {

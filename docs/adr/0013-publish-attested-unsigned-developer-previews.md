@@ -27,7 +27,11 @@ candidate pipeline while paid signing prerequisites are deferred.
 
 The preview pipeline:
 
-- runs only by explicit manual dispatch against `main`;
+- runs either by explicit manual dispatch against `main` or automatically when
+  an exact `vX.Y.Z` tag is pushed;
+- rejects a tag before dependency installation unless its version matches every
+  application/workspace package and lockfile version and its commit belongs to
+  `main` history;
 - rebuilds nothing after candidate identity, SHA-256, SPDX SBOM, and GitHub
   artifact attestations are verified;
 - stages a private GitHub draft, verifies its exact assets, and only then changes
@@ -38,8 +42,10 @@ The preview pipeline:
 - links installation guidance to the exact source commit and requires users to
   verify checksums and provenance before overriding platform protection;
 - does not provide an application, installer, or script that installs a local
-  certificate as a trusted root, removes quarantine, or disables platform
-  security globally.
+  certificate as a trusted root or disables platform security globally;
+- may document a manual quarantine-attribute removal command scoped to the
+  verified `/Applications/Skills Desktop.app` bundle while signing and
+  notarization are deferred.
 
 On macOS, an informed user may apply an ad-hoc signature to the verified local
 application copy and use Apple's per-application **Open Anyway** flow. The
@@ -59,6 +65,12 @@ key.
 Unsigned Developer Previews do not participate in automatic updates. GitHub
 marks them as pre-releases, which the accepted `update.electronjs.org` stable
 feed excludes. Preview upgrades are manual.
+
+For an automatic tag publication, the GitHub Release uses the triggering tag
+itself. The workflow verifies that the tag already exists, stages the assets in
+a private draft, verifies the exact uploaded bytes, and then publishes that
+same release as a non-latest pre-release. The workflow does not synthesize or
+move the triggering tag.
 
 ## Alternatives
 
@@ -80,6 +92,12 @@ paying for signing identities. The experience includes prominent warnings and
 may be blocked by managed-device policy. macOS users must explicitly approve
 the application, Windows users see an unverified publisher and may be unable to
 continue, and preview-to-preview updates are manual.
+
+Maintainers can publish the complete native matrix by tagging an already merged
+versioned commit. This removes the manual publication switch for tagged
+previews, so write access to version tags is release authority for this
+explicitly unsigned channel. It does not grant Stable Release, signing,
+notarization, or automatic-update authority.
 
 Issues #27 through #33 remain the path to a Stable Release and are deferred,
 not satisfied. Funding or provider eligibility resumes that chain without

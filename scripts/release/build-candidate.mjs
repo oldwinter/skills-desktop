@@ -16,6 +16,7 @@ import {
   serializeCandidateManifest,
   stageCandidateArtifacts,
 } from "./candidate-contract.mjs";
+import { verifyPackagedApplication } from "./packaged-application-contract.mjs";
 
 const repositoryRoot = fileURLToPath(new URL("../../", import.meta.url));
 
@@ -96,6 +97,8 @@ export async function buildCandidate({
   const collectBuildOutputs =
     services.collectBuildOutputs ?? collectBuildOutputEvidence;
   const stageArtifacts = services.stageArtifacts ?? stageCandidateArtifacts;
+  const verifyApplication =
+    services.verifyPackagedApplication ?? verifyPackagedApplication;
   const write = services.writeFile ?? writeFile;
   const writeOutput =
     services.writeOutput ?? ((value) => process.stdout.write(value));
@@ -212,6 +215,12 @@ export async function buildCandidate({
     ],
     candidateEnvironment,
   );
+  await verifyApplication({
+    architecture: options.architecture,
+    forgeOutDirectory,
+    iconPath: join(root, "apps/desktop/assets/app-icon.icns"),
+    platform: options.platform,
+  });
 
   const outputRoot = resolve(root, options.outputDirectory);
   const candidateDirectory = join(

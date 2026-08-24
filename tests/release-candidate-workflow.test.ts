@@ -70,6 +70,10 @@ describe("unsigned candidate workflow contract", () => {
       "push",
       "workflow_dispatch",
     ]);
+    expect(workflow.on.push).toEqual({
+      branches: ["main"],
+      tags: ["v*.*.*"],
+    });
     expect(workflow.permissions).toEqual({ contents: "read" });
     expect(workflow.on.workflow_dispatch.inputs.publish_preview).toEqual({
       default: false,
@@ -79,12 +83,23 @@ describe("unsigned candidate workflow contract", () => {
       type: "boolean",
     });
     expect(Object.keys(workflow.jobs)).toEqual([
+      "quality-gates",
+      "packaged-ui-qa",
       "package",
       "evidence",
       "verify",
       "draft-assembly",
       "publish-preview",
     ]);
+
+    const qualityJob = workflow.jobs["quality-gates"];
+    expect(qualityJob.uses).toBe("./.github/workflows/verify.yml");
+    expect(qualityJob.permissions).toEqual({ contents: "read" });
+    expect(qualityJob.if).toContain("github.ref_type == 'tag'");
+    const packagedQaJob = workflow.jobs["packaged-ui-qa"];
+    expect(packagedQaJob.uses).toBe("./.github/workflows/packaged-ui-qa.yml");
+    expect(packagedQaJob.permissions).toEqual({ contents: "read" });
+    expect(packagedQaJob.if).toContain("github.ref_type == 'tag'");
 
     const packageJob = workflow.jobs.package;
     expect(packageJob.if).toContain("github.ref == 'refs/heads/main'");
@@ -104,7 +119,29 @@ describe("unsigned candidate workflow contract", () => {
     const checkout = packageSteps.find((step: { name?: string }) =>
       step.name?.startsWith("Check out"),
     );
+    expect(checkout.with["fetch-depth"]).toBe(0);
     expect(checkout.with["persist-credentials"]).toBe(false);
+    const validateTag = packageSteps.find(
+      (step: { name?: string }) => step.name === "Validate exact version tag",
+    );
+    expect(validateTag.if).toBe("github.ref_type == 'tag'");
+    expect(validateTag.run).toContain("release-integrity-cli.mjs validate-tag");
+    expect(validateTag.run).toContain('--source-ref "${{ github.ref }}"');
+    const verifyTagCommit = packageSteps.find(
+      (step: { name?: string }) =>
+        step.name === "Verify tagged commit belongs to main",
+    );
+    expect(verifyTagCommit.if).toBe("github.ref_type == 'tag'");
+    expect(verifyTagCommit.run).toContain("git merge-base --is-ancestor");
+    const install = packageSteps.find(
+      (step: { name?: string }) => step.name === "Install locked dependencies",
+    );
+    expect(packageSteps.indexOf(validateTag)).toBeLessThan(
+      packageSteps.indexOf(install),
+    );
+    expect(packageSteps.indexOf(verifyTagCommit)).toBeLessThan(
+      packageSteps.indexOf(install),
+    );
     const linuxPrerequisites = packageSteps.find(
       (step: { name?: string }) =>
         step.name === "Install official Linux maker prerequisites",
@@ -131,6 +168,7 @@ describe("unsigned candidate workflow contract", () => {
       (step: { name?: string }) => step.name === "Retain manifest evidence",
     );
     expect(manifestUpload.if).toContain("github.event_name != 'workflow_dispatch'");
+    expect(manifestUpload.if).toContain("github.ref_type != 'tag'");
     expect(manifestUpload.with.name).toBe(
       "unsigned-package-manifest-${{ steps.identity.outputs.manifest-digest }}",
     );
@@ -143,6 +181,7 @@ describe("unsigned candidate workflow contract", () => {
         step.name === "Exchange digest-addressed candidate",
     );
     expect(packageUpload.if).toContain("github.event_name == 'workflow_dispatch'");
+    expect(packageUpload.if).toContain("github.ref_type == 'tag'");
     expect(packageUpload.with.name).toBe(
       "unsigned-package-${{ steps.identity.outputs.manifest-digest }}",
     );
@@ -156,6 +195,7 @@ describe("unsigned candidate workflow contract", () => {
     expect(evidenceJob.needs).toBe("package");
     expect(evidenceJob.if).toContain("github.event_name == 'workflow_dispatch'");
     expect(evidenceJob.if).toContain("github.ref == 'refs/heads/main'");
+    expect(evidenceJob.if).toContain("github.ref_type == 'tag'");
     expect(evidenceJob.permissions).toEqual({
       "artifact-metadata": "write",
       attestations: "write",
@@ -219,6 +259,7 @@ describe("unsigned candidate workflow contract", () => {
     expect(verifyJob["runs-on"]).toBe("ubuntu-24.04");
     expect(verifyJob.needs).toBe("evidence");
     expect(verifyJob.if).toContain("github.ref == 'refs/heads/main'");
+    expect(verifyJob.if).toContain("github.ref_type == 'tag'");
     expect(verifyJob.permissions).toEqual({
       attestations: "read",
       contents: "read",
@@ -253,6 +294,7 @@ describe("unsigned candidate workflow contract", () => {
     expect(draftJob.permissions).toEqual({ contents: "write" });
     expect(draftJob.if).toContain("github.event_name == 'workflow_dispatch'");
     expect(draftJob.if).toContain("github.ref == 'refs/heads/main'");
+    expect(draftJob.if).toContain("github.ref_type == 'tag'");
     const draftSource = draftJob.steps
       .map((step: { run?: string }) => step.run ?? "")
       .join("\n");
@@ -263,14 +305,31 @@ describe("unsigned candidate workflow contract", () => {
     expect(draftSource).toContain("--notes-file");
     expect(draftSource).not.toMatch(/--notes\s+["']/);
     expect(draftSource).toContain("release-integrity-cli.mjs verify-release");
+    expect(draftSource).toContain('--source-ref "${{ github.ref }}"');
     expect(draftSource).not.toMatch(/gh release edit|draft=false|make_latest=true/i);
+    const tagDraft = draftJob.steps.find(
+      (step: { name?: string }) =>
+        step.name === "Create tag-bound unpublished preview draft",
+    );
+    expect(tagDraft.if).toContain("github.ref_type == 'tag'");
+    expect(tagDraft.run).toContain("--verify-tag");
+    expect(tagDraft.run).toContain('--target "${{ github.sha }}"');
 
     const publishJob = workflow.jobs["publish-preview"];
     expect(publishJob["runs-on"]).toBe("ubuntu-24.04");
-    expect(publishJob.needs).toEqual(["verify", "draft-assembly"]);
+    expect(publishJob.needs).toEqual([
+      "verify",
+      "draft-assembly",
+      "quality-gates",
+      "packaged-ui-qa",
+    ]);
     expect(publishJob.permissions).toEqual({ contents: "write" });
-    expect(publishJob.if.replace(/\s+/g, " ").trim()).toBe(
+    const publishCondition = publishJob.if.replace(/\s+/g, " ").trim();
+    expect(publishCondition).toContain(
       "github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.publish_preview == true",
+    );
+    expect(publishCondition).toContain(
+      "github.event_name == 'push' && github.ref_type == 'tag'",
     );
     const publishSource = publishJob.steps
       .map((step: { run?: string }) => step.run ?? "")
@@ -283,6 +342,7 @@ describe("unsigned candidate workflow contract", () => {
     expect(publishSource).toContain(
       "release-integrity-cli.mjs verify-preview-release",
     );
+    expect(publishSource).toContain('--source-ref "${{ github.ref }}"');
     const publishStepNames = publishJob.steps.map(
       (step: { name?: string }) => step.name,
     );
@@ -295,7 +355,9 @@ describe("unsigned candidate workflow contract", () => {
       /\bnpm\s+(ci|exec|run)\b|electron-forge|xvfb|candidate:build/i,
     );
 
-    for (const job of Object.values(workflow.jobs) as Array<{
+    for (const job of Object.values(workflow.jobs).filter(
+      (candidate: { steps?: unknown }) => candidate.steps !== undefined,
+    ) as Array<{
       steps: Array<{
         uses?: string;
         with?: Record<string, unknown>;
@@ -331,6 +393,27 @@ describe("unsigned candidate workflow contract", () => {
     );
     expect(source).not.toMatch(
       /\b(CSC_LINK|APPLE_API_KEY|WIN_CSC_LINK|MACOS_CERTIFICATE|WINDOWS_CERTIFICATE)\b/,
+    );
+  });
+
+  it("exposes the full Verify and packaged UI QA gates to tag publication", async () => {
+    const [verifySource, packagedQaSource] = await Promise.all([
+      readFile(new URL("../.github/workflows/verify.yml", import.meta.url), "utf8"),
+      readFile(
+        new URL("../.github/workflows/packaged-ui-qa.yml", import.meta.url),
+        "utf8",
+      ),
+    ]);
+    const verifyWorkflow = parse(verifySource);
+    const packagedQaWorkflow = parse(packagedQaSource);
+
+    expect(verifyWorkflow.on.workflow_call).toBeNull();
+    expect(packagedQaWorkflow.on.workflow_call).toBeNull();
+    expect(packagedQaWorkflow.jobs["packaged-ui-qa"].if).toContain(
+      "github.event_name == 'workflow_call'",
+    );
+    expect(packagedQaWorkflow.jobs["packaged-ui-qa"].if).toContain(
+      "github.ref_type == 'tag'",
     );
   });
 

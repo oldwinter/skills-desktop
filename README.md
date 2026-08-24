@@ -73,6 +73,16 @@ downloaded bytes before following the platform-owned override and local-signing
 steps in the [installation guide](docs/unsigned-developer-preview.md). Paid
 signing, notarization, and stable publication remain deferred under #22/#27.
 
+The macOS preview is not signed or notarized yet. After verifying the download's
+SHA-256 value and moving `Skills Desktop.app` into `/Applications`, remove the
+quarantine attribute from this application bundle only:
+
+```bash
+sudo xattr -r -d com.apple.quarantine /Applications/Skills\ Desktop.app
+```
+
+Do not use this command on a broader directory or on an unverified download.
+
 Local candidate generation remains available for development evidence. These
 local builds have no publication authority, require a clean tracked tree, and
 must run on the target operating system. Linux additionally requires `fakeroot`
@@ -93,9 +103,20 @@ npm run candidate:build -- \
 Use `darwin` with `arm64` or `x64`, or `win32` with `x64`, on the
 corresponding native host. Each immutable candidate directory contains only
 the ADR-defined Forge outputs, `candidate-manifest-v1.json`, and its SHA-256
-sidecar. Public preview publication is a separate manual workflow on `main`:
-it attests and verifies the exact candidate bytes, stages a private draft,
-reverifies the uploaded assets, and only then publishes a GitHub prerelease.
+sidecar. A separate manual publication workflow on `main` remains available as
+a fallback. The normal release path is an exact version tag after all workspace
+and lockfile versions have been updated and merged:
+
+```bash
+git tag -a v0.1.0 -m "Skills Desktop v0.1.0"
+git push origin v0.1.0
+```
+
+The tag must match the package version and point into `main` history. CI builds
+macOS arm64/x64, Windows x64, and Linux x64 candidates, attests and verifies the
+exact bytes, stages a private draft, reverifies the uploaded assets, and only
+then publishes the same tag as a non-latest GitHub prerelease. These artifacts
+remain unsigned and are not Stable Releases.
 
 ## Run The Prototype
 

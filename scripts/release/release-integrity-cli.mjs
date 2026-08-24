@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import {
   CANDIDATE_IDENTITY_PREDICATE_TYPE,
   SPDX_PREDICATE_TYPE,
+  assertTaggedPreviewVersions,
   SLSA_PROVENANCE_PREDICATE_TYPE,
   assembleVerifiedDraft,
   assertVerifiedAttestationResult,
@@ -289,11 +290,13 @@ async function notes(argv) {
     "--payload-digest",
     "--repository",
     "--source-commit",
+    "--source-ref",
     "--version",
     "--workflow-run-url",
   ]);
   const identity = {
     sourceCommit: options["--source-commit"],
+    sourceRef: options["--source-ref"],
     version: options["--version"],
   };
   await writeFile(
@@ -331,6 +334,7 @@ async function verifyGitHubReleaseCommand(
     "--release-list-json",
     "--repository",
     "--source-commit",
+    "--source-ref",
     "--version",
     "--workflow-run-url",
   ]);
@@ -340,6 +344,7 @@ async function verifyGitHubReleaseCommand(
     payloadDigest: options["--payload-digest"],
     repository: options["--repository"],
     sourceCommit: options["--source-commit"],
+    sourceRef: options["--source-ref"],
     version: options["--version"],
     workflowRunUrl: options["--workflow-run-url"],
   };
@@ -399,6 +404,65 @@ async function preflightDraft(argv) {
   };
 }
 
+async function validateTag(argv) {
+  const options = parseReleaseIntegrityOptions(argv, [
+    "--desktop-package",
+    "--package-lock",
+    "--remote-bootstrap-package",
+    "--root-package",
+    "--skills-runtime-package",
+    "--source-ref",
+  ]);
+  const [
+    rootPackage,
+    desktopPackage,
+    remoteBootstrapPackage,
+    runtimePackage,
+    lock,
+  ] = await Promise.all([
+    readReleaseJson(
+      options["--root-package"],
+      "Root package metadata is invalid.",
+    ),
+    readReleaseJson(
+      options["--desktop-package"],
+      "Desktop package metadata is invalid.",
+    ),
+    readReleaseJson(
+      options["--remote-bootstrap-package"],
+      "Remote Bootstrap package metadata is invalid.",
+    ),
+    readReleaseJson(
+      options["--skills-runtime-package"],
+      "Skills Runtime package metadata is invalid.",
+    ),
+    readReleaseJson(
+      options["--package-lock"],
+      "Package lock metadata is invalid.",
+    ),
+  ]);
+  const result = assertTaggedPreviewVersions({
+    sourceRef: options["--source-ref"],
+    versions: {
+      "apps/desktop/package.json": desktopPackage.version,
+      "package-lock.json": lock.version,
+      "package-lock.json#apps/desktop": lock.packages?.["apps/desktop"]?.version,
+      "package-lock.json#packages/remote-bootstrap":
+        lock.packages?.["packages/remote-bootstrap"]?.version,
+      "package-lock.json#packages/skills-runtime":
+        lock.packages?.["packages/skills-runtime"]?.version,
+      "package.json": rootPackage.version,
+      "packages/remote-bootstrap/package.json": remoteBootstrapPackage.version,
+      "packages/skills-runtime/package.json": runtimePackage.version,
+    },
+  });
+  await emitReleaseOutputs({
+    "release-tag": result.tag,
+    version: result.version,
+  });
+  return result;
+}
+
 const commands = new Map([
   ["assemble", assemble],
   ["finalize", finalize],
@@ -407,6 +471,7 @@ const commands = new Map([
   ["notes", notes],
   ["preflight-draft", preflightDraft],
   ["subjects", subjects],
+  ["validate-tag", validateTag],
   ["verify-attestation", verifyAttestation],
   ["verify-preview-release", verifyPreviewRelease],
   ["verify-release", verifyRelease],

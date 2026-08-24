@@ -4,6 +4,7 @@ on:
   pull_request:
   push:
     branches: [main]
+    tags: ["v*.*.*"]
   workflow_dispatch:
     inputs:
       publish_preview:
@@ -20,6 +21,24 @@ permissions:
   contents: read
 
 jobs:
+  quality-gates:
+    name: Verify release source
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'push' && github.ref_type == 'tag')
+    permissions:
+      contents: read
+    uses: ./.github/workflows/verify.yml
+
+  packaged-ui-qa:
+    name: Verify packaged application matrix
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'push' && github.ref_type == 'tag')
+    permissions:
+      contents: read
+    uses: ./.github/workflows/packaged-ui-qa.yml
+
   package:
     name: Package ${{ matrix.platform }} ${{ matrix.architecture }}
     if: github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main'
@@ -47,12 +66,30 @@ jobs:
       - name: Check out candidate source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: 0
           persist-credentials: false
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           cache: npm
           node-version: 24
+      - if: github.ref_type == 'tag'
+        name: Validate exact version tag
+        run: >-
+          node scripts/release/release-integrity-cli.mjs validate-tag
+          --desktop-package "apps/desktop/package.json"
+          --package-lock "package-lock.json"
+          --remote-bootstrap-package "packages/remote-bootstrap/package.json"
+          --root-package "package.json"
+          --skills-runtime-package "packages/skills-runtime/package.json"
+          --source-ref "${{ github.ref }}"
+      - if: github.ref_type == 'tag'
+        name: Verify tagged commit belongs to main
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+          git merge-base --is-ancestor "${GITHUB_SHA}" "origin/main"
       - name: Install locked dependencies
         run: npm ci
       - name: Typecheck candidate generator
@@ -87,7 +124,7 @@ jobs:
           --workflow-name "${{ github.workflow }}"
           --workflow-run-attempt "${{ github.run_attempt }}"
           --workflow-run-id "${{ github.run_id }}"
-      - if: github.event_name != 'workflow_dispatch'
+      - if: github.event_name != 'workflow_dispatch' && github.ref_type != 'tag'
         name: Retain manifest evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -96,7 +133,9 @@ jobs:
           name: unsigned-package-manifest-${{ steps.identity.outputs.manifest-digest }}
           path: ${{ steps.identity.outputs.candidate-directory }}/candidate-manifest-v1.*
           retention-days: 7
-      - if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+      - if: >-
+          (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+          (github.event_name == 'push' && github.ref_type == 'tag')
         name: Exchange digest-addressed candidate
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -109,7 +148,9 @@ jobs:
 
   evidence:
     name: Generate integrity evidence
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'push' && github.ref_type == 'tag')
     needs: package
     permissions:
       artifact-metadata: write
@@ -191,7 +232,9 @@ jobs:
 
   verify:
     name: Verify exact candidate and evidence bytes
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'push' && github.ref_type == 'tag')
     needs: evidence
     permissions:
       attestations: read
@@ -335,7 +378,9 @@ jobs:
 
   draft-assembly:
     name: Stage unsigned developer preview draft
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'push' && github.ref_type == 'tag')
     needs: verify
     permissions:
       contents: write
@@ -374,9 +419,11 @@ jobs:
           --payload-digest "${{ needs.verify.outputs.payload-digest }}"
           --repository "${{ github.repository }}"
           --source-commit "${{ github.sha }}"
+          --source-ref "${{ github.ref }}"
           --version "${{ needs.verify.outputs.version }}"
           --workflow-run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-      - name: Create unpublished preview draft
+      - if: github.event_name == 'workflow_dispatch'
+        name: Create unpublished preview draft
         env:
           GH_TOKEN: ${{ github.token }}
         run: >-
@@ -384,6 +431,19 @@ jobs:
           verified-input/*
           --repo "${{ github.repository }}"
           --target "${{ github.sha }}"
+          --title "${{ steps.notes.outputs.release-name }}"
+          --notes-file "${{ runner.temp }}/draft-release-notes.md"
+          --draft --prerelease --latest=false
+      - if: github.event_name == 'push' && github.ref_type == 'tag'
+        name: Create tag-bound unpublished preview draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release create "${{ steps.notes.outputs.release-tag }}"
+          verified-input/*
+          --repo "${{ github.repository }}"
+          --target "${{ github.sha }}"
+          --verify-tag
           --title "${{ steps.notes.outputs.release-name }}"
           --notes-file "${{ runner.temp }}/draft-release-notes.md"
           --draft --prerelease --latest=false
@@ -402,16 +462,18 @@ jobs:
           --release-list-json "${{ runner.temp }}/releases.json"
           --repository "${{ github.repository }}"
           --source-commit "${{ github.sha }}"
+          --source-ref "${{ github.ref }}"
           --version "${{ needs.verify.outputs.version }}"
           --workflow-run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
   publish-preview:
     name: Publish unsigned developer preview
     if: >-
-      github.event_name == 'workflow_dispatch' &&
-      github.ref == 'refs/heads/main' &&
-      inputs.publish_preview == true
-    needs: [verify, draft-assembly]
+      (github.event_name == 'workflow_dispatch' &&
+       github.ref == 'refs/heads/main' &&
+       inputs.publish_preview == true) ||
+      (github.event_name == 'push' && github.ref_type == 'tag')
+    needs: [verify, draft-assembly, quality-gates, packaged-ui-qa]
     permissions:
       contents: write
     runs-on: ubuntu-24.04
@@ -453,6 +515,7 @@ jobs:
           --release-list-json "${{ runner.temp }}/draft-releases.json"
           --repository "${{ github.repository }}"
           --source-commit "${{ github.sha }}"
+          --source-ref "${{ github.ref }}"
           --version "${{ needs.verify.outputs.version }}"
           --workflow-run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
       - name: Publish staged preview without changing assets
@@ -477,5 +540,6 @@ jobs:
           --release-list-json "${{ runner.temp }}/releases.json"
           --repository "${{ github.repository }}"
           --source-commit "${{ github.sha }}"
+          --source-ref "${{ github.ref }}"
           --version "${{ needs.verify.outputs.version }}"
           --workflow-run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
