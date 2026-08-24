@@ -50,7 +50,10 @@ const isWireRequest = (value) => validateWireRequest(
   let transportLost = false;
 
   const interruptObservation = (code) => {
-    if (observationInterruption === undefined) {
+    if (
+      observationInterruption === undefined ||
+      code === "remote_protocol_violation"
+    ) {
       observationInterruption = {
         code,
         phase: code === "remote_protocol_violation" ? "wire" : "observe",
@@ -88,6 +91,7 @@ const isWireRequest = (value) => validateWireRequest(
   let inputEnded = false;
   let inputFailure;
   let frameCount = 0;
+  let request;
   let requestWaiter;
   const settleRequestWaiter = () => {
     if (requestWaiter === undefined) return;
@@ -111,6 +115,9 @@ const isWireRequest = (value) => validateWireRequest(
   };
   const failInput = () => {
     inputFailure = { code: "remote_protocol_violation" };
+    if (request?.operation === "observe") {
+      interruptObservation("remote_protocol_violation");
+    }
     settleRequestWaiter();
   };
   const parseInput = () => {
@@ -160,13 +167,37 @@ const isWireRequest = (value) => validateWireRequest(
     requestWaiter = { reject, resolve };
     settleRequestWaiter();
   });
+  const settleObservationInput = () => new Promise((resolve) => {
+    if (requestQueue.length > 0 || inputEnded || inputFailure !== undefined) {
+      resolve();
+      return;
+    }
+    let timer;
+    const inspect = () => {
+      if (requestQueue.length > 0 || inputEnded || inputFailure !== undefined) {
+        if (timer !== undefined) clearTimeout(timer);
+        process.stdin.removeListener("data", inspect);
+        process.stdin.removeListener("end", inspect);
+        process.stdin.removeListener("error", inspect);
+        resolve();
+      }
+    };
+    process.stdin.on("data", inspect);
+    process.stdin.on("end", inspect);
+    process.stdin.on("error", inspect);
+    timer = setTimeout(() => {
+      process.stdin.removeListener("data", inspect);
+      process.stdin.removeListener("end", inspect);
+      process.stdin.removeListener("error", inspect);
+      resolve();
+    }, 25);
+  });
   const stopReading = () => {
     process.stdin.pause();
     process.stdin.removeAllListeners();
     if (typeof process.stdin.unref === "function") process.stdin.unref();
   };
 
-  let request;
   try {
     request = await nextRequest();
   } catch {
@@ -180,6 +211,7 @@ const isWireRequest = (value) => validateWireRequest(
     return;
   }
   if (request.operation === "observe") {
+    await settleObservationInput();
     if (requestQueue.length > 0 || inputEnded) {
       let extraRequest;
       try {

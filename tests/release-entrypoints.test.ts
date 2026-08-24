@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -29,6 +29,7 @@ const temporaryDirectories: string[] = [];
 
 afterEach(async () => {
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
   await Promise.all(
     temporaryDirectories
       .splice(0)
@@ -483,6 +484,149 @@ describe("release integrity executable entrypoint", () => {
         commandHandlers: new Map(),
       }),
     ).rejects.toThrow("Unknown release integrity command: unknown");
+  });
+
+  it("writes preview notes and structured workflow outputs through the real command", async () => {
+    const root = await mkdtemp(join(tmpdir(), "skills-release-cli-notes-"));
+    temporaryDirectories.push(root);
+    const outputPath = join(root, "release-notes.md");
+    const githubOutputPath = join(root, "github-output");
+    const output: string[] = [];
+    vi.stubEnv("GITHUB_OUTPUT", githubOutputPath);
+
+    const result = await runReleaseIntegrityCommand(
+      [
+        "notes",
+        "--candidate-set-digest",
+        "b".repeat(64),
+        "--evidence-set-digest",
+        "c".repeat(64),
+        "--output-path",
+        outputPath,
+        "--payload-digest",
+        "d".repeat(64),
+        "--repository",
+        "oldwinter/skills-desktop",
+        "--source-commit",
+        sourceCommit,
+        "--version",
+        "0.1.0",
+        "--workflow-run-url",
+        "https://github.com/oldwinter/skills-desktop/actions/runs/12345",
+      ],
+      { writeOutput: (value: string) => output.push(value) },
+    );
+
+    expect(result).toEqual({
+      name: "Skills Desktop 0.1.0 unsigned developer preview aaaaaaaaaaaa",
+      tag: `preview-v0.1.0-${sourceCommit}`,
+    });
+    expect(await readFile(outputPath, "utf8")).toContain(
+      "# UNSIGNED DEVELOPER PREVIEW",
+    );
+    expect(await readFile(githubOutputPath, "utf8")).toBe(
+      `release-name=${result.name}\nrelease-tag=${result.tag}\n`,
+    );
+    expect(output).toEqual([`${JSON.stringify(result)}\n`]);
+  });
+
+  it("preflights the exact staged payload bytes through the real command", async () => {
+    const root = await mkdtemp(join(tmpdir(), "skills-release-cli-payload-"));
+    temporaryDirectories.push(root);
+    const payloadRoot = join(root, "payload");
+    await mkdir(payloadRoot);
+    const bytes = "candidate bytes\n";
+    const fileName = "candidate.zip";
+    await writeFile(join(payloadRoot, fileName), bytes);
+    const fileDigest = createHash("sha256").update(bytes).digest("hex");
+    const payloadDigest = createHash("sha256")
+      .update(`${fileDigest} *${fileName}\n`)
+      .digest("hex");
+    const output: string[] = [];
+
+    await expect(
+      runReleaseIntegrityCommand(
+        [
+          "preflight-draft",
+          "--payload-digest",
+          payloadDigest,
+          "--payload-root",
+          payloadRoot,
+        ],
+        { writeOutput: (value: string) => output.push(value) },
+      ),
+    ).resolves.toEqual({ assetCount: 1, payloadDigest });
+    expect(output).toEqual([
+      `${JSON.stringify({ assetCount: 1, payloadDigest })}\n`,
+    ]);
+  });
+
+  it("validates attestation JSON with optional exact predicate evidence", async () => {
+    const root = await mkdtemp(
+      join(tmpdir(), "skills-release-cli-attestation-"),
+    );
+    temporaryDirectories.push(root);
+    const expectedPredicate = {
+      candidateSetDigest: "b".repeat(64),
+      schemaVersion: 1,
+    };
+    const predicateType =
+      "https://github.com/oldwinter/skills-desktop/attestations/unsigned-candidate/v1";
+    const subjects = [
+      { fileName: "candidate.zip", sha256: "c".repeat(64) },
+    ];
+    const result = [
+      {
+        verificationResult: {
+          statement: {
+            predicate: expectedPredicate,
+            predicateType,
+            subject: [
+              {
+                digest: { sha256: subjects[0]!.sha256 },
+                name: `candidate-inputs/package/${subjects[0]!.fileName}`,
+              },
+            ],
+          },
+        },
+      },
+    ];
+    const expectedPredicatePath = join(root, "predicate.json");
+    const resultPath = join(root, "result.json");
+    const subjectsPath = join(root, "subjects.json");
+    await Promise.all([
+      writeFile(expectedPredicatePath, JSON.stringify(expectedPredicate)),
+      writeFile(resultPath, JSON.stringify(result)),
+      writeFile(subjectsPath, JSON.stringify({ subjects })),
+    ]);
+    const baseArguments = [
+      "--predicate-type",
+      predicateType,
+      "--result-json",
+      resultPath,
+      "--subjects-json",
+      subjectsPath,
+    ];
+
+    for (const argv of [
+      [
+        "verify-attestation",
+        "--expected-predicate",
+        expectedPredicatePath,
+        ...baseArguments,
+      ],
+      ["verify-attestation", ...baseArguments],
+    ]) {
+      const output: string[] = [];
+      await expect(
+        runReleaseIntegrityCommand(argv, {
+          writeOutput: (value: string) => output.push(value),
+        }),
+      ).resolves.toEqual({ predicateType, subjectCount: 1 });
+      expect(output).toEqual([
+        `${JSON.stringify({ predicateType, subjectCount: 1 })}\n`,
+      ]);
+    }
   });
 });
 
