@@ -57,6 +57,11 @@ const globalOutput = JSON.stringify([
   },
 ]);
 
+const scriptedPosixNpxCommand = {
+  executable: "npx",
+  path: "/usr/bin:/bin",
+} as const;
+
 function scriptedRunner(): ProcessRunner & {
   invocations: ProcessInvocation[];
 } {
@@ -181,6 +186,7 @@ else process.exitCode = 2;
       const process = createLocalSkillsProcess({
         clock: () => new Date("2026-08-21T10:00:00.000Z"),
         platform,
+        posixNpxCommand: scriptedPosixNpxCommand,
         runner,
         workspace: "/workspace",
       });
@@ -256,6 +262,7 @@ else process.exitCode = 2;
     const skillsProcess = createLocalSkillsProcess({
       clock: () => new Date("2026-08-21T10:00:00.000Z"),
       platform: "linux",
+      posixNpxCommand: scriptedPosixNpxCommand,
       runner,
       workspace: "/workspace",
     });
@@ -840,6 +847,7 @@ describe("Local SkillsProcess mutation contract", () => {
       clock: () => new Date("2026-08-21T10:00:00.000Z"),
       id: () => "prepared-1",
       platform: "linux",
+      posixNpxCommand: scriptedPosixNpxCommand,
       runner,
       workspace: "/workspace",
     });
@@ -916,6 +924,7 @@ describe("Local SkillsProcess mutation contract", () => {
       clock: () => new Date("2026-08-21T10:00:00.000Z"),
       id: () => "prepared-remove",
       platform: "linux",
+      posixNpxCommand: scriptedPosixNpxCommand,
       runner,
       workspace: "/workspace",
     });
@@ -1030,6 +1039,7 @@ describe("Local SkillsProcess mutation contract", () => {
       clock: () => new Date("2026-08-21T10:00:00.000Z"),
       id: () => "prepared-cancelled",
       platform: "linux",
+      posixNpxCommand: scriptedPosixNpxCommand,
       runner,
       workspace: "/workspace",
     });
@@ -1114,6 +1124,7 @@ describe("Local SkillsProcess mutation contract", () => {
         clock: () => new Date("2026-08-21T10:00:00.000Z"),
         id: () => `prepared-${termination}`,
         platform: "linux",
+        posixNpxCommand: scriptedPosixNpxCommand,
         runner,
         workspace: "/workspace",
       });
@@ -1193,6 +1204,7 @@ describe("Local SkillsProcess mutation contract", () => {
       clock: () => new Date("2026-08-21T10:00:00.000Z"),
       id: () => `prepared-${++nextId}`,
       platform: "linux",
+      posixNpxCommand: scriptedPosixNpxCommand,
       runner,
       workspace: "/workspace",
     });
@@ -1257,6 +1269,7 @@ describe("Local SkillsProcess mutation contract", () => {
       clock: () => new Date("2026-08-21T10:00:00.000Z"),
       id: () => `prepared-${++nextId}`,
       platform: "linux",
+      posixNpxCommand: scriptedPosixNpxCommand,
       runner,
       workspace: "/workspace",
     });
@@ -1347,6 +1360,7 @@ describe("Local SkillsProcess mutation contract", () => {
         clock: () => new Date("2026-08-21T10:00:00.000Z"),
         id: () => `prepared-${intent.type}`,
         platform: "linux",
+        posixNpxCommand: scriptedPosixNpxCommand,
         runner,
         workspace: "/workspace",
       });

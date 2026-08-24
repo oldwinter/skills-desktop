@@ -92,6 +92,7 @@ export interface LocalSkillsProcessOptions {
   readonly environment?: Readonly<Record<string, string | undefined>>;
   readonly id?: () => string;
   readonly platform: NodeJS.Platform;
+  readonly posixNpxCommand?: PosixNpxCommand;
   readonly runner: ProcessRunner;
   readonly windowsNpxCommand?: WindowsNpxCommand;
   readonly workspace: string;
@@ -701,13 +702,14 @@ export function createLocalSkillsProcess(
       ? Promise.resolve(
           options.windowsNpxCommand ?? resolveWindowsNpxCommand(environment),
         )
-      : resolvePosixNpxCommand(environment, options.platform).then(
-          ({ executable, path }) => ({
-            executable,
-            npxCliPath: undefined,
-            path,
-          }),
-        );
+      : Promise.resolve(
+          options.posixNpxCommand ??
+            resolvePosixNpxCommand(environment, options.platform),
+        ).then(({ executable, path }) => ({
+          executable,
+          npxCliPath: undefined,
+          path,
+        }));
   let dialectVerification: Promise<Result<void, ObservationError>> | undefined;
   const privatePlans = new Map<
     string,
