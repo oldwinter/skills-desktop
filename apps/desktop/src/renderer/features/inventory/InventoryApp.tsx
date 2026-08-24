@@ -47,6 +47,10 @@ type WorkspaceView =
   | "inventory"
   | "targets";
 
+// Windows may reassign DOM focus for several frames after a native modal closes.
+const REVIEW_FOCUS_MAX_FRAMES = 60;
+const REVIEW_FOCUS_STABLE_FRAMES = 12;
+
 function freshnessLabel(
   freshness: WorkspaceSnapshot["inventory"]["freshness"],
 ) {
@@ -257,6 +261,7 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
         };
   const mutationPhaseRef = useRef(snapshot?.mutation.phase);
   mutationPhaseRef.current = snapshot?.mutation.phase;
+  const cancelReviewFocusRestoreRef = useRef<() => void>(() => undefined);
   const scheduleReviewFocusRestoreRef = useRef<() => void>(() => undefined);
   const inventory = snapshot?.inventory;
 
@@ -322,46 +327,93 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
 
   useEffect(() => {
     let pendingRestore: number | undefined;
-    const scheduleReviewFocusRestore = () => {
-      if (pendingRestore !== undefined) window.clearTimeout(pendingRestore);
-      pendingRestore = window.setTimeout(() => {
+    let restoreGeneration = 0;
+    const cancelScheduledRestore = () => {
+      restoreGeneration += 1;
+      if (pendingRestore !== undefined) {
+        window.cancelAnimationFrame(pendingRestore);
         pendingRestore = undefined;
+      }
+    };
+    const cancelReviewFocusRestore = () => {
+      cancelScheduledRestore();
+      reviewReturnFocusRef.current = null;
+    };
+    const scheduleReviewFocusRestore = () => {
+      cancelScheduledRestore();
+      const generation = restoreGeneration;
+      let checkedFrames = 0;
+      let expectedTarget: HTMLElement | null = null;
+      let stableFrames = 0;
+      const restoreFocus = () => {
+        pendingRestore = undefined;
+        if (generation !== restoreGeneration) return;
         const opener = reviewReturnFocusRef.current;
-        if (opener === null || !document.hasFocus()) return;
-        if (opener.isConnected && !opener.disabled) {
-          opener.focus();
-          if (document.activeElement === opener) {
-            reviewReturnFocusRef.current = null;
+        if (opener === null) return;
+
+        checkedFrames += 1;
+        if (
+          !document.hasFocus() ||
+          mutationPhaseRef.current === "reviewing"
+        ) {
+          if (checkedFrames < REVIEW_FOCUS_MAX_FRAMES) {
+            pendingRestore = window.requestAnimationFrame(restoreFocus);
           }
           return;
         }
-        if (mutationPhaseRef.current === "reviewing") return;
         const target =
-          mutationOutcomeRef.current ??
-          document.querySelector<HTMLButtonElement>(
-            'button[aria-label="Inventory"]',
-          );
-        target?.focus();
-        if (target !== null && document.activeElement === target) {
-          reviewReturnFocusRef.current = null;
+          opener.isConnected && !opener.disabled
+            ? opener
+            : (mutationOutcomeRef.current ??
+              document.querySelector<HTMLButtonElement>(
+                'button[aria-label="Inventory"]',
+              ));
+        if (target === null) return;
+
+        if (target !== expectedTarget) {
+          expectedTarget = target;
+          stableFrames = 0;
         }
-      }, 0);
+        if (document.activeElement === target) {
+          stableFrames += 1;
+        } else {
+          target.focus();
+          stableFrames = 0;
+        }
+        if (stableFrames >= REVIEW_FOCUS_STABLE_FRAMES) {
+          reviewReturnFocusRef.current = null;
+          return;
+        }
+        if (checkedFrames < REVIEW_FOCUS_MAX_FRAMES) {
+          pendingRestore = window.requestAnimationFrame(restoreFocus);
+        }
+      };
+      pendingRestore = window.requestAnimationFrame(restoreFocus);
     };
     const handleWindowFocus = () => {
       if (mutationPhaseRef.current === "reviewing") return;
       scheduleReviewFocusRestore();
     };
+    const handleWorkspaceInput = () => {
+      if (reviewReturnFocusRef.current !== null) cancelReviewFocusRestore();
+    };
+    cancelReviewFocusRestoreRef.current = cancelReviewFocusRestore;
     scheduleReviewFocusRestoreRef.current = scheduleReviewFocusRestore;
     window.addEventListener("focus", handleWindowFocus);
+    window.addEventListener("keydown", handleWorkspaceInput, true);
+    window.addEventListener("pointerdown", handleWorkspaceInput, true);
     return () => {
       window.removeEventListener("focus", handleWindowFocus);
+      window.removeEventListener("keydown", handleWorkspaceInput, true);
+      window.removeEventListener("pointerdown", handleWorkspaceInput, true);
+      cancelReviewFocusRestoreRef.current = () => undefined;
       scheduleReviewFocusRestoreRef.current = () => undefined;
-      if (pendingRestore !== undefined) window.clearTimeout(pendingRestore);
+      cancelScheduledRestore();
     };
   }, []);
 
   useEffect(() => {
-    if (snapshot?.mutation.phase !== "planned") return;
+    if (snapshot?.mutation.phase === "reviewing") return;
     if (reviewReturnFocusRef.current === null) return;
     scheduleReviewFocusRestoreRef.current();
   }, [snapshot?.mutation.phase]);
@@ -504,6 +556,7 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
   };
   const requestReview = async (returnFocus: HTMLButtonElement) => {
     if (preparedMutationId === undefined) return;
+    cancelReviewFocusRestoreRef.current();
     reviewReturnFocusRef.current = returnFocus;
     const result = await client.requestReview(preparedMutationId);
     if (result.ok) setActionError(undefined);

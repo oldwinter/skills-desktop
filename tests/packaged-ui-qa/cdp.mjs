@@ -308,9 +308,15 @@ export class CdpPage {
     });
   }
 
-  async waitFor(expression, label, timeoutMs = 30_000) {
+  async waitFor(
+    expression,
+    label,
+    timeoutMs = 30_000,
+    { stableMs = 0 } = {},
+  ) {
     await this.evaluate(
       `(() => new Promise((resolve, reject) => {
+        let matchedAt;
         let settled = false;
         let interval;
         let observer;
@@ -328,7 +334,12 @@ export class CdpPage {
         };
         const check = () => {
           try {
-            if (${expression}) settle(resolve, true);
+            if (!(${expression})) {
+              matchedAt = undefined;
+              return;
+            }
+            matchedAt ??= Date.now();
+            if (Date.now() - matchedAt >= ${stableMs}) settle(resolve, true);
           } catch (error) {
             settle(reject, error);
           }

@@ -245,6 +245,48 @@ describe("packaged UI QA CDP seam", () => {
     await expect(waiting).resolves.toBeUndefined();
   });
 
+  it("requires a semantic condition to remain true for its stability window", async () => {
+    const socket = new FakeSocket();
+    const page = new CdpPage(socket, { requestTimeoutMs: 500 });
+    const waiting = page.waitFor("state.read()", "stable focus", 500, {
+      stableMs: 80,
+    });
+    const readings = [];
+    const state = {
+      focused: true,
+      read() {
+        readings.push(this.focused);
+        return this.focused;
+      },
+    };
+    const evaluated = runInNewContext(socket.sent[0].params.expression, {
+      clearInterval,
+      clearTimeout,
+      document: {},
+      MutationObserver: class {
+        disconnect() {}
+        observe() {}
+      },
+      setInterval,
+      setTimeout,
+      state,
+    });
+
+    setTimeout(() => {
+      state.focused = false;
+    }, 40);
+    setTimeout(() => {
+      state.focused = true;
+    }, 120);
+    socket.respond(1, { result: { value: await evaluated } });
+
+    await expect(waiting).resolves.toBeUndefined();
+    expect(readings).toContain(false);
+    expect(
+      readings.slice(readings.lastIndexOf(false) + 1).filter(Boolean).length,
+    ).toBeGreaterThanOrEqual(4);
+  });
+
   it("rejects pending and future requests when the browser disconnects", async () => {
     const socket = new FakeSocket();
     const page = new CdpPage(socket, { requestTimeoutMs: 1_000 });
