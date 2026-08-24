@@ -33,10 +33,10 @@
     "lint:biome": "npx --yes @biomejs/biome@1.9.4 check apps/desktop/src"
   },
   "devDependencies": {
-    "@babel/core": "8.0.0",
+    "@babel/core": "8.0.1",
     "@babel/eslint-parser": "8.0.1",
     "@babel/parser": "8.0.4",
-    "@eslint/js": "9.39.2",
+    "@eslint/js": "10.0.1",
     "@testing-library/jest-dom": "7.0.1",
     "@testing-library/react": "16.3.2",
     "@types/node": "26.2.0",
@@ -44,8 +44,8 @@
     "@types/react-dom": "19.2.4",
     "@vitejs/plugin-react": "6.1.0",
     "@vitest/coverage-v8": "4.1.11",
-    "axe-core": "4.11.0",
-    "eslint": "9.39.2",
+    "axe-core": "4.13.0",
+    "eslint": "10.8.1",
     "eslint-plugin-react": "7.37.5",
     "eslint-plugin-react-hooks": "7.1.1",
     "globals": "17.11.0",
