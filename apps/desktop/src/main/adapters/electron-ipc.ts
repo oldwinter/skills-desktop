@@ -13,6 +13,7 @@ import {
 } from "../../contracts/about.js";
 import { reviewWindowClosedEventSchema } from "../../contracts/desktop.js";
 import {
+  WORKSPACE_PROTOCOL_VERSION,
   desktopEventSchema,
   workspaceRequestResultSchema,
   workspaceSnapshotSchema,
@@ -21,6 +22,7 @@ import {
   type WorkspaceRequestResult,
 } from "../../contracts/workspace.js";
 import {
+  REVIEW_PROTOCOL_VERSION,
   reviewDecisionResultSchema,
   reviewSnapshotResultSchema,
   reviewSnapshotSchema,
@@ -324,7 +326,7 @@ export function registerDesktopIpc(input: {
           await endpoint.session.request({
             targetId,
             type: "inventory.refresh",
-            version: 1,
+            version: WORKSPACE_PROTOCOL_VERSION,
           }),
         );
       } catch {
@@ -342,7 +344,7 @@ export function registerDesktopIpc(input: {
           await endpoint.session.request({
             operationId,
             type: "inventory.cancel",
-            version: 1,
+            version: WORKSPACE_PROTOCOL_VERSION,
           }),
         );
       } catch {
@@ -366,7 +368,7 @@ export function registerDesktopIpc(input: {
             leftTargetId,
             rightTargetId,
             type: "comparison.open",
-            version: 1,
+            version: WORKSPACE_PROTOCOL_VERSION,
           }),
         );
       } catch {
@@ -392,7 +394,7 @@ export function registerDesktopIpc(input: {
             destinationTargetId,
             rowKey,
             type: "comparison.prepare",
-            version: 1,
+            version: WORKSPACE_PROTOCOL_VERSION,
           }),
         );
       } catch {
@@ -419,7 +421,7 @@ export function registerDesktopIpc(input: {
             selections: fields.selections,
             targetId: fields.targetId,
             type: "collection.prepare",
-            version: 1,
+            version: WORKSPACE_PROTOCOL_VERSION,
           }),
         );
       } catch {
@@ -437,7 +439,7 @@ export function registerDesktopIpc(input: {
           await endpoint.session.request({
             collectionPlanId,
             type: "collection.review.request",
-            version: 1,
+            version: WORKSPACE_PROTOCOL_VERSION,
           }),
         );
       } catch {
@@ -487,7 +489,7 @@ export function registerDesktopIpc(input: {
             releaseNumber: fields.releaseNumber,
             targets,
             type: "collection.prepare-many",
-            version: 1,
+            version: WORKSPACE_PROTOCOL_VERSION,
           }),
         );
       } catch {
@@ -505,7 +507,7 @@ export function registerDesktopIpc(input: {
           await endpoint.session.request({
             definition,
             type: "target.create",
-            version: 1,
+            version: WORKSPACE_PROTOCOL_VERSION,
           }),
         );
       } catch {
@@ -529,7 +531,7 @@ export function registerDesktopIpc(input: {
             definition,
             targetId,
             type: "target.update",
-            version: 1,
+            version: WORKSPACE_PROTOCOL_VERSION,
           }),
         );
       } catch {
@@ -547,7 +549,7 @@ export function registerDesktopIpc(input: {
           await endpoint.session.request({
             targetId,
             type: "target.delete",
-            version: 1,
+            version: WORKSPACE_PROTOCOL_VERSION,
           }),
         );
       } catch {
@@ -571,7 +573,7 @@ export function registerDesktopIpc(input: {
             intent,
             targetId,
             type: "mutation.prepare",
-            version: 1,
+            version: WORKSPACE_PROTOCOL_VERSION,
           }),
         );
       } catch {
@@ -589,7 +591,7 @@ export function registerDesktopIpc(input: {
           await endpoint.session.request({
             targetId,
             type: "mutation.reconcile",
-            version: 1,
+            version: WORKSPACE_PROTOCOL_VERSION,
           }),
         );
       } catch {
@@ -607,7 +609,7 @@ export function registerDesktopIpc(input: {
           await endpoint.session.request({
             targetId,
             type: "host-trust.review",
-            version: 1,
+            version: WORKSPACE_PROTOCOL_VERSION,
           }),
         );
       } catch {
@@ -625,7 +627,7 @@ export function registerDesktopIpc(input: {
           await endpoint.session.request({
             preparedMutationId,
             type: "review.request",
-            version: 1,
+            version: WORKSPACE_PROTOCOL_VERSION,
           }),
         );
       } catch {
@@ -643,7 +645,7 @@ export function registerDesktopIpc(input: {
           await endpoint.session.request({
             operationId,
             type: "review.cancel-request",
-            version: 1,
+            version: WORKSPACE_PROTOCOL_VERSION,
           }),
         );
       } catch {
@@ -680,7 +682,7 @@ export function registerDesktopIpc(input: {
           await endpoint.session.request({
             decision,
             type: "review.decide",
-            version: 1,
+            version: REVIEW_PROTOCOL_VERSION,
           }),
         );
       } catch {

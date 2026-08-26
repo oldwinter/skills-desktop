@@ -3,7 +3,13 @@ import { isAbsolute, normalize, posix } from "node:path";
 
 import { z } from "zod";
 
-import type { Result } from "@skills-desktop/skills-runtime";
+import {
+  HARNESS_REGISTRY_DIGEST,
+  HARNESS_REGISTRY_VERSION,
+  normalizeHarnessIds,
+  SKILLS_DIALECT_ID,
+  type Result,
+} from "@skills-desktop/skills-runtime";
 
 import type { RendererError, TargetDraft } from "../../contracts/workspace.js";
 import type { SkillsProcess } from "../adapters/skills-process.js";
@@ -58,7 +64,6 @@ async function canonicalTargetDraft(
       : !posix.isAbsolute(workspace)) ||
     workspace.includes("\0") ||
     draft.label.trim().length === 0 ||
-    draft.harness.trim().length === 0 ||
     (draft.kind === "local" && connectionReference !== null) ||
     (draft.kind === "ssh" &&
       (connectionReference === null ||
@@ -71,13 +76,27 @@ async function canonicalTargetDraft(
       "validate",
     );
   }
+  const harnessIds = normalizeHarnessIds(
+    Array.isArray(draft.harnessIds) ? draft.harnessIds : [],
+  );
+  if (!harnessIds.ok) {
+    return definitionError(
+      "invalid_request",
+      "Target Definition is not valid.",
+      "validate",
+    );
+  }
   return {
     ok: true,
     value: {
       connectionReference,
-      harness: draft.harness.trim(),
+      dialectId: SKILLS_DIALECT_ID,
+      executionBindingDigest: null,
+      harnessIds: [...harnessIds.value],
       kind: draft.kind,
       label: draft.label.trim(),
+      registryDigest: HARNESS_REGISTRY_DIGEST,
+      registryVersion: HARNESS_REGISTRY_VERSION,
       workspace,
       workspaceLabel:
         draft.kind === "ssh"
@@ -128,7 +147,8 @@ export function createSkillsTargetsCatalog(input: {
       existing !== undefined &&
       (existing.kind !== normalized.value.kind ||
         existing.workspace !== normalized.value.workspace ||
-        existing.harness !== normalized.value.harness ||
+        JSON.stringify(existing.harnessIds) !==
+          JSON.stringify(normalized.value.harnessIds) ||
         (existing.connectionReference ?? null) !==
           normalized.value.connectionReference);
     const target: TargetDefinition = {
@@ -232,10 +252,11 @@ export function createSkillsTargetsCatalog(input: {
           (selected.executionBindingDigest ?? null) !==
           inspected.value.bindingDigest
         ) {
+          const bindingChanged = selected.executionBindingDigest !== null;
           const target: TargetDefinition = {
             ...selected,
             executionBindingDigest: inspected.value.bindingDigest,
-            generation: selected.generation + 1,
+            generation: selected.generation + (bindingChanged ? 1 : 0),
           };
           return {
             ok: true,
@@ -244,7 +265,7 @@ export function createSkillsTargetsCatalog(input: {
                 definitions: definitions.map((definition) =>
                   definition.id === target.id ? target : definition,
                 ),
-                executionChanged: true,
+                executionChanged: bindingChanged,
                 target,
               },
               status: "binding-changed",
@@ -262,7 +283,7 @@ export function createSkillsTargetsCatalog(input: {
         }
         const binding: EffectiveTargetBinding = {
           generation: selected.generation,
-          harness: selected.harness,
+          harnessIds: selected.harnessIds,
           kind: selected.kind,
           ssh: inspected.value.binding,
           targetId: selected.id,
@@ -279,7 +300,7 @@ export function createSkillsTargetsCatalog(input: {
       }
       const binding: EffectiveTargetBinding = {
         generation: selected.generation,
-        harness: selected.harness,
+        harnessIds: selected.harnessIds,
         kind: selected.kind,
         targetId: selected.id,
         workspace: selected.workspace,
@@ -376,11 +397,15 @@ export function createLocalSkillsTargets(input: {
 }): SkillsTargets {
   const target: TargetDefinition = {
     connectionReference: null,
+    dialectId: SKILLS_DIALECT_ID,
+    executionBindingDigest: null,
     generation: 1,
-    harness: "Codex",
+    harnessIds: ["codex"],
     id: input.id(),
     kind: "local",
     label: "This device",
+    registryDigest: HARNESS_REGISTRY_DIGEST,
+    registryVersion: HARNESS_REGISTRY_VERSION,
     workspace: input.workspace,
     workspaceLabel: localWorkspaceLabel(input.workspace),
   };

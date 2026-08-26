@@ -24,11 +24,16 @@ const fingerprintA = `SHA256:${createHash("sha256")
   .replace(/=+$/, "")}`;
 const target = {
   connectionReference: "build-host",
+  dialectId: "skills-1.5.23" as const,
+  executionBindingDigest: null,
   generation: 1,
-  harness: "Codex",
+  harnessIds: ["codex"],
   id: "00000000-0000-4000-8000-000000000018",
   kind: "ssh" as const,
   label: "Build host",
+  registryDigest:
+    "sha256:36d0c792e0480a13818d890e1dccc93e3b29a4ea44af78091e80db8a3e9181de" as const,
+  registryVersion: 1 as const,
   workspace: "/srv/skills",
   workspaceLabel: "skills",
 };

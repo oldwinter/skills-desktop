@@ -27,6 +27,15 @@ import type {
 } from "../../../contracts/workspace.js";
 import { InventoryApp } from "./InventoryApp.js";
 
+const targetV4Metadata = {
+  dialectId: "skills-1.5.23" as const,
+  executionBindingDigest: null,
+  harnessIds: ["codex"],
+  registryDigest:
+    "sha256:36d0c792e0480a13818d890e1dccc93e3b29a4ea44af78091e80db8a3e9181de" as const,
+  registryVersion: 1 as const,
+};
+
 const snapshot: WorkspaceSnapshot = {
   eventSequence: 0,
   inventory: {
@@ -56,15 +65,17 @@ const snapshot: WorkspaceSnapshot = {
     phase: "idle",
     reconciliationDeadline: null,
   },
-  schemaVersion: 1,
+  schemaVersion: 2,
   sessionEpoch: "epoch-1",
   stateRevision: 1,
   target: {
+    connectionReference: null,
+    ...targetV4Metadata,
     generation: 1,
-    harness: "Codex",
     id: "00000000-0000-4000-8000-000000000001",
     kind: "local",
     label: "This device",
+    workspace: "/work/skills-desktop",
     workspaceLabel: "skills-desktop",
   },
 };
@@ -380,8 +391,8 @@ const twoLocalTargetsSnapshot: WorkspaceSnapshot = {
       mutation: snapshot.mutation,
       target: {
         connectionReference: null,
+        ...targetV4Metadata,
         generation: 1,
-        harness: "Codex",
         id: "00000000-0000-4000-8000-00000000000a",
         kind: "local",
         label: "Second device",
@@ -400,7 +411,7 @@ describe("Local Target Inventory shell", () => {
       await screen.findByRole("heading", { name: "Inventory" }),
     ).toBeInTheDocument();
     expect(screen.getAllByText("This device").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Codex").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("codex").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Case-Sensitive-Skill").length).toBeGreaterThan(
       0,
     );
@@ -409,7 +420,7 @@ describe("Local Target Inventory shell", () => {
       .closest("tr");
     expect(inventoryRow).not.toBeNull();
     expect(
-      within(inventoryRow!).getByRole("cell", { name: "Codex" }),
+      within(inventoryRow!).getByRole("cell", { name: "codex" }),
     ).toBeInTheDocument();
     expect(screen.getAllByText("example/skills").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Project").length).toBeGreaterThan(0);
@@ -862,7 +873,7 @@ describe("Local Target Inventory shell", () => {
     render(<InventoryApp client={clientFor(snapshot)} />);
 
     expect(await screen.findByLabelText("Target summary")).toHaveTextContent(
-      "This device / skills-desktop / Codex",
+      "This device / skills-desktop / codex",
     );
     expect(screen.getByRole("button", { name: "Inventory" })).toHaveAttribute(
       "title",
@@ -2014,8 +2025,8 @@ describe("Local Target Inventory shell", () => {
   it("selects and swaps paired Targets in the dimensioned Comparison view", async () => {
     const rightTarget = {
       connectionReference: null,
+      ...targetV4Metadata,
       generation: 2,
-      harness: "Codex",
       id: "00000000-0000-4000-8000-00000000000a",
       kind: "local" as const,
       label: "Other device",
@@ -2111,8 +2122,8 @@ describe("Local Target Inventory shell", () => {
   it("shows reconciliation as a comparison planning block even with Fresh evidence", async () => {
     const rightTarget = {
       connectionReference: null,
+      ...targetV4Metadata,
       generation: 1,
-      harness: "Codex",
       id: "00000000-0000-4000-8000-00000000000a",
       kind: "local" as const,
       label: "Right device",
@@ -2249,8 +2260,8 @@ describe("Local Target Inventory shell", () => {
   it("explains unqualified Prepare on stale comparison evidence (#73)", async () => {
     const rightTarget = {
       connectionReference: null,
+      ...targetV4Metadata,
       generation: 1,
-      harness: "Codex",
       id: "00000000-0000-4000-8000-00000000000a",
       kind: "local" as const,
       label: "Right device",
@@ -2331,8 +2342,8 @@ describe("Local Target Inventory shell", () => {
   it("explains Prepare disabled when Missing side already has the skill (#73)", async () => {
     const rightTarget = {
       connectionReference: null,
+      ...targetV4Metadata,
       generation: 1,
-      harness: "Codex",
       id: "00000000-0000-4000-8000-00000000000a",
       kind: "local" as const,
       label: "Right device",
@@ -2419,8 +2430,8 @@ describe("Local Target Inventory shell", () => {
   it("explains Prepare disabled when row is not Missing or version-drift (#73)", async () => {
     const rightTarget = {
       connectionReference: null,
+      ...targetV4Metadata,
       generation: 1,
-      harness: "Codex",
       id: "00000000-0000-4000-8000-00000000000a",
       kind: "local" as const,
       label: "Right device",
@@ -2683,7 +2694,7 @@ describe("Local Target Inventory shell", () => {
     await waitFor(() =>
       expect(createTarget).toHaveBeenCalledWith({
         connectionReference: null,
-        harness: "Codex",
+        harnessIds: ["codex"],
         kind: "local",
         label: "Local workspace",
         workspace: "/work/other",
@@ -2714,8 +2725,8 @@ describe("Local Target Inventory shell", () => {
       },
       target: {
         connectionReference: "build-host",
+        ...targetV4Metadata,
         generation: 2,
-        harness: "Codex",
         id: "00000000-0000-4000-8000-000000000018",
         kind: "ssh",
         label: "Build host",
@@ -2750,8 +2761,8 @@ describe("Local Target Inventory shell", () => {
     }));
     const sshTarget = {
       connectionReference: "build-host",
+      ...targetV4Metadata,
       generation: 2,
-      harness: "Codex",
       id: "00000000-0000-4000-8000-000000000018",
       kind: "ssh" as const,
       label: "Build host",
@@ -2837,8 +2848,8 @@ describe("Local Target Inventory shell", () => {
   it("disables SSH Targets as plannable Comparison sides", async () => {
     const sshTarget = {
       connectionReference: "build-host",
+      ...targetV4Metadata,
       generation: 2,
-      harness: "Codex",
       id: "00000000-0000-4000-8000-00000000000a",
       kind: "ssh" as const,
       label: "Build host",
@@ -2847,8 +2858,8 @@ describe("Local Target Inventory shell", () => {
     };
     const localB = {
       connectionReference: null,
+      ...targetV4Metadata,
       generation: 1,
-      harness: "Codex",
       id: "00000000-0000-4000-8000-00000000000b",
       kind: "local" as const,
       label: "Second local",

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import {
   copyFile as nodeCopyFile,
@@ -11,11 +12,19 @@ import { join } from "node:path";
 
 import { z } from "zod";
 
-import type {
-  Inventory,
-  PublicError,
-  Result,
+import {
+  HARNESS_REGISTRY_DIGEST,
+  HARNESS_REGISTRY_VERSION,
+  resolveLegacyHarnessAlias,
+  SKILLS_DIALECT_ID,
+  type Inventory,
+  type PublicError,
+  type Result,
 } from "@skills-desktop/skills-runtime";
+import {
+  durableTargetDefinitionSchema,
+  type DurableTargetDefinition,
+} from "../../contracts/workspace.js";
 import { hostPublicKeySchema } from "../ssh/host-public-key.js";
 
 const STORE_NAME = "inventorySnapshots" as const;
@@ -32,8 +41,8 @@ const HOST_TRUST_DOCUMENT_NAME = "known_hosts";
 const HOST_TRUST_FAILURE_MARKER_NAME = "host-trust.failure.json";
 const COLLECTION_DOCUMENT_NAME = "collection-acknowledgements.json";
 const CURRENT_SCHEMA_VERSION = 3 as const;
-const CURRENT_GUARD_SCHEMA_VERSION = 2 as const;
-const CURRENT_TARGET_SCHEMA_VERSION = 3 as const;
+const CURRENT_GUARD_SCHEMA_VERSION = 3 as const;
+const CURRENT_TARGET_SCHEMA_VERSION = 4 as const;
 const CURRENT_COLLECTION_SCHEMA_VERSION = 1 as const;
 const targetIdSchema = z.string().uuid();
 const legacyTargetIdSchema = z.string().min(1).max(256);
@@ -176,11 +185,15 @@ const legacyDocumentSchema = z
 
 const mutationGuardSchema = z
   .object({
+    bindingDigest: z.string().regex(/^sha256:[a-f0-9]{64}$/),
     deadline: z.string().datetime({ offset: true }),
+    dialectId: z.literal(SKILLS_DIALECT_ID),
     effects: z.enum(["none", "possible"]),
     generation: z.number().int().positive(),
+    harnessSetDigest: z.string().regex(/^sha256:[a-f0-9]{64}$/),
     operationId: z.string().min(1).max(256),
     phase: z.enum(["executing", "reconciliation-required"]),
+    registryDigest: z.literal(HARNESS_REGISTRY_DIGEST),
     targetId: targetIdSchema,
   })
   .strict();
@@ -236,40 +249,32 @@ const legacyGuardDocumentSchema = z
     );
   });
 
-const targetDefinitionSchema = z
+const legacyV2GuardDocumentSchema = z
   .object({
-    connectionReference: z.string().min(1).max(256).nullable(),
-    executionBindingDigest: z
-      .string()
-      .regex(/^[a-f0-9]{64}$/)
-      .nullable()
-      .default(null),
-    generation: z.number().int().positive(),
-    harness: z.string().min(1).max(128),
-    id: targetIdSchema,
-    kind: z.enum(["local", "ssh"]),
-    label: z.string().min(1).max(256),
-    workspace: z.string().min(1).max(4_096),
+    guards: z.array(legacyMutationGuardSchema).max(1_000),
+    kind: z.literal("mutation-guards"),
+    legacyGuards: z.array(unboundLegacyGuardSchema).max(1_000).default([]),
+    schemaVersion: z.literal(2),
   })
   .strict()
-  .superRefine((target, context) => {
-    if (
-      (target.kind === "local" && target.connectionReference !== null) ||
-      (target.kind === "ssh" && target.connectionReference === null) ||
-      (target.kind === "local" && target.executionBindingDigest !== null)
-    ) {
-      context.addIssue({
-        code: "custom",
-        message: "Target kind and connection reference do not match.",
-      });
-    }
+  .superRefine((document, context) => {
+    rejectDuplicateIdentities(
+      [...document.legacyGuards, ...document.guards],
+      ({ targetId }) => targetId,
+      context,
+    );
+    rejectDuplicateIdentities(
+      [...document.legacyGuards, ...document.guards],
+      ({ operationId }) => operationId,
+      context,
+    );
   });
 
 const targetDocumentSchema = z
   .object({
     kind: z.literal("target-definitions"),
     schemaVersion: z.literal(CURRENT_TARGET_SCHEMA_VERSION),
-    targets: z.array(targetDefinitionSchema).min(1).max(1_000),
+    targets: z.array(durableTargetDefinitionSchema).min(1).max(1_000),
   })
   .strict()
   .superRefine((document, context) => {
@@ -310,6 +315,36 @@ const legacyV2TargetDocumentSchema = z
         z
           .object({
             connectionReference: z.string().min(1).max(256).nullable(),
+            generation: z.number().int().positive(),
+            harness: z.string().min(1).max(128),
+            id: targetIdSchema,
+            kind: z.enum(["local", "ssh"]),
+            label: z.string().min(1).max(256),
+            workspace: z.string().min(1).max(4_096),
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(1_000),
+  })
+  .strict()
+  .superRefine((document, context) => {
+    rejectDuplicateIdentities(document.targets, ({ id }) => id, context);
+  });
+
+const legacyV3TargetDocumentSchema = z
+  .object({
+    kind: z.literal("target-definitions"),
+    schemaVersion: z.literal(3),
+    targets: z
+      .array(
+        z
+          .object({
+            connectionReference: z.string().min(1).max(256).nullable(),
+            executionBindingDigest: z
+              .string()
+              .regex(/^[a-f0-9]{64}$/)
+              .nullable(),
             generation: z.number().int().positive(),
             harness: z.string().min(1).max(128),
             id: targetIdSchema,
@@ -391,6 +426,15 @@ export interface RecoveryFailure {
     | typeof COLLECTION_STORE_NAME
     | typeof STORE_NAME
     | typeof TARGET_STORE_NAME;
+  readonly targetIds?: readonly string[];
+}
+
+export interface BlockedTargetDefinition {
+  readonly generation: number;
+  readonly id: string;
+  readonly label: string;
+  readonly legacyHarness: string;
+  readonly reason: "unsupported_harness";
 }
 
 export type HostTrustRecord = z.infer<typeof hostTrustRecordSchema>;
@@ -398,23 +442,31 @@ export type CollectionAcknowledgement = z.infer<
   typeof collectionAcknowledgementSchema
 >;
 
-export type DurableTargetDefinition = Omit<
-  z.infer<typeof targetDefinitionSchema>,
-  "executionBindingDigest"
-> & {
-  readonly executionBindingDigest?: string | null;
-};
-
 export interface MutationGuard {
+  readonly bindingDigest: string;
   readonly deadline: string;
+  readonly dialectId: typeof SKILLS_DIALECT_ID;
   readonly effects: "none" | "possible";
   readonly generation: number;
+  readonly harnessSetDigest: string;
   readonly operationId: string;
   readonly phase: "executing" | "reconciliation-required";
+  readonly registryDigest: typeof HARNESS_REGISTRY_DIGEST;
   readonly targetId: string;
 }
 
+export type MutationGuardInput = Pick<
+  MutationGuard,
+  | "deadline"
+  | "effects"
+  | "generation"
+  | "operationId"
+  | "phase"
+  | "targetId"
+>;
+
 export interface RestoredRecoveryRecords {
+  readonly blockedTargetDefinitions?: readonly BlockedTargetDefinition[];
   readonly collectionAcknowledgements?: readonly CollectionAcknowledgement[];
   readonly failures: readonly RecoveryFailure[];
   readonly hostTrustRecords: readonly HostTrustRecord[];
@@ -434,13 +486,13 @@ export type DurableChange =
       readonly targetId: string;
       readonly type: "inventory.replace";
     }
-  | ({ readonly type: "guard.put" } & MutationGuard)
+  | ({ readonly type: "guard.put" } & MutationGuardInput)
   | {
       readonly targetId: string;
       readonly type: "guard.clear";
     }
   | {
-      readonly remainingGuards: readonly MutationGuard[];
+      readonly remainingGuards: readonly MutationGuardInput[];
       readonly type: "guards.clear-corruption";
     }
   | {
@@ -465,6 +517,28 @@ export interface RecoveryRecords {
   commit(change: DurableChange): Promise<Result<void, RecoveryCommitError>>;
   restore(): Promise<RestoredRecoveryRecords>;
 }
+
+type MemoryTargetDefinitionInput =
+  | DurableTargetDefinition
+  | (Omit<
+      DurableTargetDefinition,
+      | "dialectId"
+      | "executionBindingDigest"
+      | "registryDigest"
+      | "registryVersion"
+    > & {
+      readonly executionBindingDigest?: string | null;
+    })
+  | {
+      readonly connectionReference: string | null;
+      readonly executionBindingDigest?: string | null;
+      readonly generation: number;
+      readonly harness: string;
+      readonly id: string;
+      readonly kind: "local" | "ssh";
+      readonly label: string;
+      readonly workspace: string;
+    };
 
 export interface JsonRecoveryRecordsOptions {
   readonly directory: string;
@@ -667,14 +741,43 @@ function remapMutationGuardTargetId(
 
 export function createMemoryRecoveryRecords(
   initialSnapshots: readonly InventorySnapshot[] = [],
-  initialGuards: readonly MutationGuard[] = [],
-  initialTargets: readonly DurableTargetDefinition[] = [],
+  initialGuards: readonly MutationGuardInput[] = [],
+  initialTargets: readonly MemoryTargetDefinitionInput[] = [],
   initialHostTrust: readonly HostTrustRecord[] = [],
   initialCollectionAcknowledgements: readonly CollectionAcknowledgement[] = [],
 ): RecoveryRecords {
   let snapshots = [...initialSnapshots];
-  let mutationGuards = [...initialGuards];
-  let targetDefinitions = structuredClone(initialTargets);
+  let targetDefinitions = initialTargets.map((target) => {
+    const current = durableTargetDefinitionSchema.safeParse(target);
+    if (current.success) return current.data;
+    const { workspaceLabel: _workspaceLabel, ...durableTarget } = target as
+      MemoryTargetDefinitionInput & { readonly workspaceLabel?: string };
+    const harnessIds =
+      "harnessIds" in target
+        ? target.harnessIds
+        : (() => {
+            const resolved = resolveLegacyHarnessAlias(target.harness);
+            if (!resolved.ok) {
+              throw new Error("Memory Target harness is not registered.");
+            }
+            return [resolved.value];
+          })();
+    return durableTargetDefinitionSchema.parse({
+      ...durableTarget,
+      dialectId: SKILLS_DIALECT_ID,
+      executionBindingDigest: target.executionBindingDigest ?? null,
+      harnessIds,
+      registryDigest: HARNESS_REGISTRY_DIGEST,
+      registryVersion: HARNESS_REGISTRY_VERSION,
+    });
+  });
+  let mutationGuards = initialGuards.map(
+    (guard) =>
+      bindMutationGuard(
+        guard,
+        targetDefinitions.find(({ id }) => id === guard.targetId),
+      ) ?? bindUnresolvedLegacyGuard(guard),
+  );
   let hostTrustRecords = structuredClone(initialHostTrust);
   let collectionAcknowledgements = structuredClone(
     initialCollectionAcknowledgements,
@@ -722,14 +825,12 @@ export function createMemoryRecoveryRecords(
         }
         snapshots = replaceSnapshot(snapshots, replacement.data);
       } else if (change.type === "guard.put") {
-        const guard = mutationGuardSchema.safeParse({
-          deadline: change.deadline,
-          effects: change.effects,
-          generation: change.generation,
-          operationId: change.operationId,
-          phase: change.phase,
-          targetId: change.targetId,
-        });
+        const guard = mutationGuardSchema.safeParse(
+          bindMutationGuard(
+            change,
+            targetDefinitions.find(({ id }) => id === change.targetId),
+          ) ?? bindUnresolvedLegacyGuard(change),
+        );
         if (!guard.success) {
           return commitFailure(
             "persist_failed",
@@ -740,14 +841,7 @@ export function createMemoryRecoveryRecords(
           ...mutationGuards.filter(
             ({ targetId }) => targetId !== change.targetId,
           ),
-          {
-            deadline: change.deadline,
-            effects: change.effects,
-            generation: change.generation,
-            operationId: change.operationId,
-            phase: change.phase,
-            targetId: change.targetId,
-          },
+          guard.data,
         ];
       } else if (change.type === "guard.clear") {
         if (!targetIdSchema.safeParse(change.targetId).success) {
@@ -796,6 +890,7 @@ export function createMemoryRecoveryRecords(
     },
     async restore() {
       return {
+        blockedTargetDefinitions: [],
         collectionAcknowledgements: structuredClone(collectionAcknowledgements),
         failures: [],
         hostTrustRecords: structuredClone(hostTrustRecords),
@@ -858,6 +953,131 @@ function migrateLegacyDocument(
   }));
 }
 
+function migrateLegacyTargetDefinitions(
+  definitions: readonly {
+    readonly connectionReference: string | null;
+    readonly executionBindingDigest?: string | null;
+    readonly generation?: number;
+    readonly harness: string;
+    readonly id: string;
+    readonly kind: "local" | "ssh";
+    readonly label: string;
+    readonly workspace: string;
+  }[],
+): TargetDocument | undefined {
+  const targets: Array<z.input<typeof durableTargetDefinitionSchema>> = [];
+  for (const definition of definitions) {
+    const harnessId = resolveLegacyHarnessAlias(definition.harness);
+    if (!harnessId.ok) return undefined;
+    targets.push({
+      connectionReference: definition.connectionReference,
+      dialectId: SKILLS_DIALECT_ID,
+      executionBindingDigest: null,
+      generation: (definition.generation ?? 0) + 1,
+      harnessIds: [harnessId.value],
+      id: definition.id,
+      kind: definition.kind,
+      label: definition.label,
+      registryDigest: HARNESS_REGISTRY_DIGEST,
+      registryVersion: HARNESS_REGISTRY_VERSION,
+      workspace: definition.workspace,
+    });
+  }
+  const migrated = targetDocumentSchema.safeParse({
+    kind: "target-definitions",
+    schemaVersion: CURRENT_TARGET_SCHEMA_VERSION,
+    targets,
+  });
+  return migrated.success ? migrated.data : undefined;
+}
+
+function sha256Json(value: unknown): `sha256:${string}` {
+  return `sha256:${createHash("sha256")
+    .update(JSON.stringify(value))
+    .digest("hex")}`;
+}
+
+function targetBindingDigest(
+  target: DurableTargetDefinition,
+): `sha256:${string}` {
+  return sha256Json({
+    connectionReference: target.connectionReference,
+    dialectId: target.dialectId,
+    harnessIds: target.harnessIds,
+    kind: target.kind,
+    registryDigest: target.registryDigest,
+    workspace: target.workspace,
+  });
+}
+
+function bindMutationGuard(
+  guard: MutationGuardInput,
+  target: DurableTargetDefinition | undefined,
+): MutationGuard | undefined {
+  if (target === undefined || target.id !== guard.targetId) return undefined;
+  return {
+    bindingDigest: targetBindingDigest(target),
+    deadline: guard.deadline,
+    dialectId: target.dialectId,
+    effects: guard.effects,
+    generation: guard.generation,
+    harnessSetDigest: sha256Json(target.harnessIds),
+    operationId: guard.operationId,
+    phase: guard.phase,
+    registryDigest: target.registryDigest,
+    targetId: guard.targetId,
+  };
+}
+
+function bindUnresolvedLegacyGuard(
+  guard: z.infer<typeof legacyMutationGuardSchema>,
+): MutationGuard {
+  return {
+    bindingDigest: sha256Json({
+      generation: guard.generation,
+      legacyUnresolved: true,
+      targetId: guard.targetId,
+    }),
+    deadline: guard.deadline,
+    dialectId: SKILLS_DIALECT_ID,
+    effects: guard.effects,
+    generation: guard.generation,
+    harnessSetDigest: sha256Json([]),
+    operationId: guard.operationId,
+    phase: "reconciliation-required",
+    registryDigest: HARNESS_REGISTRY_DIGEST,
+    targetId: guard.targetId,
+  };
+}
+
+function migrateLegacyGuards(
+  guards: readonly z.infer<typeof legacyMutationGuardSchema>[],
+  targets: readonly DurableTargetDefinition[],
+): GuardDocument | undefined {
+  const targetsById = new Map(targets.map((target) => [target.id, target]));
+  const migrated = guards.flatMap((guard) => {
+    if (isLegacyTargetId(guard.targetId)) return [];
+    const target = targetsById.get(guard.targetId);
+    if (target === undefined) {
+      return [bindUnresolvedLegacyGuard(guard)];
+    }
+    return [
+      bindMutationGuard(
+        { ...guard, phase: "reconciliation-required" },
+        target,
+      ),
+    ];
+  });
+  if (migrated.some((guard) => guard === undefined)) return undefined;
+  const parsed = guardDocumentSchema.safeParse({
+    guards: migrated,
+    kind: "mutation-guards",
+    legacyGuards: guards.filter(({ targetId }) => isLegacyTargetId(targetId)),
+    schemaVersion: CURRENT_GUARD_SCHEMA_VERSION,
+  });
+  return parsed.success ? parsed.data : undefined;
+}
+
 export function createJsonRecoveryRecords(
   options: JsonRecoveryRecordsOptions,
 ): RecoveryRecords {
@@ -900,7 +1120,11 @@ export function createJsonRecoveryRecords(
     schemaVersion: CURRENT_GUARD_SCHEMA_VERSION,
   };
   let pendingLegacyGuards: MutationGuard[] | undefined;
+  let pendingLegacyGuardInputs:
+    | z.infer<typeof legacyMutationGuardSchema>[]
+    | undefined;
   let pendingLegacyGuardRaw: string | undefined;
+  let pendingLegacyGuardVersion: 1 | 2 | undefined;
   let guardFailures: RecoveryFailure[] = [];
   let guardsLoaded = false;
   let guardUnsupportedSchema = false;
@@ -911,10 +1135,13 @@ export function createJsonRecoveryRecords(
     targets: [],
   };
   let targetFailures: RecoveryFailure[] = [];
+  let blockedTargetDefinitions: BlockedTargetDefinition[] = [];
   let targetsLoaded = false;
   let targetUnsupportedSchema = false;
   let targetWriteBlocked = false;
   let targetStoreMissing = false;
+  let pendingLegacyTargetRaw: string | undefined;
+  let targetMigrationCommitted = false;
   let hostTrustRecords: HostTrustRecord[] = [];
   let hostTrustFailures: RecoveryFailure[] = [];
   let hostTrustLoaded = false;
@@ -1025,6 +1252,14 @@ export function createJsonRecoveryRecords(
     name = DOCUMENT_NAME,
     destinationPath = documentPath,
   ) => writeUtf8(JSON.stringify(nextDocument), name, destinationPath);
+
+  const destinationMatches = async (path: string, contents: string) => {
+    try {
+      return (await fileSystem.readFile(path, "utf8")) === contents;
+    } catch {
+      return false;
+    }
+  };
 
   const quarantine = async () => {
     const quarantinePath = join(
@@ -1229,39 +1464,21 @@ export function createJsonRecoveryRecords(
       return;
     }
 
-    const legacy = legacyGuardDocumentSchema.safeParse(decoded);
-    if (!legacy.success) {
+    const legacyV2 = legacyV2GuardDocumentSchema.safeParse(decoded);
+    const legacyV1 = legacyGuardDocumentSchema.safeParse(decoded);
+    if (!legacyV2.success && !legacyV1.success) {
       await quarantineAndMarkGuards("corrupt_store").catch(() => undefined);
       guardWriteBlocked = true;
       guardFailures = [{ code: "corrupt_store", store: GUARD_STORE_NAME }];
       return;
     }
-    const migrated = guardDocumentSchema.safeParse({
-      guards: legacy.data.guards,
-      kind: "mutation-guards",
-      schemaVersion: CURRENT_GUARD_SCHEMA_VERSION,
-    });
-    if (!migrated.success) {
-      pendingLegacyGuards = legacy.data.guards;
-      pendingLegacyGuardRaw = raw;
-      return;
-    }
-    try {
-      await createVerifiedBackup(
-        guardDocumentPath,
-        `${guardDocumentPath}.v1.backup`,
-        raw,
-      );
-      await writeDocument(
-        migrated.data,
-        GUARD_DOCUMENT_NAME,
-        guardDocumentPath,
-      );
-      guardDocument = migrated.data;
-    } catch {
-      guardWriteBlocked = true;
-      guardFailures = [{ code: "migration_failed", store: GUARD_STORE_NAME }];
-    }
+    pendingLegacyGuardInputs = (
+      legacyV2.success
+        ? [...legacyV2.data.guards, ...legacyV2.data.legacyGuards]
+        : legacyV1.data!.guards
+    );
+    pendingLegacyGuardRaw = raw;
+    pendingLegacyGuardVersion = legacyV2.success ? 2 : 1;
   };
 
   const quarantineTargets = async () => {
@@ -1301,6 +1518,7 @@ export function createJsonRecoveryRecords(
     if (targetsLoaded) return;
     targetsLoaded = true;
     targetFailures = [];
+    blockedTargetDefinitions = [];
     targetStoreMissing = false;
 
     try {
@@ -1368,53 +1586,166 @@ export function createJsonRecoveryRecords(
       return;
     }
 
+    const legacyV3 = legacyV3TargetDocumentSchema.safeParse(decoded);
     const legacyV2 = legacyV2TargetDocumentSchema.safeParse(decoded);
     const legacyV1 = legacyTargetDocumentSchema.safeParse(decoded);
-    if (!legacyV2.success && !legacyV1.success) {
+    if (!legacyV3.success && !legacyV2.success && !legacyV1.success) {
       await quarantineAndMarkTargets("corrupt_store").catch(() => undefined);
       targetWriteBlocked = true;
       targetFailures = [{ code: "corrupt_store", store: TARGET_STORE_NAME }];
       return;
     }
 
-    const migrated = targetDocumentSchema.safeParse({
-      kind: "target-definitions",
-      schemaVersion: CURRENT_TARGET_SCHEMA_VERSION,
-      targets: (legacyV2.success
-        ? legacyV2.data.targets
-        : legacyV1.success
-          ? legacyV1.data.targets.map((definition) => ({
-              ...definition,
-              generation: 1,
-            }))
-          : []
-      ).map((definition) => ({
-        ...definition,
-        executionBindingDigest: null,
-      })),
-    });
-    if (!migrated.success) {
-      await quarantineAndMarkTargets("migration_failed").catch(() => undefined);
+    const legacyVersion = legacyV3.success ? 3 : legacyV2.success ? 2 : 1;
+    const migrated = migrateLegacyTargetDefinitions(
+      legacyV3.success
+        ? legacyV3.data.targets
+        : legacyV2.success
+          ? legacyV2.data.targets
+          : legacyV1.data!.targets,
+    );
+    if (migrated === undefined) {
+      const legacyDefinitions = legacyV3.success
+        ? legacyV3.data.targets
+        : legacyV2.success
+          ? legacyV2.data.targets
+          : legacyV1.data!.targets;
+      blockedTargetDefinitions = legacyDefinitions.flatMap((definition) =>
+        resolveLegacyHarnessAlias(definition.harness).ok
+          ? []
+          : [
+              {
+                generation:
+                  "generation" in definition &&
+                  typeof definition.generation === "number"
+                    ? definition.generation
+                    : 0,
+                id: definition.id,
+                label: definition.label,
+                legacyHarness: definition.harness,
+                reason: "unsupported_harness" as const,
+              },
+            ],
+      );
       targetWriteBlocked = true;
-      targetFailures = [{ code: "migration_failed", store: TARGET_STORE_NAME }];
+      targetFailures = [
+        {
+          code: "migration_failed",
+          store: TARGET_STORE_NAME,
+          targetIds: blockedTargetDefinitions.map(({ id }) => id),
+        },
+      ];
       return;
     }
+    pendingLegacyTargetRaw = raw;
+    const migratedRaw = JSON.stringify(migrated);
     try {
       await createVerifiedBackup(
         targetDocumentPath,
-        `${targetDocumentPath}.${legacyV2.success ? "v2" : "v1"}.backup`,
+        `${targetDocumentPath}.v${legacyVersion}.backup`,
         raw,
       );
       await writeDocument(
-        migrated.data,
+        migrated,
         TARGET_DOCUMENT_NAME,
         targetDocumentPath,
       );
-      targetDocument = migrated.data;
+      targetDocument = migrated;
+      targetMigrationCommitted = true;
     } catch {
-      await quarantineAndMarkTargets("migration_failed").catch(() => undefined);
+      if (await destinationMatches(targetDocumentPath, migratedRaw)) {
+        targetDocument = migrated;
+        targetMigrationCommitted = true;
+      }
       targetWriteBlocked = true;
       targetFailures = [{ code: "migration_failed", store: TARGET_STORE_NAME }];
+    }
+  };
+
+  const completePendingGuardMigration = async () => {
+    if (pendingLegacyGuardInputs === undefined) return;
+    if (
+      pendingLegacyTargetRaw !== undefined &&
+      !targetMigrationCommitted
+    ) {
+      pendingLegacyGuards = pendingLegacyGuardInputs.map(
+        bindUnresolvedLegacyGuard,
+      );
+      guardWriteBlocked = true;
+      guardFailures = [
+        { code: "migration_failed", store: GUARD_STORE_NAME },
+      ];
+      return;
+    }
+    const migrated = migrateLegacyGuards(
+      pendingLegacyGuardInputs,
+      targetDocument.targets,
+    );
+    if (migrated === undefined) {
+      guardWriteBlocked = true;
+      guardFailures = [{ code: "migration_failed", store: GUARD_STORE_NAME }];
+      return;
+    }
+    pendingLegacyGuards = [...migrated.guards];
+    guardDocument = migrated;
+    const migratedRaw = JSON.stringify(migrated);
+    try {
+      await createVerifiedBackup(
+        guardDocumentPath,
+        `${guardDocumentPath}.v${pendingLegacyGuardVersion ?? 2}.backup`,
+        pendingLegacyGuardRaw,
+      );
+      await writeDocument(
+        migrated,
+        GUARD_DOCUMENT_NAME,
+        guardDocumentPath,
+      );
+      guardDocument = migrated;
+      pendingLegacyGuardInputs = undefined;
+      pendingLegacyGuards = undefined;
+      pendingLegacyGuardRaw = undefined;
+      pendingLegacyGuardVersion = undefined;
+      guardFailures = [];
+      pendingLegacyTargetRaw = undefined;
+      targetMigrationCommitted = false;
+    } catch {
+      guardWriteBlocked = true;
+      guardFailures = [{ code: "migration_failed", store: GUARD_STORE_NAME }];
+      const replacementVisible = await destinationMatches(
+        guardDocumentPath,
+        migratedRaw,
+      );
+      if (replacementVisible) {
+        guardDocument = migrated;
+      }
+      if (
+        !replacementVisible &&
+        targetMigrationCommitted &&
+        pendingLegacyTargetRaw !== undefined
+      ) {
+        try {
+          await writeUtf8(
+            pendingLegacyTargetRaw,
+            TARGET_DOCUMENT_NAME,
+            targetDocumentPath,
+          );
+          targetDocument = {
+            kind: "target-definitions",
+            schemaVersion: CURRENT_TARGET_SCHEMA_VERSION,
+            targets: [],
+          };
+          targetWriteBlocked = true;
+          targetFailures = [
+            { code: "migration_failed", store: TARGET_STORE_NAME },
+          ];
+          targetMigrationCommitted = false;
+        } catch {
+          targetWriteBlocked = true;
+          targetFailures = [
+            { code: "migration_failed", store: TARGET_STORE_NAME },
+          ];
+        }
+      }
     }
   };
 
@@ -1663,7 +1994,6 @@ export function createJsonRecoveryRecords(
           await load();
           await loadGuards();
           await loadTargets();
-          failWhenCurrentGuardsOutliveTargetStore();
           if (unsupportedSchema || guardUnsupportedSchema) {
             return commitFailure(
               "unsupported_schema",
@@ -1681,20 +2011,43 @@ export function createJsonRecoveryRecords(
             ...document.legacySnapshots,
             ...document.snapshots,
           ];
-          const sourceGuards = pendingLegacyGuards ?? [
-            ...guardDocument.legacyGuards,
-            ...guardDocument.guards,
+          const remapGuardDocument =
+            pendingLegacyGuardInputs === undefined
+              ? guardDocument
+              : migrateLegacyGuards(
+                  pendingLegacyGuardInputs,
+                  targetDocument.targets,
+                );
+          if (remapGuardDocument === undefined) {
+            return commitFailure(
+              "persist_failed",
+              "Legacy Mutation Guard authority could not be migrated.",
+            );
+          }
+          const legacySourceGuard = remapGuardDocument.legacyGuards.find(
+            ({ targetId }) => targetId === change.fromTargetId,
+          );
+          const sourceGuards = [
+            ...remapGuardDocument.guards,
+            ...(legacySourceGuard === undefined
+              ? []
+              : [bindUnresolvedLegacyGuard(legacySourceGuard)]),
           ];
           const remappedSnapshots = remapTargetId(
             sourceSnapshots,
             change.fromTargetId,
             change.toTargetId,
           );
-          const remappedGuards = remapMutationGuardTargetId(
-            sourceGuards,
-            change.fromTargetId,
-            change.toTargetId,
-          );
+          const remappedGuards = [
+            ...remapMutationGuardTargetId(
+              sourceGuards,
+              change.fromTargetId,
+              change.toTargetId,
+            ),
+            ...remapGuardDocument.legacyGuards.filter(
+              ({ targetId }) => targetId !== change.fromTargetId,
+            ),
+          ];
           const nextDocument = currentDocumentSchema.safeParse({
             kind: "inventory-snapshots",
             legacySnapshots: remappedSnapshots.filter(
@@ -1733,7 +2086,7 @@ export function createJsonRecoveryRecords(
             if (pendingLegacyGuards !== undefined) {
               await createVerifiedBackup(
                 guardDocumentPath,
-                `${guardDocumentPath}.v1.backup`,
+                `${guardDocumentPath}.v${pendingLegacyGuardVersion ?? 2}.backup`,
                 pendingLegacyGuardRaw,
               );
             }
@@ -1748,8 +2101,10 @@ export function createJsonRecoveryRecords(
               guardDocumentPath,
             );
             guardDocument = nextGuardDocument.data;
+            pendingLegacyGuardInputs = undefined;
             pendingLegacyGuards = undefined;
             pendingLegacyGuardRaw = undefined;
+            pendingLegacyGuardVersion = undefined;
             failures = [];
             guardFailures = [];
             return { ok: true, value: undefined };
@@ -1825,7 +2180,17 @@ export function createJsonRecoveryRecords(
           const remainingGuards = z
             .array(mutationGuardSchema)
             .max(1_000)
-            .safeParse(change.remainingGuards);
+            .safeParse(
+              change.remainingGuards.map(
+                (guard) =>
+                  bindMutationGuard(
+                    guard,
+                    targetDocument.targets.find(
+                      ({ id }) => id === guard.targetId,
+                    ),
+                  ) ?? bindUnresolvedLegacyGuard(guard),
+              ),
+            );
           if (!remainingGuards.success) {
             return commitFailure(
               "persist_failed",
@@ -1868,6 +2233,7 @@ export function createJsonRecoveryRecords(
 
         if (change.type !== "inventory.replace") {
           await loadGuards();
+          if (change.type === "guard.put") await loadTargets();
           if (guardUnsupportedSchema) {
             return commitFailure(
               "unsupported_schema",
@@ -1880,10 +2246,28 @@ export function createJsonRecoveryRecords(
               "Mutation Guard data could not be read safely and will not be overwritten.",
             );
           }
-          if (pendingLegacyGuards !== undefined) {
+          if (
+            pendingLegacyGuardInputs !== undefined ||
+            pendingLegacyGuards !== undefined
+          ) {
             return commitFailure(
               "persist_failed",
               "Legacy Mutation Guard data must be migrated before it can change.",
+            );
+          }
+          const boundGuard =
+            change.type === "guard.put"
+              ? (bindMutationGuard(
+                  change,
+                  targetDocument.targets.find(
+                    ({ id }) => id === change.targetId,
+                  ),
+                ) ?? bindUnresolvedLegacyGuard(change))
+              : undefined;
+          if (change.type === "guard.put" && boundGuard === undefined) {
+            return commitFailure(
+              "persist_failed",
+              "Mutation Guard Target binding could not be established.",
             );
           }
           const guards =
@@ -1892,14 +2276,7 @@ export function createJsonRecoveryRecords(
                   ...guardDocument.guards.filter(
                     ({ targetId }) => targetId !== change.targetId,
                   ),
-                  {
-                    deadline: change.deadline,
-                    effects: change.effects,
-                    generation: change.generation,
-                    operationId: change.operationId,
-                    phase: change.phase,
-                    targetId: change.targetId,
-                  },
+                  boundGuard!,
                 ]
               : guardDocument.guards.filter(
                   ({ targetId }) => targetId !== change.targetId,
@@ -1986,10 +2363,12 @@ export function createJsonRecoveryRecords(
         await load();
         await loadGuards();
         await loadTargets();
+        await completePendingGuardMigration();
         failWhenCurrentGuardsOutliveTargetStore();
         await loadHostTrust();
         await loadCollections();
         return {
+          blockedTargetDefinitions: structuredClone(blockedTargetDefinitions),
           collectionAcknowledgements: structuredClone(
             collectionDocument.acknowledgements,
           ),
@@ -2008,10 +2387,15 @@ export function createJsonRecoveryRecords(
             ],
           ),
           mutationGuards: structuredClone(
-            pendingLegacyGuards ?? [
-              ...guardDocument.guards,
-              ...guardDocument.legacyGuards,
-            ],
+            pendingLegacyGuards === undefined
+              ? [
+                  ...guardDocument.guards,
+                  ...guardDocument.legacyGuards.map(bindUnresolvedLegacyGuard),
+                ]
+              : [
+                  ...guardDocument.legacyGuards.map(bindUnresolvedLegacyGuard),
+                  ...pendingLegacyGuards,
+                ],
           ),
           targetDefinitions: structuredClone(targetDocument.targets),
         };

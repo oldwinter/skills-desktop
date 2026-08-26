@@ -69,7 +69,7 @@ export async function createCompositionRoot(options?: {
         return createSshSkillsProcess({
           binding: {
             generation: binding.generation,
-            harness: binding.harness,
+            harnessIds: binding.harnessIds,
             kind: "ssh",
             ssh: binding.ssh,
             targetId: binding.targetId,
@@ -83,7 +83,7 @@ export async function createCompositionRoot(options?: {
       return createLocalSkillsProcess({
         binding: {
           generation: binding.generation,
-          harness: binding.harness,
+          harnessIds: binding.harnessIds,
           targetId: binding.targetId,
         },
         clock: () => new Date(),

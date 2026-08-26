@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 type TargetBinding = {
   readonly generation: number;
-  readonly harness: string;
+  readonly harnessIds: readonly string[];
   readonly kind: "local" | "ssh";
   readonly ssh?: unknown;
   readonly targetId: string;
@@ -98,7 +98,7 @@ vi.mock("./targets/local-skills-targets.js", () => ({
         primaryTarget: {
           connectionReference: null,
           generation: 1,
-          harness: "Codex",
+          harnessIds: ["codex"],
           id: "00000000-0000-4000-8000-000000000001",
           kind: "local",
           label: "This device",
@@ -273,7 +273,7 @@ describe("desktop composition workspace selection", () => {
 
       const localBinding: TargetBinding = {
         generation: 1,
-        harness: "Codex",
+        harnessIds: ["amp", "codex"],
         kind: "local",
         targetId: "00000000-0000-4000-8000-000000000001",
         workspace: await realpath(directory),
@@ -284,7 +284,7 @@ describe("desktop composition workspace selection", () => {
         expect.objectContaining({
           binding: {
             generation: 1,
-            harness: "Codex",
+            harnessIds: ["amp", "codex"],
             targetId: localBinding.targetId,
           },
           platform: process.platform,
@@ -294,7 +294,7 @@ describe("desktop composition workspace selection", () => {
 
       const sshBinding: TargetBinding = {
         generation: 3,
-        harness: "Codex",
+        harnessIds: ["codex"],
         kind: "ssh",
         ssh: { connectionReference: "build-host" },
         targetId: "00000000-0000-4000-8000-000000000002",
@@ -305,7 +305,7 @@ describe("desktop composition workspace selection", () => {
       expect(factories.createSshSkillsProcess).toHaveBeenCalledWith({
         binding: {
           generation: 3,
-          harness: "Codex",
+          harnessIds: ["codex"],
           kind: "ssh",
           ssh: sshBinding.ssh,
           targetId: sshBinding.targetId,

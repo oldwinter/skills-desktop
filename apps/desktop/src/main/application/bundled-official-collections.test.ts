@@ -7,6 +7,17 @@ import {
   validateOfficialCollectionCatalog,
 } from "./official-collections.js";
 
+const targetV4Metadata = {
+  connectionReference: null,
+  dialectId: "skills-1.5.23" as const,
+  executionBindingDigest: null,
+  harnessIds: ["codex"],
+  registryDigest:
+    "sha256:36d0c792e0480a13818d890e1dccc93e3b29a4ea44af78091e80db8a3e9181de" as const,
+  registryVersion: 1 as const,
+  workspace: "/work/skills-desktop",
+};
+
 describe("bundled Official Collection catalog", () => {
   it("binds the independent approval to the immutable bundled release", () => {
     const catalog = validateOfficialCollectionCatalog(
@@ -27,8 +38,8 @@ describe("bundled Official Collection catalog", () => {
         },
         platform: "linux",
         target: {
+          ...targetV4Metadata,
           generation: 1,
-          harness: "Codex",
           id: "00000000-0000-4000-8000-000000000001",
           kind: "local",
           label: "This device",
@@ -140,8 +151,8 @@ describe("bundled Official Collection catalog", () => {
       phase: "ready" as const,
     };
     const target = {
+      ...targetV4Metadata,
       generation: 1,
-      harness: "Codex",
       id: "00000000-0000-4000-8000-000000000001",
       kind: "local" as const,
       label: "This device",
@@ -232,9 +243,9 @@ describe("bundled Official Collection catalog", () => {
       });
     };
     const target = {
+      ...targetV4Metadata,
       connectionReference: "build-host",
       generation: 1,
-      harness: "Codex",
       id: "00000000-0000-4000-8000-000000000002",
       kind: "ssh" as const,
       label: "Build host",
@@ -334,8 +345,8 @@ describe("bundled Official Collection catalog", () => {
       },
       platform: "linux",
       target: {
+        ...targetV4Metadata,
         generation: 1,
-        harness: "Codex",
         id: "00000000-0000-4000-8000-000000000001",
         kind: "local",
         label: "This device",
@@ -398,8 +409,8 @@ describe("bundled Official Collection catalog", () => {
         },
         platform: "linux",
         target: {
+          ...targetV4Metadata,
           generation: 1,
-          harness: "Codex",
           id: "00000000-0000-4000-8000-000000000001",
           kind: "local",
           label: "This device",

@@ -1,9 +1,22 @@
+import {
+  interpretHarnessCoverage,
+  resolveLegacyHarnessAlias,
+} from "@skills-desktop/skills-runtime";
+
 export function isInventoryEntryAvailableToHarness(
-  entry: { readonly agents: readonly string[] },
+  entry: {
+    readonly agents: readonly string[];
+    readonly scope: "global" | "project";
+  },
   harness: string,
 ): boolean {
-  return (
-    entry.agents.includes(harness) ||
-    (harness === "Codex" && entry.agents.length === 0)
-  );
+  if (entry.agents.includes(harness)) return true;
+  const requested = resolveLegacyHarnessAlias(harness);
+  if (!requested.ok) return false;
+  const coverage = interpretHarnessCoverage({
+    harnessId: requested.value,
+    inventoryTokens: entry.agents,
+    scope: entry.scope,
+  });
+  return coverage === "direct" || coverage === "shared";
 }

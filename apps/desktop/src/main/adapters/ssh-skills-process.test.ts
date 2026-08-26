@@ -119,6 +119,28 @@ const binding = {
 };
 
 describe("SSH SkillsProcess observation contract", () => {
+  it("fails closed when Wire cannot represent a multi-harness Target", async () => {
+    const runner = scriptedTransport();
+    const process = createSshSkillsProcess({
+      binding: {
+        ...binding,
+        harness: undefined,
+        harnessIds: ["amp", "codex"],
+      },
+      clock: () => new Date("2026-08-22T05:00:00.000Z"),
+      id: () => "multi-harness-ssh",
+      runner,
+    });
+
+    await expect(
+      process.observeInventory({ signal: new AbortController().signal }),
+    ).resolves.toMatchObject({
+      error: { code: "remote_protocol_violation", effects: "none" },
+      ok: false,
+    });
+    expect(runner.invocations).toEqual([]);
+  });
+
   it("publishes one atomic Inventory through a fresh hardened SSH session", async () => {
     const runner = scriptedTransport();
     let requestNumber = 0;

@@ -1,7 +1,11 @@
 import { useEffect, useState } from "react";
 import { AlertCircle, Check, Clock3, ShieldCheck, X } from "lucide-react";
 
-import type { ReviewBridge, ReviewSnapshot } from "../contracts/review.js";
+import {
+  REVIEW_PROTOCOL_VERSION,
+  type ReviewBridge,
+  type ReviewSnapshot,
+} from "../contracts/review.js";
 import { userFacingErrorMessage } from "../contracts/user-facing-error.js";
 import type { RendererError } from "../contracts/workspace.js";
 
@@ -63,7 +67,11 @@ export function ReviewSurface({ client }: { readonly client: ReviewBridge }) {
           : "Mutation started",
       );
     } else setSettledMessage("Review rejected");
-    setSnapshot({ decision, schemaVersion: 1, status: "settled" });
+    setSnapshot({
+      decision,
+      schemaVersion: REVIEW_PROTOCOL_VERSION,
+      status: "settled",
+    });
     if (decision === "reject") window.close();
   };
 

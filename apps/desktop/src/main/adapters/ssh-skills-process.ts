@@ -19,6 +19,7 @@ import { REMOTE_BOOTSTRAP_COMMAND } from "@skills-desktop/remote-bootstrap";
 
 import {
   mutationExecutionFailure,
+  mutationPreparationFailure,
   observedMutationEffects,
   prepareMutationPlan,
   type NormalizedMutation,
@@ -391,7 +392,8 @@ export function createSshTransportRunner(options?: {
 
 export interface SshSkillsProcessBinding {
   readonly generation: number;
-  readonly harness: string;
+  readonly harness?: string;
+  readonly harnessIds?: readonly string[];
   readonly kind: "ssh";
   readonly ssh: OpenSshEffectiveBinding;
   readonly targetId: string;
@@ -470,7 +472,13 @@ export function createSshSkillsProcess(options: {
   readonly id: () => string;
   readonly runner: SshTransportRunner;
 }): SkillsProcess {
-  const wireHarnessId = resolveLegacyHarnessAlias(options.binding.harness);
+  const harnessValues =
+    options.binding.harnessIds ??
+    (options.binding.harness === undefined ? [] : [options.binding.harness]);
+  const wireHarnessId =
+    harnessValues.length === 1
+      ? resolveLegacyHarnessAlias(harnessValues[0]!)
+      : undefined;
   let observing = false;
   let mutating = false;
   const privatePlans = new Map<
@@ -525,7 +533,7 @@ export function createSshSkillsProcess(options: {
           },
         };
       }
-      if (!wireHarnessId.ok) {
+      if (wireHarnessId === undefined || !wireHarnessId.ok) {
         return mutationExecutionFailure(
           "confirmation_invalid",
           "The Target harness is not supported by the pinned Skills dialect.",
@@ -631,7 +639,7 @@ export function createSshSkillsProcess(options: {
             effects: observedMutationEffects(
               privatePlan.mutation,
               inventory,
-              options.binding.harness,
+              harnessValues,
             ),
             inventory,
             preparedMutationId: privatePlan.prepared.id,
@@ -647,10 +655,10 @@ export function createSshSkillsProcess(options: {
       }
     },
     async observeInventory({ signal }) {
-      if (!wireHarnessId.ok) {
+      if (wireHarnessId === undefined || !wireHarnessId.ok) {
         return observationFailure(
           "remote_protocol_violation",
-          "The Target harness is not supported by the pinned Skills dialect.",
+          "The SSH transport cannot represent this Target harness set.",
           false,
           "wire",
         );
@@ -827,6 +835,12 @@ export function createSshSkillsProcess(options: {
       }
     },
     async prepareMutation(input) {
+      if (wireHarnessId === undefined || !wireHarnessId.ok) {
+        return mutationPreparationFailure(
+          "mutation_ineligible",
+          "The SSH transport cannot represent this Target harness set.",
+        );
+      }
       const planned = prepareMutationPlan({
         binding: options.binding,
         clock: options.clock,

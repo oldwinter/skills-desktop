@@ -265,7 +265,7 @@ describe("Electron IPC sender authorization", () => {
     expect(session.request).toHaveBeenCalledWith({
       targetId: { executable: "sh" },
       type: "inventory.refresh",
-      version: 1,
+      version: 2,
     });
     await expect(
       handlers.get("workspace:comparison:open")!(
@@ -279,7 +279,7 @@ describe("Electron IPC sender authorization", () => {
       leftTargetId: "00000000-0000-4000-8000-00000000000b",
       rightTargetId: "00000000-0000-4000-8000-00000000000c",
       type: "comparison.open",
-      version: 1,
+      version: 2,
     });
     await expect(
       handlers.get("workspace:host-trust:review")!(
@@ -291,7 +291,7 @@ describe("Electron IPC sender authorization", () => {
     expect(session.request).toHaveBeenLastCalledWith({
       targetId: "00000000-0000-4000-8000-000000000018",
       type: "host-trust.review",
-      version: 1,
+      version: 2,
     });
     await expect(
       handlers.get("workspace:collection:prepare")!(
@@ -316,7 +316,7 @@ describe("Electron IPC sender authorization", () => {
       selections: [{ mode: "add", name: "find-skills" }],
       targetId: "00000000-0000-4000-8000-000000000001",
       type: "collection.prepare",
-      version: 1,
+      version: 2,
     });
     await expect(
       handlers.get("workspace:collection:prepare-many")!(
@@ -359,7 +359,7 @@ describe("Electron IPC sender authorization", () => {
         },
       ],
       type: "collection.prepare-many",
-      version: 1,
+      version: 2,
     });
     await expect(
       handlers.get("workspace:collection:review-request")!(
@@ -371,7 +371,7 @@ describe("Electron IPC sender authorization", () => {
     expect(session.request).toHaveBeenLastCalledWith({
       collectionPlanId: "collection-plan-1",
       type: "collection.review.request",
-      version: 1,
+      version: 2,
     });
     await expect(
       handlers.get("workspace:target:create")!(
@@ -395,7 +395,7 @@ describe("Electron IPC sender authorization", () => {
         workspace: "/srv/project",
       },
       type: "target.create",
-      version: 1,
+      version: 2,
     });
 
     const reviewMainFrame = { url: "skills-desktop://review/index.html" };
@@ -436,7 +436,7 @@ describe("Electron IPC sender authorization", () => {
     expect(session.request).toHaveBeenLastCalledWith({
       decision: "reject",
       type: "review.decide",
-      version: 1,
+      version: 2,
     });
   });
 

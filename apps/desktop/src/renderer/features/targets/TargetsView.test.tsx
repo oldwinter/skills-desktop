@@ -71,19 +71,23 @@ function targetState(
 
 const localTarget: TargetDefinition = {
   connectionReference: null,
+  dialectId: "skills-1.5.23",
+  executionBindingDigest: null,
   generation: 1,
-  harness: "Codex",
+  harnessIds: ["codex"],
   id: localId,
   kind: "local",
   label: "This device",
+  registryDigest:
+    "sha256:36d0c792e0480a13818d890e1dccc93e3b29a4ea44af78091e80db8a3e9181de",
+  registryVersion: 1,
   workspace: "/work/skills-desktop",
   workspaceLabel: "skills-desktop",
 };
 
 const secondTarget: TargetDefinition = {
-  connectionReference: null,
+  ...localTarget,
   generation: 2,
-  harness: "Codex",
   id: secondId,
   kind: "local",
   label: "Second device",
@@ -92,9 +96,9 @@ const secondTarget: TargetDefinition = {
 };
 
 const sshTarget: TargetDefinition = {
+  ...localTarget,
   connectionReference: "build-host",
   generation: 3,
-  harness: "Codex",
   id: sshId,
   kind: "ssh",
   label: "Build host",
@@ -193,14 +197,14 @@ describe("TargetsView", () => {
       target: { value: "/work/other" },
     });
     fireEvent.change(screen.getByLabelText("Harness"), {
-      target: { value: "Codex" },
+      target: { value: "codex" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Save Target" }));
 
     await waitFor(() =>
       expect(createTarget).toHaveBeenCalledWith({
         connectionReference: null,
-        harness: "Codex",
+        harnessIds: ["codex"],
         kind: "local",
         label: "Local workspace",
         workspace: "/work/other",
@@ -256,7 +260,7 @@ describe("TargetsView", () => {
     await waitFor(() =>
       expect(updateTarget).toHaveBeenCalledWith(localId, {
         connectionReference: null,
-        harness: "Codex",
+        harnessIds: ["codex"],
         kind: "local",
         label: "Renamed device",
         workspace: "/work/skills-desktop",

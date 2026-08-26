@@ -471,7 +471,7 @@ export function CollectionsView({
                         {targetState.target.kind === "ssh"
                           ? "SSH · 未在 V1 开放"
                           : "Local"}{" "}
-                        / {targetState.target.harness}
+                        / {targetState.target.harnessIds.join(", ")}
                       </small>
                       <small>{inventoryFreshnessLabel}</small>
                     </span>

@@ -827,6 +827,59 @@ describe("Local SkillsProcess mutation contract", () => {
     });
   });
 
+  it("keeps every canonical Target harness in one CLI mutation plan", () => {
+    expect(
+      prepareMutationPlan({
+        binding: {
+          generation: 1,
+          harnessIds: ["amp", "codex"],
+          targetId: "00000000-0000-4000-8000-000000000001",
+        },
+        clock: () => new Date("2026-08-22T06:00:00.000Z"),
+        id: () => "multi-harness-plan",
+        input: {
+          freshness: "fresh",
+          intent: {
+            names: ["new-skill"],
+            scope: "project",
+            source: {
+              source: "example/skills",
+              sourceType: "github",
+            },
+            type: "add",
+          },
+          inventory: {
+            cliVersion: CLI_VERSION,
+            entries: [],
+            observedAt: "2026-08-22T06:00:00.000Z",
+            schemaVersion: 1,
+          },
+          inventoryId: "canonical-inventory",
+        },
+      }),
+    ).toMatchObject({
+      ok: true,
+      value: {
+        args: [
+          "add",
+          "example/skills",
+          "--skill",
+          "new-skill",
+          "--agent",
+          "amp",
+          "codex",
+          "--yes",
+        ],
+        prepared: {
+          commandPlan: {
+            harness: "amp codex",
+            harnessIds: ["amp", "codex"],
+          },
+        },
+      },
+    });
+  });
+
   it("uses canonical Codex availability for remove, update, and update-all", () => {
     const inventory: Inventory = {
       cliVersion: CLI_VERSION,

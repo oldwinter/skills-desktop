@@ -643,7 +643,7 @@ export function createOpenSshTargetAccess(options: {
               effectiveConfigDigest: createHash("sha256")
                 .update(connectionConfig)
                 .digest("hex"),
-              harness: target.harness,
+              harnessIds: target.harnessIds,
               hostKeyIdentity,
               protocolVersion: WIRE_PROTOCOL_VERSION,
               workspace: target.workspace,

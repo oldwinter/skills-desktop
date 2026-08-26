@@ -3,6 +3,7 @@ import type { Result } from "@skills-desktop/skills-runtime";
 import type {
   RendererError,
   TargetDraft,
+  TargetDefinition as PublicTargetDefinition,
 } from "../../contracts/workspace.js";
 import type { SkillsProcess } from "../adapters/skills-process.js";
 import type {
@@ -18,21 +19,11 @@ export type TargetOpenError = Omit<RendererError, "code"> & {
     | OpenSshAccessError["code"];
 };
 
-export interface TargetDefinition {
-  readonly connectionReference?: string | null;
-  readonly executionBindingDigest?: string | null;
-  readonly generation: number;
-  readonly harness: string;
-  readonly id: string;
-  readonly kind: "local" | "ssh";
-  readonly label: string;
-  readonly workspace: string;
-  readonly workspaceLabel: string;
-}
+export type TargetDefinition = PublicTargetDefinition;
 
 export interface EffectiveTargetBinding {
   readonly generation: number;
-  readonly harness: string;
+  readonly harnessIds: readonly string[];
   readonly kind: TargetDefinition["kind"];
   readonly ssh?: OpenSshEffectiveBinding;
   readonly targetId: string;

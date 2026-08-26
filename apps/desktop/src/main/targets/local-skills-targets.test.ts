@@ -82,21 +82,31 @@ describe("Local SkillsTargets identity", () => {
       first.primaryTarget,
       {
         connectionReference: null,
+        dialectId: "skills-1.5.23",
+        executionBindingDigest: null,
         generation: 3,
-        harness: "Codex",
+        harnessIds: ["codex"],
         id: "00000000-0000-4000-8000-00000000000d",
         kind: "local",
         label: "Other workspace",
+        registryDigest:
+          "sha256:36d0c792e0480a13818d890e1dccc93e3b29a4ea44af78091e80db8a3e9181de",
+        registryVersion: 1,
         workspace: "/work/beta",
         workspaceLabel: "beta",
       },
       {
         connectionReference: "build-host",
+        dialectId: "skills-1.5.23",
+        executionBindingDigest: null,
         generation: 2,
-        harness: "Codex",
+        harnessIds: ["codex"],
         id: "00000000-0000-4000-8000-00000000000e",
         kind: "ssh",
         label: "Build host",
+        registryDigest:
+          "sha256:36d0c792e0480a13818d890e1dccc93e3b29a4ea44af78091e80db8a3e9181de",
+        registryVersion: 1,
         workspace: "/srv/project",
         workspaceLabel: "project",
       },
@@ -108,7 +118,7 @@ describe("Local SkillsTargets identity", () => {
       value: {
         binding: {
           generation: 3,
-          harness: "Codex",
+          harnessIds: ["codex"],
           kind: "local",
           targetId: "00000000-0000-4000-8000-00000000000d",
           workspace: "/work/beta",
@@ -120,7 +130,7 @@ describe("Local SkillsTargets identity", () => {
     expect(bindings).toEqual([
       {
         generation: 3,
-        harness: "Codex",
+        harnessIds: ["codex"],
         kind: "local",
         targetId: "00000000-0000-4000-8000-00000000000d",
         workspace: "/work/beta",
@@ -141,11 +151,16 @@ describe("Local SkillsTargets identity", () => {
       id: () => "00000000-0000-4000-8000-000000000017",
       initialTarget: {
         connectionReference: null,
+        dialectId: "skills-1.5.23",
+        executionBindingDigest: null,
         generation: 1,
-        harness: "Codex",
+        harnessIds: ["codex"],
         id: "00000000-0000-4000-8000-000000000001",
         kind: "local",
         label: "This device",
+        registryDigest:
+          "sha256:36d0c792e0480a13818d890e1dccc93e3b29a4ea44af78091e80db8a3e9181de",
+        registryVersion: 1,
         workspace: "/work/alpha",
         workspaceLabel: "alpha",
       },
@@ -154,7 +169,7 @@ describe("Local SkillsTargets identity", () => {
 
     const created = await catalog.proposeCreate({
       connectionReference: null,
-      harness: "Codex",
+      harnessIds: ["codex"],
       kind: "local",
       label: "Alias workspace",
       workspace: "/work/alias",
@@ -177,7 +192,7 @@ describe("Local SkillsTargets identity", () => {
 
     const updated = await catalog.proposeUpdate(created.value.target.id, {
       connectionReference: null,
-      harness: "Codex",
+      harnessIds: ["codex"],
       kind: "local",
       label: "Moved workspace",
       workspace: "/work/next",
@@ -196,11 +211,16 @@ describe("Local SkillsTargets identity", () => {
       id: () => "not-a-uuid",
       initialTarget: {
         connectionReference: null,
+        dialectId: "skills-1.5.23",
+        executionBindingDigest: null,
         generation: 1,
-        harness: "Codex",
+        harnessIds: ["codex"],
         id: "00000000-0000-4000-8000-000000000001",
         kind: "local",
         label: "This device",
+        registryDigest:
+          "sha256:36d0c792e0480a13818d890e1dccc93e3b29a4ea44af78091e80db8a3e9181de",
+        registryVersion: 1,
         workspace: "/work/alpha",
         workspaceLabel: "alpha",
       },
@@ -210,7 +230,7 @@ describe("Local SkillsTargets identity", () => {
     await expect(
       catalog.proposeCreate({
         connectionReference: "build-host",
-        harness: "Codex",
+        harnessIds: ["codex"],
         kind: "ssh",
         label: "Build host",
         workspace: "/srv/project",
@@ -218,6 +238,50 @@ describe("Local SkillsTargets identity", () => {
     ).resolves.toMatchObject({
       error: { code: "internal_error" },
       ok: false,
+    });
+  });
+
+  it("establishes a missing SSH binding digest without advancing Generation", async () => {
+    const catalog = createSkillsTargetsCatalog({
+      id: () => "00000000-0000-4000-8000-000000000028",
+      initialTarget: {
+        connectionReference: "build-host",
+        dialectId: "skills-1.5.23",
+        executionBindingDigest: null,
+        generation: 8,
+        harnessIds: ["codex"],
+        id: "00000000-0000-4000-8000-000000000027",
+        kind: "ssh",
+        label: "Migrated build host",
+        registryDigest:
+          "sha256:36d0c792e0480a13818d890e1dccc93e3b29a4ea44af78091e80db8a3e9181de",
+        registryVersion: 1,
+        workspace: "/srv/project",
+        workspaceLabel: "project",
+      },
+      processFor: () => process,
+      sshAccess: {
+        inspect: async () => ({
+          ok: true,
+          value: { bindingDigest: "b".repeat(64) },
+        }),
+      } as never,
+    });
+
+    await expect(
+      catalog.open("00000000-0000-4000-8000-000000000027"),
+    ).resolves.toMatchObject({
+      ok: true,
+      value: {
+        proposal: {
+          executionChanged: false,
+          target: {
+            executionBindingDigest: "b".repeat(64),
+            generation: 8,
+          },
+        },
+        status: "binding-changed",
+      },
     });
   });
 });

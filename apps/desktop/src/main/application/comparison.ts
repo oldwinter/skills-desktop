@@ -155,11 +155,13 @@ function evidenceDimension(
 
 function harnessAvailability(
   entries: readonly PublicInventoryEntry[],
-  harness: string,
+  harnessIds: readonly string[],
 ): ComparisonRow["left"]["harnessAvailability"] {
   if (entries.length === 0) return "absent";
-  return entries.some((entry) =>
-    isInventoryEntryAvailableToHarness(entry, harness),
+  return harnessIds.every((harnessId) =>
+    entries.some((entry) =>
+      isInventoryEntryAvailableToHarness(entry, harnessId),
+    ),
   )
     ? "available"
     : "unavailable";
@@ -228,7 +230,7 @@ export function compareTargetInventories(input: {
         freshness: input.leftInventory.freshness,
         harnessAvailability: harnessAvailability(
           left,
-          input.leftTarget.harness,
+          input.leftTarget.harnessIds,
         ),
       },
       right: {
@@ -236,7 +238,7 @@ export function compareTargetInventories(input: {
         freshness: input.rightInventory.freshness,
         harnessAvailability: harnessAvailability(
           right,
-          input.rightTarget.harness,
+          input.rightTarget.harnessIds,
         ),
       },
       summary,

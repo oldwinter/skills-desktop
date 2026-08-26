@@ -38,7 +38,7 @@ function inventoryPill(state: TargetState): {
 
 const blankTarget = (): TargetDraft => ({
   connectionReference: null,
-  harness: "Codex",
+  harnessIds: ["codex"],
   kind: "local",
   label: "",
   workspace: "",
@@ -77,7 +77,7 @@ export function TargetsView({
         ? blankTarget()
         : {
             connectionReference: state.target.connectionReference ?? null,
-            harness: state.target.harness,
+            harnessIds: [...state.target.harnessIds],
             kind: state.target.kind,
             label: state.target.label,
             workspace: state.target.workspace ?? "",
@@ -184,7 +184,7 @@ export function TargetsView({
                 </div>
                 <div>
                   <dt>Harness</dt>
-                  <dd>{state.target.harness}</dd>
+                  <dd>{state.target.harnessIds.join(", ")}</dd>
                 </div>
                 {state.target.kind === "ssh" ? (
                   <div>
@@ -321,11 +321,14 @@ export function TargetsView({
             <select
               disabled={draft.kind === "ssh"}
               onChange={(event) =>
-                setDraft({ ...draft, harness: event.currentTarget.value })
+                setDraft({
+                  ...draft,
+                  harnessIds: [event.currentTarget.value],
+                })
               }
-              value={draft.harness}
+              value={draft.harnessIds[0]}
             >
-              <option value="Codex">Codex</option>
+              <option value="codex">codex</option>
             </select>
           </label>
           {draft.kind === "ssh" ? (

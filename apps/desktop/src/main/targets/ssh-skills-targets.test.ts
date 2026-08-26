@@ -13,12 +13,16 @@ import type { TargetDefinition } from "./skills-targets.js";
 
 const sshTarget: TargetDefinition = {
   connectionReference: "build-host",
+  dialectId: "skills-1.5.23",
   executionBindingDigest: null,
   generation: 1,
-  harness: "Codex",
+  harnessIds: ["codex"],
   id: "00000000-0000-4000-8000-000000000018",
   kind: "ssh",
   label: "Build host",
+  registryDigest:
+    "sha256:36d0c792e0480a13818d890e1dccc93e3b29a4ea44af78091e80db8a3e9181de",
+  registryVersion: 1,
   workspace: "/srv/skills",
   workspaceLabel: "skills",
 };
@@ -29,7 +33,7 @@ const challenge: HostTrustChallenge = {
   id: "challenge-1",
   identity: "deploy@resolved.internal:2222",
   kind: "first-use",
-  targetGeneration: 2,
+  targetGeneration: 1,
   targetId: sshTarget.id,
 };
 const sshBinding: OpenSshEffectiveBinding = {
@@ -87,7 +91,7 @@ const process: SkillsProcess = {
 };
 
 describe("SSH SkillsTargets opening", () => {
-  it("advances generation for binding and trust changes before returning a frozen session", async () => {
+  it("establishes a binding, then advances generation for trust and binding changes", async () => {
     let trusted = false;
     let currentBinding = sshBinding;
     const access: OpenSshTargetAccess = {
@@ -134,10 +138,10 @@ describe("SSH SkillsTargets opening", () => {
       ok: true,
       value: {
         proposal: {
-          executionChanged: true,
+          executionChanged: false,
           target: {
             executionBindingDigest: sshBinding.bindingDigest,
-            generation: 2,
+            generation: 1,
           },
         },
         status: "binding-changed",
@@ -165,7 +169,7 @@ describe("SSH SkillsTargets opening", () => {
       ok: true,
       value: {
         executionChanged: true,
-        target: { generation: 3 },
+        target: { generation: 2 },
       },
     });
     if (!trustedProposal.ok) throw new Error();
@@ -184,12 +188,12 @@ describe("SSH SkillsTargets opening", () => {
       ok: true,
       value: {
         binding: {
-          generation: 3,
+          generation: 2,
           kind: "ssh",
           ssh: sshBinding,
           targetId: sshTarget.id,
         },
-        target: { generation: 3 },
+        target: { generation: 2 },
       },
     });
     expect(processFor).toHaveBeenCalledWith(
@@ -205,7 +209,7 @@ describe("SSH SkillsTargets opening", () => {
       ok: true,
       value: {
         proposal: {
-          target: { executionBindingDigest: "c".repeat(64), generation: 4 },
+          target: { executionBindingDigest: "c".repeat(64), generation: 3 },
         },
         status: "binding-changed",
       },

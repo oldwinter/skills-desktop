@@ -25,9 +25,19 @@ import {
   type TargetDefinition,
 } from "./desktop-capabilities.js";
 
+const targetV4Metadata = {
+  dialectId: "skills-1.5.23" as const,
+  executionBindingDigest: null,
+  harnessIds: ["codex"],
+  registryDigest:
+    "sha256:36d0c792e0480a13818d890e1dccc93e3b29a4ea44af78091e80db8a3e9181de" as const,
+  registryVersion: 1 as const,
+};
+
 const target: TargetDefinition = {
+  connectionReference: null,
+  ...targetV4Metadata,
   generation: 1,
-  harness: "Codex",
   id: "00000000-0000-4000-8000-000000000001",
   kind: "local",
   label: "This device",
@@ -36,11 +46,7 @@ const target: TargetDefinition = {
 };
 
 const publicTarget = {
-  generation: target.generation,
-  harness: target.harness,
-  id: target.id,
-  kind: target.kind,
-  label: target.label,
+  ...target,
   workspaceLabel: target.workspaceLabel,
 };
 
@@ -106,9 +112,9 @@ function targetsWith(
 
 const roleSshTarget: TargetDefinition = {
   connectionReference: "build-host",
+  ...targetV4Metadata,
   executionBindingDigest: "a".repeat(64),
   generation: 2,
-  harness: "Codex",
   id: "00000000-0000-4000-8000-000000000018",
   kind: "ssh",
   label: "Build host",
@@ -229,7 +235,7 @@ async function createHostTrustRoleFixture(options?: {
   const requested = await workspace.request({
     targetId: roleSshTarget.id,
     type: "host-trust.review",
-    version: 1,
+    version: 2,
   });
   if (!requested.ok) throw new Error("Host-trust review fixture is invalid.");
   const review = capabilities.attach(
@@ -245,7 +251,7 @@ async function createHostTrustRoleFixture(options?: {
     review.request({
       decision: "approve",
       type: "review.decide",
-      version: 1,
+      version: 2,
     });
   return {
     approve,
@@ -291,7 +297,7 @@ describe("DesktopCapabilities inventory role-session contract", () => {
         {
           connectionReference: null,
           generation: 1,
-          harness: target.harness,
+          harnessIds: target.harnessIds,
           id: target.id,
           kind: "local",
           label: target.label,
@@ -402,7 +408,7 @@ describe("DesktopCapabilities inventory role-session contract", () => {
     const refreshed = await session.request({
       targetId: target.id,
       type: "inventory.refresh",
-      version: 1,
+      version: 2,
     });
 
     expect(refreshed).toEqual({
@@ -574,13 +580,13 @@ describe("DesktopCapabilities inventory role-session contract", () => {
     await session.request({
       targetId: target.id,
       type: "inventory.refresh",
-      version: 1,
+      version: 2,
     });
 
     const failed = await session.request({
       targetId: target.id,
       type: "inventory.refresh",
-      version: 1,
+      version: 2,
     });
 
     expect(failed).toMatchObject({
@@ -646,17 +652,17 @@ describe("DesktopCapabilities inventory role-session contract", () => {
     const pending = session.request({
       targetId: target.id,
       type: "inventory.refresh",
-      version: 1,
+      version: 2,
     });
     const cancelled = await session.request({
       operationId: "pending-operation",
       type: "inventory.cancel",
-      version: 1,
+      version: 2,
     });
     const cancelledAgain = await session.request({
       operationId: "pending-operation",
       type: "inventory.cancel",
-      version: 1,
+      version: 2,
     });
 
     expect(cancelled).toEqual({
@@ -720,7 +726,7 @@ describe("DesktopCapabilities inventory role-session contract", () => {
     const pending = owner.request({
       targetId: target.id,
       type: "inventory.refresh",
-      version: 1,
+      version: 2,
     });
     await started;
 
@@ -763,7 +769,7 @@ describe("DesktopCapabilities inventory role-session contract", () => {
       await review.request({
         targetId: target.id,
         type: "inventory.refresh",
-        version: 1,
+        version: 2,
       }),
     ).toMatchObject({ error: { code: "unauthorized" }, ok: false });
     expect(
@@ -771,7 +777,7 @@ describe("DesktopCapabilities inventory role-session contract", () => {
         executable: "sh",
         targetId: target.id,
         type: "inventory.refresh",
-        version: 1,
+        version: 2,
       }),
     ).toMatchObject({ error: { code: "invalid_request" }, ok: false });
   });
@@ -801,7 +807,7 @@ describe("DesktopCapabilities inventory role-session contract", () => {
     await session.request({
       targetId: target.id,
       type: "inventory.refresh",
-      version: 1,
+      version: 2,
     });
 
     expect(deliveries).toHaveLength(1);
@@ -861,7 +867,7 @@ describe("DesktopCapabilities inventory role-session contract", () => {
     const pending = session.request({
       targetId: target.id,
       type: "inventory.refresh",
-      version: 1,
+      version: 2,
     });
     await started;
 
@@ -875,7 +881,7 @@ describe("DesktopCapabilities inventory role-session contract", () => {
       await session.request({
         targetId: target.id,
         type: "inventory.refresh",
-        version: 1,
+        version: 2,
       }),
     ).toMatchObject({
       error: { code: "target_unavailable", phase: "shutdown" },
@@ -915,7 +921,7 @@ describe("DesktopCapabilities inventory role-session contract", () => {
     const pending = session.request({
       targetId: target.id,
       type: "inventory.refresh",
-      version: 1,
+      version: 2,
     });
     await started;
 
@@ -925,7 +931,7 @@ describe("DesktopCapabilities inventory role-session contract", () => {
       await session.request({
         targetId: target.id,
         type: "inventory.refresh",
-        version: 1,
+        version: 2,
       }),
     ).toMatchObject({
       error: { code: "target_unavailable", phase: "shutdown" },
@@ -952,7 +958,7 @@ describe("DesktopCapabilities inventory role-session contract", () => {
         {
           connectionReference: null,
           generation: target.generation,
-          harness: target.harness,
+          harnessIds: target.harnessIds,
           id: target.id,
           kind: target.kind,
           label: target.label,
@@ -987,13 +993,13 @@ describe("DesktopCapabilities inventory role-session contract", () => {
       session.request({
         definition: {
           connectionReference: "build-host",
-          harness: "Codex",
+          harnessIds: ["codex"],
           kind: "ssh",
           label: "Build host",
           workspace: "/srv/skills",
         },
         type: "target.create",
-        version: 1,
+        version: 2,
       }),
     ).resolves.toEqual({
       ok: true,
@@ -1004,14 +1010,14 @@ describe("DesktopCapabilities inventory role-session contract", () => {
       session.request({
         definition: {
           connectionReference: "build-host",
-          harness: "Codex",
+          harnessIds: ["codex"],
           kind: "ssh",
           label: "CI builder",
           workspace: "/srv/skills-next/../skills-next",
         },
         targetId: "00000000-0000-4000-8000-000000000002",
         type: "target.update",
-        version: 1,
+        version: 2,
       }),
     ).resolves.toMatchObject({ ok: true });
 
@@ -1022,7 +1028,7 @@ describe("DesktopCapabilities inventory role-session contract", () => {
           target: {
             connectionReference: "build-host",
             generation: 2,
-            harness: "Codex",
+            harnessIds: ["codex"],
             id: "00000000-0000-4000-8000-000000000002",
             kind: "ssh",
             label: "CI builder",
@@ -1046,7 +1052,7 @@ describe("DesktopCapabilities inventory role-session contract", () => {
       session.request({
         targetId: "00000000-0000-4000-8000-000000000002",
         type: "target.delete",
-        version: 1,
+        version: 2,
       }),
     ).resolves.toMatchObject({ ok: true });
     await expect(session.snapshot()).resolves.toMatchObject({
@@ -1087,15 +1093,7 @@ describe("DesktopCapabilities inventory role-session contract", () => {
     const records = createMemoryRecoveryRecords(
       [],
       [],
-      definitions.map((definition) => ({
-        connectionReference: null,
-        generation: definition.generation,
-        harness: definition.harness,
-        id: definition.id,
-        kind: definition.kind,
-        label: definition.label,
-        workspace: definition.workspace,
-      })),
+      definitions,
     );
     let nextId = 0;
     const capabilities = createDesktopCapabilities({
@@ -1116,12 +1114,12 @@ describe("DesktopCapabilities inventory role-session contract", () => {
     await session.request({
       targetId: target.id,
       type: "inventory.refresh",
-      version: 1,
+      version: 2,
     });
     await session.request({
       targetId: otherTarget.id,
       type: "inventory.refresh",
-      version: 1,
+      version: 2,
     });
 
     await expect(session.snapshot()).resolves.toMatchObject({
@@ -1167,7 +1165,7 @@ describe("DesktopCapabilities inventory role-session contract", () => {
         {
           connectionReference: null,
           generation: 1,
-          harness: target.harness,
+          harnessIds: target.harnessIds,
           id: target.id,
           kind: "local",
           label: target.label,
@@ -1198,14 +1196,14 @@ describe("DesktopCapabilities inventory role-session contract", () => {
     await session.request({
       definition: {
         connectionReference: null,
-        harness: target.harness,
+        harnessIds: target.harnessIds,
         kind: "local",
         label: target.label,
         workspace: "/work/skills-desktop-next",
       },
       targetId: target.id,
       type: "target.update",
-      version: 1,
+      version: 2,
     });
 
     await expect(session.snapshot()).resolves.toMatchObject({
@@ -1268,15 +1266,7 @@ describe("DesktopCapabilities inventory role-session contract", () => {
     const records = createMemoryRecoveryRecords(
       [],
       [],
-      [target, otherTarget].map((definition) => ({
-        connectionReference: definition.connectionReference ?? null,
-        generation: definition.generation,
-        harness: definition.harness,
-        id: definition.id,
-        kind: definition.kind,
-        label: definition.label,
-        workspace: definition.workspace,
-      })),
+      [target, otherTarget],
     );
     const capabilities = createDesktopCapabilities({
       id: () => "race-operation",
@@ -1303,21 +1293,21 @@ describe("DesktopCapabilities inventory role-session contract", () => {
     const refresh = session.request({
       targetId: target.id,
       type: "inventory.refresh",
-      version: 1,
+      version: 2,
     });
     await started;
     await expect(
       session.request({
         definition: {
           connectionReference: null,
-          harness: target.harness,
+          harnessIds: target.harnessIds,
           kind: target.kind,
           label: target.label,
           workspace: "/work/changed-during-refresh",
         },
         targetId: target.id,
         type: "target.update",
-        version: 1,
+        version: 2,
       }),
     ).resolves.toMatchObject({
       error: { code: "mutation_conflict", phase: "coordinate" },
@@ -1327,7 +1317,7 @@ describe("DesktopCapabilities inventory role-session contract", () => {
       session.request({
         targetId: target.id,
         type: "target.delete",
-        version: 1,
+        version: 2,
       }),
     ).resolves.toMatchObject({
       error: { code: "mutation_conflict", phase: "coordinate" },
@@ -1374,7 +1364,7 @@ describe("DesktopCapabilities inventory role-session contract", () => {
         {
           connectionReference: null,
           generation: target.generation,
-          harness: target.harness,
+          harnessIds: target.harnessIds,
           id: target.id,
           kind: target.kind,
           label: target.label,
@@ -1400,21 +1390,21 @@ describe("DesktopCapabilities inventory role-session contract", () => {
     const update = session.request({
       definition: {
         connectionReference: null,
-        harness: target.harness,
+        harnessIds: target.harnessIds,
         kind: target.kind,
         label: target.label,
         workspace: "/work/changed-first",
       },
       targetId: target.id,
       type: "target.update",
-      version: 1,
+      version: 2,
     });
     await started;
     await expect(
       session.request({
         targetId: target.id,
         type: "inventory.refresh",
-        version: 1,
+        version: 2,
       }),
     ).resolves.toMatchObject({
       error: { code: "mutation_conflict", phase: "coordinate" },
@@ -1454,7 +1444,7 @@ describe("DesktopCapabilities inventory role-session contract", () => {
         [target, unrelatedTarget].map((definition) => ({
           connectionReference: null,
           generation: definition.generation,
-          harness: definition.harness,
+          harnessIds: definition.harnessIds,
           id: definition.id,
           kind: definition.kind,
           label: definition.label,
@@ -1473,7 +1463,7 @@ describe("DesktopCapabilities inventory role-session contract", () => {
             ok: true as const,
             value: {
               commandPlan: {
-                harness: target.harness,
+                harness: target.harnessIds[0]!,
                 names: ["tdd"],
                 operation: "remove" as const,
                 preview: "review-only preview",
@@ -1506,28 +1496,28 @@ describe("DesktopCapabilities inventory role-session contract", () => {
     await session.request({
       targetId: target.id,
       type: "inventory.refresh",
-      version: 1,
+      version: 2,
     });
 
     const preparation = session.request({
       intent: { names: ["tdd"], scope: "project", type: "remove" },
       targetId: target.id,
       type: "mutation.prepare",
-      version: 1,
+      version: 2,
     });
     await started;
     await expect(
       session.request({
         definition: {
           connectionReference: null,
-          harness: target.harness,
+          harnessIds: target.harnessIds,
           kind: target.kind,
           label: target.label,
           workspace: "/work/changed-during-preparation",
         },
         targetId: target.id,
         type: "target.update",
-        version: 1,
+        version: 2,
       }),
     ).resolves.toMatchObject({
       error: { code: "mutation_conflict", phase: "coordinate" },
@@ -1537,7 +1527,7 @@ describe("DesktopCapabilities inventory role-session contract", () => {
       session.request({
         targetId: target.id,
         type: "target.delete",
-        version: 1,
+        version: 2,
       }),
     ).resolves.toMatchObject({
       error: { code: "mutation_conflict", phase: "coordinate" },
@@ -1547,21 +1537,21 @@ describe("DesktopCapabilities inventory role-session contract", () => {
       session.request({
         definition: {
           connectionReference: null,
-          harness: unrelatedTarget.harness,
+          harnessIds: unrelatedTarget.harnessIds,
           kind: unrelatedTarget.kind,
           label: "Renamed unrelated Target",
           workspace: unrelatedTarget.workspace,
         },
         targetId: unrelatedTarget.id,
         type: "target.update",
-        version: 1,
+        version: 2,
       }),
     ).resolves.toMatchObject({ ok: true });
     await expect(
       session.request({
         targetId: unrelatedTarget.id,
         type: "target.delete",
-        version: 1,
+        version: 2,
       }),
     ).resolves.toMatchObject({ ok: true });
 
@@ -1607,7 +1597,7 @@ describe("DesktopCapabilities inventory role-session contract", () => {
       [target, guardedTarget].map((definition) => ({
         connectionReference: null,
         generation: definition.generation,
-        harness: definition.harness,
+        harnessIds: definition.harnessIds,
         id: definition.id,
         kind: definition.kind,
         label: definition.label,
@@ -1638,7 +1628,7 @@ describe("DesktopCapabilities inventory role-session contract", () => {
       session.request({
         targetId: guardedTarget.id,
         type: "target.delete",
-        version: 1,
+        version: 2,
       }),
     ).resolves.toMatchObject({
       error: { code: "reconciliation_required" },
@@ -1648,14 +1638,14 @@ describe("DesktopCapabilities inventory role-session contract", () => {
       session.request({
         definition: {
           connectionReference: null,
-          harness: "Codex",
+          harnessIds: ["codex"],
           kind: "local",
           label: "Changed label",
           workspace: guardedTarget.workspace,
         },
         targetId: guardedTarget.id,
         type: "target.update",
-        version: 1,
+        version: 2,
       }),
     ).resolves.toMatchObject({
       error: { code: "reconciliation_required" },
@@ -1697,7 +1687,7 @@ describe("DesktopCapabilities inventory role-session contract", () => {
         {
           connectionReference: null,
           generation: target.generation,
-          harness: target.harness,
+          harnessIds: target.harnessIds,
           id: target.id,
           kind: target.kind,
           label: target.label,
@@ -1738,13 +1728,13 @@ describe("DesktopCapabilities inventory role-session contract", () => {
       session.request({
         definition: {
           connectionReference: null,
-          harness: "Codex",
+          harnessIds: ["codex"],
           kind: "local",
           label: "Recovered workspace",
           workspace: legacyWorkspace,
         },
         type: "target.create",
-        version: 1,
+        version: 2,
       }),
     ).resolves.toEqual({
       ok: true,
@@ -1768,14 +1758,14 @@ describe("DesktopCapabilities inventory role-session contract", () => {
     await session.request({
       targetId: createdTargetId,
       type: "inventory.refresh",
-      version: 1,
+      version: 2,
     });
     await expect(
       session.request({
         intent: { names: ["tdd"], scope: "project", type: "remove" },
         targetId: createdTargetId,
         type: "mutation.prepare",
-        version: 1,
+        version: 2,
       }),
     ).resolves.toMatchObject({
       error: { code: "reconciliation_required" },
@@ -1818,7 +1808,7 @@ describe("DesktopCapabilities inventory role-session contract", () => {
         {
           connectionReference: null,
           generation: target.generation,
-          harness: target.harness,
+          harnessIds: target.harnessIds,
           id: target.id,
           kind: target.kind,
           label: target.label,
@@ -1859,14 +1849,14 @@ describe("DesktopCapabilities inventory role-session contract", () => {
       session.request({
         definition: {
           connectionReference: null,
-          harness: target.harness,
+          harnessIds: target.harnessIds,
           kind: target.kind,
           label: "Retargeted workspace",
           workspace: legacyWorkspace,
         },
         targetId: target.id,
         type: "target.update",
-        version: 1,
+        version: 2,
       }),
     ).resolves.toEqual({
       ok: true,
@@ -1940,7 +1930,7 @@ describe("DesktopCapabilities inventory role-session contract", () => {
       session.request({
         targetId: target.id,
         type: "inventory.refresh",
-        version: 1,
+        version: 2,
       }),
     ).resolves.toMatchObject({
       error: { code: "target_unavailable", phase: "restore" },
@@ -1952,7 +1942,7 @@ describe("DesktopCapabilities inventory role-session contract", () => {
   it("compares selected Fresh or Stale inventories without opening a Target", async () => {
     const otherTarget: TargetDefinition = {
       ...target,
-      harness: "Claude",
+      harnessIds: ["claude-code"],
       id: "00000000-0000-4000-8000-000000000006",
       label: "Comparison right",
       workspace: "/work/right",
@@ -2070,15 +2060,7 @@ describe("DesktopCapabilities inventory role-session contract", () => {
         },
       ],
       [],
-      [target, otherTarget].map((definition) => ({
-        connectionReference: null,
-        generation: definition.generation,
-        harness: definition.harness,
-        id: definition.id,
-        kind: definition.kind,
-        label: definition.label,
-        workspace: definition.workspace,
-      })),
+      [target, otherTarget],
     );
     let openCalls = 0;
     const capabilities = createDesktopCapabilities({
@@ -2113,7 +2095,7 @@ describe("DesktopCapabilities inventory role-session contract", () => {
         leftTargetId: target.id,
         rightTargetId: otherTarget.id,
         type: "comparison.open",
-        version: 1,
+        version: 2,
       }),
     ).resolves.toEqual({
       ok: true,
@@ -2208,7 +2190,7 @@ describe("DesktopCapabilities inventory role-session contract", () => {
         destinationTargetId: otherTarget.id,
         rowKey: "missing",
         type: "comparison.prepare",
-        version: 1,
+        version: 2,
       }),
     ).resolves.toMatchObject({
       error: { code: "stale_inventory" },
@@ -2282,7 +2264,7 @@ describe("DesktopCapabilities inventory role-session contract", () => {
               ok: true as const,
               value: {
                 commandPlan: {
-                  harness: selected.harness,
+                  harness: selected.harnessIds[0]!,
                   names:
                     preparationCalls === 1 ? ["copy-me"] : ["must-not-publish"],
                   operation: "add" as const,
@@ -2314,15 +2296,7 @@ describe("DesktopCapabilities inventory role-session contract", () => {
     const records = createMemoryRecoveryRecords(
       [],
       [],
-      definitions.map((definition) => ({
-        connectionReference: null,
-        generation: definition.generation,
-        harness: definition.harness,
-        id: definition.id,
-        kind: definition.kind,
-        label: definition.label,
-        workspace: definition.workspace,
-      })),
+      definitions,
     );
     let nextId = 0;
     const capabilities = createDesktopCapabilities({
@@ -2342,18 +2316,18 @@ describe("DesktopCapabilities inventory role-session contract", () => {
     await session.request({
       targetId: target.id,
       type: "inventory.refresh",
-      version: 1,
+      version: 2,
     });
     await session.request({
       targetId: destination.id,
       type: "inventory.refresh",
-      version: 1,
+      version: 2,
     });
     const openedComparison = await session.request({
       leftTargetId: target.id,
       rightTargetId: destination.id,
       type: "comparison.open",
-      version: 1,
+      version: 2,
     });
     expect(openedComparison.ok).toBe(true);
     const comparisonId = openedComparison.ok
@@ -2378,21 +2352,21 @@ describe("DesktopCapabilities inventory role-session contract", () => {
       destinationTargetId: destination.id,
       rowKey: "copy-me",
       type: "comparison.prepare",
-      version: 1,
+      version: 2,
     });
     await started;
     await expect(
       session.request({
         definition: {
           connectionReference: null,
-          harness: target.harness,
+          harnessIds: target.harnessIds,
           kind: target.kind,
           label: target.label,
           workspace: "/work/source-changed-during-comparison-preparation",
         },
         targetId: target.id,
         type: "target.update",
-        version: 1,
+        version: 2,
       }),
     ).resolves.toMatchObject({
       error: { code: "mutation_conflict", phase: "coordinate" },
@@ -2402,7 +2376,7 @@ describe("DesktopCapabilities inventory role-session contract", () => {
       session.request({
         targetId: target.id,
         type: "target.delete",
-        version: 1,
+        version: 2,
       }),
     ).resolves.toMatchObject({
       error: { code: "mutation_conflict", phase: "coordinate" },
@@ -2412,7 +2386,7 @@ describe("DesktopCapabilities inventory role-session contract", () => {
       session.request({
         targetId: target.id,
         type: "inventory.refresh",
-        version: 1,
+        version: 2,
       }),
     ).resolves.toMatchObject({
       error: { code: "mutation_conflict", phase: "coordinate" },
@@ -2422,14 +2396,14 @@ describe("DesktopCapabilities inventory role-session contract", () => {
       session.request({
         definition: {
           connectionReference: null,
-          harness: destination.harness,
+          harnessIds: destination.harnessIds,
           kind: destination.kind,
           label: destination.label,
           workspace: "/work/changed-during-comparison-preparation",
         },
         targetId: destination.id,
         type: "target.update",
-        version: 1,
+        version: 2,
       }),
     ).resolves.toMatchObject({
       error: { code: "mutation_conflict", phase: "coordinate" },
@@ -2439,7 +2413,7 @@ describe("DesktopCapabilities inventory role-session contract", () => {
       session.request({
         targetId: destination.id,
         type: "target.delete",
-        version: 1,
+        version: 2,
       }),
     ).resolves.toMatchObject({
       error: { code: "mutation_conflict", phase: "coordinate" },
@@ -2477,7 +2451,7 @@ describe("DesktopCapabilities inventory role-session contract", () => {
     const openedReview = await session.request({
       preparedMutationId: "prepared-from-comparison",
       type: "review.request",
-      version: 1,
+      version: 2,
     });
     expect(openedReview).toEqual({
       ok: true,
@@ -2502,19 +2476,19 @@ describe("DesktopCapabilities inventory role-session contract", () => {
       session.request({
         definition: {
           connectionReference: null,
-          harness: target.harness,
+          harnessIds: target.harnessIds,
           kind: target.kind,
           label: target.label,
           workspace: "/work/source-changed-after-comparison-preparation",
         },
         targetId: target.id,
         type: "target.update",
-        version: 1,
+        version: 2,
       }),
     ).resolves.toMatchObject({ ok: true });
     await expect(review.snapshot()).resolves.toEqual({
       decision: "reject",
-      schemaVersion: 1,
+      schemaVersion: 2,
       status: "settled",
     });
     await expect(session.snapshot()).resolves.toMatchObject({
@@ -2525,7 +2499,7 @@ describe("DesktopCapabilities inventory role-session contract", () => {
     await session.request({
       targetId: target.id,
       type: "inventory.refresh",
-      version: 1,
+      version: 2,
     });
 
     const discardedPreparation = session.request({
@@ -2533,7 +2507,7 @@ describe("DesktopCapabilities inventory role-session contract", () => {
       destinationTargetId: destination.id,
       rowKey: "copy-me",
       type: "comparison.prepare",
-      version: 1,
+      version: 2,
     });
     await shutdownStarted;
     let shutdownSettled = false;
@@ -2593,7 +2567,7 @@ describe("DesktopCapabilities release restart guard contract", () => {
     const refresh = workspace.request({
       targetId: target.id,
       type: "inventory.refresh",
-      version: 1,
+      version: 2,
     });
     await observationStarted;
     expect(capabilities.restartSafety()).toEqual({
@@ -2664,7 +2638,7 @@ describe("DesktopCapabilities release restart guard contract", () => {
     const reconcile = workspace.request({
       targetId: target.id,
       type: "mutation.reconcile",
-      version: 1,
+      version: 2,
     });
     await observationStarted;
     expect(capabilities.restartSafety()).toEqual({
@@ -2718,13 +2692,14 @@ describe("DesktopCapabilities release restart guard contract", () => {
         join(directory, "target-definitions.json"),
         JSON.stringify({
           kind: "target-definitions",
-          schemaVersion: 3,
+          schemaVersion: 4,
           targets: [
             {
               connectionReference: null,
+              ...targetV4Metadata,
               executionBindingDigest: null,
               generation: target.generation,
-              harness: target.harness,
+              harnessIds: target.harnessIds,
               id: target.id,
               kind: target.kind,
               label: target.label,
@@ -2799,7 +2774,7 @@ describe("DesktopCapabilities release restart guard contract", () => {
         session.request({
           targetId: target.id,
           type: "inventory.refresh",
-          version: 1,
+          version: 2,
         }),
       ).resolves.toMatchObject({ ok: true });
       await expect(
@@ -2807,7 +2782,7 @@ describe("DesktopCapabilities release restart guard contract", () => {
           intent: { names: ["tdd"], scope: "project", type: "remove" },
           targetId: target.id,
           type: "mutation.prepare",
-          version: 1,
+          version: 2,
         }),
       ).resolves.toMatchObject({
         error: { code: "reconciliation_required" },
@@ -2829,13 +2804,14 @@ describe("DesktopCapabilities release restart guard contract", () => {
         join(directory, "target-definitions.json"),
         JSON.stringify({
           kind: "target-definitions",
-          schemaVersion: 3,
+          schemaVersion: 4,
           targets: [
             {
               connectionReference: null,
+              ...targetV4Metadata,
               executionBindingDigest: null,
               generation: target.generation,
-              harness: target.harness,
+              harnessIds: target.harnessIds,
               id: target.id,
               kind: target.kind,
               label: target.label,
@@ -2904,20 +2880,20 @@ describe("DesktopCapabilities release restart guard contract", () => {
         session.request({
           definition: {
             connectionReference: null,
-            harness: "Codex",
+            harnessIds: ["codex"],
             kind: "local",
             label: "Second workspace",
             workspace: "/work/second",
           },
           type: "target.create",
-          version: 1,
+          version: 2,
         }),
       ).resolves.toMatchObject({ ok: true });
       await expect(
         session.request({
           targetId: createdTargetId,
           type: "inventory.refresh",
-          version: 1,
+          version: 2,
         }),
       ).resolves.toMatchObject({ ok: true });
       await expect(
@@ -2925,7 +2901,7 @@ describe("DesktopCapabilities release restart guard contract", () => {
           intent: { names: ["tdd"], scope: "project", type: "remove" },
           targetId: createdTargetId,
           type: "mutation.prepare",
-          version: 1,
+          version: 2,
         }),
       ).resolves.toMatchObject({
         error: { code: "reconciliation_required" },
@@ -2946,13 +2922,14 @@ describe("DesktopCapabilities release restart guard contract", () => {
         join(directory, "target-definitions.json"),
         JSON.stringify({
           kind: "target-definitions",
-          schemaVersion: 3,
+          schemaVersion: 4,
           targets: [
             {
               connectionReference: null,
+              ...targetV4Metadata,
               executionBindingDigest: null,
               generation: target.generation,
-              harness: target.harness,
+              harnessIds: target.harnessIds,
               id: target.id,
               kind: target.kind,
               label: target.label,
@@ -3001,7 +2978,7 @@ describe("DesktopCapabilities release restart guard contract", () => {
               ok: true as const,
               value: {
                 commandPlan: {
-                  harness: target.harness,
+                  harness: target.harnessIds[0]!,
                   names: ["tdd"],
                   operation: "remove" as const,
                   preview: "review-only preview",
@@ -3036,7 +3013,7 @@ describe("DesktopCapabilities release restart guard contract", () => {
         session.request({
           targetId: target.id,
           type: "mutation.reconcile",
-          version: 1,
+          version: 2,
         }),
       ).resolves.toMatchObject({ ok: true });
       await expect(
@@ -3053,7 +3030,7 @@ describe("DesktopCapabilities release restart guard contract", () => {
           intent: { names: ["tdd"], scope: "project", type: "remove" },
           targetId: target.id,
           type: "mutation.prepare",
-          version: 1,
+          version: 2,
         }),
       ).resolves.toMatchObject({ ok: true });
       expect(prepareCalls).toBe(1);
@@ -3078,13 +3055,14 @@ describe("DesktopCapabilities release restart guard contract", () => {
         join(directory, "target-definitions.json"),
         JSON.stringify({
           kind: "target-definitions",
-          schemaVersion: 3,
+          schemaVersion: 4,
           targets: [
             {
               connectionReference: null,
+              ...targetV4Metadata,
               executionBindingDigest: null,
               generation: target.generation,
-              harness: target.harness,
+              harnessIds: target.harnessIds,
               id: target.id,
               kind: target.kind,
               label: target.label,
@@ -3092,9 +3070,10 @@ describe("DesktopCapabilities release restart guard contract", () => {
             },
             {
               connectionReference: null,
+              ...targetV4Metadata,
               executionBindingDigest: null,
               generation: sibling.generation,
-              harness: sibling.harness,
+              harnessIds: sibling.harnessIds,
               id: sibling.id,
               kind: sibling.kind,
               label: sibling.label,
@@ -3159,7 +3138,7 @@ describe("DesktopCapabilities release restart guard contract", () => {
         recoveringSession.request({
           targetId: target.id,
           type: "mutation.reconcile",
-          version: 1,
+          version: 2,
         }),
       ).resolves.toMatchObject({ ok: true });
 
@@ -3211,7 +3190,7 @@ describe("DesktopCapabilities release restart guard contract", () => {
           intent: { names: ["tdd"], scope: "project", type: "remove" },
           targetId: sibling.id,
           type: "mutation.prepare",
-          version: 1,
+          version: 2,
         }),
       ).resolves.toMatchObject({
         error: { code: "reconciliation_required" },
@@ -3228,9 +3207,10 @@ describe("DesktopCapabilities SSH host-trust role-session contract", () => {
   it("requires isolated reviewed trust before publishing a remote Inventory", async () => {
     const sshTarget: TargetDefinition = {
       connectionReference: "build-host",
+      ...targetV4Metadata,
       executionBindingDigest: null,
       generation: 1,
-      harness: "Codex",
+      harnessIds: ["codex"],
       id: "00000000-0000-4000-8000-000000000018",
       kind: "ssh",
       label: "Build host",
@@ -3242,8 +3222,8 @@ describe("DesktopCapabilities SSH host-trust role-session contract", () => {
     const access: OpenSshTargetAccess = {
       async confirm(challengeId, reviewedTarget) {
         expect(challengeId).toBe("challenge-1");
-        expect(reviewedTarget.generation).toBe(2);
-        expect(durableGeneration).toBe(3);
+        expect(reviewedTarget.generation).toBe(1);
+        expect(durableGeneration).toBe(2);
         trusted = true;
         return {
           ok: true,
@@ -3304,7 +3284,7 @@ describe("DesktopCapabilities SSH host-trust role-session contract", () => {
               id: "challenge-1",
               identity: "deploy@resolved.internal:2222",
               kind: "first-use",
-              targetGeneration: 2,
+              targetGeneration: 1,
               targetId: sshTarget.id,
             };
       },
@@ -3356,7 +3336,7 @@ describe("DesktopCapabilities SSH host-trust role-session contract", () => {
       workspace.request({
         targetId: sshTarget.id,
         type: "inventory.refresh",
-        version: 1,
+        version: 2,
       }),
     ).resolves.toMatchObject({
       error: { code: "host_trust_required" },
@@ -3368,13 +3348,13 @@ describe("DesktopCapabilities SSH host-trust role-session contract", () => {
         lastError: { code: "host_trust_required" },
         phase: "error",
       },
-      target: { generation: 2 },
+      target: { generation: 1 },
     });
 
     const reviewRequested = await workspace.request({
       targetId: sshTarget.id,
       type: "host-trust.review",
-      version: 1,
+      version: 2,
     });
     expect(reviewRequested).toMatchObject({ ok: true });
     if (!reviewRequested.ok) throw new Error();
@@ -3401,18 +3381,18 @@ describe("DesktopCapabilities SSH host-trust role-session contract", () => {
       review.request({
         decision: "approve",
         type: "review.decide",
-        version: 1,
+        version: 2,
       }),
     ).resolves.toMatchObject({ ok: true });
     await expect(workspace.snapshot()).resolves.toMatchObject({
-      target: { generation: 3 },
+      target: { generation: 2 },
     });
 
     await expect(
       workspace.request({
         targetId: sshTarget.id,
         type: "inventory.refresh",
-        version: 1,
+        version: 2,
       }),
     ).resolves.toMatchObject({ ok: true });
     await expect(workspace.snapshot()).resolves.toMatchObject({
@@ -3510,7 +3490,7 @@ describe("DesktopCapabilities SSH host-trust role-session contract", () => {
       competingReview.request({
         decision: "approve",
         type: "review.decide",
-        version: 1,
+        version: 2,
       }),
     ).resolves.toMatchObject({
       error: { code: "unauthorized" },
@@ -3556,7 +3536,7 @@ describe("DesktopCapabilities SSH host-trust role-session contract", () => {
       competingReview.request({
         decision: "reject",
         type: "review.decide",
-        version: 1,
+        version: 2,
       }),
     ).resolves.toMatchObject({
       error: { code: "unauthorized" },
@@ -3601,7 +3581,7 @@ describe("DesktopCapabilities SSH host-trust role-session contract", () => {
 
     await expect(fixture.review.snapshot()).resolves.toEqual({
       decision: "reject",
-      schemaVersion: 1,
+      schemaVersion: 2,
       status: "settled",
     });
     await expect(fixture.approve()).resolves.toMatchObject({
@@ -3626,7 +3606,7 @@ describe("DesktopCapabilities mutation role-session contract", () => {
           ok: true,
           value: {
             commandPlan: {
-              harness: target.harness,
+              harness: target.harnessIds[0]!,
               names: ["tdd"],
               operation: "remove",
               preview: "review-only preview",
@@ -3671,19 +3651,19 @@ describe("DesktopCapabilities mutation role-session contract", () => {
     await owner.request({
       targetId: target.id,
       type: "inventory.refresh",
-      version: 1,
+      version: 2,
     });
     await owner.request({
       intent: { names: ["tdd"], scope: "project", type: "remove" },
       targetId: target.id,
       type: "mutation.prepare",
-      version: 1,
+      version: 2,
     });
     await expect(
       owner.request({
         preparedMutationId: "prepared-owner-review",
         type: "review.request",
-        version: 1,
+        version: 2,
       }),
     ).resolves.toEqual({ ok: true, value: { operationId: "review-owner" } });
     const review = capabilities.attach(
@@ -3710,7 +3690,7 @@ describe("DesktopCapabilities mutation role-session contract", () => {
     owner.teardown();
     await expect(review.snapshot()).resolves.toEqual({
       decision: "reject",
-      schemaVersion: 1,
+      schemaVersion: 2,
       status: "settled",
     });
     const replacement = capabilities.attach(
@@ -3766,7 +3746,7 @@ describe("DesktopCapabilities mutation role-session contract", () => {
           ok: true,
           value: {
             commandPlan: {
-              harness: target.harness,
+              harness: target.harnessIds[0]!,
               names: ["tdd"],
               operation: "remove",
               preview: "review-only preview",
@@ -3813,18 +3793,18 @@ describe("DesktopCapabilities mutation role-session contract", () => {
     await owner.request({
       targetId: target.id,
       type: "inventory.refresh",
-      version: 1,
+      version: 2,
     });
     await owner.request({
       intent: { names: ["tdd"], scope: "project", type: "remove" },
       targetId: target.id,
       type: "mutation.prepare",
-      version: 1,
+      version: 2,
     });
     await owner.request({
       preparedMutationId: "prepared-cancellation-owner",
       type: "review.request",
-      version: 1,
+      version: 2,
     });
     const executionReview = capabilities.attach(
       {
@@ -3838,14 +3818,14 @@ describe("DesktopCapabilities mutation role-session contract", () => {
     const execution = executionReview.request({
       decision: "approve",
       type: "review.decide",
-      version: 1,
+      version: 2,
     });
     await started;
     await expect(
       owner.request({
         operationId: "mutation-cancellation-owner",
         type: "review.cancel-request",
-        version: 1,
+        version: 2,
       }),
     ).resolves.toEqual({
       ok: true,
@@ -3864,7 +3844,7 @@ describe("DesktopCapabilities mutation role-session contract", () => {
     owner.teardown();
     await expect(cancellationReview.snapshot()).resolves.toEqual({
       decision: "reject",
-      schemaVersion: 1,
+      schemaVersion: 2,
       status: "settled",
     });
     expect(mutationSignal?.aborted).toBe(false);
@@ -3908,7 +3888,7 @@ describe("DesktopCapabilities mutation role-session contract", () => {
             ok: true as const,
             value: {
               commandPlan: {
-                harness: target.harness,
+                harness: target.harnessIds[0]!,
                 names: ["tdd"],
                 operation: "remove" as const,
                 preview: "review-only preview",
@@ -3946,7 +3926,7 @@ describe("DesktopCapabilities mutation role-session contract", () => {
           {
             connectionReference: null,
             generation: target.generation,
-            harness: target.harness,
+            harnessIds: target.harnessIds,
             id: target.id,
             kind: target.kind,
             label: target.label,
@@ -3968,18 +3948,18 @@ describe("DesktopCapabilities mutation role-session contract", () => {
     await workspace.request({
       targetId: target.id,
       type: "inventory.refresh",
-      version: 1,
+      version: 2,
     });
     await workspace.request({
       intent: { names: ["tdd"], scope: "project", type: "remove" },
       targetId: target.id,
       type: "mutation.prepare",
-      version: 1,
+      version: 2,
     });
     await workspace.request({
       preparedMutationId: "prepared-before-target-change",
       type: "review.request",
-      version: 1,
+      version: 2,
     });
     expect(presentedReviewId).toBe("review-target-change");
     const review = capabilities.attach(
@@ -3995,21 +3975,21 @@ describe("DesktopCapabilities mutation role-session contract", () => {
     const update = workspace.request({
       definition: {
         connectionReference: null,
-        harness: target.harness,
+        harnessIds: target.harnessIds,
         kind: target.kind,
         label: target.label,
         workspace: "/work/changed-before-approval",
       },
       targetId: target.id,
       type: "target.update",
-      version: 1,
+      version: 2,
     });
     await started;
     await expect(
       review.request({
         decision: "approve",
         type: "review.decide",
-        version: 1,
+        version: 2,
       }),
     ).resolves.toMatchObject({
       error: { code: "mutation_conflict", phase: "coordinate" },
@@ -4024,7 +4004,7 @@ describe("DesktopCapabilities mutation role-session contract", () => {
     await expect(update).resolves.toMatchObject({ ok: true });
     await expect(review.snapshot()).resolves.toEqual({
       decision: "reject",
-      schemaVersion: 1,
+      schemaVersion: 2,
       status: "settled",
     });
     expect(executions).toBe(0);
@@ -4066,7 +4046,7 @@ describe("DesktopCapabilities mutation role-session contract", () => {
               ok: true as const,
               value: {
                 commandPlan: {
-                  harness: selected.harness,
+                  harness: selected.harnessIds[0]!,
                   names: ["tdd"],
                   operation: "remove" as const,
                   preview: "review-only preview",
@@ -4094,15 +4074,7 @@ describe("DesktopCapabilities mutation role-session contract", () => {
     const records = createMemoryRecoveryRecords(
       [],
       [],
-      definitions.map((definition) => ({
-        connectionReference: null,
-        generation: definition.generation,
-        harness: definition.harness,
-        id: definition.id,
-        kind: definition.kind,
-        label: definition.label,
-        workspace: definition.workspace,
-      })),
+      definitions,
     );
     let nextId = 0;
     let reviewId: string | undefined;
@@ -4126,25 +4098,25 @@ describe("DesktopCapabilities mutation role-session contract", () => {
     await workspace.request({
       targetId: target.id,
       type: "inventory.refresh",
-      version: 1,
+      version: 2,
     });
     await workspace.request({
       intent: { names: ["tdd"], scope: "project", type: "remove" },
       targetId: target.id,
       type: "mutation.prepare",
-      version: 1,
+      version: 2,
     });
     await workspace.request({
       preparedMutationId: "prepared-target-a",
       type: "review.request",
-      version: 1,
+      version: 2,
     });
     expect(reviewId).toBeDefined();
 
     await workspace.request({
       targetId: otherTarget.id,
       type: "inventory.refresh",
-      version: 1,
+      version: 2,
     });
     const review = capabilities.attach(
       {
@@ -4166,14 +4138,14 @@ describe("DesktopCapabilities mutation role-session contract", () => {
       intent: { names: ["tdd"], scope: "project", type: "remove" },
       targetId: otherTarget.id,
       type: "mutation.prepare",
-      version: 1,
+      version: 2,
     });
     await started;
     await expect(
       review.request({
         decision: "approve",
         type: "review.decide",
-        version: 1,
+        version: 2,
       }),
     ).resolves.toMatchObject({
       error: { code: "mutation_conflict", phase: "coordinate" },
@@ -4189,7 +4161,7 @@ describe("DesktopCapabilities mutation role-session contract", () => {
     review.teardown();
     await expect(review.snapshot()).resolves.toEqual({
       decision: "reject",
-      schemaVersion: 1,
+      schemaVersion: 2,
       status: "settled",
     });
     await expect(workspace.snapshot()).resolves.toMatchObject({
@@ -4223,7 +4195,7 @@ describe("DesktopCapabilities mutation role-session contract", () => {
         {
           connectionReference: null,
           generation: target.generation,
-          harness: target.harness,
+          harnessIds: target.harnessIds,
           id: target.id,
           kind: target.kind,
           label: target.label,
@@ -4289,7 +4261,7 @@ describe("DesktopCapabilities mutation role-session contract", () => {
           ok: true,
           value: {
             commandPlan: {
-              harness: "Codex",
+              harness: "codex",
               names: ["tdd"],
               operation: "remove" as const,
               preview: "npx skills@1.5.23 remove tdd --agent codex --yes",
@@ -4335,7 +4307,7 @@ describe("DesktopCapabilities mutation role-session contract", () => {
     await workspace.request({
       targetId: target.id,
       type: "inventory.refresh",
-      version: 1,
+      version: 2,
     });
 
     expect(
@@ -4347,7 +4319,7 @@ describe("DesktopCapabilities mutation role-session contract", () => {
         },
         targetId: target.id,
         type: "mutation.prepare",
-        version: 1,
+        version: 2,
       }),
     ).toEqual({ ok: true, value: { operationId: "prepared-1" } });
     expect(await workspace.snapshot()).toMatchObject({
@@ -4360,7 +4332,7 @@ describe("DesktopCapabilities mutation role-session contract", () => {
       await workspace.request({
         preparedMutationId: "prepared-1",
         type: "review.request",
-        version: 1,
+        version: 2,
       }),
     ).toEqual({ ok: true, value: { operationId: "review-1" } });
     expect(presented).toEqual(["review-1"]);
@@ -4369,7 +4341,7 @@ describe("DesktopCapabilities mutation role-session contract", () => {
       await workspace.request({
         decision: "approve",
         type: "review.decide",
-        version: 1,
+        version: 2,
       }),
     ).toMatchObject({ error: { code: "invalid_request" }, ok: false });
     expect(lifecycle).not.toContain("executeConfirmed");
@@ -4396,7 +4368,7 @@ describe("DesktopCapabilities mutation role-session contract", () => {
       await review.request({
         decision: "approve",
         type: "review.decide",
-        version: 1,
+        version: 2,
       }),
     ).toEqual({
       ok: true,
@@ -4424,7 +4396,7 @@ describe("DesktopCapabilities mutation role-session contract", () => {
       await review.request({
         decision: "approve",
         type: "review.decide",
-        version: 1,
+        version: 2,
       }),
     ).toMatchObject({ error: { code: "unauthorized" }, ok: false });
     expect(
@@ -4453,7 +4425,7 @@ describe("DesktopCapabilities mutation role-session contract", () => {
           ok: true,
           value: {
             commandPlan: {
-              harness: "Codex",
+              harness: "codex",
               names: ["tdd"],
               operation: "remove",
               preview: "npx skills@1.5.23 remove tdd --agent codex --yes",
@@ -4502,20 +4474,20 @@ describe("DesktopCapabilities mutation role-session contract", () => {
     await workspace.request({
       targetId: target.id,
       type: "inventory.refresh",
-      version: 1,
+      version: 2,
     });
     const prepare = () =>
       workspace.request({
         intent: { names: ["tdd"], scope: "project", type: "remove" },
         targetId: target.id,
         type: "mutation.prepare",
-        version: 1,
+        version: 2,
       });
     await prepare();
     await workspace.request({
       preparedMutationId: "prepared-1",
       type: "review.request",
-      version: 1,
+      version: 2,
     });
     const expiredReview = capabilities.attach(
       {
@@ -4532,7 +4504,7 @@ describe("DesktopCapabilities mutation role-session contract", () => {
       await expiredReview.request({
         decision: "approve",
         type: "review.decide",
-        version: 1,
+        version: 2,
       }),
     ).toMatchObject({ error: { code: "review_expired" }, ok: false });
     expect(executions).toBe(0);
@@ -4541,7 +4513,7 @@ describe("DesktopCapabilities mutation role-session contract", () => {
     await workspace.request({
       preparedMutationId: "prepared-2",
       type: "review.request",
-      version: 1,
+      version: 2,
     });
     const driftedReview = capabilities.attach(
       {
@@ -4555,14 +4527,14 @@ describe("DesktopCapabilities mutation role-session contract", () => {
     await workspace.request({
       targetId: target.id,
       type: "inventory.refresh",
-      version: 1,
+      version: 2,
     });
 
     expect(
       await driftedReview.request({
         decision: "approve",
         type: "review.decide",
-        version: 1,
+        version: 2,
       }),
     ).toMatchObject({ error: { code: "unauthorized" }, ok: false });
     expect(executions).toBe(0);
@@ -4631,7 +4603,7 @@ describe("DesktopCapabilities mutation role-session contract", () => {
     await workspace.request({
       targetId: target.id,
       type: "inventory.refresh",
-      version: 1,
+      version: 2,
     });
     expect(await workspace.snapshot()).toMatchObject({
       inventory: { freshness: "fresh" },
@@ -4647,7 +4619,7 @@ describe("DesktopCapabilities mutation role-session contract", () => {
         },
         targetId: target.id,
         type: "mutation.prepare",
-        version: 1,
+        version: 2,
       }),
     ).toMatchObject({
       error: { code: "reconciliation_required" },
@@ -4657,7 +4629,7 @@ describe("DesktopCapabilities mutation role-session contract", () => {
       await workspace.request({
         targetId: target.id,
         type: "mutation.reconcile",
-        version: 1,
+        version: 2,
       }),
     ).toMatchObject({ error: { code: "reconciliation_wait" }, ok: false });
     expect(observations).toBe(1);
@@ -4667,7 +4639,7 @@ describe("DesktopCapabilities mutation role-session contract", () => {
       await workspace.request({
         targetId: target.id,
         type: "mutation.reconcile",
-        version: 1,
+        version: 2,
       }),
     ).toMatchObject({ ok: true });
     expect(observations).toBe(2);
@@ -4697,7 +4669,7 @@ describe("DesktopCapabilities mutation role-session contract", () => {
           ok: true,
           value: {
             commandPlan: {
-              harness: "Codex",
+              harness: "codex",
               names: ["tdd"],
               operation: "remove",
               preview: "npx skills@1.5.23 remove tdd --agent codex --yes",
@@ -4753,7 +4725,7 @@ describe("DesktopCapabilities mutation role-session contract", () => {
     await workspace.request({
       targetId: target.id,
       type: "inventory.refresh",
-      version: 1,
+      version: 2,
     });
     await workspace.request({
       intent: {
@@ -4763,12 +4735,12 @@ describe("DesktopCapabilities mutation role-session contract", () => {
       },
       targetId: target.id,
       type: "mutation.prepare",
-      version: 1,
+      version: 2,
     });
     await workspace.request({
       preparedMutationId: "prepared-guard-failure",
       type: "review.request",
-      version: 1,
+      version: 2,
     });
     const review = capabilities.attach(
       {
@@ -4784,7 +4756,7 @@ describe("DesktopCapabilities mutation role-session contract", () => {
       await review.request({
         decision: "approve",
         type: "review.decide",
-        version: 1,
+        version: 2,
       }),
     ).toMatchObject({ error: { code: "persist_failed" }, ok: false });
     expect(executions).toBe(0);
@@ -4805,15 +4777,7 @@ describe("DesktopCapabilities mutation role-session contract", () => {
     const records = createMemoryRecoveryRecords(
       [],
       [],
-      [target, otherTarget].map((definition) => ({
-        connectionReference: definition.connectionReference ?? null,
-        generation: definition.generation,
-        harness: definition.harness,
-        id: definition.id,
-        kind: definition.kind,
-        label: definition.label,
-        workspace: definition.workspace,
-      })),
+      [target, otherTarget],
     );
     const process: SkillsProcess = {
       async executeConfirmed() {
@@ -4839,7 +4803,7 @@ describe("DesktopCapabilities mutation role-session contract", () => {
           ok: true,
           value: {
             commandPlan: {
-              harness: "Codex",
+              harness: "codex",
               names: ["tdd"],
               operation: "remove",
               preview: "npx skills@1.5.23 remove tdd --agent codex --yes",
@@ -4879,18 +4843,18 @@ describe("DesktopCapabilities mutation role-session contract", () => {
     await workspace.request({
       targetId: target.id,
       type: "inventory.refresh",
-      version: 1,
+      version: 2,
     });
     await workspace.request({
       intent: { names: ["tdd"], scope: "project", type: "remove" },
       targetId: target.id,
       type: "mutation.prepare",
-      version: 1,
+      version: 2,
     });
     await workspace.request({
       preparedMutationId: "prepared-uncertain",
       type: "review.request",
-      version: 1,
+      version: 2,
     });
     const review = capabilities.attach(
       {
@@ -4906,13 +4870,13 @@ describe("DesktopCapabilities mutation role-session contract", () => {
       await review.request({
         decision: "approve",
         type: "review.decide",
-        version: 1,
+        version: 2,
       }),
     ).toMatchObject({
       error: { code: "reconciliation_required", effects: "possible" },
       ok: false,
     });
-    expect((await records.restore()).mutationGuards).toEqual([
+    expect((await records.restore()).mutationGuards).toMatchObject([
       {
         deadline: "2026-08-21T10:02:00.000Z",
         effects: "possible",
@@ -4936,7 +4900,7 @@ describe("DesktopCapabilities mutation role-session contract", () => {
 
     const changedDefinition = {
       connectionReference: null,
-      harness: target.harness,
+      harnessIds: target.harnessIds,
       kind: target.kind,
       label: "Changed after uncertainty",
       workspace: target.workspace,
@@ -4946,7 +4910,7 @@ describe("DesktopCapabilities mutation role-session contract", () => {
         definition: changedDefinition,
         targetId: target.id,
         type: "target.update",
-        version: 1,
+        version: 2,
       }),
     ).resolves.toMatchObject({
       error: { code: "reconciliation_required" },
@@ -4956,7 +4920,7 @@ describe("DesktopCapabilities mutation role-session contract", () => {
       workspace.request({
         targetId: target.id,
         type: "target.delete",
-        version: 1,
+        version: 2,
       }),
     ).resolves.toMatchObject({
       error: { code: "reconciliation_required" },
@@ -4968,7 +4932,7 @@ describe("DesktopCapabilities mutation role-session contract", () => {
       workspace.request({
         targetId: target.id,
         type: "mutation.reconcile",
-        version: 1,
+        version: 2,
       }),
     ).resolves.toMatchObject({ ok: true });
     await expect(
@@ -4976,7 +4940,7 @@ describe("DesktopCapabilities mutation role-session contract", () => {
         definition: changedDefinition,
         targetId: target.id,
         type: "target.update",
-        version: 1,
+        version: 2,
       }),
     ).resolves.toMatchObject({ ok: true });
     await expect(workspace.snapshot()).resolves.toMatchObject({
@@ -5029,7 +4993,7 @@ describe("DesktopCapabilities mutation role-session contract", () => {
           ok: true,
           value: {
             commandPlan: {
-              harness: "Codex",
+              harness: "codex",
               names: ["tdd"],
               operation: "remove",
               preview: "npx skills@1.5.23 remove tdd --agent codex --yes",
@@ -5075,18 +5039,18 @@ describe("DesktopCapabilities mutation role-session contract", () => {
     await workspace.request({
       targetId: target.id,
       type: "inventory.refresh",
-      version: 1,
+      version: 2,
     });
     await workspace.request({
       intent: { names: ["tdd"], scope: "project", type: "remove" },
       targetId: target.id,
       type: "mutation.prepare",
-      version: 1,
+      version: 2,
     });
     await workspace.request({
       preparedMutationId: "prepared-cancel",
       type: "review.request",
-      version: 1,
+      version: 2,
     });
     const executionReview = capabilities.attach(
       {
@@ -5100,7 +5064,7 @@ describe("DesktopCapabilities mutation role-session contract", () => {
     const execution = executionReview.request({
       decision: "approve",
       type: "review.decide",
-      version: 1,
+      version: 2,
     });
     await started;
 
@@ -5109,7 +5073,7 @@ describe("DesktopCapabilities mutation role-session contract", () => {
       await workspace.request({
         operationId: "mutation",
         type: "review.cancel-request",
-        version: 1,
+        version: 2,
       }),
     ).toEqual({
       ok: true,
@@ -5134,7 +5098,7 @@ describe("DesktopCapabilities mutation role-session contract", () => {
       await workspace.request({
         operationId: "mutation",
         type: "review.cancel-request",
-        version: 1,
+        version: 2,
       }),
     ).toEqual({ ok: true, value: { operationId: "cancel-review" } });
     const cancellationReview = capabilities.attach(
@@ -5155,7 +5119,7 @@ describe("DesktopCapabilities mutation role-session contract", () => {
       await cancellationReview.request({
         decision: "approve",
         type: "review.decide",
-        version: 1,
+        version: 2,
       }),
     ).toEqual({ ok: true, value: { operationId: "mutation" } });
     expect(await execution).toEqual({
@@ -5213,7 +5177,7 @@ describe("DesktopCapabilities mutation role-session contract", () => {
           ok: true,
           value: {
             commandPlan: {
-              harness: "Codex",
+              harness: "codex",
               names: ["tdd"],
               operation: "remove",
               preview: "npx skills@1.5.23 remove tdd --agent codex --yes",
@@ -5253,18 +5217,18 @@ describe("DesktopCapabilities mutation role-session contract", () => {
     await workspace.request({
       targetId: target.id,
       type: "inventory.refresh",
-      version: 1,
+      version: 2,
     });
     await workspace.request({
       intent: { names: ["tdd"], scope: "project", type: "remove" },
       targetId: target.id,
       type: "mutation.prepare",
-      version: 1,
+      version: 2,
     });
     await workspace.request({
       preparedMutationId: "prepared-shutdown",
       type: "review.request",
-      version: 1,
+      version: 2,
     });
     const review = capabilities.attach(
       {
@@ -5278,7 +5242,7 @@ describe("DesktopCapabilities mutation role-session contract", () => {
     const execution = review.request({
       decision: "approve",
       type: "review.decide",
-      version: 1,
+      version: 2,
     });
     await started;
     workspace.teardown();
@@ -5514,7 +5478,7 @@ describe("DesktopCapabilities Official Collection contract", () => {
     await workspace.request({
       targetId: target.id,
       type: "inventory.refresh",
-      version: 1,
+      version: 2,
     });
 
     expect(await workspace.snapshot()).toMatchObject({
@@ -5577,7 +5541,7 @@ describe("DesktopCapabilities Official Collection contract", () => {
           ok: true,
           value: {
             commandPlan: {
-              harness: target.harness,
+              harness: target.harnessIds[0]!,
               names: ["find-skills"],
               operation: "add",
               preview: "review-only collection preview",
@@ -5632,7 +5596,7 @@ describe("DesktopCapabilities Official Collection contract", () => {
     await owner.request({
       targetId: target.id,
       type: "inventory.refresh",
-      version: 1,
+      version: 2,
     });
     await expect(
       owner.request({
@@ -5643,7 +5607,7 @@ describe("DesktopCapabilities Official Collection contract", () => {
         selections: [{ mode: "add", name: "find-skills" }],
         targetId: target.id,
         type: "collection.prepare",
-        version: 1,
+        version: 2,
       }),
     ).resolves.toEqual({
       ok: true,
@@ -5653,7 +5617,7 @@ describe("DesktopCapabilities Official Collection contract", () => {
       owner.request({
         collectionPlanId: "collection-plan-owner",
         type: "collection.review.request",
-        version: 1,
+        version: 2,
       }),
     ).resolves.toEqual({
       ok: true,
@@ -5676,7 +5640,7 @@ describe("DesktopCapabilities Official Collection contract", () => {
     owner.teardown();
     await expect(review.snapshot()).resolves.toEqual({
       decision: "reject",
-      schemaVersion: 1,
+      schemaVersion: 2,
       status: "settled",
     });
     const replacement = capabilities.attach(
@@ -5765,7 +5729,7 @@ describe("DesktopCapabilities Official Collection contract", () => {
               ok: true as const,
               value: {
                 commandPlan: {
-                  harness: "Codex",
+                  harness: "codex",
                   names: ["find-skills"],
                   operation: "add" as const,
                   preview:
@@ -5795,15 +5759,7 @@ describe("DesktopCapabilities Official Collection contract", () => {
     const records = createMemoryRecoveryRecords(
       [],
       [],
-      definitions.map((definition) => ({
-        connectionReference: null,
-        generation: definition.generation,
-        harness: definition.harness,
-        id: definition.id,
-        kind: definition.kind,
-        label: definition.label,
-        workspace: definition.workspace,
-      })),
+      definitions,
     );
     const ids = [
       "refresh-other",
@@ -5833,12 +5789,12 @@ describe("DesktopCapabilities Official Collection contract", () => {
     await workspace.request({
       targetId: otherTarget.id,
       type: "inventory.refresh",
-      version: 1,
+      version: 2,
     });
     await workspace.request({
       targetId: target.id,
       type: "inventory.refresh",
-      version: 1,
+      version: 2,
     });
 
     expect(await workspace.snapshot()).toMatchObject({
@@ -5879,7 +5835,7 @@ describe("DesktopCapabilities Official Collection contract", () => {
         selections: [{ mode: "reapply", name: "find-skills" }],
         targetId: otherTarget.id,
         type: "collection.prepare",
-        version: 1,
+        version: 2,
       }),
     ).resolves.toEqual({
       ok: true,
@@ -5897,7 +5853,7 @@ describe("DesktopCapabilities Official Collection contract", () => {
       workspace.request({
         collectionPlanId: "collection-plan-other",
         type: "collection.review.request",
-        version: 1,
+        version: 2,
       }),
     ).resolves.toMatchObject({
       error: { code: "review_invalid" },
@@ -5962,7 +5918,7 @@ describe("DesktopCapabilities Official Collection contract", () => {
           ok: true,
           value: {
             commandPlan: {
-              harness: "Codex",
+              harness: "codex",
               names: ["find-skills"],
               operation: "add" as const,
               preview:
@@ -6021,7 +5977,7 @@ describe("DesktopCapabilities Official Collection contract", () => {
     await workspace.request({
       targetId: target.id,
       type: "inventory.refresh",
-      version: 1,
+      version: 2,
     });
     lifecycle.length = 0;
 
@@ -6034,7 +5990,7 @@ describe("DesktopCapabilities Official Collection contract", () => {
         selections: [{ mode: "add", name: "tdd" }],
         targetId: target.id,
         type: "collection.prepare",
-        version: 1,
+        version: 2,
       }),
     ).toMatchObject({
       error: { code: "mutation_ineligible" },
@@ -6051,7 +6007,7 @@ describe("DesktopCapabilities Official Collection contract", () => {
         selections: [{ mode: "add", name: "find-skills" }],
         targetId: target.id,
         type: "collection.prepare",
-        version: 1,
+        version: 2,
       }),
     ).toEqual({ ok: true, value: { operationId: "collection-plan" } });
     expect(capturedIntents).toEqual([
@@ -6093,7 +6049,7 @@ describe("DesktopCapabilities Official Collection contract", () => {
       await workspace.request({
         collectionPlanId: "collection-plan",
         type: "collection.review.request",
-        version: 1,
+        version: 2,
       }),
     ).toEqual({ ok: true, value: { operationId: "collection-review" } });
     const review = capabilities.attach(
@@ -6121,7 +6077,7 @@ describe("DesktopCapabilities Official Collection contract", () => {
       await review.request({
         decision: "approve",
         type: "review.decide",
-        version: 1,
+        version: 2,
       }),
     ).toEqual({
       ok: true,
@@ -6156,9 +6112,10 @@ describe("DesktopCapabilities Official Collection contract", () => {
   it("plans exact children for an ordered Local and SSH Target selection", async () => {
     const sshTarget: TargetDefinition = {
       connectionReference: "build-host",
+      ...targetV4Metadata,
       executionBindingDigest: "a".repeat(64),
       generation: 3,
-      harness: "Codex",
+      harnessIds: ["codex"],
       id: "00000000-0000-4000-8000-000000000019",
       kind: "ssh",
       label: "Build host",
@@ -6219,7 +6176,7 @@ describe("DesktopCapabilities Official Collection contract", () => {
           ok: true as const,
           value: {
             commandPlan: {
-              harness: definition.harness,
+              harness: definition.harnessIds[0]!,
               names:
                 input.intent.type === "update-all"
                   ? []
@@ -6261,7 +6218,7 @@ describe("DesktopCapabilities Official Collection contract", () => {
           value: {
             binding: {
               generation: definition.generation,
-              harness: definition.harness,
+              harnessIds: definition.harnessIds,
               kind: definition.kind,
               targetId: definition.id,
               workspace: definition.workspace,
@@ -6337,7 +6294,7 @@ describe("DesktopCapabilities Official Collection contract", () => {
       await workspace.request({
         targetId,
         type: "inventory.refresh",
-        version: 1,
+        version: 2,
       });
     }
 
@@ -6359,7 +6316,7 @@ describe("DesktopCapabilities Official Collection contract", () => {
           },
         ],
         type: "collection.prepare-many",
-        version: 1,
+        version: 2,
       }),
     ).resolves.toEqual({
       ok: true,
@@ -6401,7 +6358,7 @@ describe("DesktopCapabilities Official Collection contract", () => {
       workspace.request({
         collectionPlanId: "collection-plan-many",
         type: "collection.review.request",
-        version: 1,
+        version: 2,
       }),
     ).resolves.toEqual({
       ok: true,
@@ -6438,7 +6395,7 @@ describe("DesktopCapabilities Official Collection contract", () => {
       review.request({
         decision: "approve",
         type: "review.decide",
-        version: 1,
+        version: 2,
       }),
     ).resolves.toEqual({
       ok: true,
@@ -6606,7 +6563,7 @@ describe("DesktopCapabilities Official Collection contract", () => {
               ok: true as const,
               value: {
                 commandPlan: {
-                  harness: binding.harness,
+                  harness: binding.harnessIds[0]!,
                   names:
                     input.intent.type === "update-all"
                       ? []
@@ -6641,7 +6598,7 @@ describe("DesktopCapabilities Official Collection contract", () => {
       [target, secondTarget].map((definition) => ({
         connectionReference: null,
         generation: definition.generation,
-        harness: definition.harness,
+        harnessIds: definition.harnessIds,
         id: definition.id,
         kind: definition.kind,
         label: definition.label,
@@ -6687,7 +6644,7 @@ describe("DesktopCapabilities Official Collection contract", () => {
       await workspace.request({
         targetId,
         type: "inventory.refresh",
-        version: 1,
+        version: 2,
       });
     }
     const targets = [
@@ -6711,12 +6668,12 @@ describe("DesktopCapabilities Official Collection contract", () => {
       releaseNumber: 1,
       targets,
       type: "collection.prepare-many",
-      version: 1,
+      version: 2,
     });
     await workspace.request({
       collectionPlanId: "fail-stop-plan",
       type: "collection.review.request",
-      version: 1,
+      version: 2,
     });
     const review = capabilities.attach(
       {
@@ -6730,7 +6687,7 @@ describe("DesktopCapabilities Official Collection contract", () => {
     const approval = review.request({
       decision: "approve",
       type: "review.decide",
-      version: 1,
+      version: 2,
     });
     await firstStarted;
 
@@ -6744,7 +6701,7 @@ describe("DesktopCapabilities Official Collection contract", () => {
       workspace.request({
         operationId: "fail-stop-execution",
         type: "review.cancel-request",
-        version: 1,
+        version: 2,
       }),
     ).resolves.toEqual({
       ok: true,
@@ -6770,7 +6727,7 @@ describe("DesktopCapabilities Official Collection contract", () => {
       cancellationReview.request({
         decision: "reject",
         type: "review.decide",
-        version: 1,
+        version: 2,
       }),
     ).resolves.toEqual({
       ok: true,
@@ -6781,14 +6738,14 @@ describe("DesktopCapabilities Official Collection contract", () => {
       workspace.request({
         definition: {
           connectionReference: null,
-          harness: "Codex",
+          harnessIds: ["codex"],
           kind: "local",
           label: "Drifted second local",
           workspace: secondTarget.workspace,
         },
         targetId: secondTarget.id,
         type: "target.update",
-        version: 1,
+        version: 2,
       }),
     ).resolves.toMatchObject({
       error: { code: "mutation_conflict" },
@@ -6842,7 +6799,7 @@ describe("DesktopCapabilities Official Collection contract", () => {
         releaseNumber: 1,
         targets,
         type: "collection.prepare-many",
-        version: 1,
+        version: 2,
       }),
     ).resolves.toMatchObject({
       error: { code: "stale_inventory" },
@@ -6855,7 +6812,7 @@ describe("DesktopCapabilities Official Collection contract", () => {
       await workspace.request({
         targetId,
         type: "inventory.refresh",
-        version: 1,
+        version: 2,
       });
     }
     await workspace.request({
@@ -6864,12 +6821,12 @@ describe("DesktopCapabilities Official Collection contract", () => {
       releaseNumber: 1,
       targets,
       type: "collection.prepare-many",
-      version: 1,
+      version: 2,
     });
     await workspace.request({
       collectionPlanId: "cancel-plan",
       type: "collection.review.request",
-      version: 1,
+      version: 2,
     });
     const cancelExecutionReview = capabilities.attach(
       {
@@ -6883,14 +6840,14 @@ describe("DesktopCapabilities Official Collection contract", () => {
     const cancelledExecution = cancelExecutionReview.request({
       decision: "approve",
       type: "review.decide",
-      version: 1,
+      version: 2,
     });
     await cancellationStarted;
     await expect(
       workspace.request({
         operationId: "cancel-execution",
         type: "review.cancel-request",
-        version: 1,
+        version: 2,
       }),
     ).resolves.toEqual({
       ok: true,
@@ -6909,7 +6866,7 @@ describe("DesktopCapabilities Official Collection contract", () => {
       approvedCancellation.request({
         decision: "approve",
         type: "review.decide",
-        version: 1,
+        version: 2,
       }),
     ).resolves.toEqual({
       ok: true,

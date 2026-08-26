@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 
 import { z } from "zod";
 
+import { resolveLegacyHarnessAlias } from "@skills-desktop/skills-runtime";
+
 import type {
   PublicCollectionPlan,
   PublicCollectionsState,
@@ -238,7 +240,14 @@ function isCompatible(input: {
         );
   return (
     compatibility.requiredCapabilities.includes(input.target.kind) &&
-    compatibility.harnesses.includes(input.target.harness) &&
+    input.target.harnessIds.every((harnessId) =>
+      compatibility.harnesses.some((declaredHarness) => {
+        const resolved = resolveLegacyHarnessAlias(declaredHarness);
+        return resolved.ok
+          ? resolved.value === harnessId
+          : declaredHarness === harnessId;
+      }),
+    ) &&
     platformCompatible &&
     input.inventory.cliVersion === compatibility.cliVersion
   );
@@ -272,9 +281,8 @@ export function projectOfficialCollections(input: {
                 (entry) =>
                   entry.name === name &&
                   entry.scope === scope &&
-                  isInventoryEntryAvailableToHarness(
-                    entry,
-                    input.target.harness,
+                  input.target.harnessIds.every((harnessId) =>
+                    isInventoryEntryAvailableToHarness(entry, harnessId),
                   ),
               );
               let status:
@@ -329,9 +337,8 @@ export function projectOfficialCollections(input: {
                 (entry) =>
                   entry.name === name &&
                   entry.scope === scope &&
-                  isInventoryEntryAvailableToHarness(
-                    entry,
-                    input.target.harness,
+                  input.target.harnessIds.every((harnessId) =>
+                    isInventoryEntryAvailableToHarness(entry, harnessId),
                   ),
               );
               if (observed === undefined) continue;

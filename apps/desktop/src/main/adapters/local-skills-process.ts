@@ -85,7 +85,8 @@ export class ProcessBoundaryError extends Error {
 export interface LocalSkillsProcessOptions {
   readonly binding?: {
     readonly generation: number;
-    readonly harness: string;
+    readonly harness?: string;
+    readonly harnessIds?: readonly string[];
     readonly targetId: string;
   };
   readonly clock: () => Date;
@@ -1007,7 +1008,10 @@ export function createLocalSkillsProcess(
             effects: observedMutationEffects(
               privatePlan.mutation,
               postflight.value,
-              options.binding?.harness ?? "",
+              options.binding?.harnessIds ??
+                (options.binding?.harness === undefined
+                  ? []
+                  : [options.binding.harness]),
             ),
             inventory: postflight.value,
             preparedMutationId: privatePlan.prepared.id,

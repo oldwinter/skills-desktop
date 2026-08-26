@@ -8,9 +8,19 @@ import {
 import { createSkillsTargetsCatalog } from "../targets/local-skills-targets.js";
 import type { SkillsProcess } from "../adapters/local-skills-process.js";
 
+const targetV4Metadata = {
+  dialectId: "skills-1.5.23" as const,
+  executionBindingDigest: null,
+  harnessIds: ["codex"],
+  registryDigest:
+    "sha256:36d0c792e0480a13818d890e1dccc93e3b29a4ea44af78091e80db8a3e9181de" as const,
+  registryVersion: 1 as const,
+};
+
 const localTarget: TargetDefinition = {
+  connectionReference: null,
+  ...targetV4Metadata,
   generation: 1,
-  harness: "Codex",
   id: "00000000-0000-4000-8000-000000000001",
   kind: "local",
   label: "This device",
@@ -20,8 +30,8 @@ const localTarget: TargetDefinition = {
 
 const sshTarget: TargetDefinition = {
   connectionReference: "build-host",
+  ...targetV4Metadata,
   generation: 1,
-  harness: "Codex",
   id: "00000000-0000-4000-8000-000000000002",
   kind: "ssh",
   label: "Build host",
@@ -76,16 +86,8 @@ const sshRejectError = {
 } as const;
 
 function durable(target: TargetDefinition) {
-  return {
-    connectionReference: target.connectionReference ?? null,
-    executionBindingDigest: null,
-    generation: target.generation,
-    harness: target.harness,
-    id: target.id,
-    kind: target.kind,
-    label: target.label,
-    workspace: target.workspace,
-  };
+  const { workspaceLabel: _workspaceLabel, ...definition } = target;
+  return definition;
 }
 
 describe("V1 Local-only Target authority", () => {
@@ -114,13 +116,13 @@ describe("V1 Local-only Target authority", () => {
       session.request({
         definition: {
           connectionReference: "build-host",
-          harness: "Codex",
+          harnessIds: ["codex"],
           kind: "ssh",
           label: "Build host",
           workspace: "/srv/skills",
         },
         type: "target.create",
-        version: 1,
+        version: 2,
       }),
     ).resolves.toEqual({
       ok: false,
@@ -177,7 +179,7 @@ describe("V1 Local-only Target authority", () => {
           },
         ],
         type: "collection.prepare-many",
-        version: 1,
+        version: 2,
       }),
     ).resolves.toEqual({
       ok: false,
@@ -278,18 +280,18 @@ describe("V1 Local-only Target authority", () => {
       {
         targetId: readySshTarget.id,
         type: "inventory.refresh" as const,
-        version: 1 as const,
+        version: 2 as const,
       },
       {
         intent: { names: ["tdd"], scope: "project" as const, type: "remove" as const },
         targetId: readySshTarget.id,
         type: "mutation.prepare" as const,
-        version: 1 as const,
+        version: 2 as const,
       },
       {
         targetId: readySshTarget.id,
         type: "mutation.reconcile" as const,
-        version: 1 as const,
+        version: 2 as const,
       },
     ]) {
       await expect(session.request(request)).resolves.toEqual({
@@ -302,7 +304,7 @@ describe("V1 Local-only Target authority", () => {
       session.request({
         targetId: readySshTarget.id,
         type: "host-trust.review",
-        version: 1,
+        version: 2,
       }),
     ).resolves.toEqual({
       ok: false,
