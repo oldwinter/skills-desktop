@@ -1,13 +1,14 @@
 # Skills Desktop
 
 Cross-platform desktop client for inspecting and managing Skills through the
-existing `npx skills` CLI on the Local Target. V1 ships Local Target only;
-SSH Target support is next-scope.
+existing pinned `npx skills` CLI. The accepted architecture now targets Local
+plus POSIX Remote SSH, delivered through gated milestones. The current shipped
+product remains Local-only.
 
 
 ## 用户手册
 
-面向最终用户的操作说明见 [docs/user-guide.md](docs/user-guide.md)（V1 Local-only）。
+面向最终用户的操作说明见 [docs/user-guide.md](docs/user-guide.md)（当前仍为 Local-only）。
 
 ## Status
 
@@ -17,14 +18,15 @@ the pinned `skills@1.5.23` CLI dialect. It restores only an allowlisted last
 complete Snapshot, always marked stale. Read [`CONTEXT.md`](CONTEXT.md) and the
 accepted records in [`docs/adr/`](docs/adr/) before changing product behavior.
 
-V1 acceptance is Local-only: a reliable local tracer, reproducible unsigned
-candidates, and docs that match reality. Public
+Current acceptance remains Local-only: a reliable local tracer, reproducible
+unsigned candidates, and docs that match reality. SSH Inventory remains
+unavailable until Milestone 3 passes. SSH mutation remains unavailable until
+Milestone 4 passes. Public
 [Unsigned Developer Previews](docs/unsigned-developer-preview.md) are available
 through [GitHub Releases](https://github.com/oldwinter/skills-desktop/releases)
 with checksums, an SPDX SBOM, attestations, and manual installation guidance.
 They remain prereleases, are never latest, and do not enter automatic update
-feeds. A signed stable release remains gated on #22/#27. SSH Target,
-remote-bootstrap, and cross-machine reconciliation are out of V1 scope / next.
+feeds. A signed Stable Release remains gated on #22/#27.
 
 The prototype was imported from SimplexAI Agent-First Control Plane commit
 `e4c5cb0f41a1944b369fbe20da72af456f806d2f`. It is evidence, not the production
@@ -34,8 +36,9 @@ foundation.
 
 - Delegate skill discovery and mutations to `npx skills`; do not build another
   skill installer or scan skill directories independently.
-- V1 supports Local Target only. SSH Target is next-scope and is not marketed
-  or accepted as V1.
+- The current product supports Local Target only. Accepted SSH architecture is
+  not a shipped capability: Inventory waits for Milestone 3, and mutation waits
+  for Milestone 4.
 - Compare presence, source, harness coverage, and a content revision only when
   one is available. Do not invent semantic versions.
 - Generate a command plan before every mutation and require explicit user
@@ -61,10 +64,9 @@ reading or changing developer inventory.
 
 The production workspaces are `apps/desktop`, `packages/skills-runtime`, and
 `packages/remote-bootstrap`. `packages/remote-bootstrap` is retained for
-next-scope work; it is not part of the V1 public commitment. Production skill
-discovery and mutation must keep using argument-array invocations of the pinned
-`npx skills` package.
-
+`packages/remote-bootstrap` is retained for gated SSH work; it is not a current
+public capability. Production skill discovery and mutation must keep using
+argument-array invocations of the pinned `npx skills` package.
 ## Unsigned Developer Previews And Local Candidates
 
 Unsigned Developer Previews are public early-access prereleases, not stable

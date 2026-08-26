@@ -9,17 +9,32 @@ skill operations to `npx skills`.
 
 ## Language
 
-**Target**: An application-owned, stable `TargetId` selecting one machine,
-workspace, and harness, such as local Codex or a Pi installation on an SSH
-host. Its display label and SSH connection reference are attributes, not
-identity.
+**Harness**: One exact canonical CLI integration identified by `HarnessId`.
+Display names and translations are presentation only and never become CLI
+input.
+
+**Harness Compatibility Registry**: Versioned, reviewed compatibility metadata
+bound to one pinned Skills Dialect. It defines the exact supported `HarnessId`
+set and evidence mappings without claiming installed state or discovering
+future upstream harnesses.
+
+**Skills Dialect**: The exact reviewed command and parser contract for one
+pinned `npx skills` version. It defines supported operations and evidence
+grammar without exposing generic command or option authority.
+
+**Target**: An application-owned, stable `TargetId` selecting one machine, one
+canonical workspace, and a non-empty canonical Harness set. Its display label,
+SSH Connection Reference, and scopes are attributes or operation dimensions,
+not identity.
 
 **Target Definition**: The application-owned, non-secret description of a
-Target's kind, display label, workspace, harness, and Connection Reference.
+Target's machine, display label, workspace, Harness set, Skills Dialect, and
+Connection Reference.
 
 **Target Generation**: A monotonic revision of everything that can affect a
 Target's execution. A change to its definition, effective transport binding,
-host trust, or wire dialect advances the generation, makes its Inventory stale,
+host trust, Skills Dialect, Harness Compatibility Registry, Wire Protocol, or
+Remote Bootstrap advances the generation, makes its Inventory stale,
 and invalidates its Prepared Mutations.
 
 **Connection Reference**: The configured OpenSSH host alias used to resolve and
@@ -28,15 +43,16 @@ remote host's identity.
 
 **Effective Target Binding**: The resolved execution facts for one Target
 Generation, including effective OpenSSH endpoint and host-key lookup identity,
-workspace, harness, host trust, and wire dialect. It is frozen while a Skills
-Process is used and re-resolved for a later operation rather than silently
-drifting.
-
+Effective OpenSSH endpoint and host-key lookup identity, workspace, Harness
+set, host trust, Skills Dialect, Harness Compatibility Registry, Wire Protocol,
+and Remote Bootstrap. It is frozen while a Skills Process is used and
+re-resolved for a later operation rather than silently drifting.
 **Skills Process**: The shared `observeInventory`, `prepareMutation`, and
-`executeConfirmed` interface returned after opening a Target. Opening freezes an
-Effective Target Binding; it does not establish or retain an SSH connection.
-Local and SSH implementations are substitutable at this interface.
-
+**Skills Process**: The shared `observeInventory`, `inspectSource`,
+`prepareMutation`, and `executeConfirmed` interface returned after opening a
+Target. Opening freezes an Effective Target Binding; it does not establish or
+retain an SSH connection. Local and SSH implementations are substitutable at
+this interface.
 **Target Session**: The current application-session association of one Target
 Generation, its frozen Effective Target Binding, its Skills Process, and its
 latest Fresh Inventory. It carries no persistent or retained SSH connection and
@@ -53,10 +69,12 @@ one SSH operation. Its remote command contains no Target or Mutation data; it
 validates structured Wire Protocol requests and constructs only the closed set
 of supported `npx skills` argument arrays.
 
-**Wire Protocol**: The versioned, length-prefixed structured frames exchanged
-with a Remote Bootstrap over SSH stdin and stdout. It transports closed skill
-operations and evidence, never renderer-generated command text or generic
-argument vectors.
+**Wire Protocol v3**: The fail-closed, length-prefixed structured frames
+exchanged with a Remote Bootstrap over SSH stdin and stdout. Every operation
+binds the exact protocol, Target Generation, Skills Dialect, Harness
+Compatibility Registry, Remote Bootstrap, POSIX workspace, and Harness set. It
+transports closed Skill operations and evidence, never renderer-generated
+command text or generic argument vectors.
 
 **Remote Outcome Uncertain**: A mutation disposition used when the local SSH
 transport ended without a final Remote Bootstrap frame proving remote child
@@ -73,8 +91,9 @@ fresh Inventory; an ordinary refresh or automatic retry cannot clear it.
 and retained until the required terminal certainty is recorded. Its presence
 after a restart puts the Target into Reconciliation Required.
 
-**Inventory**: The normalized result of a read-only `npx skills list --json`
-invocation for one target. It is a snapshot, not a second source of truth.
+**Inventory**: One complete normalized project-and-global observation through
+the pinned `npx skills list --json` dialect for a Target. It is a snapshot, not
+a second source of truth.
 
 **Inventory Snapshot**: The persisted, allowlisted last complete Inventory for
 one Target Generation. It is non-authoritative and is always restored as a
@@ -105,6 +124,15 @@ semantic version.
 **Source Reference**: A branch, tag, or other potentially mutable source ref.
 It is provenance, not a Revision or Content Fingerprint.
 
+**Source Descriptor**: A closed, versioned description of one user-approved
+source form. It preserves the exact case-sensitive form and separately names
+its source family and mutable Source Reference, if any. A local source enters
+through a main-owned Filesystem Grant.
+
+**Source Inspection**: Session-only candidate evidence produced by the pinned
+CLI for one Source Descriptor and exact Target binding. It grants no mutation
+authority and proves no installed Revision or Content Fingerprint.
+
 **Content Fingerprint**: A content digest reported through an authoritative
 `npx skills` interface. Skills Desktop does not scan or hash installed skill
 directories to derive one. When none is reported, it remains unknown.
@@ -119,7 +147,7 @@ session. Elapsed time alone does not make an Inventory stale. A stale Inventory
 may be inspected and compared, but cannot authorize a mutation.
 
 **Comparison**: A dimensioned diff between two Target inventories. It preserves
-presence, Declared Source, selected-harness availability, Revision, Content
+per-scope presence, Declared Source, per-Harness coverage, Revision, Content
 Fingerprint, and Inventory freshness outcomes rather than collapsing them into
 one status.
 
@@ -148,6 +176,10 @@ filesystem, persistence, confirmation, or execution authority; the main
 process validates the sender, payload, and current application state before
 acting.
 
+**Filesystem Grant**: An opaque, main-owned, purpose-bound authorization for one
+named file operation under one canonical local root. It is bound to a renderer
+document epoch and never becomes a generic path or filesystem capability.
+
 **Trusted Review**: A main-owned, single-use opportunity to approve or reject
 one exact review projection. An ordinary renderer may request its presentation
 but cannot make the decision; approval is accepted only from the dedicated
@@ -159,8 +191,8 @@ installed Skills, defines desired state, or creates a second installation
 protocol.
 
 **Official Collection**: A Collection owned by Skills Desktop maintainers and
-shipped with the application. V1 executes only Official Collections; imported,
-user-edited, and remotely supplied catalogs are not Official Collections.
+shipped with the application under the Official review trust root. Matching
+metadata never gives a User Package or Imported Package Official identity.
 
 **Collection Release**: An immutable reviewed version within a stable Official
 Collection identity, ordered by a release number and identified by its manifest
@@ -203,6 +235,57 @@ release evidence, assessments, and exact per-Target Command Plans. Its aggregate
 confirmation authorizes only the bound single-use child Confirmed Mutations and
 does not make their execution transactional.
 
+**Package**: A metadata and source recipe that may be assessed or expanded into
+ordinary Mutation Intents. It is never installed state or desired state.
+
+**User Package**: A mutable Package authored by the user. It has no Official
+trust and keeps its own origin identity.
+
+**Imported Package**: An immutable Package accepted from one canonical
+`.skillpack` document. Editing it creates a User Package rather than changing
+its imported origin.
+
+**Skillpack**: A strict, canonical, metadata/source-only JSON interchange
+document. It contains no Skill content, credentials, Target data, installed
+state, executable arguments, raw output, review, or Guard authority.
+
+**Studio Draft**: A versioned, independently recoverable local authoring record
+for static Agent Skills metadata, Markdown, and resource references. It is not
+execution authority.
+
+**Deterministic Artifact**: A validated discovery file or Skill artifact whose
+path, raw bytes, digest, ordering, and archive metadata are fixed by one
+exporter profile. Identical inputs under that profile produce identical output.
+
+**Publication Plan**: An expiring review projection binding one sanitized Git
+remote, exact branch, reviewed base, candidate commit, managed files and
+digests, and deterministic tree digest. It grants no push authority.
+
+**Publication Guard**: Durable safety evidence written before a reviewed Git
+push may start. An uncertain push retains the Guard until exact remote-ref
+readback reconciles the outcome.
+
+**Browser Handoff**: One explicit main-owned request to open a generated,
+allowlisted HTTPS URL in the system browser. It proves only that the operating
+system accepted the open request, not that an external publication succeeded.
+
+**Workspace Protocol v2**: The strict bundled request, result, event, and
+Snapshot vocabulary shared by the ordinary renderer, preload, and main. It is
+a closed product interface with no generic process, filesystem, SSH, Git, URL,
+or confirmation operation.
+
+**Review Protocol v2**: The strict bundled projection and decision vocabulary
+for one role-bound Trusted Review. It carries explanatory facts and
+`approve`/`reject`, never executable input or a reusable confirmation token.
+
+**Recovery Center**: A main-owned projection of fail-closed durable and session
+states with only state-specific typed repair actions. It has no generic clear,
+retry, replay, or overwrite-newer action.
+
+**Unsigned Candidate**: Exact prerelease bytes that passed the stated
+reproducible candidate gates but carry no Apple or Windows publisher trust. An
+Unsigned Candidate is not automatically public.
+
 **Unsigned Developer Preview**: A public GitHub pre-release containing exact
 unsigned candidate bytes, checksums, an SPDX SBOM, GitHub artifact attestations,
 and source identity. It is an early-access distribution surface, not a Stable
@@ -221,8 +304,8 @@ place.
 - Local commands use argument arrays at the process boundary, never shell-built
   command strings.
 - SSH host identity, target selection, and mutation confirmation are explicit.
-- V1 SSH Targets provide a POSIX login shell and compatible `node` and `npx`;
-  Windows may host the desktop client but is not a V1 SSH Target platform.
+- A Remote SSH Target provides a POSIX environment with compatible `node` and
+  `npx`; Windows may host the desktop client but is not a Remote SSH Target.
 - Each remote observation or execution uses a fresh SSH session. Cancellation
   keeps local transport termination distinct from confirmed remote cleanup and
   from certainty about mutation effects.
@@ -238,6 +321,5 @@ place.
 ## Open Decisions
 
 No unresolved product, architecture, or verification decisions remain for the
-V1 specification.
-
-Record durable answers under `docs/adr/` before implementation depends on them.
+accepted comprehensive-evolution architecture. ADRs 0014 through 0024 record
+the decisions that dependent milestone work must follow.

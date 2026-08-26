@@ -2,7 +2,11 @@
 
 面向已经装好本机 `npx skills` 环境、想用桌面端查看与管理 Skills 的开发者。
 
-**V1 只支持 Local Target。** SSH Target、远程 bootstrap、跨机 reconciliation 属于下一步：界面里可能仍能看见，但会标成「SSH · 未在 V1 开放」，不能当作当前可用路径。
+**当前产品仍只开放 Local Target。** 已接受的目标架构是 Local 加 POSIX
+Remote SSH，但 ADR 不是已交付证明。SSH Inventory 要等 Milestone 3 的打包
+tracer 与 validators 全部通过后才会开放；SSH mutation 要等 Milestone 4
+的不确定结果与恢复门禁通过后才会开放。在此之前，界面里即使能看见 SSH
+Target，也会标成「SSH · 未开放」，不能当作当前可用路径。
 
 实际技能发现与变更仍交给 `npx skills`；本应用不另起一套安装器，也不自行扫描技能目录。
 
