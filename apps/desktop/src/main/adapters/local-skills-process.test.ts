@@ -757,6 +757,76 @@ setInterval(() => undefined, 1000);
 });
 
 describe("Local SkillsProcess mutation contract", () => {
+  it("rejects case-folded display input instead of deriving CLI authority", () => {
+    expect(
+      prepareMutationPlan({
+        binding: {
+          generation: 1,
+          harness: "CODEX",
+          targetId: "00000000-0000-4000-8000-000000000001",
+        },
+        clock: () => new Date("2026-08-22T06:00:00.000Z"),
+        input: {
+          freshness: "fresh",
+          intent: {
+            names: ["new-skill"],
+            scope: "project",
+            source: {
+              source: "example/skills",
+              sourceType: "github",
+            },
+            type: "add",
+          },
+          inventory: {
+            cliVersion: CLI_VERSION,
+            entries: [],
+            observedAt: "2026-08-22T06:00:00.000Z",
+            schemaVersion: 1,
+          },
+          inventoryId: "canonical-inventory",
+        },
+      }),
+    ).toMatchObject({
+      error: { code: "mutation_ineligible", effects: "none" },
+      ok: false,
+    });
+  });
+
+  it("rejects a globally unsupported harness before constructing arguments", () => {
+    expect(
+      prepareMutationPlan({
+        binding: {
+          generation: 1,
+          harness: "Eve",
+          targetId: "00000000-0000-4000-8000-000000000001",
+        },
+        clock: () => new Date("2026-08-22T06:00:00.000Z"),
+        input: {
+          freshness: "fresh",
+          intent: {
+            names: ["new-skill"],
+            scope: "global",
+            source: {
+              source: "example/skills",
+              sourceType: "github",
+            },
+            type: "add",
+          },
+          inventory: {
+            cliVersion: CLI_VERSION,
+            entries: [],
+            observedAt: "2026-08-22T06:00:00.000Z",
+            schemaVersion: 1,
+          },
+          inventoryId: "canonical-inventory",
+        },
+      }),
+    ).toMatchObject({
+      error: { code: "mutation_ineligible", effects: "none" },
+      ok: false,
+    });
+  });
+
   it("uses canonical Codex availability for remove, update, and update-all", () => {
     const inventory: Inventory = {
       cliVersion: CLI_VERSION,

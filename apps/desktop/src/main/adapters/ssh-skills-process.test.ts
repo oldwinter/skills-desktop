@@ -354,7 +354,7 @@ describe("SSH SkillsProcess observation contract", () => {
       ok: true,
       value: [
         {
-          harness: "Codex",
+          harness: "codex",
           mutation: {
             names: ["project-skill"],
             scope: "project",

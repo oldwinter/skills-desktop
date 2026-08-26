@@ -1,0 +1,78 @@
+cliId	displayAlias	inventoryToken	displayMessageKey	projectScope	globalScope	projectSharedEffectGroup	globalSharedEffectGroup	emptyAgentListCoverage
+aider-desk	AiderDesk	AiderDesk	harness.aider-desk	yes	yes	-	-	absent
+amp	Amp	Amp	harness.amp	yes	yes	project:agents	global:config-agents	absent
+antigravity	Antigravity	Antigravity	harness.antigravity	yes	yes	project:agents	-	absent
+antigravity-cli	Antigravity CLI	Antigravity CLI	harness.antigravity-cli	yes	yes	project:agents	-	absent
+astrbot	AstrBot	AstrBot	harness.astrbot	yes	yes	-	-	absent
+autohand-code	Autohand Code CLI	Autohand Code CLI	harness.autohand-code	yes	yes	-	-	absent
+augment	Augment	Augment	harness.augment	yes	yes	-	-	absent
+bob	IBM Bob	IBM Bob	harness.bob	yes	yes	-	-	absent
+claude-code	Claude Code	Claude Code	harness.claude-code	yes	yes	-	-	absent
+openclaw	OpenClaw	OpenClaw	harness.openclaw	yes	yes	-	-	absent
+cline	Cline	Cline	harness.cline	yes	yes	project:agents	-	absent
+codearts-agent	CodeArts Agent	CodeArts Agent	harness.codearts-agent	yes	yes	-	-	absent
+codebuddy	CodeBuddy	CodeBuddy	harness.codebuddy	yes	yes	-	-	absent
+codemaker	Codemaker	Codemaker	harness.codemaker	yes	yes	-	-	absent
+codestudio	Code Studio	Code Studio	harness.codestudio	yes	yes	-	-	absent
+codex	Codex	Codex	harness.codex	yes	yes	project:agents	-	direct
+command-code	Command Code	Command Code	harness.command-code	yes	yes	-	-	absent
+continue	Continue	Continue	harness.continue	yes	yes	-	-	absent
+cortex	Cortex Code	Cortex Code	harness.cortex	yes	yes	-	-	absent
+crush	Crush	Crush	harness.crush	yes	yes	-	-	absent
+cursor	Cursor	Cursor	harness.cursor	yes	yes	project:agents	-	absent
+deepagents	Deep Agents	Deep Agents	harness.deepagents	yes	yes	project:agents	-	absent
+devin	Devin for Terminal	Devin for Terminal	harness.devin	yes	yes	-	-	absent
+dexto	Dexto	Dexto	harness.dexto	yes	yes	project:agents	global:home-agents	absent
+droid	Droid	Droid	harness.droid	yes	yes	-	-	absent
+eve	Eve	Eve	harness.eve	yes	no	-	-	absent
+firebender	Firebender	Firebender	harness.firebender	yes	yes	project:agents	-	absent
+forgecode	ForgeCode	ForgeCode	harness.forgecode	yes	yes	-	-	absent
+gemini-cli	Gemini CLI	Gemini CLI	harness.gemini-cli	yes	yes	project:agents	-	absent
+github-copilot	GitHub Copilot	GitHub Copilot	harness.github-copilot	yes	yes	project:agents	-	absent
+goose	Goose	Goose	harness.goose	yes	yes	-	-	absent
+grok	Grok Build	Grok Build	harness.grok	yes	yes	-	-	absent
+hermes-agent	Hermes Agent	Hermes Agent	harness.hermes-agent	yes	yes	-	-	absent
+inference-sh	inference.sh	inference.sh	harness.inference-sh	yes	yes	-	-	absent
+jazz	Jazz	Jazz	harness.jazz	yes	yes	-	-	absent
+junie	Junie	Junie	harness.junie	yes	yes	-	-	absent
+iflow-cli	iFlow CLI	iFlow CLI	harness.iflow-cli	yes	yes	-	-	absent
+kilo	Kilo Code	Kilo Code	harness.kilo	yes	yes	-	-	absent
+kimchi	Kimchi	Kimchi	harness.kimchi	yes	yes	-	-	absent
+kimi-code-cli	Kimi Code CLI	Kimi Code CLI	harness.kimi-code-cli	yes	yes	project:agents	global:home-agents	absent
+kiro-cli	Kiro CLI	Kiro CLI	harness.kiro-cli	yes	yes	-	-	absent
+kode	Kode	Kode	harness.kode	yes	yes	-	-	absent
+lingma	Lingma	Lingma	harness.lingma	yes	yes	-	-	absent
+loaf	Loaf	Loaf	harness.loaf	yes	yes	project:agents	global:home-agents	absent
+mcpjam	MCPJam	MCPJam	harness.mcpjam	yes	yes	-	-	absent
+minimax-code	MiniMax Code	MiniMax Code	harness.minimax-code	yes	yes	-	-	absent
+mistral-vibe	Mistral Vibe	Mistral Vibe	harness.mistral-vibe	yes	yes	-	-	absent
+moxby	Moxby	Moxby	harness.moxby	yes	yes	-	-	absent
+mux	Mux	Mux	harness.mux	yes	yes	-	-	absent
+opencode	OpenCode	OpenCode	harness.opencode	yes	yes	project:agents	-	absent
+openhands	OpenHands	OpenHands	harness.openhands	yes	yes	-	-	absent
+ona	Ona	Ona	harness.ona	yes	yes	-	-	absent
+pi	Pi	Pi	harness.pi	yes	yes	-	-	absent
+posit-assistant	Posit Assistant	Posit Assistant	harness.posit-assistant	yes	yes	-	-	absent
+qoder	Qoder	Qoder	harness.qoder	yes	yes	project:qoder	-	absent
+qoder-cn	Qoder CN	Qoder CN	harness.qoder-cn	yes	yes	project:qoder	-	absent
+qwen-code	Qwen Code	Qwen Code	harness.qwen-code	yes	yes	-	-	absent
+replit	Replit	Replit	harness.replit	yes	yes	project:agents	global:config-agents	absent
+reasonix	Reasonix	Reasonix	harness.reasonix	yes	yes	-	-	absent
+rovodev	Rovo Dev	Rovo Dev	harness.rovodev	yes	yes	-	-	absent
+roo	Roo Code	Roo Code	harness.roo	yes	yes	-	-	absent
+tabnine-cli	Tabnine CLI	Tabnine CLI	harness.tabnine-cli	yes	yes	-	-	absent
+terramind	Terramind	Terramind	harness.terramind	yes	yes	-	-	absent
+tinycloud	Tinycloud	Tinycloud	harness.tinycloud	yes	yes	-	-	absent
+trae	Trae	Trae	harness.trae	yes	yes	project:trae	-	absent
+trae-cn	Trae CN	Trae CN	harness.trae-cn	yes	yes	project:trae	-	absent
+warp	Warp	Warp	harness.warp	yes	yes	project:agents	global:home-agents	absent
+windsurf	Windsurf	Windsurf	harness.windsurf	yes	yes	-	-	absent
+zed	Zed	Zed	harness.zed	yes	yes	project:agents	global:home-agents	absent
+zcode	ZCode	ZCode	harness.zcode	yes	yes	-	-	absent
+zencoder	Zencoder	Zencoder	harness.zencoder	yes	yes	project:zencoder	global:zencoder	absent
+zenflow	Zenflow	Zenflow	harness.zenflow	yes	yes	project:zencoder	global:zencoder	absent
+neovate	Neovate	Neovate	harness.neovate	yes	yes	-	-	absent
+pochi	Pochi	Pochi	harness.pochi	yes	yes	-	-	absent
+promptscript	PromptScript	PromptScript	harness.promptscript	yes	no	project:agents	-	absent
+adal	AdaL	AdaL	harness.adal	yes	yes	-	-	absent
+universal	Universal	Universal	harness.universal	yes	yes	project:agents	global:config-agents	absent

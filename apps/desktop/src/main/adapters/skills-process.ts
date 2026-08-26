@@ -3,6 +3,9 @@ import { createHash } from "node:crypto";
 import {
   CLI_VERSION,
   mutationIntentSchema,
+  resolveLegacyHarnessAlias,
+  validateHarnessScope,
+  type HarnessId,
   type Inventory,
   type InventoryParseError,
   type MutationIntent,
@@ -145,7 +148,7 @@ export function mutationExecutionFailure(
   };
 }
 
-function mutationArguments(intent: NormalizedMutation, harness: string) {
+function mutationArguments(intent: NormalizedMutation, harness: HarnessId) {
   const scopeFlag =
     intent.scope === "global"
       ? ["--global"]
@@ -163,7 +166,7 @@ function mutationArguments(intent: NormalizedMutation, harness: string) {
       "--skill",
       ...intent.names,
       "--agent",
-      harness.toLowerCase(),
+      harness,
       ...scopeFlag,
       "--yes",
     ];
@@ -173,7 +176,7 @@ function mutationArguments(intent: NormalizedMutation, harness: string) {
       "remove",
       ...intent.names,
       "--agent",
-      harness.toLowerCase(),
+      harness,
       ...scopeFlag,
       "--yes",
     ];
@@ -216,6 +219,23 @@ export function prepareMutationPlan(options: {
       "The mutation intent is not supported.",
     );
   }
+  const parsedHarness = resolveLegacyHarnessAlias(options.binding.harness);
+  if (!parsedHarness.ok) {
+    return mutationPreparationFailure(
+      "mutation_ineligible",
+      "The Target harness is not supported by the pinned Skills dialect.",
+    );
+  }
+  const scopedHarness = validateHarnessScope(
+    [parsedHarness.value],
+    parsedIntent.data.scope,
+  );
+  if (!scopedHarness.ok) {
+    return mutationPreparationFailure(
+      "mutation_ineligible",
+      "The Target harness is not supported in the selected scope.",
+    );
+  }
 
   const matchingEntries = input.inventory.entries.filter(
     (entry) =>
@@ -248,7 +268,7 @@ export function prepareMutationPlan(options: {
     );
   }
 
-  const args = mutationArguments(mutation, options.binding.harness);
+  const args = mutationArguments(mutation, scopedHarness.value[0]!);
   const commandPlan: CommandPlan = {
     harness: options.binding.harness,
     names: [...mutation.names],
