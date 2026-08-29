@@ -1482,29 +1482,15 @@ describe("RecoveryRecords Target Definition contract", () => {
       "utf8",
     );
     const delegate = createNodeRecoveryFileSystem();
-    let directorySyncs = 0;
     const records = createJsonRecoveryRecords({
       directory,
       fileSystem: {
         ...delegate,
-        async open(path, flags, mode) {
-          const handle = await delegate.open(path, flags, mode);
-          return {
-            close: () => handle.close(),
-            sync() {
-              if (
-                flags === "r" &&
-                path === directory &&
-                ++directorySyncs === 4
-              ) {
-                return Promise.reject(
-                  new Error("Post-Guard replacement directory sync fault"),
-                );
-              }
-              return handle.sync();
-            },
-            writeFile: (data, options) => handle.writeFile(data, options),
-          };
+        async rename(source, destination) {
+          await delegate.rename(source, destination);
+          if (destination === guardPath) {
+            throw new Error("Post-Guard replacement fault");
+          }
         },
       },
       id: () => "post-guard-replacement",

@@ -16,8 +16,22 @@ describe("verify workflow contract", () => {
       new URL("./packaged-electron.smoke.mjs", import.meta.url),
       "utf8",
     );
+    const recoveryRecordsSource = await readFile(
+      new URL(
+        "../apps/desktop/src/main/persistence/recovery-records.ts",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const currentTargetSchemaVersion = recoveryRecordsSource.match(
+      /const CURRENT_TARGET_SCHEMA_VERSION = (\d+) as const;/,
+    )?.[1];
 
     expect(workflow.name).toBe("Verify");
+    expect(currentTargetSchemaVersion).toBeDefined();
+    expect(packagedSmokeSource).toContain(
+      `targetDocument.schemaVersion !== ${currentTargetSchemaVersion}`,
+    );
     expect(Object.keys(workflow.on).sort()).toEqual([
       "pull_request",
       "push",

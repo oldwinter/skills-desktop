@@ -33,7 +33,7 @@ describe("accepted comprehensive-evolution decisions", () => {
         "utf8",
       );
 
-      expect(decision).toMatch(/^# .+\n\nStatus: Accepted\n/m);
+      expect(decision).toMatch(/^# .+\r?\n\r?\nStatus: Accepted\r?\n/m);
       expect(decision).toContain("## Context");
       expect(decision).toContain("## Decision");
       expect(decision).toContain("## Alternatives considered");

@@ -104,10 +104,10 @@ const fixtureBytes = readFileSync(
     import.meta.url,
   ),
   "utf8",
-);
+).replace(/\r\n/g, "\n");
 
 function parseReviewedFixture() {
-  const [header, ...rows] = fixtureBytes.trimEnd().split("\n");
+  const [header, ...rows] = fixtureBytes.trimEnd().split(/\r?\n/);
   expect(header).toBe(
     "cliId\tdisplayAlias\tinventoryToken\tdisplayMessageKey\tprojectScope\tglobalScope\tprojectSharedEffectGroup\tglobalSharedEffectGroup\temptyAgentListCoverage",
   );
