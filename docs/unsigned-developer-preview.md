@@ -62,9 +62,73 @@ contract. A public self-signed certificate is not trusted by Windows by default.
 
 ## Linux
 
-After verification, install the DEB or RPM with the normal package tool for your
-distribution. The preview has checksum and GitHub provenance evidence but no
-project-operated Linux package-signing key or repository.
+The preview has checksum and GitHub provenance evidence but no project-operated
+Linux package-signing key or repository. Verify SHA-256 from `SHA256SUMS` before
+any install step.
+
+### Debian / Ubuntu (DEB)
+
+Do not install with bare `sudo dpkg -i` on a machine that has none of the trash
+helpers listed below. Configuration fails and the package stays unconfigured.
+
+1. Download the `.deb` together with `SHA256SUMS`. Confirm the artifact's
+   SHA-256 matches its line in that file. Stop if they differ:
+
+   ```bash
+   sha256sum -c SHA256SUMS --ignore-missing
+   ```
+
+2. Install the local file with `apt` so Depends are resolved. The `./` prefix
+   is required so apt treats it as a local package:
+
+   ```bash
+   sudo apt install ./skills-desktop-*.deb
+   ```
+
+   A versioned filename is equivalent, for example:
+
+   ```bash
+   sudo apt install ./skills-desktop-0.1.0-linux-x64.deb
+   ```
+
+3. The DEB `Depends` on **one** trash helper (any one is enough):
+
+   - `kde-cli-tools`
+   - `kde-runtime`
+   - `trash-cli`
+   - `libglib2.0-bin`
+   - `gvfs-bin`
+
+   `apt install` of the local DEB selects one automatically (often
+   `libglib2.0-bin`).
+
+If `dpkg -i` already failed, do **not** run bare `sudo apt-get install -f`
+while apt's package lists are stale. That command can **remove** the
+unconfigured `skills-desktop` package instead of installing a helper.
+
+Safer recovery after a half-install:
+
+```bash
+sudo apt update
+sudo apt install ./skills-desktop-*.deb
+```
+
+Or install any one helper from the list above, then finish configuration:
+
+```bash
+sudo apt update
+sudo apt install libglib2.0-bin
+sudo dpkg --configure -a
+```
+
+Only consider `apt-get install -f` after `apt update`, and only if you
+understand it may still uninstall the preview when no helper can be
+installed.
+
+### RPM
+
+After the same SHA-256 check against `SHA256SUMS`, install the RPM with the
+normal package tool for your distribution.
 
 ## Updating
 
