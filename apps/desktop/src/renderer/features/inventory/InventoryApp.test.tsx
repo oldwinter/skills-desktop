@@ -625,6 +625,65 @@ describe("Local Target Inventory shell", () => {
     ).toBeInTheDocument();
   });
 
+  it("reports visible inventory count with singular and matching copy (#136, #139)", async () => {
+    const twoSkills: WorkspaceSnapshot = {
+      ...snapshot,
+      inventory: {
+        ...snapshot.inventory,
+        entries: [
+          snapshot.inventory.entries[0]!,
+          {
+            ...snapshot.inventory.entries[0]!,
+            name: "Other-Skill",
+            scope: "global",
+          },
+        ],
+      },
+    };
+    const { unmount } = render(<InventoryApp client={clientFor(snapshot)} />);
+
+    expect(
+      await screen.findByText("1 skill across project and global scopes"),
+    ).toBeInTheDocument();
+
+    fireEvent.change(
+      screen.getByRole("searchbox", { name: "Search inventory" }),
+      { target: { value: "zzzzqwxnotfound999" } },
+    );
+    expect(screen.getByText("0 matching skills")).toBeInTheDocument();
+    expect(
+      screen.queryByText("1 skill across project and global scopes"),
+    ).not.toBeInTheDocument();
+
+    fireEvent.change(
+      screen.getByRole("searchbox", { name: "Search inventory" }),
+      { target: { value: "" } },
+    );
+    expect(
+      screen.getByText("1 skill across project and global scopes"),
+    ).toBeInTheDocument();
+
+    const inventoryScope = screen.getByRole("group", {
+      name: "Inventory scope",
+    });
+    fireEvent.click(
+      within(inventoryScope).getByRole("button", { name: "Global scope" }),
+    );
+    expect(screen.getByText("0 matching skills")).toBeInTheDocument();
+    fireEvent.click(
+      within(inventoryScope).getByRole("button", { name: "All scopes" }),
+    );
+    expect(
+      screen.getByText("1 skill across project and global scopes"),
+    ).toBeInTheDocument();
+    unmount();
+
+    render(<InventoryApp client={clientFor(twoSkills)} />);
+    expect(
+      await screen.findByText("2 skills across project and global scopes"),
+    ).toBeInTheDocument();
+  });
+
   it("prepares scoped updates and exact GitHub additions through distinct intents", async () => {
     const prepareMutation = vi.fn(
       async (

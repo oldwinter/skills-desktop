@@ -103,6 +103,13 @@ function sourceLabel(entry: PublicInventoryEntry) {
   return entry.declaredSource.source ?? "Provenance unavailable";
 }
 
+function inventorySubtitle(count: number, filtered: boolean): string {
+  const noun = count === 1 ? "skill" : "skills";
+  return filtered
+    ? `${count} matching ${noun}`
+    : `${count} ${noun} across project and global scopes`;
+}
+
 function InventoryStatus({
   snapshot,
 }: {
@@ -794,8 +801,7 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                 <div>
                   <h1>Inventory</h1>
                   <p>
-                    {snapshot.inventory.entries.length} skills across project
-                    and global scopes
+                    {inventorySubtitle(filteredEntries.length, isFiltered)}
                   </p>
                   {targetStates.length > 1 ? (
                     <label className="inventory-target-chooser">
