@@ -23,7 +23,44 @@ Target，也会标成「SSH · 未开放」，不能当作当前可用路径。
 3. 按平台完成安装（摘要如下；细节以 `docs/unsigned-developer-preview.md` 为准）：
    - **macOS**：打开 DMG，拷到 `/Applications`，对本地副本做 ad-hoc `codesign`，必要时在「系统设置 → 隐私与安全性」里对该应用选 **仍然打开**。这不是 Developer ID，也不是公证。
    - **Windows**：运行 `win32-x64-setup.exe`。SmartScreen / 未验证发布者警告时，仅在系统提供按文件覆盖选项且你接受风险时继续；策略禁止覆盖则停止，不要自行削弱组织策略。
-   - **Linux**：用发行版常规方式安装 DEB/RPM。预览包有校验与 provenance，但没有项目运维的 Linux 包签名仓库。
+   - **Linux**：先对照 `SHA256SUMS` 校验 SHA-256，再用 apt 安装本地 DEB（见下方 Linux 小节）。不要只用 `dpkg -i`。RPM 发行版在同样校验后用发行版常规方式安装。预览包有校验与 provenance，但没有项目运维的 Linux 包签名仓库。
+
+#### Linux（Debian / Ubuntu DEB）
+
+1. 下载 `.deb` 与 `SHA256SUMS`，先确认产物 SHA-256 与 `SHA256SUMS` 中对应行一致。不一致则停止：
+
+   ```bash
+   sha256sum -c SHA256SUMS --ignore-missing
+   ```
+
+2. 用 apt 安装本地文件（必须带 `./`），以便解析 Depends：
+
+   ```bash
+   sudo apt install ./skills-desktop-*.deb
+   ```
+
+   也可写成带版本号的文件名，例如：
+
+   ```bash
+   sudo apt install ./skills-desktop-0.1.0-linux-x64.deb
+   ```
+
+3. 该 DEB 的 trash helper `Depends` 为五选一（任意一个即可）：`kde-cli-tools` | `kde-runtime` | `trash-cli` | `libglib2.0-bin` | `gvfs-bin`。`apt install` 本地 DEB 时会自动选一个（常见为 `libglib2.0-bin`）。
+
+不要在 apt 索引过期时裸跑 `sudo apt-get install -f`：它会把未配置的预览包**卸掉**，而不是补依赖。若已经 `dpkg -i` 失败，先更新索引再装本地 DEB（或先装上述任一 helper 再配置）：
+
+```bash
+sudo apt update
+sudo apt install ./skills-desktop-*.deb
+```
+
+```bash
+sudo apt update
+sudo apt install libglib2.0-bin
+sudo dpkg --configure -a
+```
+
+仅在已经 `apt update`、并且理解 Depends 无法满足时仍可能卸载预览包的前提下，才考虑 `apt-get install -f`。
 
 预览构建 **不会** 进入应用的稳定自动更新通道。更新需手动下载、校验、安装下一版预览。
 
@@ -172,6 +209,9 @@ A：**不能当作 V1 主路径。** 列表可能显示 **SSH · 未在 V1 开�
 
 **Q：macOS / Windows 拦安装正常吗？**  
 A：对 Unsigned Developer Preview 是预期行为。先校验字节，再按平台自带的「仍要打开 / 按文件覆盖」处理。不要为了安装去关 Gatekeeper 或导入不受信的自签根证书。
+
+**Q：Linux 上 `dpkg -i` 失败，或 `apt-get install -f` 把包卸掉了？**  
+A：DEB 依赖 trash helper 五选一（`kde-cli-tools` | `kde-runtime` | `trash-cli` | `libglib2.0-bin` | `gvfs-bin`）。先对照 `SHA256SUMS` 校验，再用 `sudo apt install ./skills-desktop-*.deb`。不要在 apt 索引过期时裸跑 `apt-get install -f`，那会卸掉未配置的预览包。
 
 **Q：应用内提示有更新吗？**  
 A：预览构建走手动升级。到 Releases 取新包并校验；不要期待稳定通道的自动更新。
