@@ -20,10 +20,18 @@ const otherTargetId = "00000000-0000-4000-8000-00000000000a";
 const digest = `sha256:${"a".repeat(64)}`;
 const hex64 = "b".repeat(64);
 const revision = "0123456789abcdef0123456789abcdef01234567";
+const targetV4Metadata = {
+  dialectId: "skills-1.5.23" as const,
+  executionBindingDigest: null,
+  harnessIds: ["codex"],
+  registryDigest:
+    "sha256:36d0c792e0480a13818d890e1dccc93e3b29a4ea44af78091e80db8a3e9181de" as const,
+  registryVersion: 1 as const,
+};
 
 const localDraft = {
   connectionReference: null,
-  harness: "Codex",
+  harnessIds: ["codex"],
   kind: "local" as const,
   label: "This device",
   workspace: "/work/skills-desktop",
@@ -31,7 +39,7 @@ const localDraft = {
 
 const sshDraft = {
   connectionReference: "build-host",
-  harness: "Codex",
+  harnessIds: ["codex"],
   kind: "ssh" as const,
   label: "Build host",
   workspace: "/srv/workspace",
@@ -68,8 +76,8 @@ const mutation = {
 
 const targetDefinition = {
   connectionReference: null,
+  ...targetV4Metadata,
   generation: 1,
-  harness: "Codex",
   id: targetId,
   kind: "local" as const,
   label: "This device",
@@ -146,7 +154,7 @@ describe("workspace comparison and collection request contracts", () => {
         leftTargetId: targetId,
         rightTargetId: targetId,
         type: "comparison.open",
-        version: 1,
+        version: 2,
       }).success,
     ).toBe(false);
     expect(
@@ -154,7 +162,7 @@ describe("workspace comparison and collection request contracts", () => {
         leftTargetId: targetId,
         rightTargetId: otherTargetId,
         type: "comparison.open",
-        version: 1,
+        version: 2,
       }),
     ).toMatchObject({ leftTargetId: targetId, rightTargetId: otherTargetId });
   });
@@ -167,7 +175,7 @@ describe("workspace comparison and collection request contracts", () => {
       scope: "project" as const,
       targetId,
       type: "collection.prepare" as const,
-      version: 1 as const,
+      version: 2 as const,
     };
     expect(
       prepareCollectionRequestSchema.safeParse({
@@ -207,7 +215,7 @@ describe("workspace comparison and collection request contracts", () => {
         },
       ],
       type: "collection.prepare-many" as const,
-      version: 1 as const,
+      version: 2 as const,
     };
     expect(prepareCollectionAcrossTargetsRequestSchema.parse(unique)).toEqual(
       unique,
@@ -355,6 +363,19 @@ describe("workspace multi-target collection plan contract", () => {
 });
 
 describe("workspace snapshot and request envelopes", () => {
+  it("accepts only the bundled Workspace Protocol v2", () => {
+    const request = {
+      targetId,
+      type: "inventory.refresh" as const,
+      version: 2 as const,
+    };
+
+    expect(workspaceRequestSchema.parse(request)).toEqual(request);
+    expect(
+      workspaceRequestSchema.safeParse({ ...request, version: 1 }).success,
+    ).toBe(false);
+  });
+
   it("accepts a snapshot with comparison rows and rejects malformed results", () => {
     const comparison = {
       id: "comparison-1",
@@ -408,7 +429,7 @@ describe("workspace snapshot and request envelopes", () => {
       comparison,
       inventory,
       mutation,
-      schemaVersion: 1 as const,
+      schemaVersion: 2 as const,
       sessionEpoch: "epoch-1",
       stateRevision: 2,
       target: targetDefinition,
@@ -422,7 +443,7 @@ describe("workspace snapshot and request envelopes", () => {
       ],
     };
     expect(workspaceSnapshotSchema.parse(snapshot)).toMatchObject({
-      schemaVersion: 1,
+      schemaVersion: 2,
       target: { id: targetId },
     });
     expect(
@@ -451,7 +472,7 @@ describe("workspace snapshot and request envelopes", () => {
           eventSequence: 1,
           inventory,
           mutation,
-          schemaVersion: 1,
+          schemaVersion: 2,
           sessionEpoch: "epoch-1",
           stateRevision: 1,
           target: targetDefinition,
@@ -474,14 +495,14 @@ describe("workspace snapshot and request envelopes", () => {
       workspaceRequestSchema.parse({
         targetId,
         type: "inventory.refresh",
-        version: 1,
+        version: 2,
       }).type,
     ).toBe("inventory.refresh");
     expect(
       createTargetRequestSchema.parse({
         definition: localDraft,
         type: "target.create",
-        version: 1,
+        version: 2,
       }).type,
     ).toBe("target.create");
     expect(
@@ -490,7 +511,7 @@ describe("workspace snapshot and request envelopes", () => {
         destinationTargetId: targetId,
         rowKey: "find-skills",
         type: "comparison.prepare",
-        version: 1,
+        version: 2,
       }).rowKey,
     ).toBe("find-skills");
   });

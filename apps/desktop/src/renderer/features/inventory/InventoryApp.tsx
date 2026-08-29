@@ -766,7 +766,7 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
             <dl className="target-facts">
               <div>
                 <dt>Harness</dt>
-                <dd>{snapshot.target.harness}</dd>
+                <dd>{snapshot.target.harnessIds.join(", ")}</dd>
               </div>
               <div>
                 <dt>Project</dt>
@@ -825,7 +825,7 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                         <HardDrive aria-hidden="true" size={14} />
                       )}
                       {snapshot.target.label} / {snapshot.target.workspaceLabel}{" "}
-                      / {snapshot.target.harness}
+                      / {snapshot.target.harnessIds.join(", ")}
                     </p>
                   )}
                 </div>
@@ -1074,11 +1074,13 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                               </span>
                             </td>
                             <td data-label="Harness">
-                              {isInventoryEntryAvailableToHarness(
-                                entry,
-                                snapshot.target.harness,
+                              {snapshot.target.harnessIds.every((harnessId) =>
+                                isInventoryEntryAvailableToHarness(
+                                  entry,
+                                  harnessId,
+                                ),
                               )
-                                ? snapshot.target.harness
+                                ? snapshot.target.harnessIds.join(", ")
                                 : "Not linked"}
                             </td>
                             <td data-label="Declared source">

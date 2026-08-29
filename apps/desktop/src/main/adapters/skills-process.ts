@@ -3,6 +3,10 @@ import { createHash } from "node:crypto";
 import {
   CLI_VERSION,
   mutationIntentSchema,
+  normalizeHarnessIds,
+  resolveLegacyHarnessAlias,
+  validateHarnessScope,
+  type HarnessId,
   type Inventory,
   type InventoryParseError,
   type MutationIntent,
@@ -31,6 +35,7 @@ export type ObservationError =
 
 export interface CommandPlan {
   readonly harness: string;
+  readonly harnessIds?: string[];
   readonly names: readonly string[];
   readonly operation: "add" | "remove" | "update";
   readonly preview: string;
@@ -145,7 +150,10 @@ export function mutationExecutionFailure(
   };
 }
 
-function mutationArguments(intent: NormalizedMutation, harness: string) {
+function mutationArguments(
+  intent: NormalizedMutation,
+  harnessIds: readonly HarnessId[],
+) {
   const scopeFlag =
     intent.scope === "global"
       ? ["--global"]
@@ -163,7 +171,7 @@ function mutationArguments(intent: NormalizedMutation, harness: string) {
       "--skill",
       ...intent.names,
       "--agent",
-      harness.toLowerCase(),
+      ...harnessIds,
       ...scopeFlag,
       "--yes",
     ];
@@ -173,7 +181,7 @@ function mutationArguments(intent: NormalizedMutation, harness: string) {
       "remove",
       ...intent.names,
       "--agent",
-      harness.toLowerCase(),
+      ...harnessIds,
       ...scopeFlag,
       "--yes",
     ];
@@ -184,7 +192,8 @@ function mutationArguments(intent: NormalizedMutation, harness: string) {
 export function prepareMutationPlan(options: {
   readonly binding?: {
     readonly generation: number;
-    readonly harness: string;
+    readonly harness?: string;
+    readonly harnessIds?: readonly string[];
     readonly targetId: string;
   };
   readonly clock: () => Date;
@@ -216,11 +225,43 @@ export function prepareMutationPlan(options: {
       "The mutation intent is not supported.",
     );
   }
+  const resolvedHarnessIds: HarnessId[] = [];
+  for (const value of
+    options.binding.harnessIds ??
+    (options.binding.harness === undefined ? [] : [options.binding.harness])) {
+    const resolved = resolveLegacyHarnessAlias(value);
+    if (!resolved.ok) {
+      return mutationPreparationFailure(
+        "mutation_ineligible",
+        "The Target harness is not supported by the pinned Skills dialect.",
+      );
+    }
+    resolvedHarnessIds.push(resolved.value);
+  }
+  const normalizedHarnessIds = normalizeHarnessIds(resolvedHarnessIds);
+  if (!normalizedHarnessIds.ok) {
+    return mutationPreparationFailure(
+      "mutation_ineligible",
+      "The Target harness set is not supported by the pinned Skills dialect.",
+    );
+  }
+  const scopedHarness = validateHarnessScope(
+    normalizedHarnessIds.value,
+    parsedIntent.data.scope,
+  );
+  if (!scopedHarness.ok) {
+    return mutationPreparationFailure(
+      "mutation_ineligible",
+      "The Target harness is not supported in the selected scope.",
+    );
+  }
 
   const matchingEntries = input.inventory.entries.filter(
     (entry) =>
       entry.scope === parsedIntent.data.scope &&
-      isInventoryEntryAvailableToHarness(entry, options.binding!.harness),
+      scopedHarness.value.some((harnessId) =>
+        isInventoryEntryAvailableToHarness(entry, harnessId),
+      ),
   );
   const mutation: NormalizedMutation =
     parsedIntent.data.type === "update-all"
@@ -248,9 +289,12 @@ export function prepareMutationPlan(options: {
     );
   }
 
-  const args = mutationArguments(mutation, options.binding.harness);
+  const args = mutationArguments(mutation, scopedHarness.value);
   const commandPlan: CommandPlan = {
-    harness: options.binding.harness,
+    harness: options.binding.harness ?? scopedHarness.value.join(" "),
+    ...(scopedHarness.value.length > 1
+      ? { harnessIds: [...scopedHarness.value] }
+      : {}),
     names: [...mutation.names],
     operation: mutation.type,
     preview: [`npx skills@${CLI_VERSION}`, ...args].join(" "),
@@ -298,8 +342,9 @@ export function prepareMutationPlan(options: {
 export function observedMutationEffects(
   mutation: NormalizedMutation,
   inventory: Inventory,
-  harness: string,
+  harness: string | readonly string[],
 ): MutationOutcome["effects"] {
+  const harnessIds = typeof harness === "string" ? [harness] : harness;
   const matches = (name: string) =>
     inventory.entries.find(
       (entry) => entry.name === name && entry.scope === mutation.scope,
@@ -311,7 +356,10 @@ export function observedMutationEffects(
           const entry = matches(name);
           return (
             entry === undefined ||
-            !isInventoryEntryAvailableToHarness(entry, harness)
+            harnessIds.every(
+              (harnessId) =>
+                !isInventoryEntryAvailableToHarness(entry, harnessId),
+            )
           );
         },
       )
@@ -322,10 +370,13 @@ export function observedMutationEffects(
   if (mutation.type === "add") {
     const observed = mutation.names.every((name) => {
       const entry = matches(name);
-      const availableToHarness =
+      const availableToHarnesses =
         entry !== undefined &&
-        isInventoryEntryAvailableToHarness(entry, harness);
-      if (!availableToHarness || entry === undefined) return false;
+        harnessIds.length > 0 &&
+        harnessIds.every((harnessId) =>
+          isInventoryEntryAvailableToHarness(entry, harnessId),
+        );
+      if (!availableToHarnesses || entry === undefined) return false;
       const declaredSourceMatches =
         entry.declaredSource.sourceType === mutation.source.sourceType &&
         entry.declaredSource.source === mutation.source.source;
@@ -350,7 +401,11 @@ export function observedMutationEffects(
       const entry = matches(name);
       return (
         entry === undefined ||
-        !isInventoryEntryAvailableToHarness(entry, harness)
+        harnessIds.length === 0 ||
+        harnessIds.some(
+          (harnessId) =>
+            !isInventoryEntryAvailableToHarness(entry, harnessId),
+        )
       );
     })
   ) {

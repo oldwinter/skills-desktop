@@ -5,6 +5,7 @@ import type { Result } from "@skills-desktop/skills-runtime";
 import type { RestartGuardReason } from "../../contracts/about.js";
 
 import {
+  WORKSPACE_PROTOCOL_VERSION,
   workspaceRequestSchema,
   type DesktopEvent,
   type PublicInventoryEntry,
@@ -15,17 +16,19 @@ import {
   type PublicSingleTargetCollectionPlan,
   type PublicMutationState,
   type RendererError,
+  type BlockedTargetDefinition,
+  type DurableTargetDefinition,
   type TargetDefinition as PublicTargetDefinition,
   type WorkspaceSnapshot,
 } from "../../contracts/workspace.js";
 import {
+  REVIEW_PROTOCOL_VERSION,
   reviewDecisionRequestSchema,
   type ReviewSnapshot,
 } from "../../contracts/review.js";
 
 import type { PreparedMutation } from "../adapters/skills-process.js";
 import type {
-  DurableTargetDefinition,
   CollectionAcknowledgement,
   InventorySnapshot,
   MutationGuard,
@@ -238,11 +241,15 @@ function targetGenerationStaleError() {
 function projectTarget(target: TargetDefinition): PublicTargetDefinition {
   return {
     connectionReference: target.connectionReference ?? null,
+    dialectId: target.dialectId,
+    executionBindingDigest: target.executionBindingDigest,
     generation: target.generation,
-    harness: target.harness,
+    harnessIds: [...target.harnessIds],
     id: target.id,
     kind: target.kind,
     label: target.label,
+    registryDigest: target.registryDigest,
+    registryVersion: target.registryVersion,
     workspace: target.workspace,
     workspaceLabel: target.workspaceLabel,
   };
@@ -251,12 +258,15 @@ function projectTarget(target: TargetDefinition): PublicTargetDefinition {
 function durableTarget(target: TargetDefinition): DurableTargetDefinition {
   return {
     connectionReference: target.connectionReference ?? null,
+    dialectId: target.dialectId,
     executionBindingDigest: target.executionBindingDigest ?? null,
     generation: target.generation,
-    harness: target.harness,
+    harnessIds: [...target.harnessIds],
     id: target.id,
     kind: target.kind,
     label: target.label,
+    registryDigest: target.registryDigest,
+    registryVersion: target.registryVersion,
     workspace: target.workspace,
   };
 }
@@ -356,6 +366,7 @@ export function createDesktopCapabilities(
   let recoveryUncertain = false;
   let guardStoreCorrupted = false;
   let targetAuthorityUnavailable = false;
+  let blockedTargetDefinitions: readonly BlockedTargetDefinition[] = [];
   let targetDefinitionsChanging = false;
   let shuttingDown = false;
   let shutdownPromise: Promise<void> | undefined;
@@ -625,6 +636,7 @@ export function createDesktopCapabilities(
     endpoint: EndpointState,
     eventSequence = endpoint.sequence,
   ): WorkspaceSnapshot => ({
+    blockedTargets: structuredClone([...blockedTargetDefinitions]),
     comparison: structuredClone(currentComparison()),
     collections: {
       ...collectionsForTarget(target, inventoryState),
@@ -633,7 +645,7 @@ export function createDesktopCapabilities(
     eventSequence,
     inventory: structuredClone(inventoryState),
     mutation: structuredClone(mutationState),
-    schemaVersion: 1,
+    schemaVersion: WORKSPACE_PROTOCOL_VERSION,
     sessionEpoch: endpoint.sessionEpoch,
     stateRevision,
     target: projectTarget(target),
@@ -946,7 +958,7 @@ export function createDesktopCapabilities(
       if (hostTrustReview.decision !== undefined) {
         return {
           decision: hostTrustReview.decision,
-          schemaVersion: 1,
+          schemaVersion: REVIEW_PROTOCOL_VERSION,
           status: "settled",
         };
       }
@@ -954,7 +966,10 @@ export function createDesktopCapabilities(
         ({ id }) => id === hostTrustReview.targetId,
       );
       if (reviewedTarget === undefined) {
-        return { schemaVersion: 1, status: "unavailable" };
+        return {
+          schemaVersion: REVIEW_PROTOCOL_VERSION,
+          status: "unavailable",
+        };
       }
       return {
         projection: {
@@ -966,7 +981,7 @@ export function createDesktopCapabilities(
           target: projectTarget(reviewedTarget),
           trustAction: hostTrustReview.challenge.kind,
         },
-        schemaVersion: 1,
+        schemaVersion: REVIEW_PROTOCOL_VERSION,
         status: "pending",
       };
     }
@@ -975,11 +990,14 @@ export function createDesktopCapabilities(
         ? undefined
         : reviews.get(endpoint.reviewId);
     if (review === undefined)
-      return { schemaVersion: 1, status: "unavailable" };
+      return {
+        schemaVersion: REVIEW_PROTOCOL_VERSION,
+        status: "unavailable",
+      };
     if (review.decision !== undefined) {
       return {
         decision: review.decision,
-        schemaVersion: 1,
+        schemaVersion: REVIEW_PROTOCOL_VERSION,
         status: "settled",
       };
     }
@@ -995,7 +1013,7 @@ export function createDesktopCapabilities(
             ) ?? target,
           ),
         },
-        schemaVersion: 1,
+        schemaVersion: REVIEW_PROTOCOL_VERSION,
         status: "pending",
       };
     }
@@ -1011,7 +1029,7 @@ export function createDesktopCapabilities(
           ) ?? target,
         ),
       },
-      schemaVersion: 1,
+      schemaVersion: REVIEW_PROTOCOL_VERSION,
       status: "pending",
     };
   };
@@ -3661,6 +3679,7 @@ export function createDesktopCapabilities(
       );
       initialized = true;
       const restored = await options.recoveryRecords.restore();
+      blockedTargetDefinitions = restored.blockedTargetDefinitions ?? [];
       const restoredAcknowledgements = [
         ...(restored.collectionAcknowledgements ?? []),
       ];
@@ -3749,11 +3768,16 @@ export function createDesktopCapabilities(
           };
         }
       } else {
+        const blockedLabels = blockedTargetDefinitions
+          .map(({ label }) => label)
+          .join(", ");
         inventoryState = {
           ...inventoryState,
           lastError: publicError(
             "process_failed",
-            "Saved Target Definitions could not be restored.",
+            blockedLabels.length === 0
+              ? "Saved Target Definitions could not be restored."
+              : `Target migration failed for: ${blockedLabels}.`,
             "restore",
             false,
           ),

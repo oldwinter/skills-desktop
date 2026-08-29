@@ -104,6 +104,56 @@ describe("fixed Remote Bootstrap", () => {
   });
 
   it.skipIf(process.platform === "win32")(
+    "rejects display-like harness input before invoking the CLI",
+    async () => {
+      const directory = await mkdtemp(join(tmpdir(), "skills-bootstrap-"));
+      temporaryDirectories.push(directory);
+      const executable = join(directory, "npx");
+      const invocationLog = join(directory, "invocations.ndjson");
+      await writeFile(
+        executable,
+        `#!/usr/bin/env node
+require("node:fs").appendFileSync(${JSON.stringify(invocationLog)}, "invoked\\n");
+`,
+        "utf8",
+      );
+      await chmod(executable, 0o700);
+
+      const outcome = await runBootstrap(
+        encodeWireFrame({
+          harness: "CODEX",
+          operation: "observe",
+          protocolVersion: WIRE_PROTOCOL_VERSION,
+          requestId: "unknown-harness",
+          type: "request",
+          workspace: directory,
+        }),
+        {
+          HOME: directory,
+          PATH: `${directory}${delimiter}${process.env.PATH ?? ""}`,
+          TMP: directory,
+        },
+      );
+
+      expect(decodeWireFrames(outcome.stdout)).toMatchObject({
+        ok: true,
+        value: [
+          { type: "hello" },
+          {
+            code: "remote_protocol_violation",
+            phase: "wire",
+            requestId: "unknown-harness",
+            type: "failure",
+          },
+        ],
+      });
+      await expect(readFile(invocationLog, "utf8")).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+    },
+  );
+
+  it.skipIf(process.platform === "win32")(
     "validates one observation and constructs only pinned npx argument arrays",
     async () => {
       const directory = await mkdtemp(join(tmpdir(), "skills-bootstrap-"));
@@ -137,7 +187,7 @@ else process.exitCode = 2;
 
       const outcome = await runBootstrap(
         encodeWireFrame({
-          harness: "Codex",
+          harness: "codex",
           operation: "observe",
           protocolVersion: WIRE_PROTOCOL_VERSION,
           requestId: "observe-1",
@@ -248,7 +298,7 @@ else process.exitCode = 2;
 
       const outcome = await runBootstrap(
         encodeWireFrame({
-          harness: "Codex",
+          harness: "codex",
           mutation: {
             names: ["project-skill"],
             scope: "project",
@@ -358,7 +408,7 @@ else process.exitCode = 2;
       ]) {
         const outcome = await runBootstrap(
           encodeWireFrame({
-            harness: "Codex",
+            harness: "codex",
             mutation,
             operation: "mutate",
             protocolVersion: WIRE_PROTOCOL_VERSION,
@@ -446,7 +496,7 @@ else process.exitCode = 2;
       );
       await chmod(executable, 0o700);
       const mutation = encodeWireFrame({
-        harness: "Codex",
+        harness: "codex",
         mutation: {
           names: ["project-skill"],
           scope: "project",
@@ -523,7 +573,7 @@ else process.exitCode = 2;
 
       const outcome = await runBootstrap(
         encodeWireFrame({
-          harness: "Codex",
+          harness: "codex",
           mutation: {
             names: ["project-skill"],
             scope: "project",
@@ -607,7 +657,7 @@ else process.exitCode = 2;
       child.stdout.on("data", (chunk: Buffer) => stdout.push(chunk));
       child.stdin.write(
         encodeWireFrame({
-          harness: "Codex",
+          harness: "codex",
           mutation: {
             names: ["project-skill"],
             scope: "project",
@@ -710,7 +760,7 @@ else process.exitCode = 2;
       });
       child.stdin.write(
         encodeWireFrame({
-          harness: "Codex",
+          harness: "codex",
           mutation: {
             names: ["project-skill"],
             scope: "project",
@@ -771,7 +821,7 @@ require("node:fs").writeFileSync(${JSON.stringify(invocationLog)}, "invoked");
       await chmod(executable, 0o700);
       const requestId = "observe-cancel-immediate";
       const observation = encodeWireFrame({
-        harness: "Codex",
+        harness: "codex",
         operation: "observe",
         protocolVersion: WIRE_PROTOCOL_VERSION,
         requestId,
@@ -873,7 +923,7 @@ else process.exitCode = 2;
       try {
         child.stdin.write(
           encodeWireFrame({
-            harness: "Codex",
+            harness: "codex",
             operation: "observe",
             protocolVersion: WIRE_PROTOCOL_VERSION,
             requestId,
@@ -962,7 +1012,7 @@ else process.exitCode = 2;
       );
       await chmod(executable, 0o700);
       const observation = encodeWireFrame({
-        harness: "Codex",
+        harness: "codex",
         operation: "observe",
         protocolVersion: WIRE_PROTOCOL_VERSION,
         requestId: "observe-extra",
@@ -1052,7 +1102,7 @@ else process.stdout.write(JSON.stringify([{ filler: "\\\\".repeat(4500000) }]));
 
       const outcome = await runBootstrap(
         encodeWireFrame({
-          harness: "Codex",
+          harness: "codex",
           operation: "observe",
           protocolVersion: WIRE_PROTOCOL_VERSION,
           requestId: "observe-limit",

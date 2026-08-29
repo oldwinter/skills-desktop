@@ -813,7 +813,7 @@ try {
   const createdSsh = await first.page
     .evaluate(`window.skillsDesktop.createTarget({
     connectionReference: "packaged-ssh",
-    harness: "Codex",
+    harnessIds: ["codex"],
     kind: "ssh",
     label: "Packaged SSH",
     workspace: ${JSON.stringify(workspace)},
@@ -1308,7 +1308,7 @@ try {
     ),
   );
   if (
-    targetDocument.schemaVersion !== 3 ||
+    targetDocument.schemaVersion !== 4 ||
     targetDocument.targets.length !== 2 ||
     targetDocument.targets.some(({ kind }) => kind !== "local") ||
     targetDocument.targets.some(

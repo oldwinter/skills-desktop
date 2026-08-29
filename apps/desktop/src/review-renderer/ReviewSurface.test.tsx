@@ -15,6 +15,17 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ReviewBridge } from "../contracts/review.js";
 import { ReviewSurface } from "./ReviewSurface.js";
 
+const targetV4Metadata = {
+  connectionReference: null,
+  dialectId: "skills-1.5.23" as const,
+  executionBindingDigest: null,
+  harnessIds: ["codex"],
+  registryDigest:
+    "sha256:36d0c792e0480a13818d890e1dccc93e3b29a4ea44af78091e80db8a3e9181de" as const,
+  registryVersion: 1 as const,
+  workspace: "/work/skills-desktop",
+};
+
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
@@ -34,7 +45,7 @@ describe("Trusted Review surface", () => {
           ok: true,
           value: {
             decision: "approve",
-            schemaVersion: 1,
+            schemaVersion: 2,
             status: "settled",
           },
         };
@@ -130,15 +141,16 @@ describe("Trusted Review surface", () => {
               expiresAt: "2026-08-22T06:10:00.000Z",
               reviewId: "collection-review",
               target: {
+                ...targetV4Metadata,
                 generation: 1,
-                harness: "Codex",
                 id: "00000000-0000-4000-8000-000000000001",
                 kind: "local" as const,
                 label: "This device",
+                workspace: "/work/skills-desktop",
                 workspaceLabel: "skills-desktop",
               },
             },
-            schemaVersion: 1 as const,
+            schemaVersion: 2 as const,
             status: "pending" as const,
           },
         };
@@ -184,17 +196,17 @@ describe("Trusted Review surface", () => {
       value: { operationId: "collection-execution-many" },
     }));
     const localTarget = {
+      ...targetV4Metadata,
       generation: 1,
-      harness: "Codex",
       id: "00000000-0000-4000-8000-000000000001",
       kind: "local" as const,
       label: "This device",
       workspaceLabel: "skills-desktop",
     };
     const sshTarget = {
+      ...targetV4Metadata,
       connectionReference: "build-host",
       generation: 3,
-      harness: "Codex",
       id: "00000000-0000-4000-8000-000000000002",
       kind: "ssh" as const,
       label: "Build host",
@@ -313,7 +325,7 @@ describe("Trusted Review surface", () => {
               reviewId: "collection-review-many",
               target: localTarget,
             },
-            schemaVersion: 1 as const,
+            schemaVersion: 2 as const,
             status: "pending" as const,
           },
         };
@@ -385,15 +397,16 @@ describe("Trusted Review surface", () => {
               purpose: "execute",
               reviewId: "review-1",
               target: {
+                ...targetV4Metadata,
                 generation: 1,
-                harness: "Codex",
                 id: "00000000-0000-4000-8000-000000000001",
                 kind: "local",
                 label: "This device",
+                workspace: "/work/skills-desktop",
                 workspaceLabel: "skills-desktop",
               },
             },
-            schemaVersion: 1,
+            schemaVersion: 2,
             status: "pending",
           },
         };
@@ -452,9 +465,9 @@ describe("Trusted Review surface", () => {
               identity: "deploy@resolved.internal:2222",
               reviewId: "trust-review-rejected",
               target: {
+                ...targetV4Metadata,
                 connectionReference: "build-host",
                 generation: 4,
-                harness: "Codex",
                 id: "00000000-0000-4000-8000-000000000018",
                 kind: "ssh" as const,
                 label: "Build host",
@@ -463,7 +476,7 @@ describe("Trusted Review surface", () => {
               },
               trustAction: "first-use" as const,
             },
-            schemaVersion: 1 as const,
+            schemaVersion: 2 as const,
             status: "pending" as const,
           },
         };
@@ -496,9 +509,9 @@ describe("Trusted Review surface", () => {
               identity: "deploy@resolved.internal:2222",
               reviewId: "trust-review-1",
               target: {
+                ...targetV4Metadata,
                 connectionReference: "build-host",
                 generation: 4,
-                harness: "Codex",
                 id: "00000000-0000-4000-8000-000000000018",
                 kind: "ssh" as const,
                 label: "Build host",
@@ -507,7 +520,7 @@ describe("Trusted Review surface", () => {
               },
               trustAction: "rotation" as const,
             },
-            schemaVersion: 1 as const,
+            schemaVersion: 2 as const,
             status: "pending" as const,
           },
         };

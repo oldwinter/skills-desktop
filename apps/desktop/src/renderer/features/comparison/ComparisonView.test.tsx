@@ -63,10 +63,19 @@ const mutation: WorkspaceSnapshot["mutation"] = {
   reconciliationDeadline: null,
 };
 
+const targetV4Metadata = {
+  dialectId: "skills-1.5.23" as const,
+  executionBindingDigest: null,
+  harnessIds: ["codex"],
+  registryDigest:
+    "sha256:36d0c792e0480a13818d890e1dccc93e3b29a4ea44af78091e80db8a3e9181de" as const,
+  registryVersion: 1 as const,
+};
+
 const leftTarget: TargetDefinition = {
   connectionReference: null,
+  ...targetV4Metadata,
   generation: 1,
-  harness: "Codex",
   id: leftId,
   kind: "local",
   label: "Left device",
@@ -76,8 +85,8 @@ const leftTarget: TargetDefinition = {
 
 const rightTarget: TargetDefinition = {
   connectionReference: null,
+  ...targetV4Metadata,
   generation: 1,
-  harness: "Codex",
   id: rightId,
   kind: "local",
   label: "Right device",
@@ -87,8 +96,8 @@ const rightTarget: TargetDefinition = {
 
 const sshTarget: TargetDefinition = {
   connectionReference: "build-host",
+  ...targetV4Metadata,
   generation: 1,
-  harness: "Codex",
   id: sshId,
   kind: "ssh",
   label: "SSH device",
@@ -184,7 +193,7 @@ function baseSnapshot(
     eventSequence: 0,
     inventory,
     mutation,
-    schemaVersion: 1,
+    schemaVersion: 2,
     sessionEpoch: "epoch-1",
     stateRevision: 1,
     target: leftTarget,

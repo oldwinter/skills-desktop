@@ -1,6 +1,14 @@
 import { z } from "zod";
 
-import { mutationIntentSchema } from "@skills-desktop/skills-runtime";
+import {
+  HARNESS_REGISTRY_DIGEST,
+  HARNESS_REGISTRY_VERSION,
+  mutationIntentSchema,
+  normalizeHarnessIds,
+  SKILLS_DIALECT_ID,
+} from "@skills-desktop/skills-runtime";
+
+export const WORKSPACE_PROTOCOL_VERSION = 2 as const;
 
 export const rendererErrorCodeSchema = z.enum([
   "cancelled",
@@ -51,23 +59,72 @@ export const rendererErrorSchema = z
 
 export const targetIdSchema = z.string().uuid();
 
-export const targetDefinitionSchema = z
+export const harnessIdsSchema = z
+  .array(z.string().min(1).max(128))
+  .min(1)
+  .max(77)
+  .superRefine((harnessIds, context) => {
+    const normalized = normalizeHarnessIds(harnessIds);
+    if (
+      !normalized.ok ||
+      JSON.stringify(normalized.value) !== JSON.stringify(harnessIds)
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "Harness IDs must be unique and in registry order.",
+      });
+    }
+  });
+
+export const durableTargetDefinitionSchema = z
   .object({
-    connectionReference: z.string().min(1).max(256).nullable().optional(),
+    connectionReference: z.string().min(1).max(256).nullable(),
+    dialectId: z.literal(SKILLS_DIALECT_ID),
+    executionBindingDigest: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/)
+      .nullable(),
     generation: z.number().int().positive(),
-    harness: z.string().min(1).max(128),
+    harnessIds: harnessIdsSchema,
     id: targetIdSchema,
     kind: z.enum(["local", "ssh"]),
     label: z.string().min(1).max(256),
-    workspace: z.string().min(1).max(4_096).optional(),
-    workspaceLabel: z.string().min(1).max(512),
+    registryDigest: z.literal(HARNESS_REGISTRY_DIGEST),
+    registryVersion: z.literal(HARNESS_REGISTRY_VERSION),
+    workspace: z.string().min(1).max(4_096),
+  })
+  .strict()
+  .superRefine((target, context) => {
+    if (
+      (target.kind === "local" && target.connectionReference !== null) ||
+      (target.kind === "ssh" && target.connectionReference === null) ||
+      (target.kind === "local" && target.executionBindingDigest !== null)
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "Target kind and connection reference do not match.",
+      });
+    }
+  });
+
+export const targetDefinitionSchema = durableTargetDefinitionSchema.safeExtend({
+  workspaceLabel: z.string().min(1).max(512),
+});
+
+export const blockedTargetDefinitionSchema = z
+  .object({
+    generation: z.number().int().nonnegative(),
+    id: targetIdSchema,
+    label: z.string().min(1).max(256),
+    legacyHarness: z.string().min(1).max(128),
+    reason: z.literal("unsupported_harness"),
   })
   .strict();
 
 export const targetDraftSchema = z
   .object({
     connectionReference: z.string().min(1).max(256).nullable(),
-    harness: z.string().min(1).max(128),
+    harnessIds: harnessIdsSchema,
     kind: z.enum(["local", "ssh"]),
     label: z.string().min(1).max(256),
     workspace: z.string().min(1).max(4_096),
@@ -133,6 +190,7 @@ export const publicInventoryStateSchema = z
 export const commandPlanSchema = z
   .object({
     harness: z.string().min(1).max(128),
+    harnessIds: harnessIdsSchema.optional(),
     names: z.array(z.string().min(1).max(256)).min(1).max(128),
     operation: z.enum(["add", "remove", "update"]),
     preview: z.string().min(1).max(16_384),
@@ -564,12 +622,13 @@ export const publicTargetStateSchema = z
 
 export const workspaceSnapshotSchema = z
   .object({
+    blockedTargets: z.array(blockedTargetDefinitionSchema).max(1_000).optional(),
     eventSequence: z.number().int().nonnegative(),
     comparison: publicComparisonSchema.nullable().optional(),
     collections: publicCollectionsStateSchema.optional(),
     inventory: publicInventoryStateSchema,
     mutation: publicMutationStateSchema,
-    schemaVersion: z.literal(1),
+    schemaVersion: z.literal(WORKSPACE_PROTOCOL_VERSION),
     sessionEpoch: z.string().min(1).max(256),
     stateRevision: z.number().int().nonnegative(),
     target: targetDefinitionSchema,
@@ -611,7 +670,7 @@ export const refreshRequestSchema = z
   .object({
     targetId: targetIdSchema,
     type: z.literal("inventory.refresh"),
-    version: z.literal(1),
+    version: z.literal(WORKSPACE_PROTOCOL_VERSION),
   })
   .strict();
 
@@ -619,7 +678,7 @@ export const cancelRequestSchema = z
   .object({
     operationId: z.string().min(1).max(256),
     type: z.literal("inventory.cancel"),
-    version: z.literal(1),
+    version: z.literal(WORKSPACE_PROTOCOL_VERSION),
   })
   .strict();
 
@@ -628,7 +687,7 @@ export const prepareMutationRequestSchema = z
     intent: mutationIntentSchema,
     targetId: targetIdSchema,
     type: z.literal("mutation.prepare"),
-    version: z.literal(1),
+    version: z.literal(WORKSPACE_PROTOCOL_VERSION),
   })
   .strict();
 
@@ -636,7 +695,7 @@ export const requestReviewSchema = z
   .object({
     preparedMutationId: z.string().min(1).max(256),
     type: z.literal("review.request"),
-    version: z.literal(1),
+    version: z.literal(WORKSPACE_PROTOCOL_VERSION),
   })
   .strict();
 
@@ -644,7 +703,7 @@ export const requestHostTrustReviewSchema = z
   .object({
     targetId: targetIdSchema,
     type: z.literal("host-trust.review"),
-    version: z.literal(1),
+    version: z.literal(WORKSPACE_PROTOCOL_VERSION),
   })
   .strict();
 
@@ -652,7 +711,7 @@ export const requestCancellationReviewSchema = z
   .object({
     operationId: z.string().min(1).max(256),
     type: z.literal("review.cancel-request"),
-    version: z.literal(1),
+    version: z.literal(WORKSPACE_PROTOCOL_VERSION),
   })
   .strict();
 
@@ -660,7 +719,7 @@ export const reconcileMutationRequestSchema = z
   .object({
     targetId: targetIdSchema,
     type: z.literal("mutation.reconcile"),
-    version: z.literal(1),
+    version: z.literal(WORKSPACE_PROTOCOL_VERSION),
   })
   .strict();
 
@@ -668,7 +727,7 @@ export const createTargetRequestSchema = z
   .object({
     definition: targetDraftSchema,
     type: z.literal("target.create"),
-    version: z.literal(1),
+    version: z.literal(WORKSPACE_PROTOCOL_VERSION),
   })
   .strict();
 
@@ -677,7 +736,7 @@ export const updateTargetRequestSchema = z
     definition: targetDraftSchema,
     targetId: targetIdSchema,
     type: z.literal("target.update"),
-    version: z.literal(1),
+    version: z.literal(WORKSPACE_PROTOCOL_VERSION),
   })
   .strict();
 
@@ -685,7 +744,7 @@ export const deleteTargetRequestSchema = z
   .object({
     targetId: targetIdSchema,
     type: z.literal("target.delete"),
-    version: z.literal(1),
+    version: z.literal(WORKSPACE_PROTOCOL_VERSION),
   })
   .strict();
 
@@ -694,7 +753,7 @@ export const openComparisonRequestSchema = z
     leftTargetId: targetIdSchema,
     rightTargetId: targetIdSchema,
     type: z.literal("comparison.open"),
-    version: z.literal(1),
+    version: z.literal(WORKSPACE_PROTOCOL_VERSION),
   })
   .strict()
   .refine((request) => request.leftTargetId !== request.rightTargetId);
@@ -705,7 +764,7 @@ export const prepareComparisonRequestSchema = z
     destinationTargetId: targetIdSchema,
     rowKey: z.string().min(1).max(256),
     type: z.literal("comparison.prepare"),
-    version: z.literal(1),
+    version: z.literal(WORKSPACE_PROTOCOL_VERSION),
   })
   .strict();
 
@@ -733,7 +792,7 @@ export const prepareCollectionRequestSchema = z
       ),
     targetId: targetIdSchema,
     type: z.literal("collection.prepare"),
-    version: z.literal(1),
+    version: z.literal(WORKSPACE_PROTOCOL_VERSION),
   })
   .strict();
 
@@ -768,7 +827,7 @@ export const prepareCollectionAcrossTargetsRequestSchema = z
           targets.length,
       ),
     type: z.literal("collection.prepare-many"),
-    version: z.literal(1),
+    version: z.literal(WORKSPACE_PROTOCOL_VERSION),
   })
   .strict();
 
@@ -776,7 +835,7 @@ export const requestCollectionReviewSchema = z
   .object({
     collectionPlanId: z.string().min(1).max(256),
     type: z.literal("collection.review.request"),
-    version: z.literal(1),
+    version: z.literal(WORKSPACE_PROTOCOL_VERSION),
   })
   .strict();
 
@@ -834,7 +893,13 @@ export type PrepareCollectionAcrossTargetsRequest = z.infer<
 >;
 export type PublicMutationState = z.infer<typeof publicMutationStateSchema>;
 export type RendererError = z.infer<typeof rendererErrorSchema>;
+export type DurableTargetDefinition = z.infer<
+  typeof durableTargetDefinitionSchema
+>;
 export type TargetDefinition = z.infer<typeof targetDefinitionSchema>;
+export type BlockedTargetDefinition = z.infer<
+  typeof blockedTargetDefinitionSchema
+>;
 export type TargetDraft = z.infer<typeof targetDraftSchema>;
 export type WorkspaceRequest = z.infer<typeof workspaceRequestSchema>;
 export type WorkspaceRequestResult = z.infer<

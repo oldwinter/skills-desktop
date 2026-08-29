@@ -1,6 +1,7 @@
 import {
   CLI_PACKAGE,
   CLI_VERSION,
+  HARNESS_SCOPE_SUPPORT_BY_ID,
   WIRE_FRAME_ENCODER_SOURCE,
   WIRE_REQUEST_VALIDATOR_SOURCE,
   WIRE_SINGLE_FRAME_DECODER_SOURCE,
@@ -42,6 +43,7 @@ const isWireRequest = (value) => validateWireRequest(
   const MAX_REQUEST_BYTES = ${MAX_WIRE_REQUEST_BYTES};
   const CLI_PACKAGE = ${JSON.stringify(CLI_PACKAGE)};
   const CLI_VERSION = ${JSON.stringify(CLI_VERSION)};
+  const HARNESS_SCOPE_SUPPORT_BY_ID = ${JSON.stringify(HARNESS_SCOPE_SUPPORT_BY_ID)};
   const children = new Set();
   const mutationGroups = new Set();
   let requestMutationCleanup;
@@ -207,6 +209,14 @@ const isWireRequest = (value) => validateWireRequest(
   }
   if (!isWireRequest(request) || request.operation === "cancel") {
     failure("remote_protocol_violation", "The Wire request is not a supported operation.", "wire");
+    stopReading();
+    return;
+  }
+  const harnessId = Object.prototype.hasOwnProperty.call(HARNESS_SCOPE_SUPPORT_BY_ID, request.harness)
+    ? request.harness
+    : undefined;
+  if (harnessId === undefined) {
+    failure("remote_protocol_violation", "The Wire harness is not supported by the pinned Skills dialect.", "wire", request.requestId);
     stopReading();
     return;
   }
@@ -608,15 +618,20 @@ const isWireRequest = (value) => validateWireRequest(
       phase = "mutation";
       if (transportLost) throw { code: "remote_operation_failed" };
       const mutation = request.mutation;
+      if (!HARNESS_SCOPE_SUPPORT_BY_ID[harnessId][mutation.scope]) {
+        failure("remote_protocol_violation", "The Wire harness is not supported in the selected scope.", "wire", request.requestId);
+        stopReading();
+        return;
+      }
       const scopeFlag = mutation.scope === "global"
         ? ["--global"]
         : mutation.type === "update"
           ? ["--project"]
           : [];
       const args = mutation.type === "add"
-        ? ["add", mutation.source.revision === undefined ? mutation.source.source : "https://github.com/" + mutation.source.source + "/archive/" + mutation.source.revision + ".tar.gz", "--skill", ...mutation.names, "--agent", request.harness.toLowerCase(), ...scopeFlag, "--yes"]
+        ? ["add", mutation.source.revision === undefined ? mutation.source.source : "https://github.com/" + mutation.source.source + "/archive/" + mutation.source.revision + ".tar.gz", "--skill", ...mutation.names, "--agent", harnessId, ...scopeFlag, "--yes"]
         : mutation.type === "remove"
-          ? ["remove", ...mutation.names, "--agent", request.harness.toLowerCase(), ...scopeFlag, "--yes"]
+          ? ["remove", ...mutation.names, "--agent", harnessId, ...scopeFlag, "--yes"]
           : ["update", ...mutation.names, ...scopeFlag, "--yes"];
       const mutationOutcome = await invokeMutation(
         args,

@@ -9,7 +9,9 @@ import {
   type WorkspaceRequestResult,
 } from "./workspace.js";
 
-const reviewProjectionSchema = z
+export const REVIEW_PROTOCOL_VERSION = 2 as const;
+
+export const reviewProjectionSchema = z
   .object({
     commandPlan: commandPlanSchema,
     expiresAt: z.string().datetime({ offset: true }),
@@ -19,7 +21,7 @@ const reviewProjectionSchema = z
   })
   .strict();
 
-const hostTrustReviewProjectionSchema = z
+export const hostTrustReviewProjectionSchema = z
   .object({
     algorithm: z.string().min(1).max(128),
     expiresAt: z.string().datetime({ offset: true }),
@@ -31,7 +33,7 @@ const hostTrustReviewProjectionSchema = z
   })
   .strict();
 
-const collectionReviewProjectionSchema = z
+export const collectionReviewProjectionSchema = z
   .object({
     collectionPlan: publicCollectionPlanSchema,
     expiresAt: z.string().datetime({ offset: true }),
@@ -43,7 +45,7 @@ const collectionReviewProjectionSchema = z
 export const reviewSnapshotSchema = z.discriminatedUnion("status", [
   z
     .object({
-      schemaVersion: z.literal(1),
+      schemaVersion: z.literal(REVIEW_PROTOCOL_VERSION),
       status: z.literal("unavailable"),
     })
     .strict(),
@@ -54,14 +56,14 @@ export const reviewSnapshotSchema = z.discriminatedUnion("status", [
         hostTrustReviewProjectionSchema,
         collectionReviewProjectionSchema,
       ]),
-      schemaVersion: z.literal(1),
+      schemaVersion: z.literal(REVIEW_PROTOCOL_VERSION),
       status: z.literal("pending"),
     })
     .strict(),
   z
     .object({
       decision: z.enum(["approve", "reject"]),
-      schemaVersion: z.literal(1),
+      schemaVersion: z.literal(REVIEW_PROTOCOL_VERSION),
       status: z.literal("settled"),
     })
     .strict(),
@@ -80,7 +82,7 @@ export const reviewDecisionRequestSchema = z
   .object({
     decision: z.enum(["approve", "reject"]),
     type: z.literal("review.decide"),
-    version: z.literal(1),
+    version: z.literal(REVIEW_PROTOCOL_VERSION),
   })
   .strict();
 
