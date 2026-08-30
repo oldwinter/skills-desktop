@@ -136,17 +136,18 @@ code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; fo
 .empty-state h2, .inspector-empty h2 { color: var(--text); font-size: var(--font-size-ui); }
 .empty-state p { font-size: var(--font-size-meta); }
 
-.inspector { overflow: auto; padding: 16px; box-shadow: -1px 0 0 var(--line), 0 2px 8px rgb(32 33 36 / 5%); }
-.inspector-heading { gap: 10px; padding: 2px 0 14px; border-bottom: 1px solid var(--line); }
+.inspector { display: flex; flex-direction: column; min-height: 0; overflow: hidden; padding: 16px; box-shadow: -1px 0 0 var(--line), 0 2px 8px rgb(32 33 36 / 5%); }
+.inspector-heading { flex: 0 0 auto; gap: 10px; padding: 2px 0 14px; border-bottom: 1px solid var(--line); }
 .inspector-heading > div { min-width: 0; }
 .inspector-heading p { color: var(--text-tertiary); font-size: var(--font-size-meta); }
 .inspector-heading h2 { margin-top: 2px; overflow-wrap: anywhere; }
-.evidence-list { display: grid; }
+.inspector-empty { flex: 1 1 auto; min-height: 0; overflow: auto; }
+.evidence-list { display: grid; flex: 1 1 auto; min-height: 0; overflow: auto; }
 .evidence-list > div { display: grid; gap: 4px; padding: 13px 0; border-bottom: 1px solid var(--line); }
 .evidence-list dt { color: var(--text-tertiary); font-size: var(--font-size-meta); }
 .evidence-list dd { min-width: 0; font-size: var(--font-size-meta); overflow-wrap: anywhere; }
-.inspector-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding-top: 14px; }
-.add-skill-form, .command-plan { display: grid; gap: 10px; margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line); }
+.inspector-actions { flex: 0 0 auto; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding-top: 14px; }
+.add-skill-form, .command-plan { flex: 0 0 auto; display: grid; gap: 10px; margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line); }
 .add-skill-form h2 { font-size: var(--font-size-ui); }
 .add-skill-form label { display: grid; gap: 5px; color: var(--text-tertiary); font-size: var(--font-size-meta); }
 .add-skill-form input { min-width: 0; width: 100%; height: 40px; padding: 0 9px; color: var(--text); background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--radius-control); }
