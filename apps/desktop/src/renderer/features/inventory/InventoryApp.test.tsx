@@ -625,6 +625,63 @@ describe("Local Target Inventory shell", () => {
     ).toBeInTheDocument();
   });
 
+  it("clears Inspector when the visible table is empty (#143)", async () => {
+    render(
+      <InventoryApp
+        client={clientFor({
+          ...snapshot,
+          inventory: {
+            ...snapshot.inventory,
+            entries: [
+              {
+                ...snapshot.inventory.entries[0]!,
+                agents: ["Codex"],
+              },
+            ],
+          },
+        })}
+      />,
+    );
+
+    expect(
+      await screen.findByRole("button", { name: "Prepare removal" }),
+    ).toBeInTheDocument();
+
+    fireEvent.change(
+      screen.getByRole("searchbox", { name: "Search inventory" }),
+      {
+        target: { value: "no-such-skill" },
+      },
+    );
+
+    expect(
+      screen.getByRole("heading", { name: "No matching skills" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "No skill selected" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("No skills in the current filter."),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Prepare removal" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Prepare update" }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.change(
+      screen.getByRole("searchbox", { name: "Search inventory" }),
+      {
+        target: { value: "" },
+      },
+    );
+
+    expect(
+      await screen.findByRole("button", { name: "Prepare removal" }),
+    ).toBeInTheDocument();
+  });
+
   it("reports visible inventory count with singular and matching copy (#136, #139)", async () => {
     const twoSkills: WorkspaceSnapshot = {
       ...snapshot,

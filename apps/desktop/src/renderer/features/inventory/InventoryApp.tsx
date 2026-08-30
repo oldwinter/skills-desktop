@@ -494,16 +494,15 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
   }, [inventory, query, scope]);
 
   const selected = useMemo(() => {
-    const entries = inventory?.entries ?? [];
     if (selectedIdentity !== undefined) {
-      return entries.find(
+      return filteredEntries.find(
         (entry) =>
           entry.name === selectedIdentity.name &&
           entry.scope === selectedIdentity.scope,
       );
     }
-    return entries[0];
-  }, [inventory, selectedIdentity]);
+    return filteredEntries[0];
+  }, [filteredEntries, selectedIdentity]);
 
   if (snapshot === undefined) {
     if (bootstrapError !== undefined) {
@@ -1125,6 +1124,11 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                       <p>
                         Refresh this Target, or install a skill via npx skills.
                       </p>
+                    </>
+                  ) : filteredEntries.length === 0 ? (
+                    <>
+                      <h2>No skill selected</h2>
+                      <p>No skills in the current filter.</p>
                     </>
                   ) : (
                     <>
