@@ -388,11 +388,16 @@ describe("TargetsView", () => {
       expect(defaultDl).not.toHaveTextContent("Generation");
     }
 
-    expect(within(articles[0]).getByText("Local")).toBeInTheDocument();
-    expect(within(articles[0]).getAllByText("This device").length).toBeGreaterThan(0);
-    expect(within(articles[2]).getByText("build-host")).toBeInTheDocument();
+    const firstArticle = articles[0];
+    const sshArticle = articles[2];
+    if (firstArticle === undefined || sshArticle === undefined) {
+      throw new Error("expected local and SSH target articles");
+    }
+    expect(within(firstArticle).getByText("Local")).toBeInTheDocument();
+    expect(within(firstArticle).getAllByText("This device").length).toBeGreaterThan(0);
+    expect(within(sshArticle).getByText("build-host")).toBeInTheDocument();
 
-    const advanced = within(articles[0]).getByText("Advanced");
+    const advanced = within(firstArticle).getByText("Advanced");
     const details = advanced.closest("details");
     expect(details).not.toBeNull();
     expect(details).not.toHaveAttribute("open");
