@@ -339,11 +339,14 @@ export async function runPackagedUiQa({
       ),
       heading: document.querySelector("h1")?.textContent ?? "",
       refresh: document.querySelector('[aria-label="Refresh inventory"]') !== null,
+      scrollableEvidence:
+        document.querySelector('dl.evidence-list[aria-label="Skill evidence details"][tabindex="0"]') !== null,
     })`);
     if (
       !semantics.groups.includes("Inventory scope") ||
       semantics.heading !== "Inventory" ||
-      semantics.refresh !== true
+      semantics.refresh !== true ||
+      semantics.scrollableEvidence !== true
     ) {
       throw new Error(
         `Screen-reader semantics failed: ${JSON.stringify(semantics)}`,

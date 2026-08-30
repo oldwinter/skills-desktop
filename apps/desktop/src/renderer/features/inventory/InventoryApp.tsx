@@ -1194,7 +1194,11 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                       <h2>{selected.name}</h2>
                     </div>
                   </header>
-                  <dl className="evidence-list">
+                  <dl
+                    aria-label="Skill evidence details"
+                    className="evidence-list"
+                    tabIndex={0}
+                  >
                     <div>
                       <dt>Scope</dt>
                       <dd>{scopeLabel(selected.scope)}</dd>

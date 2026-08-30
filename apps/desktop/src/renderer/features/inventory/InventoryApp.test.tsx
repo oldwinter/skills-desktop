@@ -426,6 +426,10 @@ describe("Local Target Inventory shell", () => {
     expect(screen.getAllByText("Project").length).toBeGreaterThan(0);
     expect(screen.getByText("Fresh evidence")).toBeInTheDocument();
     expect(screen.getByText("Revision unknown")).toBeInTheDocument();
+    expect(screen.getByLabelText("Skill evidence details")).toHaveAttribute(
+      "tabindex",
+      "0",
+    );
   });
 
   it("exposes Inventory and Add scopes as named groups with ordered pressed buttons", async () => {
