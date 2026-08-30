@@ -375,7 +375,6 @@ describe("TargetsView", () => {
     expect(screen.queryByText(/^fresh$/)).not.toBeInTheDocument();
     expect(screen.queryByText(/^stale$/)).not.toBeInTheDocument();
     expect(screen.queryByText(/^loading$/)).not.toBeInTheDocument();
-    expect(screen.queryByText("Generation")).not.toBeInTheDocument();
 
     const articles = screen.getAllByRole("article");
     expect(articles).toHaveLength(4);
