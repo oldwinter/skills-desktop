@@ -148,17 +148,9 @@ async function scanWithAxe(page, axeSource, label) {
       violation.impact === "serious" || violation.impact === "critical",
   );
   if (blocking.length > 0) {
-    const ids = blocking.map((violation) => violation.id);
-    const diagnostic = ids.every((id) => id === "color-contrast")
-      ? "axe-blocking-color-contrast"
-      : ids.some(
-            (id) =>
-              id.startsWith("aria-") ||
-              id.includes("label") ||
-              id.includes("name"),
-          )
-        ? "axe-blocking-accessible-name"
-        : "axe-blocking-other";
+    const diagnostic = `axe-rule-${blocking
+      .map((violation) => violation.id)
+      .sort()[0]}`;
     throw Object.assign(
       new Error(`Axe violations in ${label}: ${JSON.stringify(blocking)}`),
       { qaDiagnostic: diagnostic },

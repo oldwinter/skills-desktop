@@ -55,15 +55,13 @@ const allowedErrorClasses = new Set([
   "PackagedUiQaScenarioError",
 ]);
 const axeDiagnostics = new Set([
-  "axe-blocking-accessible-name",
-  "axe-blocking-color-contrast",
-  "axe-blocking-other",
   "axe-install-evaluation-failed",
   "axe-install-unavailable",
   "axe-result-invalid",
   "axe-run-evaluation-failed",
   "axe-run-unavailable",
 ]);
+const axeRuleDiagnostic = /^axe-rule-[a-z0-9-]{1,64}$/;
 const allowedDiagnosticsByCheck = new Map([
   ["review-axe", axeDiagnostics],
   ["settled-axe", axeDiagnostics],
@@ -123,7 +121,8 @@ export function failureReceipt(error, fallbackStage = "unknown") {
     diagnostic:
       typeof proposedDiagnostic === "string" &&
       (proposedDiagnostic === "unknown" ||
-        allowedDiagnosticsByCheck.get(check)?.has(proposedDiagnostic) === true)
+        allowedDiagnosticsByCheck.get(check)?.has(proposedDiagnostic) === true ||
+        (check.endsWith("-axe") && axeRuleDiagnostic.test(proposedDiagnostic)))
         ? proposedDiagnostic
         : "unknown",
     errorClass: allowedErrorClasses.has(proposedClass) ? proposedClass : "Error",

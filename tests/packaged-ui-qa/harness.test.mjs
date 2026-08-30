@@ -1047,11 +1047,12 @@ describe("packaged UI QA scenario contract", () => {
     expect(failureReceipt(failure).diagnostic).toBe("unknown");
 
     failure.qaCheck = "workspace-axe";
-    failure.qaDiagnostic = "axe-blocking-color-contrast";
-    expect(failureReceipt(failure).diagnostic).toBe(
-      "axe-blocking-color-contrast",
-    );
+    failure.qaDiagnostic = "axe-rule-color-contrast";
+    expect(failureReceipt(failure).diagnostic).toBe("axe-rule-color-contrast");
     failure.qaCheck = "workspace-semantics";
+    expect(failureReceipt(failure).diagnostic).toBe("unknown");
+    failure.qaCheck = "workspace-axe";
+    failure.qaDiagnostic = "axe-rule-color-contrast/secret";
     expect(failureReceipt(failure).diagnostic).toBe("unknown");
   });
 
