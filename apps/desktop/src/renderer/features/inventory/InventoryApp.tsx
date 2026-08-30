@@ -25,12 +25,14 @@ import {
 
 import type { DesktopBridge } from "../../../contracts/desktop.js";
 import { isInventoryEntryAvailableToHarness } from "../../../contracts/inventory-availability.js";
-import type {
-  DesktopEvent,
-  PublicInventoryEntry,
-  PublicInventoryState,
-  RendererError,
-  WorkspaceSnapshot,
+import { GITHUB_SOURCE_OWNER_REPOSITORY_COPY } from "../../../contracts/user-facing-error.js";
+import {
+  isGithubOwnerRepository,
+  type DesktopEvent,
+  type PublicInventoryEntry,
+  type PublicInventoryState,
+  type RendererError,
+  type WorkspaceSnapshot,
 } from "../../../contracts/workspace.js";
 import { UserFacingErrorCopy } from "../../UserFacingErrorCopy.js";
 import { AboutView } from "../about/AboutView.js";
@@ -101,16 +103,6 @@ function scopeLabel(scope: PublicInventoryEntry["scope"]) {
 
 function sourceLabel(entry: PublicInventoryEntry) {
   return entry.declaredSource.source ?? "Provenance unavailable";
-}
-
-const GITHUB_OWNER_REPOSITORY =
-  /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\/[A-Za-z0-9._-]+$/;
-
-const ADD_SKILL_GITHUB_SOURCE_ERROR =
-  "GitHub source must be owner/repository.";
-
-function isGithubOwnerRepository(source: string): boolean {
-  return GITHUB_OWNER_REPOSITORY.test(source.trim());
 }
 
 function inventorySubtitle(count: number, filtered: boolean): string {
@@ -612,7 +604,7 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
     if (sshUnavailable) return;
     const source = addSource.trim();
     if (!isGithubOwnerRepository(source)) {
-      setAddSourceError(ADD_SKILL_GITHUB_SOURCE_ERROR);
+      setAddSourceError(GITHUB_SOURCE_OWNER_REPOSITORY_COPY);
       setActionError(undefined);
       return;
     }
