@@ -9,6 +9,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -340,5 +341,64 @@ describe("TargetsView", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "请求无效。请检查输入后重试。",
     );
+  });
+
+  it("hides Generation from the default list and humanizes inventory status (#141)", () => {
+    const emptyHost = {
+      ...sshTarget,
+      id: "00000000-0000-4000-8000-000000000019",
+      label: "Empty host",
+    };
+    render(
+      <TargetsView
+        client={bridge()}
+        onSelected={vi.fn()}
+        targets={[
+          targetState(localTarget),
+          targetState(secondTarget, {
+            inventory: { ...inventory, freshness: "stale" },
+          }),
+          targetState(sshTarget, {
+            inventory: { ...inventory, freshness: "none", phase: "loading" },
+          }),
+          targetState(emptyHost, {
+            inventory: { ...inventory, freshness: "none", phase: "ready" },
+          }),
+        ]}
+      />,
+    );
+
+    expect(screen.getByText("Fresh")).toBeInTheDocument();
+    expect(screen.getByText("Stale")).toBeInTheDocument();
+    expect(screen.getByText("Loading")).toBeInTheDocument();
+    expect(screen.getByText("No evidence")).toBeInTheDocument();
+    expect(screen.queryByText(/^fresh$/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^stale$/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^loading$/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Generation")).not.toBeInTheDocument();
+
+    const articles = screen.getAllByRole("article");
+    expect(articles).toHaveLength(4);
+    for (const article of articles) {
+      const defaultDl = article.querySelector(":scope > dl");
+      expect(defaultDl).not.toBeNull();
+      expect(defaultDl).toHaveTextContent("Kind");
+      expect(defaultDl).toHaveTextContent("Harness");
+      expect(defaultDl).toHaveTextContent("Connection");
+      expect(defaultDl).not.toHaveTextContent("Generation");
+    }
+
+    expect(within(articles[0]).getByText("Local")).toBeInTheDocument();
+    expect(within(articles[0]).getAllByText("This device").length).toBeGreaterThan(0);
+    expect(within(articles[2]).getByText("build-host")).toBeInTheDocument();
+
+    const advanced = within(articles[0]).getByText("Advanced");
+    const details = advanced.closest("details");
+    expect(details).not.toBeNull();
+    expect(details).not.toHaveAttribute("open");
+    fireEvent.click(advanced);
+    expect(details).toHaveAttribute("open");
+    expect(within(details as HTMLElement).getByText("Generation")).toBeInTheDocument();
+    expect(within(details as HTMLElement).getByText("1")).toBeInTheDocument();
   });
 });

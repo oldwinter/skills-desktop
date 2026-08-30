@@ -186,12 +186,14 @@ export function TargetsView({
                   <dt>Harness</dt>
                   <dd>{state.target.harnessIds.join(", ")}</dd>
                 </div>
-                {state.target.kind === "ssh" ? (
-                  <div>
-                    <dt>Connection</dt>
-                    <dd>{state.target.connectionReference ?? "SSH host"}</dd>
-                  </div>
-                ) : null}
+                <div>
+                  <dt>Connection</dt>
+                  <dd>
+                    {state.target.kind === "ssh"
+                      ? (state.target.connectionReference ?? "SSH host")
+                      : "This device"}
+                  </dd>
+                </div>
               </dl>
               <details className="target-item-advanced">
                 <summary>Advanced</summary>
@@ -200,12 +202,6 @@ export function TargetsView({
                     <dt>Generation</dt>
                     <dd>{state.target.generation}</dd>
                   </div>
-                  {state.target.kind === "local" ? (
-                    <div>
-                      <dt>Connection</dt>
-                      <dd>This device</dd>
-                    </div>
-                  ) : null}
                 </dl>
               </details>
               {state.inventory.lastError !== null ? (
