@@ -7,6 +7,9 @@ export type UserFacingErrorLike = {
   readonly message: string;
 };
 
+export const GITHUB_SOURCE_OWNER_REPOSITORY_COPY =
+  "GitHub source must be owner/repository.";
+
 const USER_FACING_BY_CODE: Readonly<Record<string, string>> = {
   cancelled: "操作已取消。需要时请重试。",
   check_failed: "更新检查未能完成。请稍后重试。",
@@ -53,6 +56,9 @@ export function userFacingErrorMessage(
 ): string {
   if (error === null || error === undefined) {
     return USER_FACING_ERROR_FALLBACK;
+  }
+  if (error.message === GITHUB_SOURCE_OWNER_REPOSITORY_COPY) {
+    return GITHUB_SOURCE_OWNER_REPOSITORY_COPY;
   }
   return USER_FACING_BY_CODE[error.code] ?? USER_FACING_ERROR_FALLBACK;
 }

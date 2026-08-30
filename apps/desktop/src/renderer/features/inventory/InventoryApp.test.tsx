@@ -759,6 +759,47 @@ describe("Local Target Inventory shell", () => {
     await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
   });
 
+  it("explains invalid GitHub source next to Add Skill instead of an unsupported request (#138)", async () => {
+    const prepareMutation = vi.fn();
+    render(
+      <InventoryApp
+        client={{
+          ...clientFor(snapshot),
+          prepareMutation,
+        }}
+      />,
+    );
+
+    fireEvent.change(
+      await screen.findByRole("textbox", { name: "GitHub source" }),
+      {
+        target: { value: "not-a-repo" },
+      },
+    );
+    fireEvent.change(
+      screen.getByRole("textbox", { name: "Exact skill name" }),
+      {
+        target: { value: "not-a-repo" },
+      },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Prepare add" }));
+
+    const form = screen
+      .getByRole("heading", { name: "Add Skill" })
+      .closest("form");
+    expect(form).not.toBeNull();
+    const alert = await screen.findByRole("alert");
+    expect(form!).toContainElement(alert);
+    expect(alert).toHaveTextContent("GitHub source must be owner/repository.");
+    expect(
+      screen.queryByText("The request is not supported."),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("textbox", { name: "GitHub source" }),
+    ).toHaveAttribute("aria-invalid", "true");
+    expect(prepareMutation).not.toHaveBeenCalled();
+  });
+
   it("routes reconciliation failure through the visible action surface", async () => {
     const reconcileMutation = vi.fn(async () => ({
       error: {

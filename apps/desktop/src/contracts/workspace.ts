@@ -691,6 +691,15 @@ export const prepareMutationRequestSchema = z
   })
   .strict();
 
+export function isGithubOwnerRepository(source: string): boolean {
+  return mutationIntentSchema.safeParse({
+    names: ["skill"],
+    scope: "project",
+    source: { source, sourceType: "github" },
+    type: "add",
+  }).success;
+}
+
 export const requestReviewSchema = z
   .object({
     preparedMutationId: z.string().min(1).max(256),

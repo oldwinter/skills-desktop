@@ -4,7 +4,9 @@ import type { Result } from "@skills-desktop/skills-runtime";
 
 import type { RestartGuardReason } from "../../contracts/about.js";
 
+import { GITHUB_SOURCE_OWNER_REPOSITORY_COPY } from "../../contracts/user-facing-error.js";
 import {
+  isGithubOwnerRepository,
   WORKSPACE_PROTOCOL_VERSION,
   workspaceRequestSchema,
   type DesktopEvent,
@@ -178,6 +180,18 @@ function publicError<Code extends RequestError["code"]>(
 
 function requestFailure(error: RequestError): Result<never, RequestError> {
   return { error, ok: false };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function isInvalidGithubAddSourceRequest(input: unknown): boolean {
+  if (!isRecord(input) || input.type !== "mutation.prepare") return false;
+  if (!isRecord(input.intent) || input.intent.type !== "add") return false;
+  if (!isRecord(input.intent.source)) return false;
+  const source = input.intent.source.source;
+  return typeof source === "string" && !isGithubOwnerRepository(source);
 }
 
 function isSingleTargetCollectionPlan(
@@ -2158,7 +2172,9 @@ export function createDesktopCapabilities(
             return requestFailure(
               publicError(
                 "invalid_request",
-                "The request is not supported.",
+                isInvalidGithubAddSourceRequest(input)
+                  ? GITHUB_SOURCE_OWNER_REPOSITORY_COPY
+                  : "The request is not supported.",
                 "validate",
                 false,
               ),

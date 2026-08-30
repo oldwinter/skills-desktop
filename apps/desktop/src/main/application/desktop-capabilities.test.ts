@@ -780,6 +780,25 @@ describe("DesktopCapabilities inventory role-session contract", () => {
         version: 2,
       }),
     ).toMatchObject({ error: { code: "invalid_request" }, ok: false });
+    expect(
+      await workspace.request({
+        intent: {
+          names: ["not-a-repo"],
+          scope: "project",
+          source: { source: "not-a-repo", sourceType: "github" },
+          type: "add",
+        },
+        targetId: target.id,
+        type: "mutation.prepare",
+        version: 2,
+      }),
+    ).toMatchObject({
+      error: {
+        code: "invalid_request",
+        message: "GitHub source must be owner/repository.",
+      },
+      ok: false,
+    });
   });
 
   it("bounds each endpoint event buffer and requires Snapshot resynchronization after overflow", async () => {
