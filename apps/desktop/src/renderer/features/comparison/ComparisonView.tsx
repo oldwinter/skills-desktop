@@ -91,6 +91,19 @@ function compareDisabledReason(input: {
   return undefined;
 }
 
+function comparisonEmptyNextStep(input: {
+  readonly plannableCount: number;
+  readonly sameSides: boolean;
+}): string {
+  if (input.plannableCount < 2) {
+    return "Add another Local Target under Targets, then return here to compare inventories.";
+  }
+  if (input.sameSides) {
+    return "Choose different Left and Right Targets, then click Compare to build the aligned skill table.";
+  }
+  return "Click Compare to build the aligned skill table.";
+}
+
 function prepareDisabledReason(input: {
   readonly busy: boolean;
   readonly comparisonFresh: boolean;
@@ -270,6 +283,10 @@ export function ComparisonView({
     rightTargetId,
     sshSideSelected,
   });
+  const emptyNextStep = comparisonEmptyNextStep({
+    plannableCount: plannableTargets.length,
+    sameSides: leftTargetId === rightTargetId,
+  });
   const compareDescribedBy =
     compareReason === undefined
       ? undefined
@@ -433,9 +450,14 @@ export function ComparisonView({
           </div>
         ) : null}
         {plannableTargets.length >= 2 && leftTargetId === rightTargetId ? (
-          <p className="sr-only" id="comparison-same-sides-reason">
-            Left and Right must be different Targets
-          </p>
+          <div
+            className="state-banner state-banner--loading"
+            id="comparison-same-sides-reason"
+            role="status"
+          >
+            <CircleHelp aria-hidden="true" size={16} />
+            <span>Left and Right must be different Targets</span>
+          </div>
         ) : null}
         {busy ? (
           <p className="sr-only" id="comparison-busy-reason">
@@ -483,7 +505,7 @@ export function ComparisonView({
             <div className="empty-state" role="status">
               <CircleHelp aria-hidden="true" size={22} />
               <h2>No comparison selected</h2>
-              <p>Click Compare to build the aligned skill table.</p>
+              <p>{emptyNextStep}</p>
             </div>
           ) : comparison.rows.length === 0 ? (
             <div className="empty-state" role="status">
@@ -559,6 +581,11 @@ export function ComparisonView({
           <div className="inspector-empty">
             <CircleHelp aria-hidden="true" size={22} />
             <h2>No difference selected</h2>
+            <p>
+              {comparison === null
+                ? emptyNextStep
+                : "Select a skill in the table to inspect the difference."}
+            </p>
           </div>
         ) : (
           <>

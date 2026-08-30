@@ -2600,8 +2600,10 @@ describe("Local Target Inventory shell", () => {
     render(<InventoryApp client={clientFor(snapshot)} />);
     fireEvent.click(await screen.findByRole("button", { name: "Comparison" }));
     expect(
-      screen.getByText("Click Compare to build the aligned skill table."),
-    ).toBeInTheDocument();
+      screen.getAllByText(
+        "Add another Local Target under Targets, then return here to compare inventories.",
+      ).length,
+    ).toBeGreaterThanOrEqual(1);
   });
 
   it("keeps No skill selected when inventory still has rows (#111)", async () => {
