@@ -12,7 +12,7 @@
   ],
   "allowScripts": {
     "electron-winstaller@5.4.4": true,
-    "electron@43.4.1": true
+    "electron@44.0.0": true
   },
   "overrides": {
     "extract-zip": "npm:@electron-internal/extract-zip@1.0.5",
@@ -43,11 +43,11 @@
     "@babel/parser": "8.0.4",
     "@eslint/js": "9.39.5",
     "@testing-library/jest-dom": "7.0.1",
-    "@testing-library/react": "16.3.2",
-    "@types/node": "26.2.0",
+    "@testing-library/react": "16.3.3",
+    "@types/node": "26.4.0",
     "@types/react": "19.2.18",
-    "@types/react-dom": "19.2.4",
-    "@vitejs/plugin-react": "6.1.0",
+    "@types/react-dom": "19.2.5",
+    "@vitejs/plugin-react": "6.1.1",
     "@vitest/coverage-v8": "4.1.11",
     "axe-core": "4.13.0",
     "eslint": "9.39.5",
@@ -55,7 +55,7 @@
     "eslint-plugin-react-hooks": "7.1.1",
     "globals": "17.11.0",
     "jsdom": "30.0.1",
-    "plist": "3.1.1",
+    "plist": "5.0.0",
     "typescript": "7.0.2",
     "vite": "8.2.2",
     "vitest": "4.1.11",

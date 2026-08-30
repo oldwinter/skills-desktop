@@ -21,7 +21,7 @@ Target，也会标成「SSH · 未开放」，不能当作当前可用路径。
 1. 打开 [Releases](https://github.com/oldwinter/skills-desktop/releases)，下载对应平台的预览包，并一并下载 `SHA256SUMS`。
 2. **先校验再安装**：确认产物 SHA-256 与 `SHA256SUMS` 一致。有 GitHub CLI 时，按 [安装指南](unsigned-developer-preview.md) 做 attestation 校验。校验失败请停止。
 3. 按平台完成安装（摘要如下；细节以 `docs/unsigned-developer-preview.md` 为准）：
-   - **macOS**：打开 DMG，拷到 `/Applications`，对本地副本做 ad-hoc `codesign`，必要时在「系统设置 → 隐私与安全性」里对该应用选 **仍然打开**。这不是 Developer ID，也不是公证。
+   - **macOS 13 Ventura 或更高版本**：打开 DMG，拷到 `/Applications`，对本地副本做 ad-hoc `codesign`，必要时在「系统设置 → 隐私与安全性」里对该应用选 **仍然打开**。这不是 Developer ID，也不是公证。
    - **Windows**：运行 `win32-x64-setup.exe`。SmartScreen / 未验证发布者警告时，仅在系统提供按文件覆盖选项且你接受风险时继续；策略禁止覆盖则停止，不要自行削弱组织策略。
    - **Linux**：先对照 `SHA256SUMS` 校验 SHA-256，再用 apt 安装本地 DEB（见下方 Linux 小节）。不要只用 `dpkg -i`。RPM 发行版在同样校验后用发行版常规方式安装。预览包有校验与 provenance，但没有项目运维的 Linux 包签名仓库。
 

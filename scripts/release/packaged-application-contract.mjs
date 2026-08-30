@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 
-import plist from "plist";
+import * as plist from "plist";
 
 const DARWIN_HELPERS = [
   "Skills Desktop Helper (GPU).app",
