@@ -112,6 +112,16 @@ function inventorySubtitle(count: number, filtered: boolean): string {
     : `${count} ${noun} across project and global scopes`;
 }
 
+function isTextEditingTarget(target: EventTarget | null): boolean {
+  return (
+    target instanceof HTMLElement &&
+    (target.isContentEditable ||
+      target instanceof HTMLInputElement ||
+      target instanceof HTMLSelectElement ||
+      target instanceof HTMLTextAreaElement)
+  );
+}
+
 function InventoryStatus({
   snapshot,
 }: {
@@ -244,6 +254,7 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
   const [addScope, setAddScope] = useState<"global" | "project">("project");
   const [view, setView] = useState<WorkspaceView>("inventory");
   const [selectedTargetId, setSelectedTargetId] = useState<string>();
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const mutationOutcomeRef = useRef<HTMLParagraphElement>(null);
   const reviewReturnFocusRef = useRef<HTMLButtonElement | null>(null);
   const targetStates =
@@ -463,6 +474,26 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
     });
     return unsubscribe;
   }, [client]);
+
+  useEffect(() => {
+    if (view !== "inventory") return;
+    const focusInventorySearch = (event: KeyboardEvent) => {
+      if (
+        event.defaultPrevented ||
+        event.key !== "/" ||
+        event.altKey ||
+        event.ctrlKey ||
+        event.metaKey ||
+        isTextEditingTarget(event.target)
+      ) {
+        return;
+      }
+      event.preventDefault();
+      searchInputRef.current?.focus();
+    };
+    window.addEventListener("keydown", focusInventorySearch);
+    return () => window.removeEventListener("keydown", focusInventorySearch);
+  }, [view]);
 
   useEffect(() => {
     const intent = reviewFocusIntentRef.current;
@@ -993,7 +1024,14 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                   <span className="sr-only">Search inventory</span>
                   <input
                     onChange={(event) => setQuery(event.currentTarget.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Escape" && query !== "") {
+                        event.preventDefault();
+                        setQuery("");
+                      }
+                    }}
                     placeholder="Search skills or sources"
+                    ref={searchInputRef}
                     type="search"
                     value={query}
                   />

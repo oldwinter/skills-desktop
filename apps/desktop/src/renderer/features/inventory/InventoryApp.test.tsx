@@ -682,6 +682,36 @@ describe("Local Target Inventory shell", () => {
     ).toBeInTheDocument();
   });
 
+  it("focuses and clears Inventory search without stealing editable input", async () => {
+    render(<InventoryApp client={clientFor(snapshot)} />);
+
+    const search = await screen.findByRole("searchbox", {
+      name: "Search inventory",
+    });
+    const inventoryButton = screen.getByRole("button", { name: "Inventory" });
+    inventoryButton.focus();
+
+    fireEvent.keyDown(inventoryButton, { key: "/" });
+    expect(search).toHaveFocus();
+
+    fireEvent.change(search, { target: { value: "no-such-skill" } });
+    expect(
+      screen.getByRole("heading", { name: "No matching skills" }),
+    ).toBeInTheDocument();
+    fireEvent.keyDown(search, { key: "Escape" });
+    expect(search).toHaveFocus();
+    expect(search).toHaveValue("");
+    expect(
+      screen.getByRole("button", { name: "Case-Sensitive-Skill" }),
+    ).toBeInTheDocument();
+
+    const source = screen.getByRole("textbox", { name: "GitHub source" });
+    source.focus();
+    fireEvent.keyDown(source, { key: "/" });
+    expect(source).toHaveFocus();
+    expect(search).not.toHaveFocus();
+  });
+
   it("reports visible inventory count with singular and matching copy (#136, #139)", async () => {
     const twoSkills: WorkspaceSnapshot = {
       ...snapshot,
