@@ -97,35 +97,72 @@ export function createPackagedUiQaScenarioError(
 }
 
 async function scanWithAxe(page, axeSource, label) {
-  const installed = await page.evaluate(
-    `${axeSource}; typeof window.axe?.run === "function"`,
-  );
-  if (installed !== true) {
-    throw new Error(`Axe did not install in the ${label} renderer.`);
-  }
-  const result = await page.evaluate(`(async () => {
-    if (typeof window.axe?.run !== "function") throw new Error("Axe is unavailable.");
-    const scan = await window.axe.run(document, {
-      runOnly: { type: "tag", values: ["wcag2a", "wcag2aa"] },
+  let installed;
+  try {
+    installed = await page.evaluate(
+      `${axeSource}; typeof window.axe?.run === "function"`,
+    );
+  } catch (cause) {
+    throw Object.assign(new Error("Axe installation evaluation failed.", { cause }), {
+      qaDiagnostic: "axe-install-evaluation-failed",
     });
-    return {
-      version: window.axe.version,
-      violations: scan.violations.map((violation) => ({
-        id: violation.id,
-        impact: violation.impact,
-        nodes: violation.nodes.length,
-      })),
-    };
-  })()`);
+  }
+  if (installed !== true) {
+    throw Object.assign(new Error(`Axe did not install in the ${label} renderer.`), {
+      qaDiagnostic: "axe-install-unavailable",
+    });
+  }
+  let result;
+  try {
+    result = await page.evaluate(`(async () => {
+      if (typeof window.axe?.run !== "function") throw new Error("Axe is unavailable.");
+      const scan = await window.axe.run(document, {
+        runOnly: { type: "tag", values: ["wcag2a", "wcag2aa"] },
+      });
+      return {
+        version: window.axe.version,
+        violations: scan.violations.map((violation) => ({
+          id: violation.id,
+          impact: violation.impact,
+          nodes: violation.nodes.length,
+        })),
+      };
+    })()`);
+  } catch (cause) {
+    const diagnostic =
+      cause instanceof Error && cause.message.includes("Axe is unavailable.")
+        ? "axe-run-unavailable"
+        : "axe-run-evaluation-failed";
+    throw Object.assign(new Error("Axe scan evaluation failed.", { cause }), {
+      qaDiagnostic: diagnostic,
+    });
+  }
   if (typeof result?.version !== "string" || result.version.length === 0) {
-    throw new Error(`Axe did not report a version in the ${label} renderer.`);
+    throw Object.assign(
+      new Error(`Axe did not report a version in the ${label} renderer.`),
+      { qaDiagnostic: "axe-result-invalid" },
+    );
   }
   const blocking = result.violations.filter(
     (violation) =>
       violation.impact === "serious" || violation.impact === "critical",
   );
   if (blocking.length > 0) {
-    throw new Error(`Axe violations in ${label}: ${JSON.stringify(blocking)}`);
+    const ids = blocking.map((violation) => violation.id);
+    const diagnostic = ids.every((id) => id === "color-contrast")
+      ? "axe-blocking-color-contrast"
+      : ids.some(
+            (id) =>
+              id.startsWith("aria-") ||
+              id.includes("label") ||
+              id.includes("name"),
+          )
+        ? "axe-blocking-accessible-name"
+        : "axe-blocking-other";
+    throw Object.assign(
+      new Error(`Axe violations in ${label}: ${JSON.stringify(blocking)}`),
+      { qaDiagnostic: diagnostic },
+    );
   }
   return result;
 }

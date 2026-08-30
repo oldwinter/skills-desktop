@@ -54,7 +54,20 @@ const allowedErrorClasses = new Set([
   "Error",
   "PackagedUiQaScenarioError",
 ]);
-const focusDiagnostics = new Map([
+const axeDiagnostics = new Set([
+  "axe-blocking-accessible-name",
+  "axe-blocking-color-contrast",
+  "axe-blocking-other",
+  "axe-install-evaluation-failed",
+  "axe-install-unavailable",
+  "axe-result-invalid",
+  "axe-run-evaluation-failed",
+  "axe-run-unavailable",
+]);
+const allowedDiagnosticsByCheck = new Map([
+  ["review-axe", axeDiagnostics],
+  ["settled-axe", axeDiagnostics],
+  ["workspace-axe", axeDiagnostics],
   [
     "workspace-focus-restore",
     new Set([
@@ -110,7 +123,7 @@ export function failureReceipt(error, fallbackStage = "unknown") {
     diagnostic:
       typeof proposedDiagnostic === "string" &&
       (proposedDiagnostic === "unknown" ||
-        focusDiagnostics.get(check)?.has(proposedDiagnostic) === true)
+        allowedDiagnosticsByCheck.get(check)?.has(proposedDiagnostic) === true)
         ? proposedDiagnostic
         : "unknown",
     errorClass: allowedErrorClasses.has(proposedClass) ? proposedClass : "Error",
