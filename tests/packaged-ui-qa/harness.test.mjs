@@ -1045,6 +1045,15 @@ describe("packaged UI QA scenario contract", () => {
     });
     failure.qaCheck = "error-state-render";
     expect(failureReceipt(failure).diagnostic).toBe("unknown");
+
+    failure.qaCheck = "workspace-axe";
+    failure.qaDiagnostic = "axe-rule-color-contrast";
+    expect(failureReceipt(failure).diagnostic).toBe("axe-rule-color-contrast");
+    failure.qaCheck = "workspace-semantics";
+    expect(failureReceipt(failure).diagnostic).toBe("unknown");
+    failure.qaCheck = "workspace-axe";
+    failure.qaDiagnostic = "axe-rule-color-contrast/secret";
+    expect(failureReceipt(failure).diagnostic).toBe("unknown");
   });
 
   it("documents the required Local-only scenarios and setup commands", () => {
