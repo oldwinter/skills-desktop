@@ -103,6 +103,16 @@ function sourceLabel(entry: PublicInventoryEntry) {
   return entry.declaredSource.source ?? "Provenance unavailable";
 }
 
+const GITHUB_OWNER_REPOSITORY =
+  /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\/[A-Za-z0-9._-]+$/;
+
+const ADD_SKILL_GITHUB_SOURCE_ERROR =
+  "GitHub source must be owner/repository.";
+
+function isGithubOwnerRepository(source: string): boolean {
+  return GITHUB_OWNER_REPOSITORY.test(source.trim());
+}
+
 function inventorySubtitle(count: number, filtered: boolean): string {
   const noun = count === 1 ? "skill" : "skills";
   return filtered
@@ -238,6 +248,7 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
   const [actionError, setActionError] = useState<RendererError>();
   const [addName, setAddName] = useState("");
   const [addSource, setAddSource] = useState("");
+  const [addSourceError, setAddSourceError] = useState<string>();
   const [addScope, setAddScope] = useState<"global" | "project">("project");
   const [view, setView] = useState<WorkspaceView>("inventory");
   const [selectedTargetId, setSelectedTargetId] = useState<string>();
@@ -599,10 +610,17 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
   };
   const prepareAdd = async () => {
     if (sshUnavailable) return;
+    const source = addSource.trim();
+    if (!isGithubOwnerRepository(source)) {
+      setAddSourceError(ADD_SKILL_GITHUB_SOURCE_ERROR);
+      setActionError(undefined);
+      return;
+    }
+    setAddSourceError(undefined);
     const result = await client.prepareMutation(snapshot.target.id, {
       names: [addName],
       scope: addScope,
-      source: { source: addSource, sourceType: "github" },
+      source: { source, sourceType: "github" },
       type: "add",
     });
     if (result.ok) {
@@ -1233,14 +1251,30 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                 <label>
                   <span>GitHub source</span>
                   <input
-                    onChange={(event) =>
-                      setAddSource(event.currentTarget.value)
+                    aria-errormessage={
+                      addSourceError !== undefined
+                        ? "add-skill-github-source-error"
+                        : undefined
                     }
+                    aria-invalid={addSourceError !== undefined}
+                    onChange={(event) => {
+                      setAddSource(event.currentTarget.value);
+                      setAddSourceError(undefined);
+                    }}
                     placeholder="owner/repository"
                     required
                     value={addSource}
                   />
                 </label>
+                {addSourceError !== undefined ? (
+                  <p
+                    className="field-error"
+                    id="add-skill-github-source-error"
+                    role="alert"
+                  >
+                    {addSourceError}
+                  </p>
+                ) : null}
                 <label>
                   <span>Exact skill name</span>
                   <input
