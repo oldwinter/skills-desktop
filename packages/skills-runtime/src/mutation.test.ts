@@ -50,6 +50,12 @@ describe("Mutation Intent schema", () => {
         type: "add",
       },
       {
+        names: ["not-a-repo"],
+        scope: "project",
+        source: { source: "not-a-repo", sourceType: "github" },
+        type: "add",
+      },
+      {
         flags: ["--yes"],
         names: ["tdd"],
         scope: "project",

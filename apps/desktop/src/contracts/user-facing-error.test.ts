@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  GITHUB_SOURCE_OWNER_REPOSITORY_COPY,
   USER_FACING_ERROR_FALLBACK,
   userFacingErrorMessage,
 } from "./user-facing-error.js";
@@ -71,5 +72,20 @@ describe("userFacingErrorMessage", () => {
   it("falls back safely for nullish errors", () => {
     expect(userFacingErrorMessage(null)).toBe(USER_FACING_ERROR_FALLBACK);
     expect(userFacingErrorMessage(undefined)).toBe(USER_FACING_ERROR_FALLBACK);
+  });
+
+  it("maps invalid GitHub source copy instead of a generic unsupported request", () => {
+    expect(
+      userFacingErrorMessage({
+        code: "invalid_request",
+        message: GITHUB_SOURCE_OWNER_REPOSITORY_COPY,
+      }),
+    ).toBe(GITHUB_SOURCE_OWNER_REPOSITORY_COPY);
+    expect(
+      userFacingErrorMessage({
+        code: "invalid_request",
+        message: "The request is not supported.",
+      }),
+    ).not.toBe("The request is not supported.");
   });
 });

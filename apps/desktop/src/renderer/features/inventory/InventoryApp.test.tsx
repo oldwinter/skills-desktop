@@ -625,6 +625,93 @@ describe("Local Target Inventory shell", () => {
     ).toBeInTheDocument();
   });
 
+  it("clears Inspector when the visible table is empty (#143)", async () => {
+    render(
+      <InventoryApp
+        client={clientFor({
+          ...snapshot,
+          inventory: {
+            ...snapshot.inventory,
+            entries: [
+              {
+                ...snapshot.inventory.entries[0]!,
+                agents: ["Codex"],
+              },
+            ],
+          },
+        })}
+      />,
+    );
+
+    expect(
+      await screen.findByRole("button", { name: "Prepare removal" }),
+    ).toBeInTheDocument();
+
+    fireEvent.change(
+      screen.getByRole("searchbox", { name: "Search inventory" }),
+      {
+        target: { value: "no-such-skill" },
+      },
+    );
+
+    expect(
+      screen.getByRole("heading", { name: "No matching skills" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "No skill selected" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("No skills in the current filter."),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Prepare removal" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Prepare update" }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.change(
+      screen.getByRole("searchbox", { name: "Search inventory" }),
+      {
+        target: { value: "" },
+      },
+    );
+
+    expect(
+      await screen.findByRole("button", { name: "Prepare removal" }),
+    ).toBeInTheDocument();
+  });
+
+  it("focuses and clears Inventory search without stealing editable input", async () => {
+    render(<InventoryApp client={clientFor(snapshot)} />);
+
+    const search = await screen.findByRole("searchbox", {
+      name: "Search inventory",
+    });
+    const inventoryButton = screen.getByRole("button", { name: "Inventory" });
+    inventoryButton.focus();
+
+    fireEvent.keyDown(inventoryButton, { key: "/" });
+    expect(search).toHaveFocus();
+
+    fireEvent.change(search, { target: { value: "no-such-skill" } });
+    expect(
+      screen.getByRole("heading", { name: "No matching skills" }),
+    ).toBeInTheDocument();
+    fireEvent.keyDown(search, { key: "Escape" });
+    expect(search).toHaveFocus();
+    expect(search).toHaveValue("");
+    expect(
+      screen.getByRole("button", { name: "Case-Sensitive-Skill" }),
+    ).toBeInTheDocument();
+
+    const source = screen.getByRole("textbox", { name: "GitHub source" });
+    source.focus();
+    fireEvent.keyDown(source, { key: "/" });
+    expect(source).toHaveFocus();
+    expect(search).not.toHaveFocus();
+  });
+
   it("reports visible inventory count with singular and matching copy (#136, #139)", async () => {
     const twoSkills: WorkspaceSnapshot = {
       ...snapshot,
@@ -757,6 +844,47 @@ describe("Local Target Inventory shell", () => {
       }),
     );
     await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+  });
+
+  it("explains invalid GitHub source next to Add Skill instead of an unsupported request (#138)", async () => {
+    const prepareMutation = vi.fn();
+    render(
+      <InventoryApp
+        client={{
+          ...clientFor(snapshot),
+          prepareMutation,
+        }}
+      />,
+    );
+
+    fireEvent.change(
+      await screen.findByRole("textbox", { name: "GitHub source" }),
+      {
+        target: { value: "not-a-repo" },
+      },
+    );
+    fireEvent.change(
+      screen.getByRole("textbox", { name: "Exact skill name" }),
+      {
+        target: { value: "not-a-repo" },
+      },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Prepare add" }));
+
+    const form = screen
+      .getByRole("heading", { name: "Add Skill" })
+      .closest("form");
+    expect(form).not.toBeNull();
+    const alert = await screen.findByRole("alert");
+    expect(form!).toContainElement(alert);
+    expect(alert).toHaveTextContent("GitHub source must be owner/repository.");
+    expect(
+      screen.queryByText("The request is not supported."),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("textbox", { name: "GitHub source" }),
+    ).toHaveAttribute("aria-invalid", "true");
+    expect(prepareMutation).not.toHaveBeenCalled();
   });
 
   it("routes reconciliation failure through the visible action surface", async () => {
@@ -2600,8 +2728,10 @@ describe("Local Target Inventory shell", () => {
     render(<InventoryApp client={clientFor(snapshot)} />);
     fireEvent.click(await screen.findByRole("button", { name: "Comparison" }));
     expect(
-      screen.getByText("Click Compare to build the aligned skill table."),
-    ).toBeInTheDocument();
+      screen.getAllByText(
+        "Add another Local Target under Targets, then return here to compare inventories.",
+      ).length,
+    ).toBeGreaterThanOrEqual(1);
   });
 
   it("keeps No skill selected when inventory still has rows (#111)", async () => {

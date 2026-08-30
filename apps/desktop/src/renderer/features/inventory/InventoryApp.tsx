@@ -25,12 +25,14 @@ import {
 
 import type { DesktopBridge } from "../../../contracts/desktop.js";
 import { isInventoryEntryAvailableToHarness } from "../../../contracts/inventory-availability.js";
-import type {
-  DesktopEvent,
-  PublicInventoryEntry,
-  PublicInventoryState,
-  RendererError,
-  WorkspaceSnapshot,
+import { GITHUB_SOURCE_OWNER_REPOSITORY_COPY } from "../../../contracts/user-facing-error.js";
+import {
+  isGithubOwnerRepository,
+  type DesktopEvent,
+  type PublicInventoryEntry,
+  type PublicInventoryState,
+  type RendererError,
+  type WorkspaceSnapshot,
 } from "../../../contracts/workspace.js";
 import { UserFacingErrorCopy } from "../../UserFacingErrorCopy.js";
 import { AboutView } from "../about/AboutView.js";
@@ -108,6 +110,16 @@ function inventorySubtitle(count: number, filtered: boolean): string {
   return filtered
     ? `${count} matching ${noun}`
     : `${count} ${noun} across project and global scopes`;
+}
+
+function isTextEditingTarget(target: EventTarget | null): boolean {
+  return (
+    target instanceof HTMLElement &&
+    (target.isContentEditable ||
+      target instanceof HTMLInputElement ||
+      target instanceof HTMLSelectElement ||
+      target instanceof HTMLTextAreaElement)
+  );
 }
 
 function InventoryStatus({
@@ -238,9 +250,11 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
   const [actionError, setActionError] = useState<RendererError>();
   const [addName, setAddName] = useState("");
   const [addSource, setAddSource] = useState("");
+  const [addSourceError, setAddSourceError] = useState<string>();
   const [addScope, setAddScope] = useState<"global" | "project">("project");
   const [view, setView] = useState<WorkspaceView>("inventory");
   const [selectedTargetId, setSelectedTargetId] = useState<string>();
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const mutationOutcomeRef = useRef<HTMLParagraphElement>(null);
   const reviewReturnFocusRef = useRef<HTMLButtonElement | null>(null);
   const targetStates =
@@ -462,6 +476,26 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
   }, [client]);
 
   useEffect(() => {
+    if (view !== "inventory") return;
+    const focusInventorySearch = (event: KeyboardEvent) => {
+      if (
+        event.defaultPrevented ||
+        event.key !== "/" ||
+        event.altKey ||
+        event.ctrlKey ||
+        event.metaKey ||
+        isTextEditingTarget(event.target)
+      ) {
+        return;
+      }
+      event.preventDefault();
+      searchInputRef.current?.focus();
+    };
+    window.addEventListener("keydown", focusInventorySearch);
+    return () => window.removeEventListener("keydown", focusInventorySearch);
+  }, [view]);
+
+  useEffect(() => {
     const intent = reviewFocusIntentRef.current;
     if (
       intent?.closed &&
@@ -494,16 +528,15 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
   }, [inventory, query, scope]);
 
   const selected = useMemo(() => {
-    const entries = inventory?.entries ?? [];
     if (selectedIdentity !== undefined) {
-      return entries.find(
+      return filteredEntries.find(
         (entry) =>
           entry.name === selectedIdentity.name &&
           entry.scope === selectedIdentity.scope,
       );
     }
-    return entries[0];
-  }, [inventory, selectedIdentity]);
+    return filteredEntries[0];
+  }, [filteredEntries, selectedIdentity]);
 
   if (snapshot === undefined) {
     if (bootstrapError !== undefined) {
@@ -599,10 +632,17 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
   };
   const prepareAdd = async () => {
     if (sshUnavailable) return;
+    const source = addSource.trim();
+    if (!isGithubOwnerRepository(source)) {
+      setAddSourceError(GITHUB_SOURCE_OWNER_REPOSITORY_COPY);
+      setActionError(undefined);
+      return;
+    }
+    setAddSourceError(undefined);
     const result = await client.prepareMutation(snapshot.target.id, {
       names: [addName],
       scope: addScope,
-      source: { source: addSource, sourceType: "github" },
+      source: { source, sourceType: "github" },
       type: "add",
     });
     if (result.ok) {
@@ -984,7 +1024,14 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                   <span className="sr-only">Search inventory</span>
                   <input
                     onChange={(event) => setQuery(event.currentTarget.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Escape" && query !== "") {
+                        event.preventDefault();
+                        setQuery("");
+                      }
+                    }}
                     placeholder="Search skills or sources"
+                    ref={searchInputRef}
                     type="search"
                     value={query}
                   />
@@ -1126,6 +1173,11 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                         Refresh this Target, or install a skill via npx skills.
                       </p>
                     </>
+                  ) : filteredEntries.length === 0 ? (
+                    <>
+                      <h2>No skill selected</h2>
+                      <p>No skills in the current filter.</p>
+                    </>
                   ) : (
                     <>
                       <h2>No skill selected</h2>
@@ -1233,14 +1285,30 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                 <label>
                   <span>GitHub source</span>
                   <input
-                    onChange={(event) =>
-                      setAddSource(event.currentTarget.value)
+                    aria-errormessage={
+                      addSourceError !== undefined
+                        ? "add-skill-github-source-error"
+                        : undefined
                     }
+                    aria-invalid={addSourceError !== undefined}
+                    onChange={(event) => {
+                      setAddSource(event.currentTarget.value);
+                      setAddSourceError(undefined);
+                    }}
                     placeholder="owner/repository"
                     required
                     value={addSource}
                   />
                 </label>
+                {addSourceError !== undefined ? (
+                  <p
+                    className="field-error"
+                    id="add-skill-github-source-error"
+                    role="alert"
+                  >
+                    {addSourceError}
+                  </p>
+                ) : null}
                 <label>
                   <span>Exact skill name</span>
                   <input

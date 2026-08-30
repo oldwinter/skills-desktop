@@ -29,6 +29,8 @@ the original download for comparison.
 
 ## macOS
 
+Electron 44 requires macOS 13 Ventura or newer.
+
 1. Download the DMG matching `arm64` for Apple silicon or `x64` for an Intel Mac.
 2. Verify it as described above, open the DMG, and copy Skills Desktop into
    `/Applications`.

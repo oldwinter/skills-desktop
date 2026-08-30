@@ -289,7 +289,103 @@ describe("ComparisonView", () => {
       screen.getByText(/Comparison needs two Local Targets/),
     ).toBeInTheDocument();
     expect(screen.getByText(/SSH · 未在 V1 开放/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Compare" })).toBeDisabled();
+    const compare = screen.getByRole("button", { name: "Compare" });
+    expect(compare).toBeDisabled();
+    expect(compare).toHaveAttribute(
+      "title",
+      "Comparison needs two Local Targets",
+    );
+    expect(compare).toHaveAttribute(
+      "aria-describedby",
+      "comparison-needs-two-targets",
+    );
+  });
+
+  it("gives an executable next step when only one Local Target is present (#140)", () => {
+    render(
+      <ComparisonView
+        client={bridge()}
+        onPrepared={vi.fn()}
+        snapshot={baseSnapshot({
+          target: leftTarget,
+          targets: [targetState(leftTarget)],
+        })}
+        targets={[targetState(leftTarget)]}
+      />,
+    );
+
+    expect(
+      screen.getByRole("heading", { name: "No comparison selected" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "No difference selected" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getAllByText(
+        "Add another Local Target under Targets, then return here to compare inventories.",
+      ).length,
+    ).toBeGreaterThanOrEqual(2);
+    expect(
+      screen.queryByText("Click Compare to build the aligned skill table."),
+    ).not.toBeInTheDocument();
+
+    const compare = screen.getByRole("button", { name: "Compare" });
+    expect(compare).toBeDisabled();
+    expect(compare).toHaveAttribute(
+      "title",
+      "Comparison needs two Local Targets",
+    );
+    expect(compare).toHaveAttribute(
+      "aria-describedby",
+      "comparison-needs-two-targets",
+    );
+    expect(
+      document.getElementById("comparison-needs-two-targets"),
+    ).toHaveTextContent("Comparison needs two Local Targets");
+  });
+
+  it("explains disabled Compare when Left and Right stay the same after a second Target is added (#140)", () => {
+    const { rerender } = render(
+      <ComparisonView
+        client={bridge()}
+        onPrepared={vi.fn()}
+        snapshot={baseSnapshot({
+          target: leftTarget,
+          targets: [targetState(leftTarget)],
+        })}
+        targets={[targetState(leftTarget)]}
+      />,
+    );
+
+    rerender(
+      <ComparisonView
+        client={bridge()}
+        onPrepared={vi.fn()}
+        snapshot={baseSnapshot({
+          targets: [targetState(leftTarget), targetState(rightTarget)],
+        })}
+        targets={[targetState(leftTarget), targetState(rightTarget)]}
+      />,
+    );
+
+    const compare = screen.getByRole("button", { name: "Compare" });
+    expect(compare).toBeDisabled();
+    expect(compare).toHaveAttribute(
+      "title",
+      "Left and Right must be different Targets",
+    );
+    expect(compare).toHaveAttribute(
+      "aria-describedby",
+      "comparison-same-sides-reason",
+    );
+    expect(
+      document.getElementById("comparison-same-sides-reason"),
+    ).toHaveTextContent("Left and Right must be different Targets");
+    expect(
+      screen.getAllByText(
+        "Choose different Left and Right Targets, then click Compare to build the aligned skill table.",
+      ).length,
+    ).toBeGreaterThanOrEqual(2);
   });
 
   it("compares Local Targets, prepares eligible rows, and surfaces errors", async () => {
@@ -367,6 +463,11 @@ describe("ComparisonView", () => {
       screen.getByRole("button", { name: "Swap comparison Targets" }),
     );
     expect(screen.getByText("No comparison selected")).toBeInTheDocument();
+    expect(
+      screen.getAllByText("Click Compare to build the aligned skill table.")
+        .length,
+    ).toBeGreaterThanOrEqual(1);
+    expect(screen.getByRole("button", { name: "Compare" })).toBeEnabled();
   });
 
   it("blocks planning on stale evidence, reconciliation, and compare failures", async () => {
@@ -489,6 +590,9 @@ describe("ComparisonView", () => {
     ).toBeInTheDocument();
     expect(
       screen.getByRole("heading", { name: "No difference selected" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Select a skill in the table to inspect the difference."),
     ).toBeInTheDocument();
   });
 

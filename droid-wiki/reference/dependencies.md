@@ -36,8 +36,8 @@ Runtime 的 8 条声明中有重复：Zod 由 desktop 与 skills-runtime 各声�
 | `@skills-desktop/remote-bootstrap` | `0.1.0` | 固定远端程序；当前是 V1 之外的实验范围 | desktop |
 | `react` | `19.2.8` | workspace 与 review renderer | desktop |
 | `react-dom` | `19.2.8` | React DOM runtime | desktop |
-| `lucide-react` | `1.33.0` | renderer 图标 | desktop |
-| `zod` | `4.4.3` | IPC、CLI、persistence 与 Wire 边界 schema | desktop、skills-runtime |
+| `lucide-react` | `1.37.0` | renderer 图标 | desktop |
+| `zod` | `4.5.4` | IPC、CLI、persistence 与 Wire 边界 schema | desktop、skills-runtime |
 
 内部包全部 `private: true`，共享应用版本 `0.1.0`，不是独立发布的公共 packages。
 
@@ -50,9 +50,9 @@ packaged UI QA：
 | --- | --- |
 | ESLint/Babel parser | `@babel/core@8.0.1`、`@babel/eslint-parser@8.0.1`、`@babel/parser@8.0.4`、`@eslint/js@9.39.5`、`eslint@9.39.5` |
 | React lint | `eslint-plugin-react@7.37.5`、`eslint-plugin-react-hooks@7.1.1`、`globals@17.11.0` |
-| 类型 | `@types/node@26.2.0`、`@types/react@19.2.18`、`@types/react-dom@19.2.4` |
+| 类型 | `@types/node@26.4.0`、`@types/react@19.2.18`、`@types/react-dom@19.2.5` |
 | 测试 | `vitest@4.1.11`、`@vitest/coverage-v8@4.1.11`、`jsdom@30.0.1` |
-| UI/可访问性测试 | `@testing-library/jest-dom@7.0.1`、`@testing-library/react@16.3.2`、`axe-core@4.13.0` |
+| UI/可访问性测试 | `@testing-library/jest-dom@7.0.1`、`@testing-library/react@16.3.3`、`axe-core@4.13.0` |
 
 Biome 没有写入 manifest；`lint:biome` 通过
 `npx --yes @biomejs/biome@1.9.4` 固定按需运行。
@@ -63,9 +63,9 @@ Biome 没有写入 manifest；`lint:biome` 通过
 
 | 用途 | 包与固定版本 |
 | --- | --- |
-| TypeScript/Vite | `typescript@7.0.2`、`vite@8.2.2`、`@vitejs/plugin-react@6.1.0` |
-| Release metadata | `plist@3.1.1`、`yaml@2.9.0` |
-| Electron runtime/package | `electron@43.4.1`、`@electron/fuses@1.8.0` |
+| TypeScript/Vite | `typescript@7.0.2`、`vite@8.2.2`、`@vitejs/plugin-react@6.1.1` |
+| Release metadata | `plist@5.0.0`、`yaml@2.9.0` |
+| Electron runtime/package | `electron@44.0.0`、`@electron/fuses@1.8.0` |
 | Forge core | `@electron-forge/cli@7.11.2`、`@electron-forge/shared-types@7.11.2`、`@electron-forge/plugin-fuses@7.11.2` |
 | Forge makers | `@electron-forge/maker-deb@7.11.2`、`@electron-forge/maker-dmg@7.11.2`、`@electron-forge/maker-rpm@7.11.2`、`@electron-forge/maker-squirrel@7.11.2`、`@electron-forge/maker-zip@7.11.2` |
 
@@ -83,7 +83,7 @@ manifest 分类放在 build/package，而不是重复计数。
 | `tmp` | `0.2.7` |
 
 根 `allowScripts` 只显式允许 `electron-winstaller@5.4.4` 与
-`electron@43.4.1` 的 install scripts。`.npmrc` 设置
+`electron@44.0.0` 的 install scripts。`.npmrc` 设置
 `allow-git=all`。CI 一律运行 `npm ci`，因此升级直接依赖、override 或 workspace
 版本时必须同步审阅并提交根 `package-lock.json`。
 
