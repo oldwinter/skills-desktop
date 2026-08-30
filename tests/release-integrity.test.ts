@@ -75,7 +75,7 @@ async function writeCandidateSet(root: string, lockfileSha256: string) {
       ...target,
       artifacts: artifacts.map(({ bytes: _bytes, ...artifact }) => artifact),
       buildInputs: {
-        electronVersion: "43.4.1",
+        electronVersion: "44.0.0",
         forgeVersion: "7.11.2",
         lockfileSha256,
         nodeVersion: "24.19.0",
@@ -135,7 +135,7 @@ async function writePackageLock(root: string) {
       packages: {
         "": { name: "skills-desktop", version: "0.1.0" },
         "apps/desktop": {
-          dependencies: { zod: "4.4.3" },
+          dependencies: { zod: "4.5.4" },
           name: "@skills-desktop/desktop",
           version: "0.1.0",
         },
@@ -144,13 +144,13 @@ async function writePackageLock(root: string) {
           integrity:
             "sha512-jzh3++1za4mOgD5sfbN/Bw4zRXz92Q2Q3l3lh9wOXF1j4xLPXMEq9N5MLUEv3Y1+4aX9EBr2z6J0h8yZPZvknw==",
           license: "MIT",
-          version: "43.4.1",
+          version: "44.0.0",
         },
         "node_modules/zod": {
           integrity:
             "sha512-/H7VKG+arKcQlS+lv4h1E1nq5tF4XhkQx1PpV6r7wJ8xO0aOhD1dFwTnQzXpnXvOQaTVwJj3E0T0JC0D5j9zNw==",
           license: "MIT",
-          version: "4.4.3",
+          version: "4.5.4",
         },
       },
       requires: true,
@@ -294,8 +294,8 @@ describe("release integrity evidence contract", () => {
             versionInfo: "0.1.0",
           }),
           expect.objectContaining({ name: "@skills-desktop/desktop" }),
-          expect.objectContaining({ name: "electron", versionInfo: "43.4.1" }),
-          expect.objectContaining({ name: "zod", versionInfo: "4.4.3" }),
+          expect.objectContaining({ name: "electron", versionInfo: "44.0.0" }),
+          expect.objectContaining({ name: "zod", versionInfo: "4.5.4" }),
         ]),
       );
 

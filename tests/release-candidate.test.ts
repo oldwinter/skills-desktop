@@ -59,7 +59,7 @@ const linuxManifestInput = () => {
       },
     ],
     buildInputs: {
-      electronVersion: "43.4.1",
+      electronVersion: "44.0.0",
       forgeVersion: "7.11.2",
       lockfileSha256: "c".repeat(64),
       nodeVersion: "24.19.0",

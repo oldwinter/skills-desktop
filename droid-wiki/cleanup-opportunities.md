@@ -108,9 +108,9 @@ Churn 取自[代码库数字](by-the-numbers.md)已经记录的 `origin/main` �
 - 根 `package.json` 要求 Node `>=22.20.0`，并使用 npm workspace `apps/*`、`packages/*`；
 - 根开发依赖和 `apps/desktop/package.json` 的直接依赖都使用精确版本，没有 `^` 或 `~` 范围；
 - `package-lock.json` 使用 lockfile v3，并在根和 `apps/desktop` workspace 条目中记录与 manifests 相同的直接版本；
-- `packages/skills-runtime/package.json` 固定 `zod` `4.4.3`，`packages/remote-bootstrap/package.json` 只依赖内部 runtime `0.1.0`；
+- `packages/skills-runtime/package.json` 固定 `zod` `4.5.4`，`packages/remote-bootstrap/package.json` 只依赖内部 runtime `0.1.0`；
 - 根 overrides 将 `extract-zip` 指向 `@electron-internal/extract-zip@1.0.5`，并固定 `tar` `7.5.22`、`tmp` `0.2.7`；
-- Electron `43.4.1` 同时出现在 `allowScripts` 和 desktop devDependency 中。
+- Electron `44.0.0` 同时出现在 `allowScripts` 和 desktop devDependency 中。
 
 这些信息证明当前依赖解析是有意固定且 manifest/lockfile 在已检查入口上一致。它们不能证明这些版本是最新、仍受维护或没有漏洞。依赖维护的可行动做法是把“版本变更”和“行为/打包验证”绑定：每次只更新一个相关依赖组，审查 lockfile diff，然后运行 `npm run verify` 以及受影响的 packaged、candidate 或平台测试；不要根据版本号外观批量升级。
 

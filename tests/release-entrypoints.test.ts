@@ -102,7 +102,7 @@ function candidateHarness({
     {
       devDependencies: {
         "@electron-forge/cli": "7.11.2",
-        electron: "43.4.1",
+        electron: "44.0.0",
       },
       version: versions[1],
     },

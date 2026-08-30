@@ -14,10 +14,10 @@
   "dependencies": {
     "@skills-desktop/remote-bootstrap": "0.1.0",
     "@skills-desktop/skills-runtime": "0.1.0",
-    "lucide-react": "1.33.0",
+    "lucide-react": "1.37.0",
     "react": "19.2.8",
     "react-dom": "19.2.8",
-    "zod": "4.4.3"
+    "zod": "4.5.4"
   },
   "devDependencies": {
     "@electron-forge/cli": "7.11.2",
@@ -29,6 +29,6 @@
     "@electron-forge/plugin-fuses": "7.11.2",
     "@electron-forge/shared-types": "7.11.2",
     "@electron/fuses": "1.8.0",
-    "electron": "43.4.1"
+    "electron": "44.0.0"
   }
 }
