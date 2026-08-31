@@ -2269,6 +2269,26 @@ describe("Local Target Inventory shell", () => {
           },
           summary: "missing" as const,
         },
+        {
+          dimensions: {
+            contentFingerprint: "matched" as const,
+            declaredSource: "matched" as const,
+            presence: "both" as const,
+            revision: "matched" as const,
+          },
+          key: "Matched-Skill",
+          left: {
+            entries: snapshot.inventory.entries,
+            freshness: "fresh" as const,
+            harnessAvailability: "available" as const,
+          },
+          right: {
+            entries: snapshot.inventory.entries,
+            freshness: "stale" as const,
+            harnessAvailability: "available" as const,
+          },
+          summary: "matched" as const,
+        },
       ],
     };
     const compareTargets = vi.fn(async (leftTargetId, rightTargetId) => ({
@@ -2288,6 +2308,27 @@ describe("Local Target Inventory shell", () => {
     expect(
       screen.getByRole("cell", { name: "Case-Sensitive-Skill" }),
     ).toBeInTheDocument();
+    expect(
+      screen.getByRole("cell", { name: "Matched-Skill" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("2 aligned skill keys")).toBeInTheDocument();
+    const differencesOnly = screen.getByRole("checkbox", {
+      name: "Differences only",
+    });
+    expect(differencesOnly).toHaveAccessibleDescription(
+      "1 of 2 aligned skill keys would remain.",
+    );
+    fireEvent.click(differencesOnly);
+    expect(differencesOnly).toHaveAccessibleDescription(
+      "1 of 2 aligned skill keys remain.",
+    );
+    expect(
+      screen.queryByRole("cell", { name: "Matched-Skill" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("cell", { name: "Case-Sensitive-Skill" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("1 of 2 aligned skill keys")).toBeInTheDocument();
     expect(screen.getAllByText("Missing")).toHaveLength(2);
     expect(screen.getByText("Stale evidence")).toBeInTheDocument();
     expect(
@@ -2702,6 +2743,14 @@ describe("Local Target Inventory shell", () => {
       document.getElementById("comparison-prepare-right-unqualified"),
     ).toHaveTextContent(
       "Prepare only applies to Missing or Revision or content drift rows (current: Matched)",
+    );
+
+    fireEvent.click(screen.getByRole("checkbox", { name: /Differences only/ }));
+    expect(
+      screen.getByRole("heading", { name: "No differences found" }),
+    ).toBeInTheDocument();
+    expect(screen.getAllByText("All 1 aligned skill key matches.")).toHaveLength(
+      2,
     );
   });
 

@@ -239,6 +239,10 @@ code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; fo
 .collection-child-error { margin-top: 7px; color: var(--danger); font-size: var(--font-size-meta); overflow-wrap: anywhere; }
 .collection-progress-list .text-button { margin-top: 9px; }
 .comparison-controls { display: grid; grid-template-columns: minmax(160px, 1fr) 40px minmax(160px, 1fr) auto; align-items: end; gap: 10px; padding: 0 20px 14px; }
+.comparison-filter-toggle { display: flex; min-height: 40px; align-items: center; gap: 8px; padding: 0 10px; color: var(--text-secondary); background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-control); font-size: var(--font-size-meta); cursor: pointer; }
+.comparison-filter-toggle:focus-within { border-color: var(--focus); box-shadow: 0 0 0 1px var(--focus); }
+.comparison-filter-toggle input { margin: 0; }
+.comparison-filter-toggle strong { display: inline-grid; min-width: 22px; height: 22px; place-items: center; color: var(--text); background: var(--surface-muted); border-radius: 4px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .comparison-controls label, .target-form label { display: grid; min-width: 0; gap: 5px; color: var(--text-tertiary); font-size: var(--font-size-meta); }
 .comparison-controls select, .target-form select, .target-form input { min-width: 0; width: 100%; height: 40px; padding: 0 9px; color: var(--text); background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--radius-control); }
 .paired-status { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; margin: 0 20px 12px; background: var(--line); border: 1px solid var(--line); border-radius: var(--radius-panel); overflow: hidden; }
@@ -320,6 +324,7 @@ code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; fo
   .about-workspace, .comparison-workspace, .collections-workspace, .targets-workspace { display: block; overflow: visible; }
   .about-content { width: auto; margin: 0 14px 24px; }
   .page-heading { padding: 16px 14px 10px; }
+  .comparison-workspace .page-heading { flex-wrap: wrap; }
   .mobile-target-summary { display: flex; align-items: center; gap: 5px; overflow-wrap: anywhere; }
   .inventory-target-chooser { display: grid; gap: 4px; min-width: 0; max-width: 100%; color: var(--text-secondary); font-size: var(--font-size-meta); }
   .inventory-target-chooser select { width: 100%; max-width: 100%; min-width: 0; height: 36px; }
