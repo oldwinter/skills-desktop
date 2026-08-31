@@ -75,15 +75,11 @@ downloaded bytes before following the platform-owned override and local-signing
 steps in the [installation guide](docs/unsigned-developer-preview.md). Paid
 signing, notarization, and stable publication remain deferred under #22/#27.
 
-The macOS preview is not signed or notarized yet. After verifying the download's
-SHA-256 value and moving `Skills Desktop.app` into `/Applications`, remove the
-quarantine attribute from this application bundle only:
-
-```bash
-sudo xattr -r -d com.apple.quarantine /Applications/Skills\ Desktop.app
-```
-
-Do not use this command on a broader directory or on an unverified download.
+The macOS preview is not signed or notarized yet. After verifying the
+download and moving Skills Desktop.app into /Applications, follow the
+[installation guide](docs/unsigned-developer-preview.md): ad-hoc-sign the
+local copy, then Open Anyway if Gatekeeper blocks it. Do not remove the
+quarantine attribute.
 
 Local candidate generation remains available for development evidence. These
 local builds have no publication authority, require a clean tracked tree, and
