@@ -105,33 +105,35 @@ npm run candidate:build -- \
 Use `darwin` with `arm64` or `x64`, or `win32` with `x64`, on the
 corresponding native host. Each immutable candidate directory contains only
 the ADR-defined Forge outputs, `candidate-manifest-v1.json`, and its SHA-256
-sidecar.
+sidecar. A separate manual publication workflow on `main` remains available as
+a fallback.
 
-Two tag schemes exist; they are not interchangeable:
+Public Unsigned Developer Previews currently use tags of the form
+`preview-v{version}-{full commit sha}` after a `workflow_dispatch` run on
+`main`. The current public preview tag is
+`preview-v0.1.0-34ff7b72b63773bfde8b37e6eb01ec44bdb2583f`. Download that
+prerelease from
+[GitHub Releases](https://github.com/oldwinter/skills-desktop/releases); do not
+look for a `v0.1.0` release.
 
-- **Current public Unsigned Developer Previews** on GitHub Releases use
-  `preview-v{version}-{full commit sha}` from `workflow_dispatch` on `main`
-  (a separate manual publication workflow on `main` remains available as a
-  fallback). The current public tag is
-  `preview-v0.1.0-34ff7b72b63773bfde8b37e6eb01ec44bdb2583f`. Download that
-  prerelease; do not download `v0.1.0`.
-- **Tagged CI path** (`on.push.tags: v*.*.*`) is an exact version tag after
-  all workspace and lockfile versions have been updated and merged. The
-  `git tag -a v0.1.0` example below is that path. It is not the tag currently
-  listed as a public pre-release.
+A tagged CI path also exists for exact version tags after workspace and
+lockfile versions have been updated and merged:
 
 ```bash
 git tag -a v0.1.0 -m "Skills Desktop v0.1.0"
 git push origin v0.1.0
 ```
 
-That example tag must match the package version and point into `main`
-history. It is not currently published as a public GitHub pre-release. When
-that path is used, CI builds macOS arm64/x64, Windows x64, and Linux x64
-candidates, attests and verifies the exact bytes, stages a private draft,
-reverifies the uploaded assets, and only then publishes the same tag as a
-non-latest GitHub prerelease. These artifacts remain unsigned and are not
-Stable Releases.
+That `v*.*.*` tag must match the package version and point into `main`
+history. It is the tagged release-candidate path, not the tag currently listed
+as the public unsigned preview. CI builds macOS arm64/x64, Windows x64, and
+Linux x64 candidates, attests and verifies the exact bytes, stages a private
+draft, reverifies the uploaded assets, and only then can publish a non-latest
+GitHub prerelease. These artifacts remain unsigned and are not Stable Releases.
+
+Windows preview assets may include Forge / Squirrel `RELEASES` and `*.nupkg`
+files. Those packaging artifacts are not the live stable automatic-update feed;
+previews remain prereleases, are never latest, and upgrades stay manual.
 
 ## Run The Prototype
 
