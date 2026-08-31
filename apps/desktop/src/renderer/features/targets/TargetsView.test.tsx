@@ -246,6 +246,7 @@ describe("TargetsView", () => {
     );
 
     expect(screen.getByText("SSH · 未在 V1 开放")).toBeInTheDocument();
+    expect(screen.getByLabelText("SSH · 未在 V1 开放")).toBeInTheDocument();
     expect(screen.getByText("未开放")).toBeInTheDocument();
     expect(screen.getByText("Loading")).toBeInTheDocument();
     expect(screen.getByText("请求无效。请检查输入后重试。")).toBeInTheDocument();

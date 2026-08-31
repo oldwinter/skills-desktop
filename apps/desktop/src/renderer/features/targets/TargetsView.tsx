@@ -162,7 +162,7 @@ export function TargetsView({
                 </div>
                 {state.target.kind === "ssh" ? (
                   <span
-                    aria-label="SSH 未开放"
+                    aria-label="SSH · 未在 V1 开放"
                     className="scope-badge"
                     title="SSH · 未在 V1 开放"
                   >
