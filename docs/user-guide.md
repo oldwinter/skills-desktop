@@ -62,7 +62,7 @@ sudo dpkg --configure -a
 
 仅在已经 `apt update`、并且理解 Depends 无法满足时仍可能卸载预览包的前提下，才考虑 `apt-get install -f`。
 
-预览构建 **不会** 进入应用的稳定自动更新通道。更新需手动下载、校验、安装下一版预览。
+预览构建 **不会** 进入应用的稳定自动更新通道。更新需手动下载、校验、安装下一版预览。资源列表里的 `RELEASES` / `*.nupkg` 是 Forge / Squirrel 打包产物，不是 live 稳定更新源。
 
 ### 从源码本地跑（开发 / 自建候选）
 
@@ -184,7 +184,7 @@ Inventory 是对当前 Target 一次只读 `npx skills list --json` 的归一化
 | Unsigned Developer Preview | **Manual upgrade**；文案说明未签名/未公证 | 从 [Releases](https://github.com/oldwinter/skills-desktop/releases) 下载新包，按 `docs/unsigned-developer-preview.md` 校验后手动安装 |
 | 未来的已签名 Stable（尚未作为当前公开路径） | 才可能走 stable 自动检查 / 下载 | 签名发布仍受 #22 / #27 人闸约束；**不要**把预览当成已签名正式版 |
 
-预览包 **不会** 标为 latest，也 **不会** 进入自动更新源。Windows 预览资产里可能出现 `RELEASES` 和 `*.nupkg`，那是 Electron Forge/Squirrel 的打包产物，不是线上稳定自动更新源。请下载安装包与 `SHA256SUMS`。About 里可导出 release diagnostics，便于排障。
+预览包 **不会** 标为 latest，也 **不会** 进入自动更新源。Windows 预览资源里若出现 `RELEASES` 或 `*.nupkg`，那是 Electron Forge / Squirrel 打包产物，不是线上稳定更新源；请下载安装包与 `SHA256SUMS`。About 里可导出 release diagnostics，便于排障。
 
 若更新/重启被拦住，常见原因：变更进行中、Trusted Review 打开、Reconciliation required 等——先处理完再重启。
 
