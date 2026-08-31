@@ -10,18 +10,25 @@ you trust this repository and have verified the exact downloaded bytes.
 Download the artifact for your platform together with `SHA256SUMS`. Confirm the
 artifact's SHA-256 value matches its line in that file.
 
-With GitHub CLI installed, also verify the build provenance. Replace
-`<artifact>`, `<source-commit>`, and `<source-ref>` with the values from the
-release notes:
+With GitHub CLI installed, also verify the build provenance. Copy
+`<artifact>`, Source commit, and Source ref from the release notes. Current
+public unsigned previews are published from `workflow_dispatch` on `main`, so
+Source ref is `refs/heads/main` — not `refs/tags/preview-v…`.
+
+Example for the current public preview
+`preview-v0.1.0-34ff7b72b63773bfde8b37e6eb01ec44bdb2583f`:
 
 ```bash
-gh attestation verify "<artifact>" \
+gh attestation verify "skills-desktop-0.1.0-win32-x64-setup.exe" \
   --repo oldwinter/skills-desktop \
   --signer-workflow oldwinter/skills-desktop/.github/workflows/release-candidates.yml \
-  --source-digest "<source-commit>" \
-  --source-ref "<source-ref>" \
+  --source-digest "34ff7b72b63773bfde8b37e6eb01ec44bdb2583f" \
+  --source-ref "refs/heads/main" \
   --deny-self-hosted-runners
 ```
+
+Replace the artifact filename with the package for your platform. Keep
+`--source-digest` and `--source-ref` aligned with that release's notes.
 
 Stop if checksum or attestation verification fails. Local signing changes the
 artifact or application digest, so complete this verification first and retain
@@ -50,7 +57,7 @@ quarantine attribute or disable Gatekeeper globally.
 
 ## Windows
 
-1. Download the `win32-x64-setup.exe` artifact and verify it before execution.
+1. Download the `skills-desktop-0.1.0-win32-x64-setup.exe` artifact and verify it before execution.
 2. Start the installer. Windows will show an unverified-publisher/SmartScreen
    warning. Continue only if Windows offers its own per-file override and you
    accept the risk.
@@ -138,3 +145,8 @@ Unsigned Developer Previews are GitHub pre-releases and are not served through
 the application's stable automatic-update channel. Download, verify, and
 install each newer preview manually. Signed Stable Releases remain a separate
 future distribution path.
+
+Windows preview assets may include `RELEASES` and `*.nupkg`. Those are Electron
+Forge / Squirrel packaging artifacts published with the installer; they are not
+the live stable auto-update feed. Download the platform installer and
+`SHA256SUMS`. Ignore `RELEASES` / `*.nupkg` unless you are inspecting packaging.

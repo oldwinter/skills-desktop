@@ -18,11 +18,11 @@ Target，也会标成「SSH · 未开放」，不能当作当前可用路径。
 
 当前公开分发是 **Unsigned Developer Preview**（GitHub prerelease），不是已签名的 Stable Release。
 
-1. 打开 [Releases](https://github.com/oldwinter/skills-desktop/releases)，下载对应平台的预览包，并一并下载 `SHA256SUMS`。
+1. 打开 [Releases](https://github.com/oldwinter/skills-desktop/releases)，下载当前唯一公开的 Unsigned Developer Preview，并一并下载 `SHA256SUMS`。
 2. **先校验再安装**：确认产物 SHA-256 与 `SHA256SUMS` 一致。有 GitHub CLI 时，按 [安装指南](unsigned-developer-preview.md) 做 attestation 校验。校验失败请停止。
 3. 按平台完成安装（摘要如下；细节以 `docs/unsigned-developer-preview.md` 为准）：
    - **macOS 13 Ventura 或更高版本**：打开 DMG，拷到 `/Applications`，对本地副本做 ad-hoc `codesign`，必要时在「系统设置 → 隐私与安全性」里对该应用选 **仍然打开**。这不是 Developer ID，也不是公证。
-   - **Windows**：运行 `win32-x64-setup.exe`。SmartScreen / 未验证发布者警告时，仅在系统提供按文件覆盖选项且你接受风险时继续；策略禁止覆盖则停止，不要自行削弱组织策略。
+   - **Windows**：运行 `skills-desktop-0.1.0-win32-x64-setup.exe`。SmartScreen / 未验证发布者警告时，仅在系统提供按文件覆盖选项且你接受风险时继续；策略禁止覆盖则停止，不要自行削弱组织策略。
    - **Linux**：先对照 `SHA256SUMS` 校验 SHA-256，再用 apt 安装本地 DEB（见下方 Linux 小节）。不要只用 `dpkg -i`。RPM 发行版在同样校验后用发行版常规方式安装。预览包有校验与 provenance，但没有项目运维的 Linux 包签名仓库。
 
 #### Linux（Debian / Ubuntu DEB）
@@ -62,7 +62,7 @@ sudo dpkg --configure -a
 
 仅在已经 `apt update`、并且理解 Depends 无法满足时仍可能卸载预览包的前提下，才考虑 `apt-get install -f`。
 
-预览构建 **不会** 进入应用的稳定自动更新通道。更新需手动下载、校验、安装下一版预览。
+预览构建 **不会** 进入应用的稳定自动更新通道。更新需手动下载、校验、安装下一版预览。资源列表里的 `RELEASES` / `*.nupkg` 是 Forge / Squirrel 打包产物，不是 live 稳定更新源。
 
 ### 从源码本地跑（开发 / 自建候选）
 
@@ -184,7 +184,7 @@ Inventory 是对当前 Target 一次只读 `npx skills list --json` 的归一化
 | Unsigned Developer Preview | **Manual upgrade**；文案说明未签名/未公证 | 从 [Releases](https://github.com/oldwinter/skills-desktop/releases) 下载新包，按 `docs/unsigned-developer-preview.md` 校验后手动安装 |
 | 未来的已签名 Stable（尚未作为当前公开路径） | 才可能走 stable 自动检查 / 下载 | 签名发布仍受 #22 / #27 人闸约束；**不要**把预览当成已签名正式版 |
 
-预览包 **不会** 标为 latest，也 **不会** 进入自动更新源。About 里可导出 release diagnostics，便于排障。
+预览包 **不会** 标为 latest，也 **不会** 进入自动更新源。Windows 预览资源里若出现 `RELEASES` 或 `*.nupkg`，那是 Electron Forge / Squirrel 打包产物，不是线上稳定更新源；请下载安装包与 `SHA256SUMS`。About 里可导出 release diagnostics，便于排障。
 
 若更新/重启被拦住，常见原因：变更进行中、Trusted Review 打开、Reconciliation required 等——先处理完再重启。
 
