@@ -101,6 +101,10 @@ function scopeLabel(scope: PublicInventoryEntry["scope"]) {
   return scope === "project" ? "Project" : "Global";
 }
 
+function targetOptionLabel(target: WorkspaceSnapshot["target"]) {
+  return target.kind === "ssh" ? `${target.label} · 未开放` : target.label;
+}
+
 function sourceLabel(entry: PublicInventoryEntry) {
   return entry.declaredSource.source ?? "Provenance unavailable";
 }
@@ -855,7 +859,7 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                       >
                         {targetStates.map((state) => (
                           <option key={state.target.id} value={state.target.id}>
-                            {state.target.label}
+                            {targetOptionLabel(state.target)}
                           </option>
                         ))}
                       </select>
