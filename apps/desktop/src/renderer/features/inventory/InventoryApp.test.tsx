@@ -1109,6 +1109,43 @@ describe("Local Target Inventory shell", () => {
     );
   });
 
+  it("marks SSH Targets as unavailable in the Inventory chooser", async () => {
+    const sshTarget = {
+      connectionReference: "build-host",
+      ...targetV4Metadata,
+      generation: 2,
+      id: "00000000-0000-4000-8000-000000000018",
+      kind: "ssh" as const,
+      label: "Build host",
+      workspace: "/srv/skills",
+      workspaceLabel: "skills",
+    };
+    const snapshotWithSsh: WorkspaceSnapshot = {
+      ...twoLocalTargetsSnapshot,
+      targets: [
+        ...twoLocalTargetsSnapshot.targets!,
+        {
+          deletionBlocked: false,
+          inventory: snapshot.inventory,
+          mutation: snapshot.mutation,
+          target: sshTarget,
+        },
+      ],
+    };
+    render(<InventoryApp client={clientFor(snapshotWithSsh)} />);
+
+    const chooser = await screen.findByRole("combobox", { name: "Target" });
+    expect(
+      within(chooser).getByRole("option", { name: "Build host · 未开放" }),
+    ).toBeInTheDocument();
+
+    fireEvent.change(chooser, { target: { value: sshTarget.id } });
+    expect(chooser).toHaveDisplayValue("Build host · 未开放");
+    expect(
+      await screen.findByText(/远程 Target 仅保留只读痕迹/),
+    ).toBeInTheDocument();
+  });
+
   it("opens About from workspace navigation", async () => {
     render(<InventoryApp client={clientFor(snapshot)} />);
 
