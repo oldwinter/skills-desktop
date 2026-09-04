@@ -629,6 +629,39 @@ describe("Local Target Inventory shell", () => {
     ).toBeInTheDocument();
   });
 
+  it("clears empty-result search and scope filters in one action", async () => {
+    render(<InventoryApp client={clientFor(snapshot)} />);
+
+    const search = await screen.findByRole("searchbox", {
+      name: "Search inventory",
+    });
+    const inventoryScope = screen.getByRole("group", {
+      name: "Inventory scope",
+    });
+    const allScope = within(inventoryScope).getByRole("button", {
+      name: "All scopes",
+    });
+    const globalScope = within(inventoryScope).getByRole("button", {
+      name: "Global scope",
+    });
+
+    fireEvent.click(globalScope);
+    fireEvent.change(search, { target: { value: "no-such-skill" } });
+
+    expect(
+      screen.getByRole("heading", { name: "No matching skills" }),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+
+    expect(search).toHaveValue("");
+    expect(search).toHaveFocus();
+    expect(allScope).toHaveAttribute("aria-pressed", "true");
+    expect(globalScope).toHaveAttribute("aria-pressed", "false");
+    expect(
+      screen.getByRole("button", { name: "Case-Sensitive-Skill" }),
+    ).toBeInTheDocument();
+  });
+
   it("clears Inspector when the visible table is empty (#143)", async () => {
     render(
       <InventoryApp
