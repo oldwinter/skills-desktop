@@ -464,6 +464,37 @@ describe("Local Target Inventory shell", () => {
     expect(addButtons.every((button) => button.tabIndex === 0)).toBe(true);
   });
 
+  it("keeps the inspector aligned with visible search results and clears search", async () => {
+    const client = clientFor({
+      ...snapshot,
+      inventory: {
+        ...snapshot.inventory,
+        entries: [
+          snapshot.inventory.entries[0]!,
+          {
+            ...snapshot.inventory.entries[0]!,
+            name: "Another-Skill",
+          },
+        ],
+      },
+    });
+    render(<InventoryApp client={client} />);
+
+    const search = await screen.findByRole("searchbox", {
+      name: "Search inventory",
+    });
+    fireEvent.change(search, { target: { value: "no-match" } });
+
+    expect(screen.getByText("0 shown")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "No skill selected" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Clear inventory search" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear inventory search" }));
+
+    expect(await screen.findByText("2 shown")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Case-Sensitive-Skill" })).toBeInTheDocument();
+  });
+
   it("shows a bounded opening error returned by the IPC boundary", async () => {
     const client: DesktopBridge = {
       ...clientFor(snapshot),
