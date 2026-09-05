@@ -7,20 +7,15 @@ import {
   Clock3,
   FolderGit2,
   HardDrive,
-  Info,
-  LibraryBig,
-  ListFilter,
-  MonitorCog,
   PackagePlus,
   RefreshCw,
   Search,
   Server,
-  Settings2,
-  Terminal,
   ShieldCheck,
   Square,
   Trash2,
   WifiOff,
+  X,
 } from "lucide-react";
 
 import type { DesktopBridge } from "../../../contracts/desktop.js";
@@ -39,12 +34,21 @@ import { AboutView } from "../about/AboutView.js";
 import { ComparisonView } from "../comparison/ComparisonView.js";
 import { CollectionsView } from "../collections/CollectionsView.js";
 import { TargetsView } from "../targets/TargetsView.js";
+import {
+  WorkspaceNavigation,
+  type WorkspaceView,
+} from "../navigation/WorkspaceNavigation.js";
+import {
+  freshnessLabel,
+  isTargetOffline,
+  scopeLabel,
+  sourceLabel,
+  statusLabel,
+  statusTone,
+} from "./inventory-state.js";
 
 type ScopeFilter = "all" | "global" | "project";
 type SelectedIdentity = Pick<PublicInventoryEntry, "name" | "scope">;
-type WorkspaceView =
-  "about" | "collections" | "comparison" | "inventory" | "targets";
-
 interface ReviewFocusIntent {
   closed: boolean;
   exhausted: boolean;
@@ -55,55 +59,6 @@ interface ReviewFocusIntent {
 const REVIEW_FOCUS_INTERVAL_MS = 16;
 const REVIEW_FOCUS_MAX_CHECKS = 60;
 const REVIEW_FOCUS_STABLE_CHECKS = 12;
-
-function freshnessLabel(
-  freshness: WorkspaceSnapshot["inventory"]["freshness"],
-) {
-  if (freshness === "fresh") return "Fresh evidence";
-  if (freshness === "stale") return "Stale evidence";
-  return "No evidence";
-}
-
-function statusLabel(snapshot: WorkspaceSnapshot) {
-  const { freshness, phase } = snapshot.inventory;
-  if (phase === "loading") return `Refreshing - ${freshnessLabel(freshness)}`;
-  if (phase === "cancelled")
-    return `Refresh cancelled - ${freshnessLabel(freshness)}`;
-  if (phase === "error" && isTargetOffline(snapshot))
-    return `Offline - ${freshnessLabel(freshness)}`;
-  if (phase === "error")
-    return freshness === "stale" ? "Stale after error" : "Refresh error";
-  return freshnessLabel(freshness);
-}
-
-function isTargetOffline(snapshot: WorkspaceSnapshot) {
-  return (
-    snapshot.target.kind === "ssh" &&
-    snapshot.inventory.lastError !== null &&
-    ["transport_failed", "transport_lost", "transport_unavailable"].includes(
-      snapshot.inventory.lastError.code,
-    )
-  );
-}
-
-function statusTone(snapshot: WorkspaceSnapshot) {
-  if (snapshot.inventory.phase === "error") return "danger";
-  if (
-    snapshot.inventory.phase === "cancelled" ||
-    snapshot.inventory.freshness === "stale"
-  ) {
-    return "warning";
-  }
-  return snapshot.inventory.freshness === "fresh" ? "healthy" : "neutral";
-}
-
-function scopeLabel(scope: PublicInventoryEntry["scope"]) {
-  return scope === "project" ? "Project" : "Global";
-}
-
-function sourceLabel(entry: PublicInventoryEntry) {
-  return entry.declaredSource.source ?? "Provenance unavailable";
-}
 
 function inventorySubtitle(count: number, filtered: boolean): string {
   const noun = count === 1 ? "skill" : "skills";
@@ -246,7 +201,11 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
   const [query, setQuery] = useState("");
   const [scope, setScope] = useState<ScopeFilter>("all");
   const [selectedIdentity, setSelectedIdentity] = useState<SelectedIdentity>();
-  const [preparedMutationId, setPreparedMutationId] = useState<string>();
+  const [preparedMutationContext, setPreparedMutationContext] = useState<{
+    readonly generation: number;
+    readonly operationId: string;
+    readonly targetId: string;
+  }>();
   const [actionError, setActionError] = useState<RendererError>();
   const [addName, setAddName] = useState("");
   const [addSource, setAddSource] = useState("");
@@ -290,6 +249,7 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
   const reviewFocusIntentRef = useRef<ReviewFocusIntent | null>(null);
   const lastClosedReviewIdRef = useRef<string | undefined>(undefined);
   const inventory = snapshot?.inventory;
+  const preparedMutationId = preparedMutationContext?.operationId;
 
   useEffect(() => {
     let active = true;
@@ -564,10 +524,6 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
     );
   }
 
-  const projectCount = snapshot.inventory.entries.filter(
-    ({ scope: entryScope }) => entryScope === "project",
-  ).length;
-  const globalCount = snapshot.inventory.entries.length - projectCount;
   const isFiltered = query.trim() !== "" || scope !== "all";
   const activeOperationId = snapshot.inventory.activeOperationId;
   const sshUnavailable = snapshot.target.kind === "ssh";
@@ -615,7 +571,11 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
     if (result.ok) {
       setActionError(undefined);
       cancelReviewFocusRestoreRef.current();
-      setPreparedMutationId(result.value.operationId);
+      setPreparedMutationContext({
+        generation: snapshot.target.generation,
+        operationId: result.value.operationId,
+        targetId: snapshot.target.id,
+      });
     } else setActionError(result.error);
   };
   const prepareUpdateAll = async () => {
@@ -627,7 +587,11 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
     if (result.ok) {
       setActionError(undefined);
       cancelReviewFocusRestoreRef.current();
-      setPreparedMutationId(result.value.operationId);
+      setPreparedMutationContext({
+        generation: snapshot.target.generation,
+        operationId: result.value.operationId,
+        targetId: snapshot.target.id,
+      });
     } else setActionError(result.error);
   };
   const prepareAdd = async () => {
@@ -648,11 +612,21 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
     if (result.ok) {
       setActionError(undefined);
       cancelReviewFocusRestoreRef.current();
-      setPreparedMutationId(result.value.operationId);
+      setPreparedMutationContext({
+        generation: snapshot.target.generation,
+        operationId: result.value.operationId,
+        targetId: snapshot.target.id,
+      });
     } else setActionError(result.error);
   };
   const requestReview = async (returnFocus: HTMLButtonElement) => {
-    if (preparedMutationId === undefined) return;
+    if (
+      preparedMutationContext === undefined ||
+      preparedMutationContext.targetId !== snapshot.target.id ||
+      preparedMutationContext.generation !== snapshot.target.generation
+    ) {
+      return;
+    }
     cancelReviewFocusRestoreRef.current();
     reviewReturnFocusRef.current = returnFocus;
     const intent: ReviewFocusIntent = {
@@ -661,7 +635,7 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
       reviewId: undefined,
     };
     reviewFocusIntentRef.current = intent;
-    const result = await client.requestReview(preparedMutationId);
+    const result = await client.requestReview(preparedMutationContext.operationId);
     if (reviewFocusIntentRef.current !== intent) return;
     if (result.ok) setActionError(undefined);
     else {
@@ -686,6 +660,16 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
     const result = await client.requestCancellationReview(operationId);
     if (result.ok) setActionError(undefined);
     else setActionError(result.error);
+  };
+  const clearTargetScopedState = (targetId: string) => {
+    setSelectedTargetId(targetId);
+    setSelectedIdentity(undefined);
+    setPreparedMutationContext(undefined);
+    setActionError(undefined);
+  };
+  const selectTarget = (targetId: string) => {
+    clearTargetScopedState(targetId);
+    setView("inventory");
   };
   return (
     <div className="app-shell">
@@ -719,117 +703,14 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
       </header>
 
       <div className="workspace-layout">
-        <aside className="scope-rail" aria-label="Workspace navigation">
-          <nav className="primary-nav" aria-label="Primary">
-            <button
-              aria-current={view === "inventory" ? "page" : undefined}
-              aria-label="Inventory"
-              className={`nav-item${view === "inventory" ? " nav-item--active" : ""}`}
-              onClick={() => setView("inventory")}
-              title="Inventory"
-              type="button"
-            >
-              <ListFilter aria-hidden="true" size={17} />
-              <span>Inventory</span>
-            </button>
-            <button
-              aria-current={view === "comparison" ? "page" : undefined}
-              aria-label="Comparison"
-              className={`nav-item${view === "comparison" ? " nav-item--active" : ""}`}
-              onClick={() => setView("comparison")}
-              title="Comparison"
-              type="button"
-            >
-              <MonitorCog aria-hidden="true" size={17} />
-              <span>Comparison</span>
-            </button>
-            <button
-              aria-current={view === "collections" ? "page" : undefined}
-              aria-label="Collections"
-              className={`nav-item${view === "collections" ? " nav-item--active" : ""}`}
-              onClick={() => setView("collections")}
-              title="Collections"
-              type="button"
-            >
-              <LibraryBig aria-hidden="true" size={17} />
-              <span>Collections</span>
-            </button>
-            <button
-              aria-current={view === "targets" ? "page" : undefined}
-              aria-label="Targets"
-              className={`nav-item${view === "targets" ? " nav-item--active" : ""}`}
-              onClick={() => setView("targets")}
-              title="Targets"
-              type="button"
-            >
-              <Settings2 aria-hidden="true" size={17} />
-              <span>Targets</span>
-            </button>
-            <button
-              aria-current={view === "about" ? "page" : undefined}
-              aria-label="About"
-              className={`nav-item${view === "about" ? " nav-item--active" : ""}`}
-              onClick={() => setView("about")}
-              title="About"
-              type="button"
-            >
-              <Info aria-hidden="true" size={17} />
-              <span>About</span>
-            </button>
-          </nav>
-
-          <section className="target-section" aria-labelledby="target-heading">
-            <h2 id="target-heading">Targets</h2>
-            {targetStates.map((state) => (
-              <button
-                className={`target-row${state.target.id === snapshot.target.id ? " target-row--active" : ""}`}
-                key={state.target.id}
-                onClick={() => {
-                  setSelectedTargetId(state.target.id);
-                  setView("inventory");
-                }}
-                type="button"
-              >
-                {state.target.kind === "local" ? (
-                  <HardDrive aria-hidden="true" size={16} />
-                ) : (
-                  <Server aria-hidden="true" size={16} />
-                )}
-                <span>
-                  <strong>{state.target.label}</strong>
-                  <small>{state.target.workspaceLabel}</small>
-                </span>
-                {state.target.kind === "ssh" ? (
-                  <span
-                    aria-label="SSH 未开放"
-                    className="scope-badge"
-                    title="SSH · 未在 V1 开放"
-                  >
-                    未开放
-                  </span>
-                ) : null}
-              </button>
-            ))}
-            <dl className="target-facts">
-              <div>
-                <dt>Harness</dt>
-                <dd>{snapshot.target.harnessIds.join(", ")}</dd>
-              </div>
-              <div>
-                <dt>Project</dt>
-                <dd>{projectCount}</dd>
-              </div>
-              <div>
-                <dt>Global</dt>
-                <dd>{globalCount}</dd>
-              </div>
-            </dl>
-          </section>
-          <div className="rail-version">
-            <Terminal aria-hidden="true" size={14} />
-            <span>skills {snapshot.inventory.cliVersion ?? "1.5.23"}</span>
-          </div>
-        </aside>
+        <WorkspaceNavigation
+          inventory={snapshot.inventory}
+          onSelectTarget={selectTarget}
+          onViewChange={setView}
+          target={snapshot.target}
+          targetStates={targetStates}
+          view={view}
+        />
 
         {view === "inventory" ? (
           <>
@@ -847,9 +728,8 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                     <label className="inventory-target-chooser">
                       Target
                       <select
-                        onChange={(event) => {
-                          setSelectedTargetId(event.currentTarget.value);
-                          setView("inventory");
+                      onChange={(event) => {
+                          selectTarget(event.currentTarget.value);
                         }}
                         value={snapshot.target.id}
                       >
@@ -1019,10 +899,11 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
               ) : null}
 
               <div className="inventory-toolbar">
-                <label className="search-control">
+                <div className="search-control">
                   <Search aria-hidden="true" size={16} />
                   <span className="sr-only">Search inventory</span>
                   <input
+                    aria-label="Search inventory"
                     onChange={(event) => setQuery(event.currentTarget.value)}
                     onKeyDown={(event) => {
                       if (event.key === "Escape" && query !== "") {
@@ -1035,7 +916,21 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                     type="search"
                     value={query}
                   />
-                </label>
+                  {query !== "" ? (
+                    <button
+                      aria-label="Clear inventory search"
+                      className="search-clear"
+                      onClick={() => setQuery("")}
+                      title="Clear inventory search"
+                      type="button"
+                    >
+                      <X aria-hidden="true" size={15} />
+                    </button>
+                  ) : null}
+                </div>
+                <span aria-live="polite" className="inventory-result-count">
+                  {filteredEntries.length} shown
+                </span>
                 <div
                   className="segmented-control"
                   aria-label="Inventory scope"
@@ -1409,7 +1304,15 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
           <ComparisonView
             client={client}
             onPrepared={(preparedId, destinationTargetId) => {
-              setPreparedMutationId(preparedId);
+              const destination = targetStates.find(
+                ({ target }) => target.id === destinationTargetId,
+              );
+              if (destination === undefined) return;
+              setPreparedMutationContext({
+                generation: destination.target.generation,
+                operationId: preparedId,
+                targetId: destinationTargetId,
+              });
               setSelectedTargetId(destinationTargetId);
               setView("inventory");
             }}
@@ -1423,7 +1326,7 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
         ) : (
           <TargetsView
             client={client}
-            onSelected={setSelectedTargetId}
+            onSelected={clearTargetScopedState}
             targets={targetStates}
           />
         )}
