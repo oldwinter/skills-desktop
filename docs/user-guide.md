@@ -119,6 +119,7 @@ Inventory 是对当前 Target 一次只读 `npx skills list --json` 的归一化
 
 - 表格列：Skill、Scope、Harness、Declared source、Evidence（revision）。
 - 搜索框可按名称 / 源过滤；范围可切 All / Project / Global。
+- 筛选后没有结果时，点 **Clear filters** 可一次清空搜索词并恢复 All scopes。
 - 点选一行，右侧 **Skill evidence** 显示 scope、harness agents、source type、declared source、revision、content fingerprint。未知证据会明确标 Unknown，不会被捏造成版本号。
 
 ### 变更（必须先计划、再确认）

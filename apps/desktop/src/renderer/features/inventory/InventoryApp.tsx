@@ -9,6 +9,7 @@ import {
   HardDrive,
   PackagePlus,
   RefreshCw,
+  RotateCcw,
   Search,
   Server,
   ShieldCheck,
@@ -149,7 +150,13 @@ function InventoryStatus({
   return null;
 }
 
-function EmptyInventory({ filtered }: { readonly filtered: boolean }) {
+function EmptyInventory({
+  filtered,
+  onClearFilters,
+}: {
+  readonly filtered: boolean;
+  readonly onClearFilters: () => void;
+}) {
   return (
     <div className="empty-state" role="status">
       <CircleHelp aria-hidden="true" size={22} />
@@ -159,6 +166,16 @@ function EmptyInventory({ filtered }: { readonly filtered: boolean }) {
           ? "Change the current search or scope filter."
           : "Project and global inventory are empty. Refresh this Target, or install a skill via npx skills."}
       </p>
+      {filtered ? (
+        <button
+          className="text-button"
+          onClick={onClearFilters}
+          type="button"
+        >
+          <RotateCcw aria-hidden="true" size={15} />
+          Clear filters
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -487,6 +504,12 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
       );
     });
   }, [inventory, query, scope]);
+
+  const clearInventoryFilters = () => {
+    setQuery("");
+    setScope("all");
+    searchInputRef.current?.focus();
+  };
 
   const selected = useMemo(() => {
     if (selectedIdentity !== undefined) {
@@ -976,7 +999,10 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                       phase={snapshot.inventory.phase}
                     />
                   ) : (
-                    <EmptyInventory filtered={isFiltered} />
+                    <EmptyInventory
+                      filtered={isFiltered}
+                      onClearFilters={clearInventoryFilters}
+                    />
                   )
                 ) : (
                   <table className="inventory-table">
