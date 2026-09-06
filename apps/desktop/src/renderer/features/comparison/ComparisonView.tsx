@@ -174,6 +174,7 @@ export function ComparisonView({
       "",
   );
   const [selectedKey, setSelectedKey] = useState<string>();
+  const [differencesOnly, setDifferencesOnly] = useState(false);
   const [error, setError] = useState<RendererError>();
   const [busy, setBusy] = useState(false);
 
@@ -206,11 +207,23 @@ export function ComparisonView({
     snapshot.comparison.rightTargetId === rightTargetId
       ? snapshot.comparison
       : null;
+  const visibleRows = useMemo(
+    () =>
+      comparison?.rows.filter(
+        ({ summary }) => !differencesOnly || summary !== "matched",
+      ) ?? [],
+    [comparison, differencesOnly],
+  );
+  const differenceCount = useMemo(
+    () =>
+      comparison?.rows.filter(({ summary }) => summary !== "matched").length ??
+      0,
+    [comparison],
+  );
   const selectedRow = useMemo(
     () =>
-      comparison?.rows.find(({ key }) => key === selectedKey) ??
-      comparison?.rows[0],
-    [comparison, selectedKey],
+      visibleRows.find(({ key }) => key === selectedKey) ?? visibleRows[0],
+    [selectedKey, visibleRows],
   );
   const leftTarget = targets.find(({ target }) => target.id === leftTargetId);
   const rightTarget = targets.find(({ target }) => target.id === rightTargetId);
@@ -355,9 +368,31 @@ export function ComparisonView({
             <p>
               {plannableTargets.length < 2
                 ? "Needs a second Local Target"
-                : `${comparison?.rows.length ?? 0} aligned skill keys`}
+                : differencesOnly && comparison !== null
+                  ? `${visibleRows.length} of ${comparison.rows.length} aligned skill keys`
+                  : `${comparison?.rows.length ?? 0} aligned skill keys`}
             </p>
           </div>
+          {comparison !== null && comparison.rows.length > 0 ? (
+            <label className="comparison-filter-toggle">
+              <input
+                aria-describedby="comparison-difference-count"
+                aria-label="Differences only"
+                checked={differencesOnly}
+                onChange={(event) => {
+                  setDifferencesOnly(event.currentTarget.checked);
+                  setSelectedKey(undefined);
+                }}
+                type="checkbox"
+              />
+              <span>Differences only</span>
+              <strong aria-hidden="true">{differenceCount}</strong>
+              <span className="sr-only" id="comparison-difference-count">
+                {differenceCount} of {comparison.rows.length} aligned skill keys
+                {differencesOnly ? " remain." : " would remain."}
+              </span>
+            </label>
+          ) : null}
         </section>
 
         <div className="comparison-controls" aria-label="Paired Targets">
@@ -512,6 +547,15 @@ export function ComparisonView({
               <CircleHelp aria-hidden="true" size={22} />
               <h2>No skill evidence on either Target</h2>
             </div>
+          ) : visibleRows.length === 0 ? (
+            <div className="empty-state" role="status">
+              <CircleHelp aria-hidden="true" size={22} />
+              <h2>No differences found</h2>
+              <p>
+                All {comparison.rows.length} aligned skill
+                {comparison.rows.length === 1 ? " key matches." : " keys match."}
+              </p>
+            </div>
           ) : (
             <table className="comparison-table">
               <caption className="sr-only">
@@ -527,7 +571,7 @@ export function ComparisonView({
                 </tr>
               </thead>
               <tbody>
-                {comparison.rows.map((row) => (
+                {visibleRows.map((row) => (
                   <tr
                     className={
                       selectedRow?.key === row.key ? "is-selected" : undefined
@@ -584,6 +628,8 @@ export function ComparisonView({
             <p>
               {comparison === null
                 ? emptyNextStep
+                : differencesOnly && comparison.rows.length > 0
+                  ? `All ${comparison.rows.length} aligned skill ${comparison.rows.length === 1 ? "key matches" : "keys match"}.`
                 : "Select a skill in the table to inspect the difference."}
             </p>
           </div>

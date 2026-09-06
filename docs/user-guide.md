@@ -148,6 +148,8 @@ Inventory 是对当前 Target 一次只读 `npx skills list --json` 的归一化
 2. 打开 **Comparison**，选左右 Target，可互换。
 3. 点 **Compare**。
 
+对比结果较多时，可启用 **Differences only**，隐藏完全匹配项，只保留需要关注的差异与未知证据。
+
 只有一个 Target 时：副标题为 **Needs a second Local Target**，Compare 禁用，并提示先到 Targets 再添加一个。
 
 两侧证据最好都是 fresh；一侧 stale 时仍可查看，但向该侧准备变更会受限。选中一行可查看左右证据详情，并在条件满足时准备跨 Target 的更新/同步类操作（仍需 Trusted Review）。
