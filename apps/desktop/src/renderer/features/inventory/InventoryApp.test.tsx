@@ -1140,6 +1140,48 @@ describe("Local Target Inventory shell", () => {
     );
   });
 
+  it("shows V1-unavailable context for SSH options while keeping Local labels", async () => {
+    const sshTarget = {
+      connectionReference: "build-host",
+      ...targetV4Metadata,
+      generation: 2,
+      id: "00000000-0000-4000-8000-000000000018",
+      kind: "ssh" as const,
+      label: "Build host",
+      workspace: "/srv/skills",
+      workspaceLabel: "skills",
+    };
+    render(
+      <InventoryApp
+        client={clientFor({
+          ...snapshot,
+          targets: [
+            {
+              deletionBlocked: false,
+              inventory: snapshot.inventory,
+              mutation: snapshot.mutation,
+              target: snapshot.target,
+            },
+            {
+              deletionBlocked: false,
+              inventory: snapshot.inventory,
+              mutation: snapshot.mutation,
+              target: sshTarget,
+            },
+          ],
+        })}
+      />,
+    );
+
+    const chooser = await screen.findByRole("combobox", { name: "Target" });
+    expect(
+      within(chooser).getByRole("option", { name: "This device" }),
+    ).toBeInTheDocument();
+    expect(
+      within(chooser).getByRole("option", { name: "Build host · 未开放" }),
+    ).toBeInTheDocument();
+  });
+
   it("opens About from workspace navigation", async () => {
     render(<InventoryApp client={clientFor(snapshot)} />);
 

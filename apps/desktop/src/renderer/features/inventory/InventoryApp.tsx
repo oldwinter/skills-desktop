@@ -735,7 +735,9 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                       >
                         {targetStates.map((state) => (
                           <option key={state.target.id} value={state.target.id}>
-                            {state.target.label}
+                            {state.target.kind === "ssh"
+                              ? `${state.target.label} · 未开放`
+                              : state.target.label}
                           </option>
                         ))}
                       </select>
