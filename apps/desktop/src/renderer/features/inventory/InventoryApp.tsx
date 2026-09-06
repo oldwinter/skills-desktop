@@ -45,6 +45,7 @@ import {
   sourceLabel,
   statusLabel,
   statusTone,
+  targetOptionLabel,
 } from "./inventory-state.js";
 
 type ScopeFilter = "all" | "global" | "project";
@@ -735,7 +736,7 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                       >
                         {targetStates.map((state) => (
                           <option key={state.target.id} value={state.target.id}>
-                            {state.target.label}
+                            {targetOptionLabel(state.target)}
                           </option>
                         ))}
                       </select>

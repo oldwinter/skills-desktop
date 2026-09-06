@@ -48,6 +48,10 @@ export function scopeLabel(scope: PublicInventoryEntry["scope"]) {
   return scope === "project" ? "Project" : "Global";
 }
 
+export function targetOptionLabel(target: WorkspaceSnapshot["target"]) {
+  return target.kind === "ssh" ? `${target.label} · 未开放` : target.label;
+}
+
 export function sourceLabel(entry: PublicInventoryEntry) {
   return entry.declaredSource.source ?? "Provenance unavailable";
 }
