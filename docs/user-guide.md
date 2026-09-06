@@ -77,6 +77,10 @@ npm run verify
 
 启动应用后，侧栏可见：**Inventory / Comparison / Collections / Targets / About**。
 
+![侧栏与主界面：Inventory / Comparison / Collections / Targets / About](images/user-guide/inventory-fresh-evidence.png)
+
+侧栏五项与页眉 **Fresh evidence** 如上。后续各节按同一套 chrome 对照截图。
+
 ---
 
 ## 2. Local Target
@@ -89,7 +93,11 @@ npm run verify
 2. **New Target**，填写显示标签、工作区、harness 等。
 3. Kind 保持 **Local**，保存。
 
+![Targets：New Target 与 Local Definition](images/user-guide/targets-new-target.webp)
+
 列表上 Local 显示为 Local；若仍看到历史残留的 SSH 项，会标 **SSH · 未在 V1 开放**，编辑只读、不能保存。新建 SSH 在 V1 中不可用。
+
+![Inventory Target 选择器中的 SSH · 未开放](images/user-guide/inventory-ssh-unavailable.png)
 
 页眉会显示当前 Target 标签与工作区路径。侧栏 **Targets** 区可切换当前观察对象。
 
@@ -115,6 +123,8 @@ Inventory 是对当前 Target 一次只读 `npx skills list --json` 的归一化
 
 点标题旁的刷新按钮重新观察；进行中可取消。空清单时提示：Refresh this Target，或通过 `npx skills` 安装技能。
 
+![Inventory：Fresh evidence 与清单表](images/user-guide/inventory-fresh-evidence.png)
+
 ### 浏览与筛选
 
 - 表格列：Skill、Scope、Harness、Declared source、Evidence（revision）。
@@ -125,6 +135,11 @@ Inventory 是对当前 Target 一次只读 `npx skills list --json` 的归一化
 ### 变更（必须先计划、再确认）
 
 任何变更都走：**Prepare → Command Plan → Trusted Review → 执行**。界面上的预览字符串只是说明，**不会**当 shell 执行。
+
+![Inventory：Add Skill 与 Prepare add](images/user-guide/inventory-prepare-add.png)
+
+> Trusted Review / Command Plan 在点击 **Prepare add** / **Prepare update** / **Prepare removal** / Collections 的 **Prepare plan** 之后打开；上图是进入该确认链的入口 chrome。
+
 
 常见操作：
 
@@ -140,6 +155,10 @@ Inventory 是对当前 Target 一次只读 `npx skills list --json` 的归一化
 ---
 
 ## 4. Comparison（对比）
+
+![Comparison 空态：Needs a second Local Target](images/user-guide/comparison-needs-second-local.png)
+
+![Comparison：两个 Local Target 对照](images/user-guide/comparison-two-targets.png)
 
 对比两个 Target 的 Inventory，按技能名对齐，保留多维结果（是否存在、declared source、harness、revision / content fingerprint、新鲜度），**不会**压成单一「好坏」状态。
 
@@ -161,6 +180,8 @@ Inventory 是对当前 Target 一次只读 `npx skills list --json` 的归一化
 
 ## 5. Collections（官方合集）
 
+![Collections：Official Collections 与 Prepare plan](images/user-guide/collections-prepare-plan.webp)
+
 **Official Collections** = 随应用分发、经审阅的菜谱：从已有源中点名若干 skill，可对 **Local** Target 生成变更意图。合集不拥有已安装技能，也不另起安装协议。
 
 ### 典型流程
@@ -179,6 +200,8 @@ Inventory 是对当前 Target 一次只读 `npx skills list --json` 的归一化
 ---
 
 ## 6. About 与更新
+
+![About：Manual upgrade](images/user-guide/about-manual-upgrade.webp)
 
 **About** 显示产品名、版本、平台 / 架构，以及更新策略。
 
