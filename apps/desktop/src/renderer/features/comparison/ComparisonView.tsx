@@ -386,7 +386,7 @@ export function ComparisonView({
           </div>
           {comparison !== null && comparison.rows.length > 0 ? (
             <div className="comparison-filters">
-              <label className="search-control">
+              <div className="search-control">
                 <Search aria-hidden="true" size={16} />
                 <input
                   aria-label="Search comparison skills"
@@ -412,7 +412,7 @@ export function ComparisonView({
                     <X aria-hidden="true" size={14} />
                   </button>
                 ) : null}
-              </label>
+              </div>
               <label className="comparison-filter-toggle">
                 <input
                   aria-describedby="comparison-difference-count"
