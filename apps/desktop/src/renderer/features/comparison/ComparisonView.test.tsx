@@ -8,6 +8,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -273,6 +274,126 @@ const driftRow: PublicComparison["rows"][number] = {
 };
 
 describe("ComparisonView", () => {
+  it("searches only skill names and prepares the visible original key", async () => {
+    const prepareComparison = vi.fn(async () => ({ ok: false as const, error }));
+    const compareTargets = vi.fn();
+    const refreshInventory = vi.fn();
+    render(
+      <ComparisonView
+        client={bridge({ prepareComparison, compareTargets, refreshInventory })}
+        onPrepared={vi.fn()}
+        snapshot={baseSnapshot({
+          comparison: {
+            id: "search-comparison",
+            leftFreshness: "fresh",
+            leftTargetId: leftId,
+            rightFreshness: "fresh",
+            rightTargetId: rightId,
+            rows: [missingRow, { ...driftRow, key: "TDD" }],
+          },
+        })}
+        targets={[targetState(leftTarget), targetState(rightTarget)]}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "find-skills" }));
+    const search = screen.getByRole("searchbox", { name: "Search comparison skills" });
+    fireEvent.change(search, { target: { value: "  tDd  " } });
+    expect(screen.queryByRole("button", { name: "find-skills" })).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "TDD" })).toBeInTheDocument();
+    expect(screen.getByText("1 of 2 aligned skill keys")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Prepare for Left" }));
+    await waitFor(() => expect(prepareComparison).toHaveBeenCalledWith("search-comparison", "TDD", leftId));
+    fireEvent.change(search, { target: { value: "example/skills" } });
+    expect(screen.getByRole("heading", { name: "No skills match your search" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "No difference selected" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Prepare for Left" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Prepare for Right" })).not.toBeInTheDocument();
+    expect(compareTargets).not.toHaveBeenCalled();
+    expect(refreshInventory).not.toHaveBeenCalled();
+  });
+
+  it("combines search with differences and restores the list without clearing the toggle", () => {
+    render(
+      <ComparisonView
+        client={bridge()}
+        onPrepared={vi.fn()}
+        snapshot={baseSnapshot({
+          comparison: {
+            id: "search-differences",
+            leftFreshness: "fresh",
+            leftTargetId: leftId,
+            rightFreshness: "fresh",
+            rightTargetId: rightId,
+            rows: [
+              missingRow,
+              { ...driftRow, key: "known-skill", summary: "matched" },
+              { ...driftRow, key: "unknown-skill", summary: "unknown-evidence" },
+            ],
+          },
+        })}
+        targets={[targetState(leftTarget), targetState(rightTarget)]}
+      />,
+    );
+    const search = screen.getByRole("searchbox", { name: "Search comparison skills" });
+    const toggle = screen.getByRole("checkbox", { name: "Differences only" });
+    fireEvent.change(search, { target: { value: "known" } });
+    expect(screen.getByRole("button", { name: "known-skill" })).toBeInTheDocument();
+    fireEvent.click(toggle);
+    expect(screen.queryByRole("button", { name: "known-skill" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "unknown-skill" })).toBeInTheDocument();
+    expect(screen.getByText("1 of 3 aligned skill keys")).toBeInTheDocument();
+    expect(toggle).toHaveAccessibleDescription("2 of 3 aligned skill keys have differences or unknown evidence before search.");
+    fireEvent.change(search, { target: { value: "nothing" } });
+    expect(screen.queryByText(/All 3 aligned skill keys match/)).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "No difference selected" })).toBeInTheDocument();
+    fireEvent.click(within(screen.getByRole("status")).getByRole("button", { name: "Clear search" }));
+    expect(search).toHaveValue("");
+    expect(search).toHaveFocus();
+    expect(toggle).toBeChecked();
+    expect(screen.getByRole("button", { name: "find-skills" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "unknown-skill" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "known-skill" })).not.toBeInTheDocument();
+    fireEvent.change(search, { target: { value: "missing" } });
+    fireEvent.keyDown(search, { key: "Escape", isComposing: true });
+    expect(search).toHaveValue("missing");
+    fireEvent.keyDown(search, { key: "Escape" });
+    expect(search).toHaveValue("");
+    expect(search).toHaveFocus();
+    expect(toggle).toBeChecked();
+    expect(screen.getByText("2 of 3 aligned skill keys")).toBeInTheDocument();
+  });
+
+  it("treats whitespace as no search and keeps all-matched empty results accurate", () => {
+    render(
+      <ComparisonView
+        client={bridge()}
+        onPrepared={vi.fn()}
+        snapshot={baseSnapshot({
+          comparison: {
+            id: "search-matched",
+            leftFreshness: "fresh",
+            leftTargetId: leftId,
+            rightFreshness: "fresh",
+            rightTargetId: rightId,
+            rows: [{ ...driftRow, summary: "matched" }],
+          },
+        })}
+        targets={[targetState(leftTarget), targetState(rightTarget)]}
+      />,
+    );
+    const search = screen.getByRole("searchbox", { name: "Search comparison skills" });
+    fireEvent.change(search, { target: { value: "   " } });
+    expect(screen.getByRole("button", { name: "tdd" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Clear search" }));
+    expect(search).toHaveFocus();
+    fireEvent.click(screen.getByRole("checkbox", { name: "Differences only" }));
+    expect(screen.getByRole("heading", { name: "No differences found" })).toBeInTheDocument();
+    fireEvent.change(search, { target: { value: "absent" } });
+    expect(screen.getByRole("heading", { name: "No skills match your search" })).toBeInTheDocument();
+    fireEvent.keyDown(search, { key: "Escape" });
+    expect(screen.getByRole("heading", { name: "No differences found" })).toBeInTheDocument();
+  });
+
   it("asks for a second Local Target and explains SSH unavailability", () => {
     render(
       <ComparisonView

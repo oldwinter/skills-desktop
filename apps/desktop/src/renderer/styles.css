@@ -243,6 +243,9 @@ code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; fo
 .collection-child-error { margin-top: 7px; color: var(--danger); font-size: var(--font-size-meta); overflow-wrap: anywhere; }
 .collection-progress-list .text-button { margin-top: 9px; }
 .comparison-controls { display: grid; grid-template-columns: minmax(160px, 1fr) 40px minmax(160px, 1fr) auto; align-items: end; gap: 10px; padding: 0 20px 14px; }
+.comparison-filters { display: flex; flex: 0 1 520px; flex-wrap: wrap; align-items: center; gap: 10px; min-width: 0; }
+.comparison-filters .search-control { flex: 1 1 200px; min-width: 0; }
+.comparison-filters input[type="search"]::-webkit-search-cancel-button { appearance: none; }
 .comparison-filter-toggle { display: flex; min-height: 40px; align-items: center; gap: 8px; padding: 0 10px; color: var(--text-secondary); background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-control); font-size: var(--font-size-meta); cursor: pointer; }
 .comparison-filter-toggle:focus-within { border-color: var(--focus); box-shadow: 0 0 0 1px var(--focus); }
 .comparison-filter-toggle input { margin: 0; }

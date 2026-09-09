@@ -170,6 +170,8 @@ Inventory 是对当前 Target 一次只读 `npx skills list --json` 的归一化
 
 对比结果较多时，可启用 **Differences only**，隐藏完全匹配项，只保留需要关注的差异与未知证据。
 
+在 **Search skills by name** 输入技能名称可进一步筛选，搜索忽略大小写和首尾空格，并与 **Differences only** 叠加。点击 **Clear search** 或在搜索框内按 `Escape` 可清除搜索并保留差异筛选，焦点仍在搜索框。
+
 只有一个 Target 时：副标题为 **Needs a second Local Target**，Compare 禁用，并提示先到 Targets 再添加一个。
 
 两侧证据最好都是 fresh；一侧 stale 时仍可查看，但向该侧准备变更会受限。选中一行可查看左右证据详情，并在条件满足时准备跨 Target 的更新/同步类操作（仍需 Trusted Review）。
