@@ -1,10 +1,12 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
   ArrowLeftRight,
   CircleHelp,
   PackagePlus,
   RefreshCw,
+  Search,
+  X,
 } from "lucide-react";
 
 import type {
@@ -175,6 +177,9 @@ export function ComparisonView({
   );
   const [selectedKey, setSelectedKey] = useState<string>();
   const [differencesOnly, setDifferencesOnly] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const searchRef = useRef<HTMLInputElement>(null);
+  const normalizedQuery = searchQuery.trim().toLowerCase();
   const [error, setError] = useState<RendererError>();
   const [busy, setBusy] = useState(false);
 
@@ -210,9 +215,11 @@ export function ComparisonView({
   const visibleRows = useMemo(
     () =>
       comparison?.rows.filter(
-        ({ summary }) => !differencesOnly || summary !== "matched",
+        ({ key, summary }) =>
+          (!differencesOnly || summary !== "matched") &&
+          key.toLowerCase().includes(normalizedQuery),
       ) ?? [],
-    [comparison, differencesOnly],
+    [comparison, differencesOnly, normalizedQuery],
   );
   const differenceCount = useMemo(
     () =>
@@ -227,6 +234,10 @@ export function ComparisonView({
   );
   const leftTarget = targets.find(({ target }) => target.id === leftTargetId);
   const rightTarget = targets.find(({ target }) => target.id === rightTargetId);
+  const clearSearch = () => {
+    setSearchQuery("");
+    searchRef.current?.focus();
+  };
 
   const openComparison = async () => {
     const leftKind = targets.find(({ target }) => target.id === leftTargetId)
@@ -368,30 +379,61 @@ export function ComparisonView({
             <p>
               {plannableTargets.length < 2
                 ? "Needs a second Local Target"
-                : differencesOnly && comparison !== null
+                : (differencesOnly || normalizedQuery !== "") && comparison !== null
                   ? `${visibleRows.length} of ${comparison.rows.length} aligned skill keys`
                   : `${comparison?.rows.length ?? 0} aligned skill keys`}
             </p>
           </div>
           {comparison !== null && comparison.rows.length > 0 ? (
-            <label className="comparison-filter-toggle">
-              <input
-                aria-describedby="comparison-difference-count"
-                aria-label="Differences only"
-                checked={differencesOnly}
-                onChange={(event) => {
-                  setDifferencesOnly(event.currentTarget.checked);
-                  setSelectedKey(undefined);
-                }}
-                type="checkbox"
-              />
-              <span>Differences only</span>
-              <strong aria-hidden="true">{differenceCount}</strong>
-              <span className="sr-only" id="comparison-difference-count">
-                {differenceCount} of {comparison.rows.length} aligned skill keys
-                {differencesOnly ? " remain." : " would remain."}
-              </span>
-            </label>
+            <div className="comparison-filters">
+              <div className="search-control">
+                <Search aria-hidden="true" size={16} />
+                <input
+                  aria-label="Search comparison skills"
+                  onChange={(event) => setSearchQuery(event.currentTarget.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Escape" && !event.nativeEvent.isComposing) {
+                      event.preventDefault();
+                      clearSearch();
+                    }
+                  }}
+                  placeholder="Search skills by name"
+                  ref={searchRef}
+                  type="search"
+                  value={searchQuery}
+                />
+                {searchQuery !== "" ? (
+                  <button
+                    aria-label="Clear search"
+                    className="search-clear"
+                    onClick={clearSearch}
+                    type="button"
+                  >
+                    <X aria-hidden="true" size={14} />
+                  </button>
+                ) : null}
+              </div>
+              <label className="comparison-filter-toggle">
+                <input
+                  aria-describedby="comparison-difference-count"
+                  aria-label="Differences only"
+                  checked={differencesOnly}
+                  onChange={(event) => {
+                    setDifferencesOnly(event.currentTarget.checked);
+                    setSelectedKey(undefined);
+                  }}
+                  type="checkbox"
+                />
+                <span>Differences only</span>
+                <strong aria-hidden="true">{differenceCount}</strong>
+                <span className="sr-only" id="comparison-difference-count">
+                  {differenceCount} of {comparison.rows.length} aligned skill keys
+                  {normalizedQuery !== ""
+                    ? " have differences or unknown evidence before search."
+                    : differencesOnly ? " remain." : " would remain."}
+                </span>
+              </label>
+            </div>
           ) : null}
         </section>
 
@@ -547,6 +589,19 @@ export function ComparisonView({
               <CircleHelp aria-hidden="true" size={22} />
               <h2>No skill evidence on either Target</h2>
             </div>
+          ) : visibleRows.length === 0 && normalizedQuery !== "" ? (
+            <div className="empty-state" role="status">
+              <Search aria-hidden="true" size={22} />
+              <h2>No skills match your search</h2>
+              <p>
+                {differencesOnly
+                  ? "Try another skill name or turn off Differences only."
+                  : "Try another skill name or clear the search."}
+              </p>
+              <button className="text-button" onClick={clearSearch} type="button">
+                Clear search
+              </button>
+            </div>
           ) : visibleRows.length === 0 ? (
             <div className="empty-state" role="status">
               <CircleHelp aria-hidden="true" size={22} />
@@ -628,6 +683,8 @@ export function ComparisonView({
             <p>
               {comparison === null
                 ? emptyNextStep
+                : normalizedQuery !== "" && comparison.rows.length > 0
+                  ? "Clear the search or change the filters to inspect a skill."
                 : differencesOnly && comparison.rows.length > 0
                   ? `All ${comparison.rows.length} aligned skill ${comparison.rows.length === 1 ? "key matches" : "keys match"}.`
                 : "Select a skill in the table to inspect the difference."}
