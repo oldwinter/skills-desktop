@@ -115,7 +115,7 @@ export function TargetsView({
 
   return (
     <>
-      <main className="targets-workspace">
+      <main className="targets-workspace" id="workspace-main" tabIndex={-1}>
         <section className="page-heading">
           <div>
             <h1>Targets</h1>
