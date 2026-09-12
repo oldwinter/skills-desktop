@@ -372,7 +372,7 @@ export function ComparisonView({
 
   return (
     <>
-      <main className="comparison-workspace">
+      <main className="comparison-workspace" id="workspace-main" tabIndex={-1}>
         <section className="page-heading">
           <div>
             <h1>Comparison</h1>
