@@ -10,11 +10,7 @@ import {
   createPackagedQaFixture,
   resolvePackagedExecutable,
 } from "../../../../tests/packaged-ui-qa/fixture.mjs";
-import {
-  EXPECTED_URL,
-  launchPackagedElectron,
-  stopChild,
-} from "../../../../tests/packaged-ui-qa/launch.mjs";
+import { EXPECTED_URL, stopChild } from "../../../../tests/packaged-ui-qa/launch.mjs";
 
 export { CdpPage, createPackagedQaFixture, EXPECTED_URL, resolvePackagedExecutable };
 
