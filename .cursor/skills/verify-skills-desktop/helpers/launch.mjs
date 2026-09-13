@@ -84,6 +84,7 @@ try {
     workspaceState: state,
   });
   await launched.page.disconnect();
+  launched.child.unref?.();
   process.stdout.write(
     [
       "verification session ready",
@@ -96,6 +97,7 @@ try {
       "",
     ].join("\n"),
   );
+  process.exit(0);
 } catch (error) {
   try {
     await launched?.close();

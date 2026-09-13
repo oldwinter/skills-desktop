@@ -179,6 +179,10 @@ Standards:
 5. Preview strings in Command Plan are not executable. Proof of a mutation is
    Trusted Review approval plus stub argv plus fixture inventory change, not
    the preview text.
+6. On Xvfb / missing UI fonts, `Page.captureScreenshot` can smash Latin
+   spacing so OCR reads `Thisdevice` or `qa-oproject-skill`. Trust
+   `drive.mjs state`, `eval`, and fixture files for text. Keep the PNG as
+   layout evidence, not as the source of truth for copy.
 
 ## Cleanup
 

@@ -98,3 +98,5 @@ invocations contain `remove`, fixture `project` array no longer includes
 - `set-mode` only changes the stub. Inventory does not change until Refresh.
 - Trusted Review is another CDP target. Workspace clicks will not reach it.
 - Review initial focus is **Reject**. Approve is the second button.
+- Xvfb screenshots may look like letters are glued together. `state` JSON
+  still reports `qa-project-skill` and `Fresh evidence`.

@@ -6,9 +6,17 @@ import {
   clearSessionFile,
   processAlive,
   readSession,
+  sessionPath,
   stopOwnedElectron,
   writeJson,
 } from "./lib.mjs";
+
+try {
+  await access(sessionPath());
+} catch {
+  process.stdout.write("no verification session to clean\n");
+  process.exit(0);
+}
 
 const session = await readSession();
 const evidenceDir = session.evidenceDir;
