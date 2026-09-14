@@ -3307,6 +3307,15 @@ describe("Local Target Inventory shell", () => {
     expect(screen.getByText(reason)).toBeInTheDocument();
   });
 
+  it("places the skip link before the shell and targets the workspace main", async () => {
+    render(<InventoryApp client={clientFor(snapshot)} />);
+
+    const skipLink = await screen.findByRole("link", { name: "Skip to workspace" });
+    expect(skipLink).toHaveAttribute("href", "#workspace-main");
+    expect(skipLink.compareDocumentPosition(document.querySelector(".app-header")!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(document.getElementById("workspace-main")).toHaveAttribute("tabindex", "-1");
+  });
+
   it("presents SSH transport loss as an accessible offline state", async () => {
     render(
       <InventoryApp

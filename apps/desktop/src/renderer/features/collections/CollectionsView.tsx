@@ -256,7 +256,7 @@ export function CollectionsView({
 
   if (collections === undefined || collections.releases.length === 0) {
     return (
-      <main className="collections-workspace">
+      <main className="collections-workspace" id="workspace-main" tabIndex={-1}>
         <section className="page-heading">
           <div>
             <h1>Official Collections</h1>
@@ -280,7 +280,7 @@ export function CollectionsView({
 
   return (
     <>
-      <main className="collections-workspace">
+      <main className="collections-workspace" id="workspace-main" tabIndex={-1}>
         <section className="page-heading">
           <div>
             <h1>Official Collections</h1>

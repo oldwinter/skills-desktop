@@ -525,7 +525,7 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
   if (snapshot === undefined) {
     if (bootstrapError !== undefined) {
       return (
-        <main className="boot-state boot-state--error" role="alert">
+        <main className="boot-state boot-state--error" id="workspace-main" role="alert" tabIndex={-1}>
           <AlertCircle aria-hidden="true" size={24} />
           <UserFacingErrorCopy error={bootstrapError} />
           <button
@@ -541,7 +541,7 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
       );
     }
     return (
-      <main className="boot-state" aria-busy="true">
+      <main className="boot-state" aria-busy="true" id="workspace-main" tabIndex={-1}>
         <Boxes aria-hidden="true" size={24} />
         <span>Opening local inventory</span>
       </main>
@@ -697,6 +697,7 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
   };
   return (
     <div className="app-shell">
+      <a className="skip-link" href="#workspace-main">Skip to workspace</a>
       <header className="app-header">
         <div className="brand-lockup">
           <span className="brand-mark">
@@ -740,6 +741,8 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
           <>
             <main
               className="inventory-workspace"
+              id="workspace-main"
+              tabIndex={-1}
               aria-busy={snapshot.inventory.phase === "loading"}
             >
               <section className="page-heading">

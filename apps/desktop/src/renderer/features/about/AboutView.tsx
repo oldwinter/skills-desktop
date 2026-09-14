@@ -118,7 +118,7 @@ export function AboutView({ client }: { readonly client: AboutBridge }) {
     snapshot?.schemaVersion === 2 ? snapshot.candidate : null;
 
   return (
-    <main className="about-workspace">
+    <main className="about-workspace" id="workspace-main" tabIndex={-1}>
       <section className="page-heading">
         <div>
           <h1>About</h1>
