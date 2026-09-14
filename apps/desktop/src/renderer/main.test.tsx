@@ -10,8 +10,8 @@ const renderer = vi.hoisted(() => ({
 }));
 
 vi.mock("react-dom/client", () => ({ createRoot: renderer.createRoot }));
-vi.mock("./features/inventory/InventoryApp.js", () => ({
-  InventoryApp: renderer.InventoryApp,
+vi.mock("./features/workspace/WorkspaceShell.js", () => ({
+  WorkspaceShell: renderer.InventoryApp,
 }));
 
 const client = { getSnapshot: vi.fn() };
@@ -30,7 +30,7 @@ describe("workspace renderer entrypoint", () => {
     Object.assign(window, { skillsDesktop: client });
   });
 
-  it("renders the InventoryApp in StrictMode with the desktop bridge", async () => {
+  it("renders the WorkspaceShell in StrictMode with the desktop bridge", async () => {
     const root = document.createElement("div");
     root.id = "root";
     document.body.append(root);

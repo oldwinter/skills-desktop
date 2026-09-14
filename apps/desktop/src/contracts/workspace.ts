@@ -253,6 +253,28 @@ export const publicMutationStateSchema = z
   })
   .strict();
 
+export const prepareEligibilityReasonSchema = z.enum([
+  "mutation-running",
+  "reconciliation-required",
+  "ssh-not-in-v1",
+  "stale-inventory",
+]);
+
+export const prepareEligibilityNextActionSchema = z.enum([
+  "none",
+  "reconcile",
+  "refresh",
+  "wait",
+]);
+
+export const prepareEligibilitySchema = z
+  .object({
+    allowed: z.boolean(),
+    nextAction: prepareEligibilityNextActionSchema,
+    reason: prepareEligibilityReasonSchema.nullable(),
+  })
+  .strict();
+
 const comparisonSideSchema = z
   .object({
     entries: z.array(publicInventoryEntrySchema).max(16),
@@ -616,6 +638,7 @@ export const publicTargetStateSchema = z
     deletionBlocked: z.boolean(),
     inventory: publicInventoryStateSchema,
     mutation: publicMutationStateSchema,
+    prepareEligibility: prepareEligibilitySchema,
     target: targetDefinitionSchema,
   })
   .strict();
@@ -628,6 +651,7 @@ export const workspaceSnapshotSchema = z
     collections: publicCollectionsStateSchema.optional(),
     inventory: publicInventoryStateSchema,
     mutation: publicMutationStateSchema,
+    prepareEligibility: prepareEligibilitySchema,
     schemaVersion: z.literal(WORKSPACE_PROTOCOL_VERSION),
     sessionEpoch: z.string().min(1).max(256),
     stateRevision: z.number().int().nonnegative(),
@@ -901,6 +925,13 @@ export type PrepareCollectionAcrossTargetsRequest = z.infer<
   typeof prepareCollectionAcrossTargetsRequestSchema
 >;
 export type PublicMutationState = z.infer<typeof publicMutationStateSchema>;
+export type PrepareEligibility = z.infer<typeof prepareEligibilitySchema>;
+export type PrepareEligibilityReason = z.infer<
+  typeof prepareEligibilityReasonSchema
+>;
+export type PrepareEligibilityNextAction = z.infer<
+  typeof prepareEligibilityNextActionSchema
+>;
 export type RendererError = z.infer<typeof rendererErrorSchema>;
 export type DurableTargetDefinition = z.infer<
   typeof durableTargetDefinitionSchema

@@ -1,5 +1,3 @@
-import { posix } from "node:path";
-
 import type { Result } from "@skills-desktop/skills-runtime";
 
 import type { RestartGuardReason } from "../../contracts/about.js";
@@ -7,10 +5,8 @@ import type { RestartGuardReason } from "../../contracts/about.js";
 import { GITHUB_SOURCE_OWNER_REPOSITORY_COPY } from "../../contracts/user-facing-error.js";
 import {
   isGithubOwnerRepository,
-  WORKSPACE_PROTOCOL_VERSION,
   workspaceRequestSchema,
   type DesktopEvent,
-  type PublicInventoryEntry,
   type PublicInventoryState,
   type PublicCollectionPlan,
   type PublicCollectionExecution,
@@ -19,8 +15,6 @@ import {
   type PublicMutationState,
   type RendererError,
   type BlockedTargetDefinition,
-  type DurableTargetDefinition,
-  type TargetDefinition as PublicTargetDefinition,
   type WorkspaceSnapshot,
 } from "../../contracts/workspace.js";
 import {
@@ -41,10 +35,6 @@ import type {
   TargetDefinition,
   TargetSession,
 } from "../targets/skills-targets.js";
-import {
-  isLocalWorkspaceRoot,
-  localWorkspaceLabel,
-} from "../targets/workspace-path.js";
 import type { HostTrustChallenge } from "../ssh/openssh-target.js";
 import { compareTargetInventories } from "./comparison.js";
 import {
@@ -54,6 +44,24 @@ import {
   type OfficialCollectionCatalog,
   validateOfficialCollectionCatalog,
 } from "./official-collections.js";
+import {
+  remapRecoveredTargetId,
+  repairPersistedRootWorkspaces,
+  stateFromRecoveredRecords,
+} from "./recovery-restore.js";
+import { isRecord, publicError, requestFailure } from "./request-errors.js";
+import {
+  durableTarget,
+  emptyInventoryState,
+  emptyMutationState,
+  projectCommandPlan,
+  projectEntries,
+  projectTarget,
+  projectWorkspaceSnapshot,
+  staleAfterFailure,
+  targetFromDurable,
+  targetGenerationStaleError,
+} from "./snapshot-projection.js";
 
 const MAX_RETAINED_REVIEWS = 128;
 
@@ -169,23 +177,6 @@ interface ActivePreparation {
   readonly session: FreshTargetSession;
 }
 
-function publicError<Code extends RequestError["code"]>(
-  code: Code,
-  message: string,
-  phase: string,
-  retryable: boolean,
-): Omit<RendererError, "code"> & { readonly code: Code } {
-  return { code, effects: "none", message, phase, retryable };
-}
-
-function requestFailure(error: RequestError): Result<never, RequestError> {
-  return { error, ok: false };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
 function isInvalidGithubAddSourceRequest(input: unknown): boolean {
   if (!isRecord(input) || input.type !== "mutation.prepare") return false;
   if (!isRecord(input.intent) || input.intent.type !== "add") return false;
@@ -198,167 +189,6 @@ function isSingleTargetCollectionPlan(
   plan: PublicCollectionPlan,
 ): plan is PublicSingleTargetCollectionPlan {
   return plan.schemaVersion === 1;
-}
-
-interface ProjectableInventoryEntry {
-  readonly agents: readonly string[];
-  readonly contentFingerprint: PublicInventoryEntry["contentFingerprint"];
-  readonly declaredSource: PublicInventoryEntry["declaredSource"];
-  readonly name: string;
-  readonly revision: PublicInventoryEntry["revision"];
-  readonly scope: PublicInventoryEntry["scope"];
-}
-
-function projectEntries(
-  entries: readonly ProjectableInventoryEntry[],
-): PublicInventoryEntry[] {
-  return entries.map((entry) => ({
-    agents: [...entry.agents],
-    contentFingerprint: { ...entry.contentFingerprint },
-    declaredSource: { ...entry.declaredSource },
-    name: entry.name,
-    revision: { ...entry.revision },
-    scope: entry.scope,
-  }));
-}
-
-function remapRecoveredTargetId<Value extends { readonly targetId: string }>(
-  values: readonly Value[],
-  fromTargetId: string,
-  toTargetId: string,
-): Value[] {
-  const byTarget = new Map<string, Value>();
-  for (const value of values) {
-    if (value.targetId === fromTargetId) {
-      byTarget.set(toTargetId, { ...value, targetId: toTargetId });
-    }
-  }
-  for (const value of values) {
-    if (value.targetId !== fromTargetId) byTarget.set(value.targetId, value);
-  }
-  return [...byTarget.values()];
-}
-
-function staleAfterFailure(freshness: PublicInventoryState["freshness"]) {
-  return freshness === "none" ? "none" : "stale";
-}
-
-function targetGenerationStaleError() {
-  return publicError(
-    "stale_inventory",
-    "Target Definition changed; refresh before preparing a mutation.",
-    "target",
-    true,
-  );
-}
-
-function projectTarget(target: TargetDefinition): PublicTargetDefinition {
-  return {
-    connectionReference: target.connectionReference ?? null,
-    dialectId: target.dialectId,
-    executionBindingDigest: target.executionBindingDigest,
-    generation: target.generation,
-    harnessIds: [...target.harnessIds],
-    id: target.id,
-    kind: target.kind,
-    label: target.label,
-    registryDigest: target.registryDigest,
-    registryVersion: target.registryVersion,
-    workspace: target.workspace,
-    workspaceLabel: target.workspaceLabel,
-  };
-}
-
-function durableTarget(target: TargetDefinition): DurableTargetDefinition {
-  return {
-    connectionReference: target.connectionReference ?? null,
-    dialectId: target.dialectId,
-    executionBindingDigest: target.executionBindingDigest ?? null,
-    generation: target.generation,
-    harnessIds: [...target.harnessIds],
-    id: target.id,
-    kind: target.kind,
-    label: target.label,
-    registryDigest: target.registryDigest,
-    registryVersion: target.registryVersion,
-    workspace: target.workspace,
-  };
-}
-
-function targetFromDurable(target: DurableTargetDefinition): TargetDefinition {
-  return {
-    ...target,
-    executionBindingDigest: target.executionBindingDigest ?? null,
-    workspaceLabel:
-      target.kind === "ssh"
-        ? posix.basename(target.workspace) || target.workspace
-        : localWorkspaceLabel(target.workspace),
-  };
-}
-
-function repairPersistedRootWorkspaces(
-  definitions: readonly TargetDefinition[],
-  startupTarget: TargetDefinition,
-): {
-  readonly changed: boolean;
-  readonly definitions: readonly TargetDefinition[];
-} {
-  if (
-    startupTarget.kind !== "local" ||
-    isLocalWorkspaceRoot(startupTarget.workspace)
-  ) {
-    return { changed: false, definitions };
-  }
-  let changed = false;
-  const repaired = definitions.map((definition) => {
-    if (
-      definition.kind !== "local" ||
-      !isLocalWorkspaceRoot(definition.workspace)
-    ) {
-      return definition;
-    }
-    changed = true;
-    return {
-      ...definition,
-      executionBindingDigest: null,
-      generation: definition.generation + 1,
-      workspace: startupTarget.workspace,
-      workspaceLabel: localWorkspaceLabel(startupTarget.workspace),
-    };
-  });
-  return { changed, definitions: repaired };
-}
-
-function emptyInventoryState(): PublicInventoryState {
-  return {
-    activeOperationId: null,
-    cliVersion: null,
-    entries: [],
-    freshness: "none",
-    lastError: null,
-    observedAt: null,
-    persistenceWarning: null,
-    phase: "ready",
-  };
-}
-
-function emptyMutationState(): PublicMutationState {
-  return {
-    activeOperationId: null,
-    commandPlan: null,
-    lastError: null,
-    outcome: null,
-    phase: "idle",
-    reconciliationDeadline: null,
-  };
-}
-
-function projectCommandPlan(plan: PreparedMutation["commandPlan"]) {
-  return {
-    ...plan,
-    names: [...plan.names],
-    source: plan.source === null ? null : { ...plan.source },
-  };
 }
 
 export function createDesktopCapabilities(
@@ -411,55 +241,6 @@ export function createDesktopCapabilities(
         readonly rightTargetId: string;
       }
     | undefined;
-
-  const stateFromRecoveredRecords = (
-    definition: TargetDefinition,
-    snapshot: InventorySnapshot | undefined,
-    guard: MutationGuard | undefined,
-    currentInventory = emptyInventoryState(),
-    currentMutation = emptyMutationState(),
-  ) => {
-    let inventory = currentInventory;
-    if (snapshot !== undefined) {
-      inventory = {
-        activeOperationId: null,
-        cliVersion: snapshot.cliVersion,
-        entries: projectEntries(snapshot.entries),
-        freshness: "stale",
-        lastError:
-          snapshot.generation === definition.generation
-            ? null
-            : targetGenerationStaleError(),
-        observedAt: snapshot.observedAt,
-        persistenceWarning: null,
-        phase: "ready",
-      };
-    }
-    let mutation = currentMutation;
-    if (guard !== undefined) {
-      inventory = {
-        ...inventory,
-        freshness: staleAfterFailure(inventory.freshness),
-      };
-      mutation = {
-        activeOperationId: null,
-        commandPlan: null,
-        lastError: {
-          ...publicError(
-            "reconciliation_required",
-            "A prior mutation requires explicit reconciliation.",
-            "restore",
-            false,
-          ),
-          effects: "possible",
-        },
-        outcome: null,
-        phase: "reconciliation-required",
-        reconciliationDeadline: guard.deadline,
-      };
-    }
-    return { inventory, mutation };
-  };
 
   const storeActiveTargetState = () => {
     inventoryStates.set(target.id, structuredClone(inventoryState));
@@ -649,31 +430,16 @@ export function createDesktopCapabilities(
   const snapshotFor = (
     endpoint: EndpointState,
     eventSequence = endpoint.sequence,
-  ): WorkspaceSnapshot => ({
-    blockedTargets: structuredClone([...blockedTargetDefinitions]),
-    comparison: structuredClone(currentComparison()),
-    collections: {
-      ...collectionsForTarget(target, inventoryState),
-      execution: structuredClone(collectionExecution ?? null),
-    },
-    eventSequence,
-    inventory: structuredClone(inventoryState),
-    mutation: structuredClone(mutationState),
-    schemaVersion: WORKSPACE_PROTOCOL_VERSION,
-    sessionEpoch: endpoint.sessionEpoch,
-    stateRevision,
-    target: projectTarget(target),
-    targets: targetDefinitions().map((definition) => {
+  ): WorkspaceSnapshot => {
+    const targets = targetDefinitions().map((definition) => {
       const isActive = definition.id === target.id;
       const targetInventory = isActive
-        ? structuredClone(inventoryState)
-        : structuredClone(
-            inventoryStates.get(definition.id) ?? emptyInventoryState(),
-          );
+        ? inventoryState
+        : (inventoryStates.get(definition.id) ?? emptyInventoryState());
       return {
         collections: {
           ...collectionsForTarget(definition, targetInventory),
-          execution: structuredClone(collectionExecution ?? null),
+          execution: collectionExecution ?? null,
         },
         deletionBlocked:
           guardedTargetIds.has(definition.id) ||
@@ -681,14 +447,28 @@ export function createDesktopCapabilities(
           targetDefinitions().length === 1,
         inventory: targetInventory,
         mutation: isActive
-          ? structuredClone(mutationState)
-          : structuredClone(
-              mutationStates.get(definition.id) ?? emptyMutationState(),
-            ),
+          ? mutationState
+          : (mutationStates.get(definition.id) ?? emptyMutationState()),
         target: projectTarget(definition),
       };
-    }),
-  });
+    });
+    return projectWorkspaceSnapshot({
+      blockedTargets: blockedTargetDefinitions,
+      comparison: currentComparison(),
+      collections: {
+        ...collectionsForTarget(target, inventoryState),
+        execution: collectionExecution ?? null,
+      },
+      eventSequence,
+      inventory: inventoryState,
+      mutation: mutationState,
+      sessionEpoch: endpoint.sessionEpoch,
+      stateRevision,
+      target: projectTarget(target),
+      targets,
+      v1LocalOnlyTargets: options.v1LocalOnlyTargets === true,
+    });
+  };
 
   const enqueue = (endpoint: EndpointState, event: DesktopEvent) => {
     endpoint.pendingEvent =

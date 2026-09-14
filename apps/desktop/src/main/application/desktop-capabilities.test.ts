@@ -401,6 +401,11 @@ describe("DesktopCapabilities inventory role-session contract", () => {
         freshness: "stale",
         phase: "ready",
       },
+      prepareEligibility: {
+        allowed: false,
+        nextAction: "refresh",
+        reason: "stale-inventory",
+      },
       sessionEpoch: "epoch-1",
       target: publicTarget,
     });
@@ -428,6 +433,11 @@ describe("DesktopCapabilities inventory role-session contract", () => {
         ],
         freshness: "fresh",
         phase: "ready",
+      },
+      prepareEligibility: {
+        allowed: true,
+        nextAction: "none",
+        reason: null,
       },
     });
     expect(JSON.stringify(snapshot)).not.toMatch(

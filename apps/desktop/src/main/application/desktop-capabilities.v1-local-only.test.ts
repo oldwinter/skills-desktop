@@ -130,6 +130,60 @@ describe("V1 Local-only Target authority", () => {
     });
   });
 
+  it("projects ssh-not-in-v1 prepare eligibility for restored SSH Targets", async () => {
+    const skillsTargets = createSkillsTargetsCatalog({
+      id: () => "00000000-0000-4000-8000-000000000099",
+      initialTarget: localTarget,
+      processFor: () => unusedProcess,
+    });
+    skillsTargets.replaceDefinitions([localTarget, sshTarget]);
+    const capabilities = createDesktopCapabilities({
+      id: () => "00000000-0000-4000-8000-000000000099",
+      recoveryRecords: createMemoryRecoveryRecords(
+        [],
+        [],
+        [durable(localTarget), durable(sshTarget)],
+      ),
+      skillsTargets,
+      v1LocalOnlyTargets: true,
+    });
+    await capabilities.initialize();
+    const session = capabilities.attach(
+      {
+        endpointId: "workspace-v1-eligibility",
+        role: "workspace",
+        sessionEpoch: "epoch-v1-eligibility",
+      },
+      () => undefined,
+    );
+
+    await expect(session.snapshot()).resolves.toMatchObject({
+      prepareEligibility: {
+        allowed: false,
+        nextAction: "refresh",
+        reason: "stale-inventory",
+      },
+      targets: [
+        {
+          prepareEligibility: {
+            allowed: false,
+            nextAction: "refresh",
+            reason: "stale-inventory",
+          },
+          target: { id: localTarget.id },
+        },
+        {
+          prepareEligibility: {
+            allowed: false,
+            nextAction: "none",
+            reason: "ssh-not-in-v1",
+          },
+          target: { id: sshTarget.id },
+        },
+      ],
+    });
+  });
+
   it("rejects collection.prepare-many that includes an ssh Target", async () => {
     const skillsTargets = createSkillsTargetsCatalog({
       id: () => "00000000-0000-4000-8000-000000000099",

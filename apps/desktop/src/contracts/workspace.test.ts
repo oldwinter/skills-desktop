@@ -74,6 +74,12 @@ const mutation = {
   reconciliationDeadline: null,
 };
 
+const allowedPrepareEligibility = {
+  allowed: true as const,
+  nextAction: "none" as const,
+  reason: null,
+};
+
 const targetDefinition = {
   connectionReference: null,
   ...targetV4Metadata,
@@ -429,6 +435,7 @@ describe("workspace snapshot and request envelopes", () => {
       comparison,
       inventory,
       mutation,
+      prepareEligibility: allowedPrepareEligibility,
       schemaVersion: 2 as const,
       sessionEpoch: "epoch-1",
       stateRevision: 2,
@@ -438,14 +445,22 @@ describe("workspace snapshot and request envelopes", () => {
           deletionBlocked: false,
           inventory,
           mutation,
+          prepareEligibility: allowedPrepareEligibility,
           target: targetDefinition,
         },
       ],
     };
     expect(workspaceSnapshotSchema.parse(snapshot)).toMatchObject({
+      prepareEligibility: allowedPrepareEligibility,
       schemaVersion: 2,
       target: { id: targetId },
     });
+    expect(
+      workspaceSnapshotSchema.safeParse({
+        ...snapshot,
+        prepareEligibility: undefined,
+      }).success,
+    ).toBe(false);
     expect(
       workspaceSnapshotResultSchema.parse({ ok: true, value: snapshot }),
     ).toMatchObject({ ok: true });
@@ -472,6 +487,7 @@ describe("workspace snapshot and request envelopes", () => {
           eventSequence: 1,
           inventory,
           mutation,
+          prepareEligibility: allowedPrepareEligibility,
           schemaVersion: 2,
           sessionEpoch: "epoch-1",
           stateRevision: 1,

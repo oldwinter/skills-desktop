@@ -51,6 +51,7 @@ function targetStatesFor(snapshot: WorkspaceSnapshot): TargetState[] {
         deletionBlocked: false,
         inventory: snapshot.inventory,
         mutation: snapshot.mutation,
+        prepareEligibility: snapshot.prepareEligibility,
         target: snapshot.target,
       },
     ]
@@ -60,11 +61,11 @@ function targetStatesFor(snapshot: WorkspaceSnapshot): TargetState[] {
 function inputFor(
   targetId: string,
   activeTargetId: string,
-  kind: TargetState["target"]["kind"],
+  sshNotInV1: boolean,
 ): TargetInput {
   return {
     // V1 Local-only: SSH Targets stay visible but never included in Collections.
-    included: kind !== "ssh" && targetId === activeTargetId,
+    included: !sshNotInV1 && targetId === activeTargetId,
     scope: "project",
     selected: {},
   };
@@ -89,9 +90,13 @@ export function CollectionsView({
   );
   const [inputs, setInputs] = useState<Record<string, TargetInput>>(() =>
     Object.fromEntries(
-      targetStates.map(({ target }) => [
-        target.id,
-        inputFor(target.id, snapshot.target.id, target.kind),
+      targetStates.map((targetState) => [
+        targetState.target.id,
+        inputFor(
+          targetState.target.id,
+          snapshot.target.id,
+          targetState.prepareEligibility.reason === "ssh-not-in-v1",
+        ),
       ]),
     ),
   );
@@ -107,9 +112,13 @@ export function CollectionsView({
   useEffect(() => {
     setInputs(
       Object.fromEntries(
-        targetStates.map(({ target }) => [
-          target.id,
-          inputFor(target.id, snapshot.target.id, target.kind),
+        targetStates.map((targetState) => [
+          targetState.target.id,
+          inputFor(
+            targetState.target.id,
+            snapshot.target.id,
+            targetState.prepareEligibility.reason === "ssh-not-in-v1",
+          ),
         ]),
       ),
     );
@@ -171,7 +180,7 @@ export function CollectionsView({
   const selectedTargets = targetStates.flatMap((targetState) => {
     const input = inputs[targetState.target.id];
     if (input === undefined || !input.included) return [];
-    if (targetState.target.kind === "ssh") return [];
+    if (targetState.prepareEligibility.reason === "ssh-not-in-v1") return [];
     return [
       { input, selections: selectionsFor(targetState, input), targetState },
     ];
@@ -417,7 +426,11 @@ export function CollectionsView({
           {targetStates.map((targetState) => {
             const input =
               inputs[targetState.target.id] ??
-              inputFor(targetState.target.id, snapshot.target.id, targetState.target.kind);
+              inputFor(
+                targetState.target.id,
+                snapshot.target.id,
+                targetState.prepareEligibility.reason === "ssh-not-in-v1",
+              );
             const assessment = assessmentFor(targetState, input.scope);
             const blockers = targetBlockers(targetState, input);
             const targetRelease = releaseFor(targetState);
@@ -445,11 +458,21 @@ export function CollectionsView({
                       <input
                         aria-label={`Include ${targetState.target.label}`}
                         checked={
-                          targetState.target.kind === "ssh" ? false : included
+                          targetState.prepareEligibility.reason === "ssh-not-in-v1"
+                            ? false
+                            : included
                         }
-                        disabled={locked || targetState.target.kind === "ssh"}
+                        disabled={
+                          locked ||
+                          targetState.prepareEligibility.reason ===
+                            "ssh-not-in-v1"
+                        }
                         onChange={(event) => {
-                          if (targetState.target.kind === "ssh") return;
+                          if (
+                            targetState.prepareEligibility.reason ===
+                            "ssh-not-in-v1"
+                          )
+                            return;
                           const included = event.currentTarget.checked;
                           updateInput(targetState.target.id, (current) => ({
                             ...current,
@@ -457,7 +480,8 @@ export function CollectionsView({
                           }));
                         }}
                         title={
-                          targetState.target.kind === "ssh"
+                          targetState.prepareEligibility.reason ===
+                          "ssh-not-in-v1"
                             ? "SSH · 未在 V1 开放，不在 V1 Local Collections 范围内"
                             : undefined
                         }
@@ -468,7 +492,8 @@ export function CollectionsView({
                     <span>
                       <strong>{targetState.target.label}</strong>
                       <small>
-                        {targetState.target.kind === "ssh"
+                        {targetState.prepareEligibility.reason ===
+                        "ssh-not-in-v1"
                           ? "SSH · 未在 V1 开放"
                           : "Local"}{" "}
                         / {targetState.target.harnessIds.join(", ")}

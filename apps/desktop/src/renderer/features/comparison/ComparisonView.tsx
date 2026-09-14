@@ -10,12 +10,14 @@ import {
 } from "lucide-react";
 
 import type {
+  PrepareEligibility,
   PublicComparison,
   RendererError,
   WorkspaceBridge,
   WorkspaceSnapshot,
 } from "../../../contracts/workspace.js";
 import { UserFacingErrorCopy } from "../../UserFacingErrorCopy.js";
+import { prepareBlockedReasonCopy } from "../workspace/prepare-eligibility-copy.js";
 
 type TargetState = NonNullable<WorkspaceSnapshot["targets"]>[number];
 
@@ -110,7 +112,7 @@ function prepareDisabledReason(input: {
   readonly busy: boolean;
   readonly comparisonFresh: boolean;
   readonly eligible: boolean;
-  readonly mutationEligible: boolean;
+  readonly eligibility: PrepareEligibility | undefined;
   readonly row:
     | {
         readonly sideEntryCount: number;
@@ -118,17 +120,16 @@ function prepareDisabledReason(input: {
       }
     | undefined;
   readonly side: "left" | "right";
-  readonly ssh: boolean;
 }): string | undefined {
   if (!input.busy && input.eligible) return undefined;
-  if (input.ssh) {
-    return "SSH · 未在 V1 开放，无法准备变更";
+  if (input.eligibility?.reason === "ssh-not-in-v1") {
+    return prepareBlockedReasonCopy(input.eligibility);
   }
   if (!input.comparisonFresh) {
     return "Fresh evidence is required on both Targets before planning.";
   }
-  if (!input.mutationEligible) {
-    return "Reconciliation is required before this Target can receive a comparison mutation.";
+  if (input.eligibility !== undefined && !input.eligibility.allowed) {
+    return prepareBlockedReasonCopy(input.eligibility);
   }
   if (input.busy) {
     return "Comparison is busy";
@@ -163,7 +164,10 @@ export function ComparisonView({
   readonly targets: readonly TargetState[];
 }) {
   const plannableTargets = useMemo(
-    () => targets.filter(({ target }) => target.kind !== "ssh"),
+    () =>
+      targets.filter(
+        ({ prepareEligibility }) => prepareEligibility.reason !== "ssh-not-in-v1",
+      ),
     [targets],
   );
   const [leftTargetId, setLeftTargetId] = useState(
@@ -184,25 +188,31 @@ export function ComparisonView({
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    const locals = targets.filter(({ target }) => target.kind !== "ssh");
+    const locals = targets.filter(
+      ({ prepareEligibility }) => prepareEligibility.reason !== "ssh-not-in-v1",
+    );
     const pickDefault = (excludeId?: string) =>
       locals.find(({ target }) => target.id !== excludeId)?.target.id ??
       locals[0]?.target.id ??
       "";
     const leftExists = targets.some(({ target }) => target.id === leftTargetId);
-    const leftIsSsh = targets.some(
-      ({ target }) => target.id === leftTargetId && target.kind === "ssh",
+    const leftBlockedAsSsh = targets.some(
+      ({ prepareEligibility, target }) =>
+        target.id === leftTargetId &&
+        prepareEligibility.reason === "ssh-not-in-v1",
     );
-    if (!leftExists || leftIsSsh) {
+    if (!leftExists || leftBlockedAsSsh) {
       setLeftTargetId(pickDefault(rightTargetId));
     }
     const rightExists = targets.some(
       ({ target }) => target.id === rightTargetId,
     );
-    const rightIsSsh = targets.some(
-      ({ target }) => target.id === rightTargetId && target.kind === "ssh",
+    const rightBlockedAsSsh = targets.some(
+      ({ prepareEligibility, target }) =>
+        target.id === rightTargetId &&
+        prepareEligibility.reason === "ssh-not-in-v1",
     );
-    if (!rightExists || rightIsSsh) {
+    if (!rightExists || rightBlockedAsSsh) {
       setRightTargetId(pickDefault(leftTargetId));
     }
   }, [leftTargetId, rightTargetId, targets]);
@@ -240,11 +250,12 @@ export function ComparisonView({
   };
 
   const openComparison = async () => {
-    const leftKind = targets.find(({ target }) => target.id === leftTargetId)
-      ?.target.kind;
-    const rightKind = targets.find(({ target }) => target.id === rightTargetId)
-      ?.target.kind;
-    if (leftKind === "ssh" || rightKind === "ssh") return;
+    if (
+      leftTarget?.prepareEligibility.reason === "ssh-not-in-v1" ||
+      rightTarget?.prepareEligibility.reason === "ssh-not-in-v1"
+    ) {
+      return;
+    }
     setBusy(true);
     try {
       const result = await client.compareTargets(leftTargetId, rightTargetId);
@@ -259,7 +270,7 @@ export function ComparisonView({
     const destination = targets.find(
       ({ target }) => target.id === destinationTargetId,
     );
-    if (destination?.target.kind === "ssh") return;
+    if (destination?.prepareEligibility.reason === "ssh-not-in-v1") return;
     setBusy(true);
     try {
       const result = await client.prepareComparison(
@@ -278,12 +289,8 @@ export function ComparisonView({
   const comparisonFresh =
     comparison?.leftFreshness === "fresh" &&
     comparison.rightFreshness === "fresh";
-  const leftMutationEligible =
-    leftTarget?.target.kind !== "ssh" &&
-    leftTarget?.mutation.phase !== "reconciliation-required";
-  const rightMutationEligible =
-    rightTarget?.target.kind !== "ssh" &&
-    rightTarget?.mutation.phase !== "reconciliation-required";
+  const leftMutationEligible = leftTarget?.prepareEligibility.allowed === true;
+  const rightMutationEligible = rightTarget?.prepareEligibility.allowed === true;
   const leftEligible =
     comparisonFresh &&
     leftMutationEligible &&
@@ -299,7 +306,8 @@ export function ComparisonView({
       selectedRow.right.entries.length === 0) ||
       selectedRow.summary === "version-drift");
   const sshSideSelected =
-    leftTarget?.target.kind === "ssh" || rightTarget?.target.kind === "ssh";
+    leftTarget?.prepareEligibility.reason === "ssh-not-in-v1" ||
+    rightTarget?.prepareEligibility.reason === "ssh-not-in-v1";
   const compareReason = compareDisabledReason({
     busy,
     leftTargetId,
@@ -325,7 +333,7 @@ export function ComparisonView({
     busy,
     comparisonFresh,
     eligible: leftEligible,
-    mutationEligible: leftMutationEligible,
+    eligibility: leftTarget?.prepareEligibility,
     row:
       selectedRow === undefined
         ? undefined
@@ -334,13 +342,12 @@ export function ComparisonView({
             summary: selectedRow.summary,
           },
     side: "left",
-    ssh: leftTarget?.target.kind === "ssh",
   });
   const rightPrepareReason = prepareDisabledReason({
     busy,
     comparisonFresh,
     eligible: rightEligible,
-    mutationEligible: rightMutationEligible,
+    eligibility: rightTarget?.prepareEligibility,
     row:
       selectedRow === undefined
         ? undefined
@@ -349,7 +356,6 @@ export function ComparisonView({
             summary: selectedRow.summary,
           },
     side: "right",
-    ssh: rightTarget?.target.kind === "ssh",
   });
   const prepareDescribedBy = (
     reason: string | undefined,
@@ -444,15 +450,16 @@ export function ComparisonView({
               onChange={(event) => setLeftTargetId(event.currentTarget.value)}
               value={leftTargetId}
             >
-              {targets.map(({ target }) => (
+              {targets.map(({ prepareEligibility, target }) => (
                 <option
                   disabled={
-                    target.id === rightTargetId || target.kind === "ssh"
+                    target.id === rightTargetId ||
+                    prepareEligibility.reason === "ssh-not-in-v1"
                   }
                   key={target.id}
                   value={target.id}
                 >
-                  {target.kind === "ssh"
+                  {prepareEligibility.reason === "ssh-not-in-v1"
                     ? `${target.label} · 未开放`
                     : target.label}
                 </option>
@@ -479,15 +486,16 @@ export function ComparisonView({
               onChange={(event) => setRightTargetId(event.currentTarget.value)}
               value={rightTargetId}
             >
-              {targets.map(({ target }) => (
+              {targets.map(({ prepareEligibility, target }) => (
                 <option
                   disabled={
-                    target.id === leftTargetId || target.kind === "ssh"
+                    target.id === leftTargetId ||
+                    prepareEligibility.reason === "ssh-not-in-v1"
                   }
                   key={target.id}
                   value={target.id}
                 >
-                  {target.kind === "ssh"
+                  {prepareEligibility.reason === "ssh-not-in-v1"
                     ? `${target.label} · 未开放`
                     : target.label}
                 </option>
@@ -520,7 +528,10 @@ export function ComparisonView({
           >
             <CircleHelp aria-hidden="true" size={16} />
             <span>
-              {targets.some(({ target }) => target.kind === "ssh")
+              {targets.some(
+                ({ prepareEligibility }) =>
+                  prepareEligibility.reason === "ssh-not-in-v1",
+              )
                 ? "Comparison needs two Local Targets. SSH · 未在 V1 开放，不能作为可规划对比侧。Add another Local Target under Targets, then return here to compare inventories."
                 : "Comparison needs two Local Targets. Add another Local Target under Targets, then return here to compare inventories."}
             </span>
@@ -769,7 +780,8 @@ export function ComparisonView({
                 </span>
               </div>
             ) : null}
-            {!leftMutationEligible || !rightMutationEligible ? (
+            {leftTarget?.mutation.phase === "reconciliation-required" ||
+            rightTarget?.mutation.phase === "reconciliation-required" ? (
               <div
                 className="state-banner state-banner--danger"
                 id="comparison-reconciliation-reason"

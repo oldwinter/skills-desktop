@@ -19,6 +19,7 @@ import type {
   WorkspaceBridge,
   WorkspaceSnapshot,
 } from "../../../contracts/workspace.js";
+import { projectPrepareEligibility } from "../../../main/application/prepare-eligibility.js";
 import { ComparisonView } from "./ComparisonView.js";
 
 afterEach(cleanup);
@@ -113,10 +114,18 @@ function targetState(
     mutation: WorkspaceSnapshot["mutation"];
   }> = {},
 ) {
+  const nextInventory = overrides.inventory ?? inventory;
+  const nextMutation = overrides.mutation ?? mutation;
   return {
     deletionBlocked: false,
-    inventory: overrides.inventory ?? inventory,
-    mutation: overrides.mutation ?? mutation,
+    inventory: nextInventory,
+    mutation: nextMutation,
+    prepareEligibility: projectPrepareEligibility({
+      freshness: nextInventory.freshness,
+      kind: target.kind,
+      mutationPhase: nextMutation.phase,
+      v1LocalOnlyTargets: true,
+    }),
     target,
   };
 }
@@ -194,6 +203,12 @@ function baseSnapshot(
     eventSequence: 0,
     inventory,
     mutation,
+    prepareEligibility: projectPrepareEligibility({
+      freshness: inventory.freshness,
+      kind: leftTarget.kind,
+      mutationPhase: mutation.phase,
+      v1LocalOnlyTargets: true,
+    }),
     schemaVersion: 2,
     sessionEpoch: "epoch-1",
     stateRevision: 1,

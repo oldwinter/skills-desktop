@@ -23,8 +23,10 @@ import type {
 } from "../../../contracts/desktop.js";
 import type {
   DesktopEvent,
+  PrepareEligibility,
   WorkspaceSnapshot,
 } from "../../../contracts/workspace.js";
+import { projectPrepareEligibility } from "../../../main/application/prepare-eligibility.js";
 import { InventoryApp } from "./InventoryApp.js";
 
 const targetV4Metadata = {
@@ -64,6 +66,11 @@ const snapshot: WorkspaceSnapshot = {
     outcome: null,
     phase: "idle",
     reconciliationDeadline: null,
+  },
+  prepareEligibility: {
+    allowed: true,
+    nextAction: "none",
+    reason: null,
   },
   schemaVersion: 2,
   sessionEpoch: "epoch-1",
@@ -196,8 +203,52 @@ interface ReviewCloseHarness {
   listener: ((event: ReviewWindowClosedEvent) => void) | undefined;
 }
 
+function eligibilityFor(input: {
+  readonly freshness?: WorkspaceSnapshot["inventory"]["freshness"];
+  readonly kind?: WorkspaceSnapshot["target"]["kind"];
+  readonly mutationPhase?: WorkspaceSnapshot["mutation"]["phase"];
+}): PrepareEligibility {
+  return projectPrepareEligibility({
+    freshness: input.freshness ?? "fresh",
+    kind: input.kind ?? "local",
+    mutationPhase: input.mutationPhase ?? "idle",
+    v1LocalOnlyTargets: true,
+  });
+}
+
+type TestTargetState = Omit<
+  NonNullable<WorkspaceSnapshot["targets"]>[number],
+  "prepareEligibility"
+> & {
+  readonly prepareEligibility?: PrepareEligibility;
+};
+
+type TestSnapshot = Omit<WorkspaceSnapshot, "prepareEligibility" | "targets"> & {
+  readonly prepareEligibility?: PrepareEligibility;
+  readonly targets?: readonly TestTargetState[];
+};
+
+function withEligibility(value: TestSnapshot): WorkspaceSnapshot {
+  return {
+    ...value,
+    prepareEligibility: eligibilityFor({
+      freshness: value.inventory.freshness,
+      kind: value.target.kind,
+      mutationPhase: value.mutation.phase,
+    }),
+    targets: value.targets?.map((state) => ({
+      ...state,
+      prepareEligibility: eligibilityFor({
+        freshness: state.inventory.freshness,
+        kind: state.target.kind,
+        mutationPhase: state.mutation.phase,
+      }),
+    })),
+  };
+}
+
 function clientFor(
-  value: WorkspaceSnapshot,
+  value: TestSnapshot,
   reviewCloseHarness?: ReviewCloseHarness,
 ): DesktopBridge {
   return {
@@ -215,7 +266,7 @@ function clientFor(
       return { ok: true, value: { operationId: targetId } };
     },
     async getSnapshot() {
-      return { ok: true, value };
+      return { ok: true, value: withEligibility(value) };
     },
     async prepareMutation() {
       return { ok: true, value: { operationId: "prepared-1" } };
@@ -371,6 +422,7 @@ const twoLocalTargetsSnapshot: WorkspaceSnapshot = {
       deletionBlocked: false,
       inventory: snapshot.inventory,
       mutation: snapshot.mutation,
+      prepareEligibility: snapshot.prepareEligibility,
       target: {
         ...snapshot.target,
         connectionReference: null,
@@ -389,6 +441,7 @@ const twoLocalTargetsSnapshot: WorkspaceSnapshot = {
         ],
       },
       mutation: snapshot.mutation,
+      prepareEligibility: snapshot.prepareEligibility,
       target: {
         connectionReference: null,
         ...targetV4Metadata,
@@ -1184,7 +1237,7 @@ describe("Local Target Inventory shell", () => {
       workspace: "/srv/skills",
       workspaceLabel: "skills",
     };
-    const snapshotWithSsh: WorkspaceSnapshot = {
+    const snapshotWithSsh: TestSnapshot = {
       ...twoLocalTargetsSnapshot,
       targets: [
         ...twoLocalTargetsSnapshot.targets!,
@@ -1349,7 +1402,7 @@ describe("Local Target Inventory shell", () => {
           async getSnapshot() {
             return {
               ok: true as const,
-              value: {
+              value: withEligibility({
                 ...collectionSnapshot,
                 collections: localCollections,
                 targets: [
@@ -1364,7 +1417,7 @@ describe("Local Target Inventory shell", () => {
                     target: otherTarget,
                   },
                 ],
-              },
+              }),
             };
           },
         }}
@@ -2545,7 +2598,7 @@ describe("Local Target Inventory shell", () => {
     expect(prepareRight).toBeDisabled();
     expect(prepareRight).toHaveAttribute(
       "title",
-      "Reconciliation is required before this Target can receive a comparison mutation.",
+      "需要先完成 reconciliation",
     );
     expect(prepareRight).toHaveAttribute(
       "aria-describedby",

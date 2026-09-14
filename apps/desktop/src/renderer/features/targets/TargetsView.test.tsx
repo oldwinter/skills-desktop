@@ -19,6 +19,7 @@ import type {
   WorkspaceBridge,
   WorkspaceSnapshot,
 } from "../../../contracts/workspace.js";
+import { projectPrepareEligibility } from "../../../main/application/prepare-eligibility.js";
 import { TargetsView } from "./TargetsView.js";
 
 afterEach(cleanup);
@@ -62,10 +63,17 @@ function targetState(
     inventory: WorkspaceSnapshot["inventory"];
   }> = {},
 ) {
+  const nextInventory = overrides.inventory ?? inventory;
   return {
     deletionBlocked: overrides.deletionBlocked ?? false,
-    inventory: overrides.inventory ?? inventory,
+    inventory: nextInventory,
     mutation,
+    prepareEligibility: projectPrepareEligibility({
+      freshness: nextInventory.freshness,
+      kind: target.kind,
+      mutationPhase: mutation.phase,
+      v1LocalOnlyTargets: true,
+    }),
     target,
   };
 }
