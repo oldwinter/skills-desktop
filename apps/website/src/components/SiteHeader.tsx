@@ -21,51 +21,59 @@ export const SECTION_IDS = {
 export function SiteHeader({ copy, onToggleLocale }: SiteHeaderProps): ReactElement {
   return (
     <header className="site-header">
-      <nav className="shell site-nav" aria-label="Primary">
-        <a className="brand" href="#top">
-          <img alt="" className="brand__icon" height={26} src="./icon.png" width={26} />
-          <span className="display-3">Skills Desktop</span>
+      <nav className="nav" aria-label="Primary">
+        <a className="lock" href="#top">
+          <img alt="" className="lock__mark" height={26} src="./icon.png" width={26} />
+          <b>Skills Desktop</b>
         </a>
-        <ul className="site-nav__links">
+        <span className="nav__space" />
+        <ul className="nav__links">
           <li>
-            <a href={`#${SECTION_IDS.harnesses}`}>{copy.nav.harnesses}</a>
+            <a className="lnk" href={`#${SECTION_IDS.harnesses}`}>
+              {copy.nav.harnesses}
+            </a>
           </li>
           <li>
-            <a href={`#${SECTION_IDS.inventory}`}>{copy.nav.inventory}</a>
+            <a className="lnk" href={`#${SECTION_IDS.inventory}`}>
+              {copy.nav.inventory}
+            </a>
           </li>
           <li>
-            <a href={`#${SECTION_IDS.compare}`}>{copy.nav.compare}</a>
+            <a className="lnk" href={`#${SECTION_IDS.compare}`}>
+              {copy.nav.compare}
+            </a>
           </li>
           <li>
-            <a href={`#${SECTION_IDS.collections}`}>{copy.nav.collections}</a>
+            <a className="lnk" href={`#${SECTION_IDS.collections}`}>
+              {copy.nav.collections}
+            </a>
           </li>
           <li>
-            <a href={`#${SECTION_IDS.cli}`}>{copy.nav.cli}</a>
+            <a className="lnk" href={`#${SECTION_IDS.cli}`}>
+              {copy.nav.cli}
+            </a>
           </li>
         </ul>
-        <div className="site-nav__actions">
-          <button
-            aria-label={copy.nav.switchLocaleLabel}
-            className="locale-switch"
-            onClick={onToggleLocale}
-            type="button"
-          >
-            {copy.nav.switchLocale}
-          </button>
-          <a
-            aria-label={copy.nav.github}
-            className="github-link"
-            href={REPOSITORY_URL}
-            rel="noreferrer"
-            target="_blank"
-          >
-            <GitHubIcon />
-            <span>{copy.nav.github}</span>
-          </a>
-          <a className="btn btn--primary btn--compact" href={`#${SECTION_IDS.download}`}>
-            {copy.nav.download}
-          </a>
-        </div>
+        <button
+          aria-label={copy.nav.switchLocaleLabel}
+          className="ico ico--text"
+          onClick={onToggleLocale}
+          type="button"
+        >
+          {copy.nav.switchLocale}
+        </button>
+        <a
+          aria-label={copy.nav.github}
+          className="ico"
+          href={REPOSITORY_URL}
+          rel="noreferrer"
+          target="_blank"
+        >
+          <GitHubIcon />
+        </a>
+        <a className="btn" href={`#${SECTION_IDS.download}`}>
+          {copy.nav.download}
+        </a>
       </nav>
     </header>
   );

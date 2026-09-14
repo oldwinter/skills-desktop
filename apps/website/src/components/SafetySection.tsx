@@ -6,17 +6,18 @@ import { BulletList } from "./FeatureSection.js";
 export function SafetySection({ copy }: { readonly copy: Copy }): ReactElement {
   const section = copy.safety;
   return (
-    <section className="band band--deep" id="safety">
-      <div className="shell">
-        <div className="split">
-          <div>
-            <p className="eyebrow eyebrow--mark">{section.eyebrow}</p>
-            <h2 className="display-2 mt-5 text-balance">{section.title}</h2>
-          </div>
-          <p className="prose-body split__aside">{section.body}</p>
-        </div>
-        <BulletList bullets={section.bullets} grid />
+    <section className="fig fig--safety" data-reveal id="safety">
+      <div className="fighd">
+        <span>
+          <i>FIG 3</i> {section.eyebrow}
+        </span>
+        <span className="r">Prepare → Command Plan → Trusted Review → execute</span>
       </div>
+      <div className="fig__split">
+        <h2>{section.title}</h2>
+        <p>{section.body}</p>
+      </div>
+      <BulletList bullets={section.bullets} grid />
     </section>
   );
 }

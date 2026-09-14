@@ -1,6 +1,6 @@
 import type { ReactElement } from "react";
 
-import type { Bullet, FeatureCopy } from "../content/copy.js";
+import type { Bullet } from "../content/copy.js";
 
 export function BulletList({
   bullets,
@@ -11,88 +11,58 @@ export function BulletList({
 }): ReactElement {
   return (
     <ul className={grid ? "bullets bullets--grid" : "bullets"}>
-      {bullets.map((bullet) => (
-        <li className="bullet" key={bullet.title}>
-          <span>
-            <span className="bullet__title">{bullet.title}</span>
-            <span className="bullet__body">{bullet.body}</span>
-          </span>
+      {bullets.map((bullet, index) => (
+        <li className="bullet" data-reveal key={bullet.title} style={{ transitionDelay: `${index * 70}ms` }}>
+          {grid ? <span className="bullet__index">{String(index + 1).padStart(2, "0")}</span> : null}
+          <span className="bullet__title">{bullet.title}</span>
+          <span className="bullet__body">{bullet.body}</span>
         </li>
       ))}
     </ul>
   );
 }
 
-export interface FeatureSectionProps {
-  readonly id: string;
-  readonly copy: FeatureCopy;
-  readonly screenshot: string;
-  readonly reverse?: boolean;
-  readonly deep?: boolean;
-}
-
-/** Two-column feature band: text plus bullets on one side, a real screenshot on the other. */
-export function FeatureSection({
-  copy,
-  deep = false,
-  id,
-  reverse = false,
-  screenshot,
-}: FeatureSectionProps): ReactElement {
-  const layout = ["split--media", reverse ? "split--reverse" : ""].filter(Boolean).join(" ");
-  return (
-    <section className={deep ? "band band--deep" : "band"} id={id}>
-      <div className="shell">
-        <div className={layout}>
-          <div className="split__text">
-            <p className="eyebrow eyebrow--mark">{copy.eyebrow}</p>
-            <h2 className="display-2 mt-5 text-balance">{copy.title}</h2>
-            <p className="prose-body mt-5">{copy.body}</p>
-            <BulletList bullets={copy.bullets} />
-          </div>
-          <div className="split__media">
-            <figure className="screenshot">
-              <img alt={copy.screenshotAlt} loading="lazy" src={screenshot} />
-            </figure>
-          </div>
-        </div>
-      </div>
-    </section>
-  );
-}
-
-export interface WideSectionProps {
+export interface FeatureRowProps {
   readonly id?: string;
+  readonly index: number;
   readonly eyebrow: string;
   readonly title: string;
   readonly body: string;
+  readonly bullets?: readonly Bullet[];
   readonly screenshot: string;
   readonly screenshotAlt: string;
 }
 
-/** Heading and body side by side, then one wide screenshot underneath. */
-export function WideSection({
+/** One numbered row: index, copy and a real screenshot as the evidence panel. */
+export function FeatureRow({
   body,
+  bullets,
   eyebrow,
   id,
+  index,
   screenshot,
   screenshotAlt,
   title,
-}: WideSectionProps): ReactElement {
+}: FeatureRowProps): ReactElement {
   return (
-    <section className="band" id={id}>
-      <div className="shell">
-        <div className="split">
-          <div>
-            <p className="eyebrow eyebrow--mark">{eyebrow}</p>
-            <h2 className="display-2 mt-5 text-balance">{title}</h2>
-          </div>
-          <p className="prose-body split__aside">{body}</p>
-        </div>
-        <figure className="screenshot mt-12">
-          <img alt={screenshotAlt} loading="lazy" src={screenshot} />
-        </figure>
+    <section className="cap" data-reveal id={id}>
+      <div className="cap__n" aria-hidden="true">
+        <span>{String(index).padStart(2, "0")}</span>
       </div>
+      <div className="cap__in">
+        <p className="kicker">{eyebrow}</p>
+        <h3>
+          {title}
+          <b aria-hidden="true" className="arw">
+            →
+          </b>
+        </h3>
+        <p>{body}</p>
+        {bullets === undefined ? null : <BulletList bullets={bullets} />}
+      </div>
+      <figure className="cap__ev">
+        <img alt={screenshotAlt} loading="lazy" src={screenshot} />
+      </figure>
     </section>
   );
 }

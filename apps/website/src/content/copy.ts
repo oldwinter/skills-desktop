@@ -37,7 +37,14 @@ export interface Copy {
     readonly download: string;
     readonly viewSource: string;
     readonly meta: string;
+    readonly stats: {
+      readonly harnesses: string;
+      readonly cli: string;
+      readonly platforms: string;
+      readonly telemetry: string;
+    };
     readonly figure: {
+      readonly label: string;
       readonly inventory: string;
       readonly inventoryPath: string;
       readonly targets: string;
@@ -103,9 +110,6 @@ export interface Copy {
   };
   readonly footer: {
     readonly tagline: string;
-    readonly product: string;
-    readonly source: string;
-    readonly docs: string;
     readonly links: {
       readonly releases: string;
       readonly issues: string;
@@ -214,7 +218,6 @@ const en: Copy = {
   },
   footer: {
     builtBy: "Built by",
-    docs: "Docs",
     license: "MIT licensed",
     links: {
       adrs: "Architecture decisions",
@@ -226,8 +229,6 @@ const en: Copy = {
       releases: "Releases",
       userGuide: "User guide",
     },
-    product: "Product",
-    source: "Source",
     tagline: "A desktop client that makes the pinned npx skills CLI observable, comparable and reviewable.",
   },
   harnesses: {
@@ -246,7 +247,7 @@ const en: Copy = {
     definition:
       "A skill is a folder with a SKILL.md in it — reusable instructions your agent loads when the task calls for them.",
     download: "Download preview",
-    eyebrow: "v0.1.0 · Unsigned Developer Preview · macOS · Windows · Linux · MIT",
+    eyebrow: "the skills desktop",
     figure: {
       caption:
         "Pick a Target. Skills Desktop observes it through one npx skills list --json call per scope and shows which harnesses are covered. Nothing is written until you confirm a Command Plan.",
@@ -255,15 +256,22 @@ const en: Copy = {
       harnessesPath: "--agent <id>",
       inventory: "Inventory · Local Target",
       inventoryPath: "npx skills list --json",
+      label: "one inventory, one Target at a time",
       scopeGlobal: "global",
       scopeProject: "project",
       summary: (skills, harnesses) => `${skills} skills → ${harnesses} harnesses`,
       targets: "Targets",
-      targetsHint: "Switch Target",
+      targetsHint: "click a Target",
     },
     lead:
       "Observe project and global skills for a Local Target through the pinned npx skills CLI, compare Targets dimension by dimension, and never run a change without a Trusted Review.",
-    meta: "Free and open source. No account, no telemetry. Local-only in V1.",
+    meta: "v0.1.0 Unsigned Developer Preview · macOS · Windows · Linux · MIT · no account, no telemetry, Local-only in V1",
+    stats: {
+      cli: "pinned CLI dialect",
+      harnesses: "harnesses in the registry",
+      platforms: "desktop platforms",
+      telemetry: "telemetry endpoints",
+    },
     titleLines: ["One inventory.", "Every harness."],
     viewSource: "View source",
   },
@@ -430,7 +438,6 @@ const zh: Copy = {
   },
   footer: {
     builtBy: "由",
-    docs: "文档",
     license: "MIT 许可",
     links: {
       adrs: "架构决策记录",
@@ -442,8 +449,6 @@ const zh: Copy = {
       releases: "Releases",
       userGuide: "用户手册",
     },
-    product: "产品",
-    source: "源码",
     tagline: "让 pinned npx skills CLI 可观察、可对比、可审阅的桌面客户端。",
   },
   harnesses: {
@@ -460,7 +465,7 @@ const zh: Copy = {
   hero: {
     definition: "Skill 是一个带 SKILL.md 的文件夹——在任务需要时，agent 会加载的可复用指令。",
     download: "下载预览版",
-    eyebrow: "v0.1.0 · Unsigned Developer Preview · macOS · Windows · Linux · MIT",
+    eyebrow: "the skills desktop",
     figure: {
       caption:
         "选一个 Target。Skills Desktop 对每个 scope 各执行一次 npx skills list --json 来观察它，并显示覆盖了哪些 harness。在你确认 Command Plan 之前，什么都不会被写入。",
@@ -469,14 +474,21 @@ const zh: Copy = {
       harnessesPath: "--agent <id>",
       inventory: "Inventory · Local Target",
       inventoryPath: "npx skills list --json",
+      label: "一份清单，一次一个 Target",
       scopeGlobal: "global",
       scopeProject: "project",
       summary: (skills, harnesses) => `${skills} 个技能 → ${harnesses} 个 harness`,
       targets: "Targets",
-      targetsHint: "切换 Target",
+      targetsHint: "点一个 Target",
     },
     lead: "通过 pinned 的 npx skills CLI 观察 Local Target 的 project 与 global 技能，按维度对比多个 Target，并且没有 Trusted Review 就绝不执行任何变更。",
-    meta: "免费开源。无账号，无遥测。V1 仅支持本机。",
+    meta: "v0.1.0 Unsigned Developer Preview · macOS · Windows · Linux · MIT · 无账号、无遥测，V1 仅支持本机",
+    stats: {
+      cli: "pinned CLI 方言",
+      harnesses: "注册表中的 harness",
+      platforms: "桌面平台",
+      telemetry: "遥测端点",
+    },
     titleLines: ["一份清单。", "每个 harness。"],
     viewSource: "查看源码",
   },

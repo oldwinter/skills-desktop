@@ -18,16 +18,16 @@ function HarnessItem({
   readonly projectOnly: string;
 }): ReactElement {
   return (
-    <li className="harness-item">
-      <span aria-hidden="true" className="harness-tile harness-tile--dark">
+    <li className="herd__cell">
+      <span aria-hidden="true" className="tile">
         {harness.initial}
       </span>
-      <span className="harness-item__text">
-        <span className="harness-item__name">{harness.name}</span>
-        <span className="harness-item__id">
+      <span className="herd__text">
+        <span className="herd__name">{harness.name}</span>
+        <code className="herd__id">
           --agent {harness.id}
           {harness.globalSupported ? null : <small> · {projectOnly}</small>}
-        </span>
+        </code>
       </span>
     </li>
   );
@@ -36,39 +36,38 @@ function HarnessItem({
 export function HarnessSection({ copy }: { readonly copy: Copy }): ReactElement {
   const section = copy.harnesses;
   return (
-    <section className="band" id={SECTION_IDS.harnesses}>
-      <div className="shell">
-        <div className="split">
-          <div>
-            <p className="eyebrow eyebrow--mark">{section.eyebrow}</p>
-            <h2 className="display-2 mt-5 text-balance">{section.title}</h2>
-          </div>
-          <p className="prose-body split__aside">{section.body}</p>
-        </div>
-        <div className="card harness-card mt-12">
-          <ul className="harness-grid" aria-label={section.eyebrow}>
-            {FEATURED_HARNESSES.map((harness) => (
+    <section className="fig" data-reveal id={SECTION_IDS.harnesses}>
+      <div className="fighd">
+        <span>
+          <i>FIG 2</i> {section.eyebrow}
+        </span>
+        <span className="r">{HARNESS_REGISTRY_LABEL}</span>
+      </div>
+      <div className="fig__split">
+        <h2>{section.title}</h2>
+        <p>{section.body}</p>
+      </div>
+      <div className="herd">
+        <ul className="herd__grid" aria-label={section.eyebrow}>
+          {FEATURED_HARNESSES.map((harness) => (
+            <HarnessItem harness={harness} key={harness.id} projectOnly={section.projectOnly} />
+          ))}
+        </ul>
+        <details className="herd__more">
+          <summary>
+            <span className="herd__more-all">{section.showAll(HARNESS_TOTAL)}</span>
+            <span className="herd__more-fewer">{section.showFewer}</span>
+            <b aria-hidden="true">+</b>
+          </summary>
+          <ul className="herd__grid">
+            {REMAINING_HARNESSES.map((harness) => (
               <HarnessItem harness={harness} key={harness.id} projectOnly={section.projectOnly} />
             ))}
           </ul>
-          <details className="details-toggle">
-            <summary className="link-underline">
-              <span className="details-toggle__all">{section.showAll(HARNESS_TOTAL)}</span>
-              <span className="details-toggle__fewer">{section.showFewer}</span>
-            </summary>
-            <ul className="harness-grid">
-              {REMAINING_HARNESSES.map((harness) => (
-                <HarnessItem harness={harness} key={harness.id} projectOnly={section.projectOnly} />
-              ))}
-            </ul>
-          </details>
-          <div className="harness-footer">
-            <p className="harness-footer__count">
-              <span className="tabular">{section.count(HARNESS_TOTAL)}</span>
-              <span className="meta"> · {HARNESS_REGISTRY_LABEL}</span>
-            </p>
-            <p className="meta">{section.footnote}</p>
-          </div>
+        </details>
+        <div className="herd__foot">
+          <span>{section.count(HARNESS_TOTAL)}</span>
+          <span>{section.footnote}</span>
         </div>
       </div>
     </section>
