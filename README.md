@@ -83,8 +83,8 @@ npm run build --workspace @skills-desktop/website
 
 `.github/workflows/website.yml` builds the page on every change and publishes
 `main` to GitHub Pages under `/skills-desktop/` (set `WEBSITE_BASE_PATH` for a
-different base). Publishing requires GitHub Pages to be enabled for the
-repository with the "GitHub Actions" source.
+different base). The deploy job enables GitHub Pages with the "GitHub
+Actions" source on first run if it is not enabled yet.
 
 The page's section structure follows skillsmanager.dev. A comparison of that
 project's skill-management architecture with the accepted ADRs, and the
