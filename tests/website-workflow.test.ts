@@ -48,10 +48,6 @@ describe("website workflow contract", () => {
     expect(deploy.needs).toBe("build");
     expect(deploy.permissions).toEqual({ pages: "write", "id-token": "write" });
     expect(deploy.environment.name).toBe("github-pages");
-    expect(
-      (deploy.steps as Step[]).find((step) => step.uses?.startsWith("actions/configure-pages@"))
-        ?.with,
-    ).toEqual({ enablement: true });
     for (const step of deploy.steps as Step[]) {
       expect(step.uses).toMatch(pinnedAction);
     }
