@@ -67,6 +67,24 @@ The production workspaces are `apps/desktop`, `packages/skills-runtime`, and
 `packages/remote-bootstrap` is retained for gated SSH work; it is not a current
 public capability. Production skill discovery and mutation must keep using
 argument-array invocations of the pinned `npx skills` package.
+
+## Landing Page
+
+`apps/website` is a static bilingual (English / 中文) landing page built with
+Vite and React. It is not part of the packaged application. Its harness grid
+and CLI examples are derived from `packages/skills-runtime`, and its
+screenshots are the ones used by `docs/user-guide.md`, so the page must keep
+describing the shipped Local-only Unsigned Developer Preview.
+
+```bash
+npm run dev --workspace @skills-desktop/website
+npm run build --workspace @skills-desktop/website
+```
+
+`.github/workflows/website.yml` builds the page on every change and publishes
+`main` to GitHub Pages under `/skills-desktop/` (set `WEBSITE_BASE_PATH` for a
+different base). Publishing requires GitHub Pages to be enabled for the
+repository with the "GitHub Actions" source.
 ## Unsigned Developer Previews And Local Candidates
 
 Unsigned Developer Previews are public early-access prereleases, not stable
