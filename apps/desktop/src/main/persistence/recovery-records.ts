@@ -505,6 +505,11 @@ export type DurableChange =
       readonly type: "target.remap";
     }
   | {
+      readonly harnessId: string;
+      readonly targetId: string;
+      readonly type: "target.repair-legacy-harness";
+    }
+  | {
       readonly record: HostTrustRecord;
       readonly type: "host-trust.replace";
     };
@@ -858,6 +863,11 @@ export function createMemoryRecoveryRecords(
           "persist_failed",
           "No Mutation Guard corruption marker is present.",
         );
+      } else if (change.type === "target.repair-legacy-harness") {
+        return commitFailure(
+          "persist_failed",
+          "No blocked Target Definition matches this repair.",
+        );
       } else if (change.type === "targets.replace") {
         const parsed = targetDocumentSchema.safeParse({
           kind: "target-definitions",
@@ -953,17 +963,19 @@ function migrateLegacyDocument(
   }));
 }
 
+interface LegacyTargetDefinitionInput {
+  readonly connectionReference: string | null;
+  readonly executionBindingDigest?: string | null;
+  readonly generation?: number;
+  readonly harness: string;
+  readonly id: string;
+  readonly kind: "local" | "ssh";
+  readonly label: string;
+  readonly workspace: string;
+}
+
 function migrateLegacyTargetDefinitions(
-  definitions: readonly {
-    readonly connectionReference: string | null;
-    readonly executionBindingDigest?: string | null;
-    readonly generation?: number;
-    readonly harness: string;
-    readonly id: string;
-    readonly kind: "local" | "ssh";
-    readonly label: string;
-    readonly workspace: string;
-  }[],
+  definitions: readonly LegacyTargetDefinitionInput[],
 ): TargetDocument | undefined {
   const targets: Array<z.input<typeof durableTargetDefinitionSchema>> = [];
   for (const definition of definitions) {
@@ -1142,6 +1154,13 @@ export function createJsonRecoveryRecords(
   let targetStoreMissing = false;
   let pendingLegacyTargetRaw: string | undefined;
   let targetMigrationCommitted = false;
+  let blockedLegacyTargetDocument:
+    | {
+        readonly definitions: readonly LegacyTargetDefinitionInput[];
+        readonly raw: string;
+        readonly version: 1 | 2 | 3;
+      }
+    | undefined;
   let hostTrustRecords: HostTrustRecord[] = [];
   let hostTrustFailures: RecoveryFailure[] = [];
   let hostTrustLoaded = false;
@@ -1519,6 +1538,7 @@ export function createJsonRecoveryRecords(
     targetsLoaded = true;
     targetFailures = [];
     blockedTargetDefinitions = [];
+    blockedLegacyTargetDocument = undefined;
     targetStoreMissing = false;
 
     try {
@@ -1610,6 +1630,11 @@ export function createJsonRecoveryRecords(
         : legacyV2.success
           ? legacyV2.data.targets
           : legacyV1.data!.targets;
+      blockedLegacyTargetDocument = {
+        definitions: legacyDefinitions,
+        raw,
+        version: legacyVersion,
+      };
       blockedTargetDefinitions = legacyDefinitions.flatMap((definition) =>
         resolveLegacyHarnessAlias(definition.harness).ok
           ? []
@@ -2114,6 +2139,78 @@ export function createJsonRecoveryRecords(
               "Legacy Target evidence could not be saved under its current UUID.",
             );
           }
+        }
+
+        if (change.type === "target.repair-legacy-harness") {
+          await loadTargets();
+          await loadGuards();
+          if (targetUnsupportedSchema) {
+            return commitFailure(
+              "unsupported_schema",
+              "Target data was written by a newer unsupported application version.",
+            );
+          }
+          const blocked = blockedLegacyTargetDocument;
+          if (
+            blocked === undefined ||
+            !blockedTargetDefinitions.some(({ id }) => id === change.targetId)
+          ) {
+            return commitFailure(
+              "persist_failed",
+              "No blocked Target Definition matches this repair.",
+            );
+          }
+          const guardBlocksRepair =
+            pendingLegacyGuardInputs !== undefined ||
+            guardWriteBlocked ||
+            guardDocument.legacyGuards.length > 0 ||
+            guardDocument.guards.some(
+              ({ targetId }) => targetId === change.targetId,
+            );
+          if (guardBlocksRepair) {
+            return commitFailure(
+              "persist_failed",
+              "A surviving Mutation Guard blocks this Target repair.",
+            );
+          }
+          const replacement = resolveLegacyHarnessAlias(change.harnessId);
+          if (!replacement.ok) {
+            return commitFailure(
+              "persist_failed",
+              "The replacement harness is not in the pinned registry.",
+            );
+          }
+          const repairedRaw = JSON.stringify({
+            kind: "target-definitions",
+            schemaVersion: blocked.version,
+            targets: blocked.definitions.map((definition) =>
+              definition.id === change.targetId
+                ? { ...definition, harness: replacement.value }
+                : definition,
+            ),
+          });
+          try {
+            await createVerifiedBackup(
+              targetDocumentPath,
+              `${targetDocumentPath}.v${blocked.version}.blocked-${options.id()}.backup`,
+              blocked.raw,
+            );
+            await writeUtf8(
+              repairedRaw,
+              TARGET_DOCUMENT_NAME,
+              targetDocumentPath,
+            );
+          } catch {
+            return commitFailure(
+              "persist_failed",
+              "The repaired Target Definition could not be saved.",
+            );
+          }
+          targetsLoaded = false;
+          targetWriteBlocked = false;
+          await loadTargets();
+          failWhenCurrentGuardsOutliveTargetStore();
+          return { ok: true, value: undefined };
         }
 
         if (change.type === "targets.replace") {

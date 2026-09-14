@@ -214,6 +214,9 @@ function clientFor(
     async deleteTarget(targetId) {
       return { ok: true, value: { operationId: targetId } };
     },
+    async repairTarget(targetId) {
+      return { ok: true, value: { operationId: targetId } };
+    },
     async getSnapshot() {
       return { ok: true, value };
     },

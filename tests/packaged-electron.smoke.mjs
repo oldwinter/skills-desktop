@@ -1152,6 +1152,7 @@ try {
         "Comparison",
         "Collections",
         "Targets",
+        "Recovery",
         "About",
       ]) ||
     compactNavigation.chooserDisplay !== "grid" ||

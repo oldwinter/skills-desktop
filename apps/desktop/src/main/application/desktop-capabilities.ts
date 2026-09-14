@@ -1,6 +1,9 @@
 import { posix } from "node:path";
 
-import type { Result } from "@skills-desktop/skills-runtime";
+import {
+  normalizeHarnessIds,
+  type Result,
+} from "@skills-desktop/skills-runtime";
 
 import type { RestartGuardReason } from "../../contracts/about.js";
 
@@ -17,6 +20,7 @@ import {
   type PublicMultiTargetCollectionPlan,
   type PublicSingleTargetCollectionPlan,
   type PublicMutationState,
+  type PublicRecoveryState,
   type RendererError,
   type BlockedTargetDefinition,
   type DurableTargetDefinition,
@@ -381,6 +385,10 @@ export function createDesktopCapabilities(
   let guardStoreCorrupted = false;
   let targetAuthorityUnavailable = false;
   let blockedTargetDefinitions: readonly BlockedTargetDefinition[] = [];
+  let recoveryState: PublicRecoveryState = {
+    repairedTargets: [],
+    restartRequired: false,
+  };
   let targetDefinitionsChanging = false;
   let shuttingDown = false;
   let shutdownPromise: Promise<void> | undefined;
@@ -651,6 +659,7 @@ export function createDesktopCapabilities(
     eventSequence = endpoint.sequence,
   ): WorkspaceSnapshot => ({
     blockedTargets: structuredClone([...blockedTargetDefinitions]),
+    recovery: structuredClone(recoveryState),
     comparison: structuredClone(currentComparison()),
     collections: {
       ...collectionsForTarget(target, inventoryState),
@@ -2179,6 +2188,59 @@ export function createDesktopCapabilities(
                 false,
               ),
             );
+          }
+
+          if (parsed.data.type === "target.repair") {
+            const repairRequest = parsed.data;
+            const blocked = blockedTargetDefinitions.find(
+              ({ id }) => id === repairRequest.targetId,
+            );
+            if (blocked === undefined) {
+              return requestFailure(
+                publicError(
+                  "target_not_found",
+                  "No blocked Target Definition matches this repair.",
+                  "target",
+                  false,
+                ),
+              );
+            }
+            const replacement = normalizeHarnessIds([repairRequest.harnessId]);
+            if (!replacement.ok) {
+              return requestFailure(
+                publicError(
+                  "invalid_request",
+                  "The replacement harness is not in the pinned registry.",
+                  "validate",
+                  false,
+                ),
+              );
+            }
+            const harnessId = replacement.value[0]!;
+            const committed = await options.recoveryRecords.commit({
+              harnessId,
+              targetId: blocked.id,
+              type: "target.repair-legacy-harness",
+            });
+            if (!committed.ok) return requestFailure(committed.error);
+            const restored = await options.recoveryRecords.restore();
+            blockedTargetDefinitions = restored.blockedTargetDefinitions ?? [];
+            const targetStoreStillFailed = restored.failures.some(
+              (failure) => failure.store === "targetDefinitions",
+            );
+            recoveryState = {
+              repairedTargets: [
+                ...recoveryState.repairedTargets.filter(
+                  ({ id }) => id !== blocked.id,
+                ),
+                { harnessId, id: blocked.id, label: blocked.label },
+              ],
+              restartRequired:
+                recoveryState.restartRequired ||
+                (!targetStoreStillFailed && targetAuthorityUnavailable),
+            };
+            publish({ ...inventoryState });
+            return { ok: true, value: { operationId: blocked.id } };
           }
 
           if (targetAuthorityUnavailable) {

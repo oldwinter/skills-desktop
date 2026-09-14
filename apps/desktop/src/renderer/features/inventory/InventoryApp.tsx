@@ -36,6 +36,11 @@ import { ComparisonView } from "../comparison/ComparisonView.js";
 import { CollectionsView } from "../collections/CollectionsView.js";
 import { TargetsView } from "../targets/TargetsView.js";
 import {
+  RecoveryView,
+  recoveryItemCount,
+  recoveryItemsFor,
+} from "../recovery/RecoveryView.js";
+import {
   WorkspaceNavigation,
   type WorkspaceView,
 } from "../navigation/WorkspaceNavigation.js";
@@ -732,6 +737,9 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
           inventory={snapshot.inventory}
           onSelectTarget={selectTarget}
           onViewChange={setView}
+          recoveryCount={recoveryItemCount(
+            recoveryItemsFor(snapshot, targetStates),
+          )}
           target={snapshot.target}
           targetStates={targetStates}
           view={view}
@@ -1353,6 +1361,13 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
           <CollectionsView client={client} snapshot={snapshot} />
         ) : view === "about" ? (
           <AboutView client={client.about} />
+        ) : view === "recovery" ? (
+          <RecoveryView
+            client={client}
+            onSelectTarget={clearTargetScopedState}
+            snapshot={snapshot}
+            targets={targetStates}
+          />
         ) : (
           <TargetsView
             client={client}

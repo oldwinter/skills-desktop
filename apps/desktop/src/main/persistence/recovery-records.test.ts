@@ -1561,6 +1561,201 @@ describe("RecoveryRecords Target Definition contract", () => {
     );
   });
 
+  it("repairs one blocked legacy harness at a time and migrates once every Target resolves (#209)", async () => {
+    const directory = await temporaryDirectory();
+    const targetPath = join(directory, "target-definitions.json");
+    const blockedId = "00000000-0000-4000-8000-000000000024";
+    const otherBlockedId = "00000000-0000-4000-8000-000000000025";
+    const legacyRaw = JSON.stringify({
+      kind: "target-definitions",
+      schemaVersion: 3,
+      targets: [
+        {
+          connectionReference: null,
+          executionBindingDigest: null,
+          generation: 4,
+          harness: "Future Harness",
+          id: blockedId,
+          kind: "local",
+          label: "Needs repair",
+          workspace: "/work/blocked",
+        },
+        {
+          connectionReference: null,
+          executionBindingDigest: null,
+          generation: 2,
+          harness: "Another Future Harness",
+          id: otherBlockedId,
+          kind: "local",
+          label: "Also blocked",
+          workspace: "/work/also-blocked",
+        },
+      ],
+    });
+    await writeFile(targetPath, legacyRaw, "utf8");
+    let sequence = 0;
+    const records = createJsonRecoveryRecords({
+      directory,
+      id: () => `repair-${(sequence += 1)}`,
+    });
+    await records.restore();
+
+    await expect(
+      records.commit({
+        harnessId: "codex",
+        targetId: "00000000-0000-4000-8000-0000000000ff",
+        type: "target.repair-legacy-harness",
+      }),
+    ).resolves.toMatchObject({
+      error: { code: "persist_failed" },
+      ok: false,
+    });
+    await expect(
+      records.commit({
+        harnessId: "not-a-harness",
+        targetId: blockedId,
+        type: "target.repair-legacy-harness",
+      }),
+    ).resolves.toMatchObject({
+      error: { code: "persist_failed" },
+      ok: false,
+    });
+    await expect(readFile(targetPath, "utf8")).resolves.toBe(legacyRaw);
+
+    await expect(
+      records.commit({
+        harnessId: "claude-code",
+        targetId: blockedId,
+        type: "target.repair-legacy-harness",
+      }),
+    ).resolves.toEqual({ ok: true, value: undefined });
+    const partiallyRepaired = await records.restore();
+    expect(partiallyRepaired.blockedTargetDefinitions).toEqual([
+      {
+        generation: 2,
+        id: otherBlockedId,
+        label: "Also blocked",
+        legacyHarness: "Another Future Harness",
+        reason: "unsupported_harness",
+      },
+    ]);
+    expect(partiallyRepaired.targetDefinitions).toEqual([]);
+    await expect(
+      readFile(targetPath, "utf8").then(JSON.parse),
+    ).resolves.toMatchObject({
+      schemaVersion: 3,
+      targets: [{ harness: "claude-code", id: blockedId }, { harness: "Another Future Harness" }],
+    });
+    const backups = (await readdir(directory)).filter((name) =>
+      name.includes(".v3.blocked-"),
+    );
+    expect(backups).toHaveLength(1);
+    await expect(
+      readFile(join(directory, backups[0]!), "utf8"),
+    ).resolves.toBe(legacyRaw);
+
+    await expect(
+      records.commit({
+        harnessId: "Cursor",
+        targetId: otherBlockedId,
+        type: "target.repair-legacy-harness",
+      }),
+    ).resolves.toEqual({ ok: true, value: undefined });
+    const repaired = await records.restore();
+    expect(repaired.blockedTargetDefinitions).toEqual([]);
+    expect(repaired.failures).toEqual([]);
+    expect(repaired.targetDefinitions).toMatchObject([
+      { generation: 5, harnessIds: ["claude-code"], id: blockedId },
+      { generation: 3, harnessIds: ["cursor"], id: otherBlockedId },
+    ]);
+    await expect(
+      readFile(targetPath, "utf8").then(JSON.parse),
+    ).resolves.toMatchObject({ schemaVersion: 4 });
+    expect(
+      (await readdir(directory)).filter((name) => name.includes(".v3.blocked-")),
+    ).toHaveLength(2);
+
+    await expect(
+      records.commit({
+        harnessId: "codex",
+        targetId: blockedId,
+        type: "target.repair-legacy-harness",
+      }),
+    ).resolves.toMatchObject({
+      error: { code: "persist_failed" },
+      ok: false,
+    });
+  });
+
+  it("refuses to repair a blocked Target while a Mutation Guard survives (#209)", async () => {
+    const directory = await temporaryDirectory();
+    const targetPath = join(directory, "target-definitions.json");
+    const guardPath = join(directory, "mutation-guards.json");
+    const blockedId = "00000000-0000-4000-8000-000000000024";
+    const legacyRaw = JSON.stringify({
+      kind: "target-definitions",
+      schemaVersion: 3,
+      targets: [
+        {
+          connectionReference: null,
+          executionBindingDigest: null,
+          generation: 4,
+          harness: "Future Harness",
+          id: blockedId,
+          kind: "local",
+          label: "Needs repair",
+          workspace: "/work/blocked",
+        },
+      ],
+    });
+    await writeFile(targetPath, legacyRaw, "utf8");
+    await writeFile(
+      guardPath,
+      JSON.stringify({
+        guards: [
+          {
+            deadline: "2026-08-22T10:10:00.000Z",
+            effects: "possible",
+            generation: 4,
+            operationId: "guarded",
+            phase: "reconciliation-required",
+            targetId: blockedId,
+          },
+        ],
+        kind: "mutation-guards",
+        schemaVersion: 2,
+      }),
+      "utf8",
+    );
+    const records = createJsonRecoveryRecords({
+      directory,
+      id: () => "guarded-repair",
+    });
+    await records.restore();
+
+    await expect(
+      records.commit({
+        harnessId: "codex",
+        targetId: blockedId,
+        type: "target.repair-legacy-harness",
+      }),
+    ).resolves.toMatchObject({
+      error: {
+        code: "persist_failed",
+        message: "A surviving Mutation Guard blocks this Target repair.",
+      },
+      ok: false,
+    });
+    await expect(readFile(targetPath, "utf8")).resolves.toBe(legacyRaw);
+    await expect(
+      createMemoryRecoveryRecords().commit({
+        harnessId: "codex",
+        targetId: blockedId,
+        type: "target.repair-legacy-harness",
+      }),
+    ).resolves.toMatchObject({ error: { code: "persist_failed" }, ok: false });
+  });
+
   it("restores allowlisted Local and SSH Target Definitions in memory", async () => {
     const records = createMemoryRecoveryRecords();
 

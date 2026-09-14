@@ -108,6 +108,7 @@ async function loadBridge() {
       destinationTargetId: string,
     ): Promise<unknown>;
     reconcileMutation(targetId: string): Promise<unknown>;
+    repairTarget(targetId: string, harnessId: string): Promise<unknown>;
     refreshInventory(targetId: string): Promise<unknown>;
     requestCancellationReview(operationId: string): Promise<unknown>;
     requestCollectionReview(collectionPlanId: string): Promise<unknown>;
@@ -209,6 +210,7 @@ describe("workspace preload authority", () => {
       secondTargetId,
     );
     await bridge.reconcileMutation(targetId);
+    await bridge.repairTarget(targetId, "claude-code");
     await bridge.refreshInventory(targetId);
     await bridge.requestCancellationReview("operation-1");
     await bridge.requestCollectionReview("collection-plan-1");
@@ -247,6 +249,7 @@ describe("workspace preload authority", () => {
         secondTargetId,
       ],
       ["workspace:mutation:reconcile", "attachment-epoch", targetId],
+      ["workspace:target:repair", "attachment-epoch", targetId, "claude-code"],
       ["workspace:inventory:refresh", "attachment-epoch", targetId],
       ["workspace:review:cancel-request", "attachment-epoch", "operation-1"],
       [
