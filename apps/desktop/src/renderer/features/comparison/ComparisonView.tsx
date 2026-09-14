@@ -179,6 +179,7 @@ export function ComparisonView({
   const [differencesOnly, setDifferencesOnly] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const searchRef = useRef<HTMLInputElement>(null);
+  const tableRef = useRef<HTMLTableElement>(null);
   const normalizedQuery = searchQuery.trim().toLowerCase();
   const [error, setError] = useState<RendererError>();
   const [busy, setBusy] = useState(false);
@@ -612,7 +613,7 @@ export function ComparisonView({
               </p>
             </div>
           ) : (
-            <table className="comparison-table">
+            <table className="comparison-table" ref={tableRef}>
               <caption className="sr-only">
                 Dimensioned Target comparison
               </caption>
@@ -626,7 +627,7 @@ export function ComparisonView({
                 </tr>
               </thead>
               <tbody>
-                {visibleRows.map((row) => (
+                {visibleRows.map((row, index) => (
                   <tr
                     className={
                       selectedRow?.key === row.key ? "is-selected" : undefined
@@ -637,6 +638,42 @@ export function ComparisonView({
                       <button
                         className="skill-button"
                         onClick={() => setSelectedKey(row.key)}
+                        onKeyDown={(event) => {
+                          if (
+                            event.altKey ||
+                            event.ctrlKey ||
+                            event.metaKey ||
+                            event.shiftKey ||
+                            event.nativeEvent.isComposing
+                          ) return;
+                          let nextIndex: number;
+                          switch (event.key) {
+                            case "ArrowDown":
+                              nextIndex = Math.min(
+                                index + 1, visibleRows.length - 1,
+                              );
+                              break;
+                            case "ArrowUp":
+                              nextIndex = Math.max(index - 1, 0);
+                              break;
+                            case "Home":
+                              nextIndex = 0;
+                              break;
+                            case "End":
+                              nextIndex = visibleRows.length - 1;
+                              break;
+                            default:
+                              return;
+                          }
+                          const nextRow = visibleRows[nextIndex];
+                          if (nextRow === undefined) return;
+                          event.preventDefault();
+                          setSelectedKey(nextRow.key);
+                          tableRef.current?.querySelectorAll<HTMLButtonElement>(
+                            ".skill-button",
+                          )[nextIndex]?.focus();
+                        }}
+                        title="Browse skills with ↑ / ↓ · Home / End"
                         type="button"
                       >
                         {row.key}

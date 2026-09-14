@@ -274,6 +274,146 @@ const driftRow: PublicComparison["rows"][number] = {
 };
 
 describe("ComparisonView", () => {
+  it("navigates from the focused row and keeps focus, inspector, and Prepare together", async () => {
+    const prepareComparison = vi.fn(async () => ({ ok: false as const, error }));
+    const compareTargets = vi.fn();
+    const refreshInventory = vi.fn();
+    render(
+      <ComparisonView
+        client={bridge({ prepareComparison, compareTargets, refreshInventory })}
+        onPrepared={vi.fn()}
+        snapshot={baseSnapshot({
+          comparison: {
+            id: "keyboard-comparison",
+            leftFreshness: "fresh",
+            leftTargetId: leftId,
+            rightFreshness: "fresh",
+            rightTargetId: rightId,
+            rows: [missingRow, { ...driftRow, key: "TDD" }, { ...driftRow, key: "unknown", summary: "unknown-evidence" }],
+          },
+        })}
+        targets={[targetState(leftTarget), targetState(rightTarget)]}
+      />,
+    );
+    const first = screen.getByRole("button", { name: "find-skills" });
+    const middle = screen.getByRole("button", { name: "TDD" });
+    const last = screen.getByRole("button", { name: "unknown" });
+    const expectSelected = (name: string) => {
+      expect(screen.getByRole("button", { name })).toHaveFocus();
+      expect(screen.getByRole("heading", { name, level: 2 })).toBeInTheDocument();
+    };
+    fireEvent.click(first);
+    last.focus();
+    fireEvent.keyDown(last, { key: "ArrowUp" });
+    expectSelected("TDD");
+    fireEvent.keyDown(middle, { key: "ArrowDown" });
+    expectSelected("unknown");
+    expect(screen.getByRole("button", { name: "Prepare for Right" })).toBeDisabled();
+    fireEvent.keyDown(last, { key: "ArrowDown" });
+    expectSelected("unknown");
+    fireEvent.keyDown(last, { key: "Home" });
+    expectSelected("find-skills");
+    fireEvent.keyDown(first, { key: "ArrowUp" });
+    expectSelected("find-skills");
+    fireEvent.keyDown(first, { key: "End" });
+    expectSelected("unknown");
+    fireEvent.keyDown(last, { key: "ArrowUp" });
+    expectSelected("TDD");
+    expect(prepareComparison).not.toHaveBeenCalled();
+    expect(compareTargets).not.toHaveBeenCalled();
+    expect(refreshInventory).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Prepare for Right" }));
+    await waitFor(() => expect(prepareComparison).toHaveBeenCalledExactlyOnceWith("keyboard-comparison", "TDD", rightId));
+  });
+
+  it("limits keyboard navigation to visible search and difference results", () => {
+    render(
+      <ComparisonView
+        client={bridge()}
+        onPrepared={vi.fn()}
+        snapshot={baseSnapshot({
+          comparison: {
+            id: "keyboard-filters",
+            leftFreshness: "stale",
+            leftTargetId: leftId,
+            rightFreshness: "fresh",
+            rightTargetId: rightId,
+            rows: [
+              { ...driftRow, key: "visible-matched", summary: "matched" },
+              { ...driftRow, key: "visible-unknown", summary: "unknown-evidence" },
+              { ...missingRow, key: "hidden-missing" },
+              { ...missingRow, key: "visible-missing" },
+            ],
+          },
+        })}
+        targets={[targetState(leftTarget), targetState(rightTarget)]}
+      />,
+    );
+    const search = screen.getByRole("searchbox", { name: "Search comparison skills" });
+    fireEvent.change(search, { target: { value: "visible-" } });
+    fireEvent.click(screen.getByRole("checkbox", { name: "Differences only" }));
+    const first = screen.getByRole("button", { name: "visible-unknown" });
+    const last = screen.getByRole("button", { name: "visible-missing" });
+    first.focus();
+    fireEvent.keyDown(first, { key: "ArrowDown" });
+    expect(last).toHaveFocus();
+    expect(screen.getByRole("heading", { name: "visible-missing" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Prepare for Right" })).toBeDisabled();
+    fireEvent.keyDown(last, { key: "Home" });
+    expect(first).toHaveFocus();
+    fireEvent.keyDown(first, { key: "End" });
+    expect(last).toHaveFocus();
+    fireEvent.change(search, { target: { value: "visible-missing" } });
+    last.focus();
+    for (const key of ["ArrowUp", "ArrowDown", "Home", "End"]) {
+      fireEvent.keyDown(last, { key });
+      expect(last).toHaveFocus();
+      expect(screen.getByRole("heading", { name: "visible-missing" })).toBeInTheDocument();
+    }
+    fireEvent.change(search, { target: { value: "no-match" } });
+    search.focus();
+    fireEvent.keyDown(search, { key: "ArrowDown" });
+    expect(search).toHaveFocus();
+    expect(screen.getByRole("heading", { name: "No difference selected" })).toBeInTheDocument();
+  });
+
+  it("leaves modified, composing, and unrelated row keys untouched", () => {
+    render(
+      <ComparisonView
+        client={bridge()}
+        onPrepared={vi.fn()}
+        snapshot={baseSnapshot({
+          comparison: {
+            id: "keyboard-ignored",
+            leftFreshness: "fresh",
+            leftTargetId: leftId,
+            rightFreshness: "fresh",
+            rightTargetId: rightId,
+            rows: [missingRow, driftRow],
+          },
+        })}
+        targets={[targetState(leftTarget), targetState(rightTarget)]}
+      />,
+    );
+    const first = screen.getByRole("button", { name: "find-skills" });
+    first.focus();
+    for (const event of [
+      { key: "ArrowDown", altKey: true },
+      { key: "ArrowDown", ctrlKey: true },
+      { key: "End", metaKey: true },
+      { key: "End", shiftKey: true },
+      { key: "ArrowDown", isComposing: true },
+      { key: "Tab" },
+      { key: "Enter" },
+      { key: " " },
+      { key: "ArrowRight" },
+    ]) {
+      expect(fireEvent.keyDown(first, event)).toBe(true);
+      expect(first).toHaveFocus();
+      expect(screen.getByRole("heading", { name: "find-skills" })).toBeInTheDocument();
+    }
+  });
+
   it("searches only skill names and prepares the visible original key", async () => {
     const prepareComparison = vi.fn(async () => ({ ok: false as const, error }));
     const compareTargets = vi.fn();
