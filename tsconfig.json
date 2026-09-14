@@ -3,6 +3,7 @@
   "references": [
     { "path": "packages/skills-runtime" },
     { "path": "packages/remote-bootstrap" },
-    { "path": "apps/desktop" }
+    { "path": "apps/desktop" },
+    { "path": "apps/website" }
   ]
 }

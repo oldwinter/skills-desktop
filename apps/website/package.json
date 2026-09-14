@@ -1,0 +1,18 @@
+{
+  "name": "@skills-desktop/website",
+  "description": "Static landing page for Skills Desktop.",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite",
+    "preview": "vite preview",
+    "typecheck": "tsc -b --pretty false"
+  },
+  "dependencies": {
+    "@skills-desktop/skills-runtime": "0.1.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  }
+}
