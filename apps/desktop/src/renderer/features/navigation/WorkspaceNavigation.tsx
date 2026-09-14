@@ -2,6 +2,7 @@ import {
   HardDrive,
   Info,
   LibraryBig,
+  LifeBuoy,
   ListFilter,
   MonitorCog,
   Server,
@@ -20,6 +21,7 @@ export type WorkspaceView =
   | "collections"
   | "comparison"
   | "inventory"
+  | "recovery"
   | "targets";
 
 type TargetState = NonNullable<WorkspaceSnapshot["targets"]>[number];
@@ -33,6 +35,7 @@ const navigationItems: readonly {
   { view: "comparison", label: "Comparison", icon: MonitorCog },
   { view: "collections", label: "Collections", icon: LibraryBig },
   { view: "targets", label: "Targets", icon: Settings2 },
+  { view: "recovery", label: "Recovery", icon: LifeBuoy },
   { view: "about", label: "About", icon: Info },
 ];
 
@@ -40,6 +43,7 @@ export function WorkspaceNavigation({
   inventory,
   onSelectTarget,
   onViewChange,
+  recoveryCount = 0,
   target,
   targetStates,
   view,
@@ -47,6 +51,7 @@ export function WorkspaceNavigation({
   readonly inventory: PublicInventoryState;
   readonly onSelectTarget: (targetId: string) => void;
   readonly onViewChange: (view: WorkspaceView) => void;
+  readonly recoveryCount?: number;
   readonly target: WorkspaceSnapshot["target"];
   readonly targetStates: readonly TargetState[];
   readonly view: WorkspaceView;
@@ -59,20 +64,32 @@ export function WorkspaceNavigation({
   return (
     <aside className="scope-rail" aria-label="Workspace navigation">
       <nav className="primary-nav" aria-label="Primary">
-        {navigationItems.map(({ icon: Icon, label, view: itemView }) => (
-          <button
-            aria-current={view === itemView ? "page" : undefined}
-            aria-label={label}
-            className={`nav-item${view === itemView ? " nav-item--active" : ""}`}
-            key={itemView}
-            onClick={() => onViewChange(itemView)}
-            title={label}
-            type="button"
-          >
-            <Icon aria-hidden="true" size={17} />
-            <span>{label}</span>
-          </button>
-        ))}
+        {navigationItems.map(({ icon: Icon, label, view: itemView }) => {
+          const pending = itemView === "recovery" ? recoveryCount : 0;
+          const accessibleLabel =
+            pending > 0
+              ? `${label}, ${pending} item${pending === 1 ? "" : "s"} pending`
+              : label;
+          return (
+            <button
+              aria-current={view === itemView ? "page" : undefined}
+              aria-label={accessibleLabel}
+              className={`nav-item${view === itemView ? " nav-item--active" : ""}`}
+              key={itemView}
+              onClick={() => onViewChange(itemView)}
+              title={accessibleLabel}
+              type="button"
+            >
+              <Icon aria-hidden="true" size={17} />
+              <span>{label}</span>
+              {pending > 0 ? (
+                <span aria-hidden="true" className="nav-count">
+                  {pending}
+                </span>
+              ) : null}
+            </button>
+          );
+        })}
       </nav>
 
       <section className="target-section" aria-labelledby="target-heading">

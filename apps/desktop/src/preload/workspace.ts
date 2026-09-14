@@ -149,6 +149,11 @@ const bridge: DesktopBridge = Object.freeze({
       await invoke("workspace:mutation:reconcile", targetId),
     );
   },
+  async repairTarget(targetId: string, harnessId: string) {
+    return workspaceRequestResultSchema.parse(
+      await invoke("workspace:target:repair", targetId, harnessId),
+    );
+  },
   async refreshInventory(targetId: string) {
     return workspaceRequestResultSchema.parse(
       await invoke("workspace:inventory:refresh", targetId),
