@@ -85,13 +85,13 @@ npm run verify
 
 ## 2. Local Target
 
-**Target** = 应用侧选定的一台机器 + 工作区 + harness（如本机 Codex）。V1 只创建与编辑 **Local** Target。
+**Target** = 应用侧选定的一台机器 + 工作区 + 一个非空的 harness 集合（如本机同时在用的 Codex 与 Claude Code）。V1 只创建与编辑 **Local** Target。
 
 ### 新建 / 编辑
 
 1. 打开 **Targets**。
-2. **New Target**，填写显示标签、工作区、harness 等。
-3. Kind 保持 **Local**，保存。
+2. **New Target**，填写显示标签、工作区，并在 **Harness** 列表里勾选一个或多个 harness（可按名称或 CLI id 过滤；列表来自 pinned 注册表，标 **project only** 的 harness 不支持 global scope）。至少要保留一个。
+3. Kind 保持 **Local**，保存。改动 harness 集合会推进该 Target 的 Generation，之前的 Inventory 会变为 Stale。
 
 ![Targets：New Target 与 Local Definition](images/user-guide/targets-new-target.webp)
 
@@ -105,7 +105,7 @@ npm run verify
 
 - 本机已安装可用的 Node / `npx`。
 - Skills Desktop 通过 pinned `skills@1.5.23` 方言调用 `npx skills`（侧栏底部可见 CLI 版本提示）。
-- 每个 Local Target 应对应你真实在用的工作区与 harness。
+- 每个 Local Target 应对应你真实在用的工作区与 harness 集合。
 
 ---
 

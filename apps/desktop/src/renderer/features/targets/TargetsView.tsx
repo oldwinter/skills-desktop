@@ -16,6 +16,7 @@ import type {
   WorkspaceSnapshot,
 } from "../../../contracts/workspace.js";
 import { UserFacingErrorCopy } from "../../UserFacingErrorCopy.js";
+import { HarnessPicker } from "./HarnessPicker.js";
 
 type TargetState = NonNullable<WorkspaceSnapshot["targets"]>[number];
 
@@ -312,21 +313,13 @@ export function TargetsView({
               value={draft.workspace}
             />
           </label>
-          <label>
-            <span>Harness</span>
-            <select
-              disabled={draft.kind === "ssh"}
-              onChange={(event) =>
-                setDraft({
-                  ...draft,
-                  harnessIds: [event.currentTarget.value],
-                })
-              }
-              value={draft.harnessIds[0]}
-            >
-              <option value="codex">codex</option>
-            </select>
-          </label>
+          <HarnessPicker
+            disabled={draft.kind === "ssh"}
+            onChange={(harnessIds) =>
+              setDraft({ ...draft, harnessIds: [...harnessIds] })
+            }
+            value={draft.harnessIds}
+          />
           {draft.kind === "ssh" ? (
             <label>
               <span>OpenSSH connection reference</span>
