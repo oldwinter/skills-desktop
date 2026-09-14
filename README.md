@@ -85,6 +85,12 @@ npm run build --workspace @skills-desktop/website
 `main` to GitHub Pages under `/skills-desktop/` (set `WEBSITE_BASE_PATH` for a
 different base). Publishing requires GitHub Pages to be enabled for the
 repository with the "GitHub Actions" source.
+
+The page's section structure follows skillsmanager.dev. A comparison of that
+project's skill-management architecture with the accepted ADRs, and the
+resulting adoption roadmap, lives in
+[docs/research/skills-manager-architecture-study.md](docs/research/skills-manager-architecture-study.md).
+
 ## Unsigned Developer Previews And Local Candidates
 
 Unsigned Developer Previews are public early-access prereleases, not stable
