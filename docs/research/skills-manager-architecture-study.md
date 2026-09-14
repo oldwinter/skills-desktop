@@ -50,6 +50,11 @@ Schema 见 `src-tauri/src/core/migrations.rs`（`migrate_v0_to_v1`），关键�
 直接写在 `sync_engine.rs` 的 `ReplacePolicy::Recorded` 注释里，并决定了整个
 安全模型（1.4）。
 
+SQLite 本身**不进 git**。可随库同步的元数据另存为 JSON
+（`sync_metadata.rs`：`skills/.skills-manager/skills/<id>.json` 的 `SkillMetaFile`、
+`scenarios/`、`scenario-skills/`），重建索引时再写回数据库。敏感设置
+（代理、备份远端 URL）用 `.secret.key` 做 AES-GCM 加密后存入 `settings`。
+
 ### 1.3 技能格式识别
 
 `docs/skill-format-detection-spec.md` 明确：
@@ -89,16 +94,20 @@ Schema 见 `src-tauri/src/core/migrations.rs`（`migrate_v0_to_v1`），关键�
   更新检查永远 `source_missing`。
 - `path_guard.rs`：`sanitize_name()`（去分隔符、遍历、Windows 保留字符、控制
   字符、长度）与 `is_path_safe()`（含 symlink 逃逸测试）。
-- `removals.rs`：`removed_paths()` 在更新前列出"这次更新会删掉哪些文件"，供
-  确认对话框展示。
+- `removals.rs`：`removed_paths()` 在更新前列出"这次更新会删掉哪些文件"。
+  `commands/skills.rs` 据此把更新拆成两步：会删文件的更新先**held back**，
+  返回 `removal_approval` token（由 `removal_approval_token(revision, pending)`
+  绑定到具体 revision 与删除清单）；只有桌面端用户接受后带 token 重试才真正
+  删除，CLI 无法越过（`manage-skills` 技能也明文禁止 agent 强制）。
 - `content_hash.rs`：`hash_directory()` 对内容文件（含可执行位）做确定性哈希，
   作为 `skill_targets.source_hash` 与 `skills.content_hash` 的新鲜度依据。
 
 ### 1.5 Agent 适配与工作区
 
-- `src-tauri/src/core/tool_adapters.rs` 内置约 19 个 `ToolAdapter`（`cursor`、
-  `claude_code`、`codex`、`gemini_cli`、`github_copilot`、`windsurf`、`cline`、
-  `deepagents`……），每个描述全局技能目录、扫描行为等；另有 `CustomToolDef`
+- `src-tauri/src/core/tool_adapters.rs` 的 `default_tool_adapters()` 内置 54 个
+  `ToolAdapter`（`cursor`、`claude_code`、`codex`、`gemini_cli`、`github_copilot`、
+  `windsurf`、`cline`、`hermes`……，与 README「54 agents」一致），每个描述全局
+  技能目录、项目级目录、附加扫描目录、是否递归扫描等；另有 `CustomToolDef`
   允许用户自定义 agent。
 - `project_scanner.rs`：`AgentSkillConfig { key, relative_skills_dir }` 描述
   项目级技能目录（如 `.claude/skills`），`read_project_skills()` 产出
@@ -123,7 +132,9 @@ Schema 见 `src-tauri/src/core/migrations.rs`（`migrate_v0_to_v1`），关键�
 - `merge/`：**对象级三方合并**（以技能目录为单位而非行级），默认启用，
   `settings.merge_engine = "system"` 是回退到 git 行级合并的逃生门；每次 app
   提交带协议标记，旧客户端的行级合并提交会被识别为违规。无法自动裁决的进入
-  `pending_conflicts`，自动备份在该技能上退避，其它技能照常流动。
+  `pending_conflicts`（本地工作副本保留，UI 标记 Needs attention），自动备份在
+  该技能上退避，其它技能照常流动。用户裁决为 `merge/resolve.rs` 的
+  `ResolveAction::{KeepLocal, UseRemote, KeepBoth}`，裁决前先打安全快照 tag。
 
 ### 1.8 面向 agent 的 CLI 与"自举"技能
 
@@ -183,8 +194,11 @@ Schema 见 `src-tauri/src/core/migrations.rs`（`migrate_v0_to_v1`），关键�
    - 位置：`packages/skills-runtime/src/mutation.ts` 的计划输出 + Trusted Review。
    - 做法：对 `remove` / `update` 类 `MutationIntent`，在 Inventory Snapshot 的
      证据里标出受影响的 skill 路径与名称，确认对话框逐条列出。
+   - 借鉴其 `removal_approval` token：把确认与"具体 revision + 具体删除清单"
+     绑定，证据变了确认即失效。这与 Mutation Guard v3 的 digest 绑定同构，
+     只需把"删除清单"纳入 digest 输入。
    - 边界：只呈现 CLI 已报告的证据，不自行遍历目录（ADR 0001/0004）。
-   - 测试：diff 语义、确认文案与计划的绑定。
+   - 测试：diff 语义、确认文案与计划的绑定、证据变更后 token 失效。
 2. **"记录不等于证明"显式化**（对应 `ReplacePolicy::Recorded`）
    - 位置：Comparison / Mutation Guard。
    - 做法：当 Snapshot 为 Stale 时，任何 mutation 计划必须先刷新 Inventory；
