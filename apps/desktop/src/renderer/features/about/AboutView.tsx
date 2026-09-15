@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import {
   AlertCircle,
   Download,
@@ -14,6 +14,8 @@ import type {
   AboutUpdateSnapshot,
   RestartGuardReason,
 } from "../../../contracts/about.js";
+import type { MessageKey, Translator } from "../../../contracts/i18n/translate.js";
+import { useTranslator } from "../../i18n/LocaleProvider.js";
 import { UserFacingErrorCopy } from "../../UserFacingErrorCopy.js";
 
 type AboutActionError = Extract<AboutUpdateResult, { ok: false }>["error"];
@@ -22,50 +24,58 @@ function resultError(result: AboutUpdateResult): AboutActionError | undefined {
   return result.ok ? undefined : result.error;
 }
 
-function automaticStatus(snapshot: AboutUpdateSnapshot) {
+function automaticStatus(t: Translator["t"], snapshot: AboutUpdateSnapshot) {
   switch (snapshot.state.kind) {
     case "idle":
-      return { heading: "Ready to check", message: "No update check is running." };
+      return {
+        heading: t("about.status.idle.heading"),
+        message: t("about.status.idle.message"),
+      };
     case "checking":
       return {
-        heading: "Checking for updates",
-        message: "Checking the stable release channel.",
+        heading: t("about.status.checking.heading"),
+        message: t("about.status.checking.message"),
       };
     case "up-to-date":
       return {
-        heading: "Up to date",
-        message: "This is the latest available stable version.",
+        heading: t("about.status.upToDate.heading"),
+        message: t("about.status.upToDate.message"),
       };
     case "update-available":
       return {
-        heading: "Update available",
-        message: "正在下载更新",
+        heading: t("about.status.available.heading"),
+        message: t("about.status.available.message"),
       };
     case "update-downloaded":
       return {
-        heading: "Update ready for next launch",
-        message: "The downloaded update will apply on a later normal launch.",
+        heading: t("about.status.downloaded.heading"),
+        message: t("about.status.downloaded.message"),
       };
     case "error":
-      return {
-        heading: "Update check failed",
-        message: "",
-      };
+      return { heading: t("about.status.error.heading"), message: "" };
     case "manual":
     case "unavailable":
       return undefined;
   }
 }
 
-const guardLabels: Record<RestartGuardReason, string> = {
-  "mutation-active": "Mutation active",
-  "protected-process-active": "Protected process active",
-  "trusted-review-active": "Trusted Review active",
-  "reconciliation-required": "Reconciliation required",
-  "recovery-uncertain": "Recovery state uncertain",
+const guardKeys: Record<RestartGuardReason, MessageKey> = {
+  "mutation-active": "about.guard.mutation-active",
+  "protected-process-active": "about.guard.protected-process-active",
+  "trusted-review-active": "about.guard.trusted-review-active",
+  "reconciliation-required": "about.guard.reconciliation-required",
+  "recovery-uncertain": "about.guard.recovery-uncertain",
 };
 
-export function AboutView({ client }: { readonly client: AboutBridge }) {
+export function AboutView({
+  children,
+  client,
+}: {
+  /** Workspace-level settings rendered above the update status. */
+  readonly children?: ReactNode;
+  readonly client: AboutBridge;
+}) {
+  const { t } = useTranslator();
   const [snapshot, setSnapshot] = useState<AboutUpdateSnapshot>();
   const [error, setError] = useState<AboutActionError>();
 
@@ -116,15 +126,18 @@ export function AboutView({ client }: { readonly client: AboutBridge }) {
 
   const restartCandidate =
     snapshot?.schemaVersion === 2 ? snapshot.candidate : null;
+  const guardLabel = (reason: RestartGuardReason) => t(guardKeys[reason]);
 
   return (
     <main className="about-workspace" id="workspace-main" tabIndex={-1}>
       <section className="page-heading">
         <div>
-          <h1>About</h1>
-          <p>Skills Desktop</p>
+          <h1>{t("about.title")}</h1>
+          <p>{t("app.name")}</p>
         </div>
       </section>
+
+      {children}
 
       {error !== undefined ? (
         <div className="state-banner state-banner--danger" role="alert">
@@ -136,7 +149,7 @@ export function AboutView({ client }: { readonly client: AboutBridge }) {
       {snapshot === undefined ? (
         <div className="about-loading" aria-busy="true">
           <Info aria-hidden="true" size={20} />
-          <span>Loading application details</span>
+          <span>{t("about.loading")}</span>
         </div>
       ) : (
         <div className="about-content">
@@ -145,8 +158,8 @@ export function AboutView({ client }: { readonly client: AboutBridge }) {
               <PackageOpen aria-hidden="true" size={22} />
             </span>
             <div>
-              <h2 id="about-product-name">Skills Desktop</h2>
-              <p>Version {snapshot.application.version}</p>
+              <h2 id="about-product-name">{t("app.name")}</h2>
+              <p>{t("about.version", { version: snapshot.application.version })}</p>
               <code>
                 {snapshot.application.platform} / {snapshot.application.architecture}
               </code>
@@ -155,10 +168,10 @@ export function AboutView({ client }: { readonly client: AboutBridge }) {
 
           <dl className="about-facts">
             <div>
-              <dt>Last check</dt>
+              <dt>{t("about.lastCheck")}</dt>
               <dd>
                 {snapshot.lastCheckAt === null ? (
-                  "Never checked"
+                  t("about.neverChecked")
                 ) : (
                   <time dateTime={snapshot.lastCheckAt}>
                     {snapshot.lastCheckAt}
@@ -167,10 +180,10 @@ export function AboutView({ client }: { readonly client: AboutBridge }) {
               </dd>
             </div>
             <div>
-              <dt>Next eligibility</dt>
+              <dt>{t("about.nextEligibility")}</dt>
               <dd>
                 {snapshot.nextAutomaticCheckAt === null ? (
-                  "Not scheduled"
+                  t("about.notScheduled")
                 ) : (
                   <time dateTime={snapshot.nextAutomaticCheckAt}>
                     {snapshot.nextAutomaticCheckAt}
@@ -187,29 +200,31 @@ export function AboutView({ client }: { readonly client: AboutBridge }) {
               role={snapshot.state.kind === "error" ? "alert" : "status"}
             >
               <div>
-                <p className="about-status-label">Update status</p>
+                <p className="about-status-label">{t("about.updateStatus")}</p>
                 <h2 id="update-status-heading">
-                  {automaticStatus(snapshot)?.heading}
+                  {automaticStatus(t, snapshot)?.heading}
                 </h2>
               </div>
               {snapshot.state.kind === "error" ? (
                 <UserFacingErrorCopy error={snapshot.state.error} />
               ) : (
-                <p>{automaticStatus(snapshot)?.message}</p>
+                <p>{automaticStatus(t, snapshot)?.message}</p>
               )}
               {snapshot.schemaVersion === 2 && restartCandidate !== null ? (
                 <div className="about-restart-control">
                   <p className="about-candidate">
-                    版本 {restartCandidate.version} 已就绪
+                    {t("about.candidateReady", {
+                      version: restartCandidate.version,
+                    })}
                   </p>
                   {snapshot.restart.guardReasons.length > 0 ? (
                     <ul
                       className="about-guard-reasons"
-                      aria-label="Restart guards"
+                      aria-label={t("about.restartGuards")}
                       id="about-restart-unavailable-reason"
                     >
                       {snapshot.restart.guardReasons.map((reason) => (
-                        <li key={reason}>{guardLabels[reason]}</li>
+                        <li key={reason}>{guardLabel(reason)}</li>
                       ))}
                     </ul>
                   ) : !snapshot.restart.immediateRestartAvailable ? (
@@ -217,7 +232,7 @@ export function AboutView({ client }: { readonly client: AboutBridge }) {
                       className="sr-only"
                       id="about-restart-unavailable-reason"
                     >
-                      Restart unavailable
+                      {t("about.restartUnavailable")}
                     </p>
                   ) : null}
                   <button
@@ -233,15 +248,17 @@ export function AboutView({ client }: { readonly client: AboutBridge }) {
                       snapshot.restart.immediateRestartAvailable
                         ? undefined
                         : snapshot.restart.guardReasons.length > 0
-                          ? `Restart unavailable: ${snapshot.restart.guardReasons
-                              .map((reason) => guardLabels[reason])
-                              .join(", ")}`
-                          : "Restart unavailable"
+                          ? t("about.restartUnavailableBecause", {
+                              reasons: snapshot.restart.guardReasons
+                                .map(guardLabel)
+                                .join(", "),
+                            })
+                          : t("about.restartUnavailable")
                     }
                     type="button"
                   >
                     <RotateCw aria-hidden="true" size={15} />
-                    Restart to update
+                    {t("about.restartToUpdate")}
                   </button>
                 </div>
               ) : (
@@ -256,15 +273,15 @@ export function AboutView({ client }: { readonly client: AboutBridge }) {
                     className={snapshot.state.kind === "checking" ? "spin" : undefined}
                     size={15}
                   />
-                  Check for updates
+                  {t("about.checkForUpdates")}
                 </button>
               )}
             </section>
           ) : snapshot.policy.mode === "manual" ? (
             <section className="about-update-status" aria-labelledby="update-status-heading">
               <div>
-                <p className="about-status-label">Update status</p>
-                <h2 id="update-status-heading">Manual upgrade</h2>
+                <p className="about-status-label">{t("about.updateStatus")}</p>
+                <h2 id="update-status-heading">{t("about.manualUpgrade")}</h2>
               </div>
               <p>{snapshot.policy.message}</p>
               <code className="wrapping-value">
@@ -274,8 +291,8 @@ export function AboutView({ client }: { readonly client: AboutBridge }) {
           ) : snapshot.policy.mode === "unavailable" ? (
             <section className="about-update-status" aria-labelledby="update-status-heading">
               <div>
-                <p className="about-status-label">Update status</p>
-                <h2 id="update-status-heading">Checks unavailable</h2>
+                <p className="about-status-label">{t("about.updateStatus")}</p>
+                <h2 id="update-status-heading">{t("about.checksUnavailable")}</h2>
               </div>
               <p>{snapshot.policy.message}</p>
             </section>
@@ -287,7 +304,7 @@ export function AboutView({ client }: { readonly client: AboutBridge }) {
               type="button"
             >
               <Download aria-hidden="true" size={15} />
-              Export release diagnostics
+              {t("about.exportDiagnostics")}
             </button>
           </div>
         </div>

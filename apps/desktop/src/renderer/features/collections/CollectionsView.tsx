@@ -12,12 +12,14 @@ import {
   ShieldCheck,
 } from "lucide-react";
 
+import type { MessageKey } from "../../../contracts/i18n/translate.js";
 import type {
   PublicCollectionsState,
   RendererError,
   WorkspaceBridge,
   WorkspaceSnapshot,
 } from "../../../contracts/workspace.js";
+import { useTranslator } from "../../i18n/LocaleProvider.js";
 import { UserFacingErrorCopy } from "../../UserFacingErrorCopy.js";
 
 type Release = PublicCollectionsState["releases"][number];
@@ -30,14 +32,11 @@ type TargetInput = {
   readonly selected: Readonly<Record<string, SelectionMode>>;
 };
 
-const statusLabels = {
-  incompatible: "Incompatible",
-  missing: "Missing",
-  "present-content-unknown": "Present, content unknown",
-  "removal-candidate": "Removal candidate",
-  "source-conflict": "Source conflict",
-  unchanged: "Unchanged",
-} as const;
+type EntryStatus =
+  NonNullable<Release["assessments"]>[number]["entries"][number]["status"];
+
+const statusKey = (status: EntryStatus): MessageKey =>
+  `collections.status.${status}`;
 
 function releaseKey(release: Release) {
   return `${release.collectionId}:${release.releaseNumber}:${release.manifestDigest}`;
@@ -77,6 +76,7 @@ export function CollectionsView({
   readonly client: WorkspaceBridge;
   readonly snapshot: WorkspaceSnapshot;
 }) {
+  const { t, tc } = useTranslator();
   const collections = snapshot.collections;
   const targetStates = useMemo(() => targetStatesFor(snapshot), [snapshot]);
   const targetKey = targetStates
@@ -154,16 +154,16 @@ export function CollectionsView({
     const assessment = assessmentFor(targetState, input.scope);
     const blockers: string[] = [];
     if (targetRelease === undefined || !targetRelease.executable) {
-      blockers.push("No executable reviewed release for this Target.");
+      blockers.push(t("collections.blocker.noRelease"));
     }
     if (assessment?.compatibility !== "compatible") {
-      blockers.push("Release is incompatible with this Target.");
+      blockers.push(t("collections.blocker.incompatible"));
     }
     if (assessment?.inventoryFreshness !== "fresh") {
-      blockers.push("Fresh inventory evidence is required.");
+      blockers.push(t("collections.blocker.freshness"));
     }
     if (targetState.mutation.phase === "reconciliation-required") {
-      blockers.push("Mutation reconciliation is required.");
+      blockers.push(t("collections.blocker.reconciliation"));
     }
     return blockers;
   };
@@ -259,17 +259,14 @@ export function CollectionsView({
       <main className="collections-workspace" id="workspace-main" tabIndex={-1}>
         <section className="page-heading">
           <div>
-            <h1>Official Collections</h1>
-            <p>No reviewed releases are bundled</p>
+            <h1>{t("collections.title")}</h1>
+            <p>{t("collections.noneBundled")}</p>
           </div>
         </section>
         <div className="empty-state" role="status">
           <CircleHelp aria-hidden="true" size={22} />
-          <h2>No Official Collections</h2>
-          <p>
-            This build has no bundled reviewed releases. V1 Collections only
-            apply to Local Targets once a release is packaged with the app.
-          </p>
+          <h2>{t("collections.empty.heading")}</h2>
+          <p>{t("collections.empty.body")}</p>
         </div>
       </main>
     );
@@ -283,14 +280,14 @@ export function CollectionsView({
       <main className="collections-workspace" id="workspace-main" tabIndex={-1}>
         <section className="page-heading">
           <div>
-            <h1>Official Collections</h1>
-            <p>{collections.releases.length} bundled releases</p>
+            <h1>{t("collections.title")}</h1>
+            <p>{tc("collections.bundled", collections.releases.length)}</p>
           </div>
         </section>
 
         <div className="collection-controls">
           <label>
-            <span>Release</span>
+            <span>{t("collections.release")}</span>
             <select
               disabled={busy || plan !== null || execution?.phase === "running"}
               onChange={(event) =>
@@ -303,7 +300,10 @@ export function CollectionsView({
                   key={releaseKey(candidate)}
                   value={releaseKey(candidate)}
                 >
-                  {candidate.title} / release {candidate.releaseNumber}
+                  {t("collections.releaseOption", {
+                    release: candidate.releaseNumber,
+                    title: candidate.title,
+                  })}
                 </option>
               ))}
             </select>
@@ -315,7 +315,7 @@ export function CollectionsView({
             type="button"
           >
             <PackagePlus aria-hidden="true" size={15} />
-            Prepare plan
+            {t("collections.preparePlan")}
           </button>
         </div>
 
@@ -348,13 +348,15 @@ export function CollectionsView({
               )}
               <div>
                 <h2 ref={statusHeadingRef} tabIndex={-1}>
-                  {execution.phase === "running"
-                    ? "Collection run in progress"
-                    : execution.phase === "completed"
-                      ? "Collection run completed"
-                      : "Collection run stopped"}
+                  {t(
+                    execution.phase === "running"
+                      ? "collections.run.running"
+                      : execution.phase === "completed"
+                        ? "collections.run.completed"
+                        : "collections.run.stopped",
+                  )}
                 </h2>
-                <p>Sequential, non-transactional execution</p>
+                <p>{t("collections.run.semantics")}</p>
               </div>
             </header>
             <ol className="collection-progress-list">
@@ -392,7 +394,9 @@ export function CollectionsView({
                       type="button"
                     >
                       <RotateCcw aria-hidden="true" size={15} />
-                      Reconcile {child.target.label}
+                      {t("collections.run.reconcile", {
+                        label: child.target.label,
+                      })}
                     </button>
                   ) : execution.phase === "stopped" &&
                     child.status !== "pending" &&
@@ -404,7 +408,9 @@ export function CollectionsView({
                       type="button"
                     >
                       <RotateCcw aria-hidden="true" size={15} />
-                      Refresh {child.target.label}
+                      {t("collections.run.refresh", {
+                        label: child.target.label,
+                      })}
                     </button>
                   ) : null}
                 </li>
@@ -424,12 +430,13 @@ export function CollectionsView({
             const included = input.included;
             const inventoryFreshness =
               assessment?.inventoryFreshness ?? targetState.inventory.freshness;
-            const inventoryFreshnessLabel =
+            const inventoryFreshnessLabel = t(
               inventoryFreshness === "fresh"
-                ? "Fresh inventory"
+                ? "collections.inventory.fresh"
                 : inventoryFreshness === "stale"
-                  ? "Stale inventory"
-                  : "No inventory evidence";
+                  ? "collections.inventory.stale"
+                  : "collections.inventory.none",
+            );
             const locked =
               busy || plan !== null || execution?.phase === "running";
             const TargetIcon =
@@ -443,7 +450,9 @@ export function CollectionsView({
                   <div className="collection-machine-toggle">
                     <label className="collection-checkbox-hit-area">
                       <input
-                        aria-label={`Include ${targetState.target.label}`}
+                        aria-label={t("collections.include", {
+                          label: targetState.target.label,
+                        })}
                         checked={
                           targetState.target.kind === "ssh" ? false : included
                         }
@@ -458,7 +467,7 @@ export function CollectionsView({
                         }}
                         title={
                           targetState.target.kind === "ssh"
-                            ? "SSH · 未在 V1 开放，不在 V1 Local Collections 范围内"
+                            ? t("collections.sshExcluded")
                             : undefined
                         }
                         type="checkbox"
@@ -468,16 +477,18 @@ export function CollectionsView({
                     <span>
                       <strong>{targetState.target.label}</strong>
                       <small>
-                        {targetState.target.kind === "ssh"
-                          ? "SSH · 未在 V1 开放"
-                          : "Local"}{" "}
+                        {t(
+                          targetState.target.kind === "ssh"
+                            ? "common.ssh.notInV1"
+                            : "common.local",
+                        )}{" "}
                         / {targetState.target.harnessIds.join(", ")}
                       </small>
                       <small>{inventoryFreshnessLabel}</small>
                     </span>
                   </div>
                   <label className="collection-scope-select">
-                    <span>Scope</span>
+                    <span>{t("common.scope")}</span>
                     <select
                       disabled={locked || !included}
                       onChange={(event) => {
@@ -490,8 +501,8 @@ export function CollectionsView({
                       }}
                       value={input.scope}
                     >
-                      <option value="project">Project</option>
-                      <option value="global">Global</option>
+                      <option value="project">{t("common.scope.project")}</option>
+                      <option value="global">{t("common.scope.global")}</option>
                     </select>
                   </label>
                 </header>
@@ -505,15 +516,16 @@ export function CollectionsView({
                 <div className="collection-table-wrap">
                   <table className="collection-table">
                     <caption className="sr-only">
-                      Official Collection assessment for{" "}
-                      {targetState.target.label}
+                      {t("collections.assessmentCaption", {
+                        label: targetState.target.label,
+                      })}
                     </caption>
                     <thead>
                       <tr>
-                        <th scope="col">Include</th>
-                        <th scope="col">Skill</th>
-                        <th scope="col">Assessment</th>
-                        <th scope="col">Action</th>
+                        <th scope="col">{t("collections.table.include")}</th>
+                        <th scope="col">{t("common.skill")}</th>
+                        <th scope="col">{t("collections.table.assessment")}</th>
+                        <th scope="col">{t("collections.table.action")}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -521,11 +533,14 @@ export function CollectionsView({
                         const mode = entry.selectionModes[0];
                         const selectionLabel =
                           targetStates.length === 1
-                            ? `Select ${entry.name}`
-                            : `Select ${entry.name} on ${targetState.target.label}`;
+                            ? t("collections.select", { name: entry.name })
+                            : t("collections.selectOn", {
+                                label: targetState.target.label,
+                                name: entry.name,
+                              });
                         return (
                           <tr key={`${input.scope}:${entry.name}`}>
-                            <td data-label="Include">
+                            <td data-label={t("collections.table.include")}>
                               <label className="collection-checkbox-hit-area">
                                 <input
                                   aria-label={selectionLabel}
@@ -557,22 +572,24 @@ export function CollectionsView({
                                 />
                               </label>
                             </td>
-                            <td data-label="Skill">
+                            <td data-label={t("common.skill")}>
                               <strong>{entry.name}</strong>
                             </td>
-                            <td data-label="Assessment">
+                            <td data-label={t("collections.table.assessment")}>
                               <span
                                 className={`collection-status collection-status--${entry.status}`}
                               >
-                                {statusLabels[entry.status]}
+                                {t(statusKey(entry.status))}
                               </span>
                             </td>
-                            <td data-label="Action">
-                              {mode === undefined
-                                ? "Not selectable"
-                                : mode === "add"
-                                  ? "Add"
-                                  : "Reapply"}
+                            <td data-label={t("collections.table.action")}>
+                              {t(
+                                mode === undefined
+                                  ? "collections.action.notSelectable"
+                                  : mode === "add"
+                                    ? "collections.action.add"
+                                    : "collections.action.reapply",
+                              )}
                             </td>
                           </tr>
                         );
@@ -588,7 +605,7 @@ export function CollectionsView({
 
       <aside
         className="inspector collection-inspector"
-        aria-label="Official Collection details"
+        aria-label={t("collections.inspector.label")}
       >
         {release === undefined ? null : (
           <>
@@ -602,33 +619,33 @@ export function CollectionsView({
             <p className="collection-description">{release.description}</p>
             <dl className="evidence-list">
               <div>
-                <dt>Status</dt>
+                <dt>{t("collections.inspector.status")}</dt>
                 <dd>{release.status}</dd>
               </div>
               <div>
-                <dt>Independent review</dt>
+                <dt>{t("collections.inspector.independentReview")}</dt>
                 <dd>{release.receipt.status}</dd>
               </div>
               <div>
-                <dt>Pinned source</dt>
+                <dt>{t("collections.inspector.pinnedSource")}</dt>
                 <dd>
                   <code>{release.source.repository}</code>
                 </dd>
               </div>
               <div>
-                <dt>Reviewed revision</dt>
+                <dt>{t("collections.inspector.reviewedRevision")}</dt>
                 <dd>
                   <code>{release.source.reviewedRevision}</code>
                 </dd>
               </div>
               <div>
-                <dt>Manifest digest</dt>
+                <dt>{t("collections.inspector.manifestDigest")}</dt>
                 <dd>
                   <code>{release.manifestDigest}</code>
                 </dd>
               </div>
               <div>
-                <dt>Targets selected</dt>
+                <dt>{t("collections.inspector.targetsSelected")}</dt>
                 <dd>{selectedTargets.length}</dd>
               </div>
             </dl>
@@ -637,10 +654,10 @@ export function CollectionsView({
                 <header>
                   <CheckCircle2 aria-hidden="true" size={16} />
                   <h3 ref={statusHeadingRef} tabIndex={-1}>
-                    Collection Plan
+                    {t("collections.plan.heading")}
                   </h3>
                 </header>
-                <p>Sequential, non-transactional</p>
+                <p>{t("collections.plan.semantics")}</p>
                 <ol>
                   {plan.order.map((child) => (
                     <li key={`${child.position}:${child.targetId}`}>
@@ -661,7 +678,7 @@ export function CollectionsView({
                   type="button"
                 >
                   <ShieldCheck aria-hidden="true" size={15} />
-                  Open Trusted Review
+                  {t("common.openTrustedReview")}
                 </button>
               </section>
             )}

@@ -16,6 +16,8 @@ import {
   createSshSkillsProcess,
   createSshTransportRunner,
 } from "./adapters/ssh-skills-process.js";
+import { createPreferenceAuthority } from "./application/preferences.js";
+import { createJsonPreferenceRecords } from "./persistence/preference-records.js";
 import { createJsonRecoveryRecords } from "./persistence/recovery-records.js";
 import { createRecoveryHostTrustStore } from "./persistence/recovery-host-trust.js";
 import {
@@ -60,6 +62,14 @@ export async function createCompositionRoot(options?: {
       path: resolve(recoveryDirectory, "known_hosts"),
       records: recoveryRecords,
     }),
+  });
+  const preferences = createPreferenceAuthority({
+    records: createJsonPreferenceRecords({
+      id: randomUUID,
+      path: resolve(userData, "preferences.json"),
+      platform: process.platform,
+    }),
+    systemLocaleTag: () => app.getLocale(),
   });
   const sshRunner = createSshTransportRunner({ platform: process.platform });
   const skillsTargets = createLocalSkillsTargets({
@@ -111,6 +121,7 @@ export async function createCompositionRoot(options?: {
     id: randomUUID,
     officialCollectionCatalog: BUNDLED_OFFICIAL_COLLECTION_CATALOG,
     onReviewRequested: options?.onReviewRequested,
+    preferences,
     recoveryRecords,
     platform: process.platform,
     skillsTargets,

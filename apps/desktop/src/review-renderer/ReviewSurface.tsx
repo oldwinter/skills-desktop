@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { AlertCircle, Check, Clock3, ShieldCheck, X } from "lucide-react";
 
 import {
@@ -7,17 +7,25 @@ import {
   type ReviewSnapshot,
 } from "../contracts/review.js";
 import { describeHarnessEffect } from "../contracts/harness-effect.js";
+import type { MessageKey, Translator } from "../contracts/i18n/translate.js";
+import type { Locale } from "../contracts/preferences.js";
 import { userFacingErrorMessage } from "../contracts/user-facing-error.js";
 import type { CommandPlan, RendererError } from "../contracts/workspace.js";
+import {
+  LocaleProvider,
+  useDocumentPreferences,
+  useTranslator,
+} from "../renderer/i18n/LocaleProvider.js";
 
-function scopeLabel(scope: "global" | "project") {
-  return scope === "project" ? "Project" : "Global";
+function scopeLabel(t: Translator["t"], scope: "global" | "project") {
+  return t(scope === "project" ? "common.scope.project" : "common.scope.global");
 }
-function formatReviewInstant(iso: string): string {
+
+function formatReviewInstant(locale: Locale, iso: string): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return iso;
   try {
-    return new Intl.DateTimeFormat(undefined, {
+    return new Intl.DateTimeFormat(locale, {
       dateStyle: "medium",
       timeStyle: "short",
     }).format(date);
@@ -26,13 +34,10 @@ function formatReviewInstant(iso: string): string {
   }
 }
 
-function ReviewInstant({
-  value,
-}: {
-  readonly value: string | null;
-}) {
-  if (value === null) return <span>Not reviewed yet</span>;
-  return <time dateTime={value}>{formatReviewInstant(value)}</time>;
+function ReviewInstant({ value }: { readonly value: string | null }) {
+  const { locale, t } = useTranslator();
+  if (value === null) return <span>{t("review.notReviewedYet")}</span>;
+  return <time dateTime={value}>{formatReviewInstant(locale, value)}</time>;
 }
 
 function HarnessEffectDisclosure({
@@ -40,7 +45,8 @@ function HarnessEffectDisclosure({
 }: {
   readonly commandPlan: CommandPlan;
 }) {
-  const effect = describeHarnessEffect(commandPlan);
+  const { locale } = useTranslator();
+  const effect = describeHarnessEffect(commandPlan, locale);
   return (
     <section
       aria-labelledby="review-effect-heading"
@@ -53,14 +59,42 @@ function HarnessEffectDisclosure({
   );
 }
 
+function ReviewHeading({ title }: { readonly title: string }) {
+  const { t } = useTranslator();
+  return (
+    <header className="review-heading">
+      <span className="review-mark">
+        <ShieldCheck aria-hidden="true" size={20} />
+      </span>
+      <div>
+        <p>{t("review.brand")}</p>
+        <h1>{title}</h1>
+      </div>
+    </header>
+  );
+}
 
+function DigestDetails({ children }: { readonly children: ReactNode }) {
+  const { t } = useTranslator();
+  return (
+    <details className="review-digest-details">
+      <summary>{t("common.details")}</summary>
+      {children}
+    </details>
+  );
+}
+
+type Decision = "approve" | "reject";
+
+/**
+ * Trusted Review renders under the main-owned locale carried by the Review
+ * Snapshot so a language change in the workspace is honoured on the next
+ * review without any renderer-to-renderer coupling.
+ */
 export function ReviewSurface({ client }: { readonly client: ReviewBridge }) {
   const [snapshot, setSnapshot] = useState<ReviewSnapshot>();
   const [error, setError] = useState<RendererError>();
-  const [pendingDecision, setPendingDecision] = useState<
-    "approve" | "reject"
-  >();
-  const [settledMessage, setSettledMessage] = useState<string>();
+  useDocumentPreferences(snapshot?.preferences);
 
   useEffect(() => {
     void client.getReview().then((result) => {
@@ -69,28 +103,63 @@ export function ReviewSurface({ client }: { readonly client: ReviewBridge }) {
     });
   }, [client]);
 
-  const decide = async (decision: "approve" | "reject") => {
+  return (
+    <LocaleProvider locale={snapshot?.preferences?.locale}>
+      <ReviewContent
+        client={client}
+        error={error}
+        onError={setError}
+        onSnapshot={setSnapshot}
+        snapshot={snapshot}
+      />
+    </LocaleProvider>
+  );
+}
+
+function ReviewContent({
+  client,
+  error,
+  onError,
+  onSnapshot,
+  snapshot,
+}: {
+  readonly client: ReviewBridge;
+  readonly error: RendererError | undefined;
+  readonly onError: (error: RendererError | undefined) => void;
+  readonly onSnapshot: (
+    update: (current: ReviewSnapshot | undefined) => ReviewSnapshot,
+  ) => void;
+  readonly snapshot: ReviewSnapshot | undefined;
+}) {
+  const { locale, t } = useTranslator();
+  const [pendingDecision, setPendingDecision] = useState<Decision>();
+  const [settledMessage, setSettledMessage] = useState<MessageKey>();
+
+  const decide = async (decision: Decision) => {
     setPendingDecision(decision);
-    setError(undefined);
+    onError(undefined);
     const result =
       decision === "approve" ? await client.approve() : await client.reject();
     setPendingDecision(undefined);
     if (!result.ok) {
-      setError(result.error);
+      onError(result.error);
       return;
     }
     if (decision === "approve") {
       setSettledMessage(
         snapshot?.status === "pending" && "fingerprint" in snapshot.projection
-          ? "Host trust confirmed"
-          : "Mutation started",
+          ? "review.hostTrustConfirmed"
+          : "review.mutationStarted",
       );
-    } else setSettledMessage("Review rejected");
-    setSnapshot({
+    } else setSettledMessage("review.rejected");
+    onSnapshot((current) => ({
+      ...(current?.preferences === undefined
+        ? {}
+        : { preferences: current.preferences }),
       decision,
       schemaVersion: REVIEW_PROTOCOL_VERSION,
       status: "settled",
-    });
+    }));
     if (decision === "reject") window.close();
   };
 
@@ -100,9 +169,9 @@ export function ReviewSurface({ client }: { readonly client: ReviewBridge }) {
         <div className="review-alert" role="alert">
           <AlertCircle aria-hidden="true" size={18} />
           <span className="user-facing-error">
-            <span>{userFacingErrorMessage(error)}</span>
+            <span>{userFacingErrorMessage(error, locale)}</span>
             <details className="user-facing-error-details">
-              <summary>详情</summary>
+              <summary>{t("common.details")}</summary>
               <code>{error.message}</code>
             </details>
           </span>
@@ -115,7 +184,7 @@ export function ReviewSurface({ client }: { readonly client: ReviewBridge }) {
       <main className="review-surface" aria-busy="true">
         <div className="review-loading" role="status">
           <Clock3 aria-hidden="true" size={18} />
-          Loading review
+          {t("review.loading")}
         </div>
       </main>
     );
@@ -125,7 +194,7 @@ export function ReviewSurface({ client }: { readonly client: ReviewBridge }) {
       <main className="review-surface">
         <div className="review-alert" role="alert">
           <AlertCircle aria-hidden="true" size={18} />
-          No review is available
+          {t("review.unavailable")}
         </div>
       </main>
     );
@@ -136,86 +205,93 @@ export function ReviewSurface({ client }: { readonly client: ReviewBridge }) {
         <div className="review-settled">
           <span className="review-settled__message" role="status">
             <Check aria-hidden="true" size={20} />
-            {settledMessage ??
-              (snapshot.decision === "approve"
-                ? "Review approved"
-                : "Review rejected")}
+            {t(
+              settledMessage ??
+                (snapshot.decision === "approve"
+                  ? "review.approved"
+                  : "review.rejected"),
+            )}
           </span>
           <button
-            aria-label="Close review"
+            aria-label={t("review.closeReview")}
             autoFocus
             className="review-button"
             onClick={() => window.close()}
             type="button"
           >
             <X aria-hidden="true" size={16} />
-            Close
+            {t("common.close")}
           </button>
         </div>
       </main>
     );
   }
 
+  const rejectButton = (
+    <button
+      autoFocus
+      className="review-button"
+      disabled={pendingDecision !== undefined}
+      onClick={() => void decide("reject")}
+      type="button"
+    >
+      <X aria-hidden="true" size={16} />
+      {t("review.reject")}
+    </button>
+  );
+  const approveButton = (label: string, pendingKey: MessageKey) => (
+    <button
+      aria-label={label}
+      className="review-button review-button--primary"
+      disabled={pendingDecision !== undefined}
+      onClick={() => void decide("approve")}
+      type="button"
+    >
+      <Check aria-hidden="true" size={16} />
+      {t(pendingDecision === "approve" ? pendingKey : "review.approve")}
+    </button>
+  );
+
   if ("fingerprint" in snapshot.projection) {
     const { algorithm, fingerprint, identity, target, trustAction } =
       snapshot.projection;
     return (
       <main className="review-surface">
-        <header className="review-heading">
-          <span className="review-mark">
-            <ShieldCheck aria-hidden="true" size={20} />
-          </span>
-          <div>
-            <p>Trusted Review</p>
-            <h1>
-              Review{" "}
-              {trustAction === "rotation" ? "changed host key" : "host key"}
-            </h1>
-          </div>
-        </header>
+        <ReviewHeading
+          title={t(
+            trustAction === "rotation"
+              ? "review.hostKey.rotationTitle"
+              : "review.hostKey.title",
+          )}
+        />
         <dl className="review-facts">
           <div>
-            <dt>Target</dt>
+            <dt>{t("common.target")}</dt>
             <dd>{target.label}</dd>
           </div>
           <div>
-            <dt>Effective identity</dt>
+            <dt>{t("review.hostKey.identity")}</dt>
             <dd>{identity}</dd>
           </div>
           <div>
-            <dt>Algorithm</dt>
+            <dt>{t("review.hostKey.algorithm")}</dt>
             <dd>{algorithm}</dd>
           </div>
           <div className="review-facts__wide">
-            <dt>SHA-256 fingerprint</dt>
+            <dt>{t("review.hostKey.fingerprint")}</dt>
             <dd>{fingerprint}</dd>
           </div>
         </dl>
         <div className="review-actions">
-          <button
-            autoFocus
-            className="review-button"
-            disabled={pendingDecision !== undefined}
-            onClick={() => void decide("reject")}
-            type="button"
-          >
-            <X aria-hidden="true" size={16} />
-            Reject
-          </button>
-          <button
-            aria-label={
+          {rejectButton}
+          {approveButton(
+            t(
               trustAction === "rotation"
-                ? "Approve host key rotation"
-                : "Trust host key"
-            }
-            className="review-button review-button--primary"
-            disabled={pendingDecision !== undefined}
-            onClick={() => void decide("approve")}
-            type="button"
-          >
-            <Check aria-hidden="true" size={16} />
-            {pendingDecision === "approve" ? "Confirming" : "Approve"}
-          </button>
+                ? "review.hostKey.approveRotation"
+                : "review.hostKey.trust",
+            ),
+            "review.confirming",
+          )}
         </div>
       </main>
     );
@@ -226,82 +302,79 @@ export function ReviewSurface({ client }: { readonly client: ReviewBridge }) {
     if (collectionPlan.schemaVersion === 2) {
       return (
         <main className="review-surface">
-          <header className="review-heading">
-            <span className="review-mark">
-              <ShieldCheck aria-hidden="true" size={20} />
-            </span>
-            <div>
-              <p>Trusted Review</p>
-              <h1>Review Official Collection</h1>
-            </div>
-          </header>
+          <ReviewHeading title={t("review.collection.title")} />
           <dl className="review-facts">
             <div>
-              <dt>Collection</dt>
+              <dt>{t("review.collection.collection")}</dt>
               <dd>{collectionPlan.collectionId}</dd>
             </div>
             <div>
-              <dt>Release</dt>
+              <dt>{t("review.collection.release")}</dt>
               <dd>{collectionPlan.releaseNumber}</dd>
             </div>
             <div>
-              <dt>Targets</dt>
+              <dt>{t("common.targets")}</dt>
               <dd>{collectionPlan.children.length}</dd>
             </div>
             <div>
-              <dt>Execution</dt>
-              <dd>Sequential, non-transactional</dd>
+              <dt>{t("review.collection.execution")}</dt>
+              <dd>{t("collections.plan.semantics")}</dd>
             </div>
             <div className="review-facts__wide">
-              <dt>Pinned source</dt>
+              <dt>{t("review.collection.pinnedSource")}</dt>
               <dd>
                 {collectionPlan.source.repository}@
                 {collectionPlan.source.reviewedRevision}
               </dd>
             </div>
             <div>
-              <dt>Release status</dt>
+              <dt>{t("review.collection.releaseStatus")}</dt>
               <dd>{collectionPlan.releaseEvidence.status}</dd>
             </div>
             <div>
-              <dt>Independent reviewer</dt>
+              <dt>{t("review.collection.independentReviewer")}</dt>
               <dd>{collectionPlan.releaseEvidence.receipt.reviewer}</dd>
             </div>
             <div>
-              <dt>Reviewed at</dt>
-              <dd><ReviewInstant value={collectionPlan.releaseEvidence.receipt.reviewedAt} /></dd>
+              <dt>{t("review.collection.reviewedAt")}</dt>
+              <dd>
+                <ReviewInstant
+                  value={collectionPlan.releaseEvidence.receipt.reviewedAt}
+                />
+              </dd>
             </div>
             <div>
-              <dt>Review policy</dt>
+              <dt>{t("review.collection.reviewPolicy")}</dt>
               <dd>{collectionPlan.releaseEvidence.receipt.reviewPolicy}</dd>
             </div>
             <div className="review-facts__wide">
-              <dt>Review location</dt>
+              <dt>{t("review.collection.reviewLocation")}</dt>
               <dd>{collectionPlan.releaseEvidence.receipt.reviewLocation}</dd>
             </div>
             <div>
-              <dt>Expires</dt>
-              <dd><ReviewInstant value={collectionPlan.expiresAt} /></dd>
+              <dt>{t("review.collection.expires")}</dt>
+              <dd>
+                <ReviewInstant value={collectionPlan.expiresAt} />
+              </dd>
             </div>
           </dl>
-          <details className="review-digest-details">
-            <summary>详情</summary>
+          <DigestDetails>
             <dl className="review-facts">
               <div className="review-facts__wide">
-                <dt>Manifest digest</dt>
+                <dt>{t("review.collection.manifestDigest")}</dt>
                 <dd>{collectionPlan.manifestDigest}</dd>
               </div>
               <div className="review-facts__wide">
-                <dt>Review digest</dt>
+                <dt>{t("review.collection.reviewDigest")}</dt>
                 <dd>{collectionPlan.reviewDigest}</dd>
               </div>
             </dl>
-          </details>
+          </DigestDetails>
           <section
             className="review-plan"
             aria-labelledby="review-plan-heading"
           >
-            <h2 id="review-plan-heading">Stable child order</h2>
+            <h2 id="review-plan-heading">{t("review.collection.childOrder")}</h2>
             <ol className="review-child-list">
               {collectionPlan.children.map((child) => (
                 <li key={child.target.id}>
@@ -310,8 +383,11 @@ export function ReviewSurface({ client }: { readonly client: ReviewBridge }) {
                       {child.position}. {child.target.label}
                     </strong>
                     <span>
-                      {child.target.kind.toUpperCase()} / generation{" "}
-                      {child.target.generation} / {scopeLabel(child.scope)}
+                      {t("review.collection.childMeta", {
+                        generation: child.target.generation,
+                        kind: child.target.kind.toUpperCase(),
+                        scope: scopeLabel(t, child.scope),
+                      })}
                     </span>
                   </header>
                   <p>
@@ -320,99 +396,75 @@ export function ReviewSurface({ client }: { readonly client: ReviewBridge }) {
                       .join(", ")}
                   </p>
                   <code>{child.commandPlan.preview}</code>
-                  <details className="review-digest-details">
-                    <summary>详情</summary>
+                  <DigestDetails>
                     <dl className="review-child-evidence">
                       <div>
-                        <dt>Binding</dt>
+                        <dt>{t("review.collection.binding")}</dt>
                         <dd>{child.bindingDigest}</dd>
                       </div>
                       <div>
-                        <dt>Inventory</dt>
+                        <dt>{t("review.collection.inventory")}</dt>
                         <dd>{child.inventoryDigest}</dd>
                       </div>
                       <div>
-                        <dt>Assessment</dt>
+                        <dt>{t("review.collection.assessment")}</dt>
                         <dd>{child.assessmentDigest}</dd>
                       </div>
                       <div>
-                        <dt>Prepared child</dt>
+                        <dt>{t("review.collection.preparedChild")}</dt>
                         <dd>{child.preparedDigest}</dd>
                       </div>
                     </dl>
-                  </details>
+                  </DigestDetails>
                 </li>
               ))}
             </ol>
           </section>
           <div className="review-actions">
-            <button
-              autoFocus
-              className="review-button"
-              disabled={pendingDecision !== undefined}
-              onClick={() => void decide("reject")}
-              type="button"
-            >
-              <X aria-hidden="true" size={16} />
-              Reject
-            </button>
-            <button
-              aria-label="Approve Official Collection plan"
-              className="review-button review-button--primary"
-              disabled={pendingDecision !== undefined}
-              onClick={() => void decide("approve")}
-              type="button"
-            >
-              <Check aria-hidden="true" size={16} />
-              {pendingDecision === "approve" ? "Applying" : "Approve"}
-            </button>
+            {rejectButton}
+            {approveButton(t("review.collection.approve"), "review.applying")}
           </div>
         </main>
       );
     }
     return (
       <main className="review-surface">
-        <header className="review-heading">
-          <span className="review-mark">
-            <ShieldCheck aria-hidden="true" size={20} />
-          </span>
-          <div>
-            <p>Trusted Review</p>
-            <h1>Review Official Collection</h1>
-          </div>
-        </header>
+        <ReviewHeading title={t("review.collection.title")} />
         <dl className="review-facts">
           <div>
-            <dt>Collection</dt>
+            <dt>{t("review.collection.collection")}</dt>
             <dd>{collectionPlan.collectionId}</dd>
           </div>
           <div>
-            <dt>Release</dt>
+            <dt>{t("review.collection.release")}</dt>
             <dd>{collectionPlan.releaseNumber}</dd>
           </div>
           <div>
-            <dt>Target</dt>
+            <dt>{t("common.target")}</dt>
             <dd>
-              {target.label} / generation {collectionPlan.targetGeneration}
+              {t("review.collection.targetGeneration", {
+                generation: collectionPlan.targetGeneration,
+                label: target.label,
+              })}
             </dd>
           </div>
           <div>
-            <dt>Scope</dt>
-            <dd>{scopeLabel(collectionPlan.scope)}</dd>
+            <dt>{t("common.scope")}</dt>
+            <dd>{scopeLabel(t, collectionPlan.scope)}</dd>
           </div>
           <div className="review-facts__wide">
-            <dt>Pinned source</dt>
+            <dt>{t("review.collection.pinnedSource")}</dt>
             <dd>
               {collectionPlan.source.repository}@
               {collectionPlan.source.reviewedRevision}
             </dd>
           </div>
           <div>
-            <dt>Release status</dt>
+            <dt>{t("review.collection.releaseStatus")}</dt>
             <dd>{collectionPlan.releaseEvidence.status}</dd>
           </div>
           <div>
-            <dt>Compatibility</dt>
+            <dt>{t("review.collection.compatibility")}</dt>
             <dd>
               CLI {collectionPlan.releaseEvidence.compatibility.cliVersion} /{" "}
               {collectionPlan.releaseEvidence.compatibility.platforms.join(
@@ -425,27 +477,31 @@ export function ReviewSurface({ client }: { readonly client: ReviewBridge }) {
             </dd>
           </div>
           <div>
-            <dt>Manifest author</dt>
+            <dt>{t("review.collection.manifestAuthor")}</dt>
             <dd>{collectionPlan.releaseEvidence.receipt.author}</dd>
           </div>
           <div>
-            <dt>Independent reviewer</dt>
+            <dt>{t("review.collection.independentReviewer")}</dt>
             <dd>{collectionPlan.releaseEvidence.receipt.reviewer}</dd>
           </div>
           <div>
-            <dt>Reviewed at</dt>
-            <dd><ReviewInstant value={collectionPlan.releaseEvidence.receipt.reviewedAt} /></dd>
+            <dt>{t("review.collection.reviewedAt")}</dt>
+            <dd>
+              <ReviewInstant
+                value={collectionPlan.releaseEvidence.receipt.reviewedAt}
+              />
+            </dd>
           </div>
           <div>
-            <dt>Review policy</dt>
+            <dt>{t("review.collection.reviewPolicy")}</dt>
             <dd>{collectionPlan.releaseEvidence.receipt.reviewPolicy}</dd>
           </div>
           <div className="review-facts__wide">
-            <dt>Review location</dt>
+            <dt>{t("review.collection.reviewLocation")}</dt>
             <dd>{collectionPlan.releaseEvidence.receipt.reviewLocation}</dd>
           </div>
           <div className="review-facts__wide">
-            <dt>Selected skills</dt>
+            <dt>{t("review.collection.selectedSkills")}</dt>
             <dd>
               {collectionPlan.selections
                 .map(({ mode, name }) => `${name} (${mode})`)
@@ -453,147 +509,107 @@ export function ReviewSurface({ client }: { readonly client: ReviewBridge }) {
             </dd>
           </div>
           <div>
-            <dt>Execution order</dt>
+            <dt>{t("review.collection.executionOrder")}</dt>
             <dd>
               {collectionPlan.order.map(({ position }) => position).join(", ")}
             </dd>
           </div>
           <div>
-            <dt>Expires</dt>
-            <dd><ReviewInstant value={collectionPlan.expiresAt} /></dd>
+            <dt>{t("review.collection.expires")}</dt>
+            <dd>
+              <ReviewInstant value={collectionPlan.expiresAt} />
+            </dd>
           </div>
         </dl>
-        <details className="review-digest-details">
-          <summary>详情</summary>
+        <DigestDetails>
           <dl className="review-facts">
             <div className="review-facts__wide">
-              <dt>Manifest digest</dt>
+              <dt>{t("review.collection.manifestDigest")}</dt>
               <dd>{collectionPlan.manifestDigest}</dd>
             </div>
             <div className="review-facts__wide">
-              <dt>Review digest</dt>
+              <dt>{t("review.collection.reviewDigest")}</dt>
               <dd>{collectionPlan.reviewDigest}</dd>
             </div>
             <div className="review-facts__wide">
-              <dt>Assessment digest</dt>
+              <dt>{t("review.collection.assessmentDigest")}</dt>
               <dd>{collectionPlan.assessmentDigest}</dd>
             </div>
             <div className="review-facts__wide">
-              <dt>Inventory digest</dt>
+              <dt>{t("review.collection.inventoryDigest")}</dt>
               <dd>{collectionPlan.inventoryDigest}</dd>
             </div>
             <div className="review-facts__wide">
-              <dt>Child prepared digest</dt>
+              <dt>{t("review.collection.childPreparedDigest")}</dt>
               <dd>{collectionPlan.childPreparedDigest}</dd>
             </div>
           </dl>
-        </details>
+        </DigestDetails>
         <section className="review-plan" aria-labelledby="review-plan-heading">
-          <h2 id="review-plan-heading">Child Command Plan</h2>
+          <h2 id="review-plan-heading">{t("review.collection.childPlan")}</h2>
           <code>{collectionPlan.childCommandPlan.preview}</code>
         </section>
         <div className="review-actions">
-          <button
-            autoFocus
-            className="review-button"
-            disabled={pendingDecision !== undefined}
-            onClick={() => void decide("reject")}
-            type="button"
-          >
-            <X aria-hidden="true" size={16} />
-            Reject
-          </button>
-          <button
-            aria-label="Approve Official Collection plan"
-            className="review-button review-button--primary"
-            disabled={pendingDecision !== undefined}
-            onClick={() => void decide("approve")}
-            type="button"
-          >
-            <Check aria-hidden="true" size={16} />
-            {pendingDecision === "approve" ? "Applying" : "Approve"}
-          </button>
+          {rejectButton}
+          {approveButton(t("review.collection.approve"), "review.applying")}
         </div>
       </main>
     );
   }
 
   const { commandPlan, purpose, target } = snapshot.projection;
-  const actionLabel =
+  const titleKey: MessageKey =
     purpose === "cancel"
-      ? "cancellation"
+      ? "review.mutation.title.cancellation"
       : commandPlan.operation === "remove"
-        ? "removal"
-        : commandPlan.operation;
+        ? "review.mutation.title.removal"
+        : commandPlan.operation === "add"
+          ? "review.mutation.title.add"
+          : "review.mutation.title.update";
   return (
     <main className="review-surface">
-      <header className="review-heading">
-        <span className="review-mark">
-          <ShieldCheck aria-hidden="true" size={20} />
-        </span>
-        <div>
-          <p>Trusted Review</p>
-          <h1>Review {actionLabel}</h1>
-        </div>
-      </header>
+      <ReviewHeading title={t(titleKey)} />
 
       <dl className="review-facts">
         <div>
-          <dt>Target</dt>
+          <dt>{t("common.target")}</dt>
           <dd>{target.label}</dd>
         </div>
         <div>
-          <dt>Workspace</dt>
+          <dt>{t("review.mutation.workspace")}</dt>
           <dd>{target.workspaceLabel}</dd>
         </div>
         <div>
-          <dt>Harness</dt>
+          <dt>{t("common.harness")}</dt>
           <dd>{commandPlan.harness}</dd>
         </div>
         <div>
-          <dt>Scope</dt>
-          <dd>{scopeLabel(commandPlan.scope)}</dd>
+          <dt>{t("common.scope")}</dt>
+          <dd>{scopeLabel(t, commandPlan.scope)}</dd>
         </div>
         <div className="review-facts__wide">
-          <dt>Skills</dt>
+          <dt>{t("common.skills")}</dt>
           <dd>{commandPlan.names.join(", ")}</dd>
         </div>
       </dl>
 
       <section className="review-plan" aria-labelledby="review-plan-heading">
-        <h2 id="review-plan-heading">Command Plan</h2>
+        <h2 id="review-plan-heading">{t("inventory.plan.heading")}</h2>
         <code>{commandPlan.preview}</code>
       </section>
 
       <HarnessEffectDisclosure commandPlan={commandPlan} />
 
       <div className="review-actions">
-        <button
-          autoFocus
-          className="review-button"
-          disabled={pendingDecision !== undefined}
-          onClick={() => void decide("reject")}
-          type="button"
-        >
-          <X aria-hidden="true" size={16} />
-          Reject
-        </button>
-        <button
-          aria-label={
-            purpose === "cancel" ? "Approve cancellation" : "Approve mutation"
-          }
-          className="review-button review-button--primary"
-          disabled={pendingDecision !== undefined}
-          onClick={() => void decide("approve")}
-          type="button"
-        >
-          <Check aria-hidden="true" size={16} />
-          {pendingDecision === "approve"
-            ? purpose === "cancel"
-              ? "Cancelling"
-              : "Applying"
-            : "Approve"}
-        </button>
+        {rejectButton}
+        {approveButton(
+          t(
+            purpose === "cancel"
+              ? "review.mutation.approveCancellation"
+              : "review.mutation.approveMutation",
+          ),
+          purpose === "cancel" ? "review.cancelling" : "review.applying",
+        )}
       </div>
     </main>
   );

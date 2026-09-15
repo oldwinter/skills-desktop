@@ -217,6 +217,9 @@ function clientFor(
     async handoffSkillsSh(recordId) {
       return { ok: true, value: { operationId: recordId } };
     },
+    async updatePreferences() {
+      return { ok: true, value: { operationId: "preferences" } };
+    },
     async repairTarget(targetId) {
       return { ok: true, value: { operationId: targetId } };
     },
@@ -521,7 +524,7 @@ describe("Local Target Inventory shell", () => {
     render(<InventoryApp client={client} />);
 
     const openingAlert = await screen.findByRole("alert");
-    expect(openingAlert).toHaveTextContent("无权限执行该操作。");
+    expect(openingAlert).toHaveTextContent("You are not allowed to perform this operation.");
     expect(
       openingAlert.querySelector(".user-facing-error-details code"),
     ).toHaveTextContent("This window cannot make that request.");
@@ -556,7 +559,7 @@ describe("Local Target Inventory shell", () => {
       name: "cancellation",
     },
     {
-      expected: "本地进程执行失败。请刷新后重试。",
+      expected: "The local process failed. Refresh, then try again.",
       inventory: {
         freshness: "stale" as const,
         lastError: {
@@ -606,7 +609,7 @@ describe("Local Target Inventory shell", () => {
 
     const alert = await screen.findByRole("alert");
     const primary = alert.querySelector(".user-facing-error > span");
-    expect(primary).toHaveTextContent("本地进程执行失败。请刷新后重试。");
+    expect(primary).toHaveTextContent("The local process failed. Refresh, then try again.");
     expect(primary).not.toHaveTextContent("ENOENT");
     expect(
       alert.querySelector(".user-facing-error-details code"),
@@ -1348,13 +1351,13 @@ describe("Local Target Inventory shell", () => {
 
     const chooser = await screen.findByRole("combobox", { name: "Target" });
     expect(
-      within(chooser).getByRole("option", { name: "Build host · 未开放" }),
+      within(chooser).getByRole("option", { name: "Build host · Not available" }),
     ).toBeInTheDocument();
 
     fireEvent.change(chooser, { target: { value: sshTarget.id } });
-    expect(chooser).toHaveDisplayValue("Build host · 未开放");
+    expect(chooser).toHaveDisplayValue("Build host · Not available");
     expect(
-      await screen.findByText(/远程 Target 仅保留只读痕迹/),
+      await screen.findByText(/Remote Targets keep a read-only trace/),
     ).toBeInTheDocument();
   });
 
@@ -1521,7 +1524,7 @@ describe("Local Target Inventory shell", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Collections" }));
     expect(screen.getAllByText("Fresh inventory")).toHaveLength(2);
-    expect(screen.getByText(/SSH · 未在 V1 开放/)).toBeInTheDocument();
+    expect(screen.getByText(/SSH · Not available in V1/)).toBeInTheDocument();
     const sshInclude = screen.getByRole("checkbox", {
       name: "Include Build host",
     });
@@ -3235,10 +3238,10 @@ describe("Local Target Inventory shell", () => {
     );
 
     expect(
-      await screen.findByText(/主机身份复核 · 未在 V1 开放/),
+      await screen.findByText(/Host identity review · Not available in V1/),
     ).toBeInTheDocument();
-    expect(screen.queryByText(/请打开主机身份复核/)).not.toBeInTheDocument();
-    expect(screen.getByText(/主机身份复核未在 V1 开放/)).toBeInTheDocument();
+    expect(screen.queryByText(/open host identity review/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/host identity review is not available in V1/)).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Review host identity" }),
     ).not.toBeInTheDocument();
@@ -3290,14 +3293,14 @@ describe("Local Target Inventory shell", () => {
       />,
     );
 
-    expect(await screen.findAllByText("未开放")).not.toHaveLength(0);
+    expect(await screen.findAllByText("Not available")).not.toHaveLength(0);
 
     fireEvent.click(screen.getByRole("button", { name: /Build host/i }));
 
     expect(
-      await screen.findByText(/远程 Target 仅保留只读痕迹/),
+      await screen.findByText(/Remote Targets keep a read-only trace/),
     ).toBeInTheDocument();
-    expect(screen.getByLabelText("SSH 未开放")).toBeInTheDocument();
+    expect(screen.getByLabelText("SSH not available")).toBeInTheDocument();
     expect(
       document.getElementById("inventory-ssh-unavailable-reason"),
     ).not.toBeNull();
@@ -3321,7 +3324,7 @@ describe("Local Target Inventory shell", () => {
     expect(prepareAdd).toBeDisabled();
     expect(prepareUpdate).toHaveAttribute(
       "title",
-      "SSH · 未在 V1 开放，无法准备变更",
+      "SSH · Not available in V1; changes cannot be prepared",
     );
     expect(prepareUpdate).toHaveAttribute(
       "aria-describedby",
@@ -3391,7 +3394,7 @@ describe("Local Target Inventory shell", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Comparison" }));
     const sshOptions = screen.getAllByRole("option", {
-      name: /Build host · 未开放/,
+      name: /Build host · Not available/,
     });
     expect(sshOptions.length).toBeGreaterThan(0);
     for (const option of sshOptions) {
@@ -3428,7 +3431,7 @@ describe("Local Target Inventory shell", () => {
       )[0]!,
     );
 
-    const reason = "需要先刷新 inventory 证据";
+    const reason = "Refresh the inventory evidence first";
     expect(
       document.getElementById("inventory-mutation-blocked-reason"),
     ).toHaveTextContent(reason);
@@ -3496,5 +3499,85 @@ describe("Local Target Inventory shell", () => {
       await screen.findByText("Offline - Stale evidence"),
     ).toBeInTheDocument();
     expect(screen.getByRole("alert")).toHaveTextContent("Target offline");
+  });
+
+  it("renders the workspace in the main-resolved locale and applies the appearance token (#210)", async () => {
+    render(
+      <InventoryApp
+        client={clientFor({
+          ...snapshot,
+          preferences: {
+            appearance: "dark",
+            locale: "zh-CN",
+            localePreference: "system",
+            systemLocale: "zh-CN",
+          },
+        })}
+      />,
+    );
+
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "库存" }),
+    ).toBeInTheDocument();
+    expect(document.documentElement.lang).toBe("zh-CN");
+    expect(document.documentElement.dataset["appearance"]).toBe("dark");
+    expect(screen.getByRole("link", { name: "跳到工作区" })).toBeInTheDocument();
+    // Identifiers and evidence stay untranslated.
+    expect(screen.getAllByText("Case-Sensitive-Skill")).not.toHaveLength(0);
+    expect(screen.getAllByText("example/skills")).not.toHaveLength(0);
+    expect(screen.getByRole("button", { name: "刷新库存" })).toBeInTheDocument();
+  });
+
+  it("falls back to English and the system appearance when the Snapshot carries no preferences", async () => {
+    render(<InventoryApp client={clientFor(snapshot)} />);
+
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Inventory" }),
+    ).toBeInTheDocument();
+    expect(document.documentElement.lang).toBe("en");
+    expect(document.documentElement.dataset["appearance"]).toBe("system");
+  });
+
+  it("sends a typed preferences.update patch from the About page and never mutates the Snapshot locally (#210)", async () => {
+    const updatePreferences = vi.fn(async () => ({
+      ok: true as const,
+      value: { operationId: "preferences" },
+    }));
+    const client: DesktopBridge = {
+      ...clientFor({
+        ...snapshot,
+        preferences: {
+          appearance: "system",
+          locale: "en",
+          localePreference: "system",
+          systemLocale: "en",
+        },
+      }),
+      updatePreferences,
+    };
+    render(<InventoryApp client={client} />);
+    await screen.findByRole("heading", { level: 1, name: "Inventory" });
+
+    fireEvent.click(screen.getByRole("button", { name: "About" }));
+    const language = await screen.findByLabelText("Language");
+    fireEvent.change(language, { target: { value: "zh-CN" } });
+
+    await waitFor(() =>
+      expect(updatePreferences).toHaveBeenCalledWith({
+        localePreference: "zh-CN",
+      }),
+    );
+    expect(await screen.findByText("Preferences saved")).toBeInTheDocument();
+    // The renderer waits for the main-owned Snapshot; the heading stays English.
+    expect(screen.getByRole("heading", { level: 1, name: "About" })).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Appearance"), {
+      target: { value: "high-contrast" },
+    });
+    await waitFor(() =>
+      expect(updatePreferences).toHaveBeenLastCalledWith({
+        appearance: "high-contrast",
+      }),
+    );
   });
 });

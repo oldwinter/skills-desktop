@@ -539,6 +539,7 @@ try {
       "requestReview",
       "subscribe",
       "subscribeReviewWindowClosed",
+      "updatePreferences",
       "updateTarget",
     ]) ||
     JSON.stringify(rendererBoundary.aboutBridgeKeys) !==

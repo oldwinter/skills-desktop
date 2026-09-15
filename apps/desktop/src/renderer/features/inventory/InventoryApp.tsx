@@ -22,8 +22,8 @@ import {
 
 import type { DesktopBridge } from "../../../contracts/desktop.js";
 import { describeHarnessEffect } from "../../../contracts/harness-effect.js";
+import type { Translator } from "../../../contracts/i18n/translate.js";
 import { isInventoryEntryAvailableToHarness } from "../../../contracts/inventory-availability.js";
-import { GITHUB_SOURCE_OWNER_REPOSITORY_COPY } from "../../../contracts/user-facing-error.js";
 import {
   isGithubOwnerRepository,
   type DesktopEvent,
@@ -32,8 +32,14 @@ import {
   type RendererError,
   type WorkspaceSnapshot,
 } from "../../../contracts/workspace.js";
+import {
+  LocaleProvider,
+  useDocumentPreferences,
+  useTranslator,
+} from "../../i18n/LocaleProvider.js";
 import { UserFacingErrorCopy } from "../../UserFacingErrorCopy.js";
 import { AboutView } from "../about/AboutView.js";
+import { PreferencesPanel } from "../preferences/PreferencesPanel.js";
 import { ComparisonView } from "../comparison/ComparisonView.js";
 import { CollectionsView } from "../collections/CollectionsView.js";
 import { TargetsView } from "../targets/TargetsView.js";
@@ -53,6 +59,7 @@ import {
 import {
   freshnessLabel,
   isTargetOffline,
+  scopeFilterLabel,
   scopeLabel,
   sourceLabel,
   statusLabel,
@@ -73,11 +80,14 @@ const REVIEW_FOCUS_INTERVAL_MS = 16;
 const REVIEW_FOCUS_MAX_CHECKS = 60;
 const REVIEW_FOCUS_STABLE_CHECKS = 12;
 
-function inventorySubtitle(count: number, filtered: boolean): string {
-  const noun = count === 1 ? "skill" : "skills";
+function inventorySubtitle(
+  tc: Translator["tc"],
+  count: number,
+  filtered: boolean,
+): string {
   return filtered
-    ? `${count} matching ${noun}`
-    : `${count} ${noun} across project and global scopes`;
+    ? tc("inventory.subtitle.matching", count)
+    : tc("inventory.subtitle.total", count);
 }
 
 function isTextEditingTarget(target: EventTarget | null): boolean {
@@ -95,16 +105,19 @@ function InventoryStatus({
 }: {
   readonly snapshot: WorkspaceSnapshot;
 }) {
+  const { t } = useTranslator();
   const { inventory } = snapshot;
   if (inventory.phase === "loading") {
     return (
       <div className="state-banner state-banner--loading" role="status">
         <RefreshCw aria-hidden="true" className="spin" size={16} />
-        <span>Refreshing project and global inventory</span>
+        <span>{t("inventory.status.refreshing")}</span>
         <strong>
           {inventory.freshness === "none"
-            ? "No prior evidence"
-            : `${freshnessLabel(inventory.freshness)} retained`}
+            ? t("inventory.status.noPriorEvidence")
+            : t("inventory.status.retained", {
+                freshness: freshnessLabel(t, inventory.freshness),
+              })}
         </strong>
       </div>
     );
@@ -120,9 +133,9 @@ function InventoryStatus({
         )}
         <UserFacingErrorCopy error={inventory.lastError} />
         {offline ? (
-          <strong>Target offline</strong>
+          <strong>{t("inventory.status.targetOffline")}</strong>
         ) : inventory.freshness === "stale" ? (
-          <strong>Last complete evidence retained</strong>
+          <strong>{t("inventory.status.lastCompleteRetained")}</strong>
         ) : null}
       </div>
     );
@@ -131,8 +144,8 @@ function InventoryStatus({
     return (
       <div className="state-banner state-banner--warning" role="status">
         <Square aria-hidden="true" size={15} />
-        <span>Refresh cancelled</span>
-        <strong>{freshnessLabel(inventory.freshness)}</strong>
+        <span>{t("inventory.status.refreshCancelled")}</span>
+        <strong>{freshnessLabel(t, inventory.freshness)}</strong>
       </div>
     );
   }
@@ -143,9 +156,7 @@ function InventoryStatus({
         {inventory.lastError !== null ? (
           <UserFacingErrorCopy error={inventory.lastError} />
         ) : (
-          <span>
-            Showing stale evidence restored from the last complete observation
-          </span>
+          <span>{t("inventory.status.staleRestored")}</span>
         )}
       </div>
     );
@@ -168,14 +179,19 @@ function EmptyInventory({
   readonly filtered: boolean;
   readonly onClearFilters: () => void;
 }) {
+  const { t } = useTranslator();
   return (
     <div className="empty-state" role="status">
       <CircleHelp aria-hidden="true" size={22} />
-      <h2>{filtered ? "No matching skills" : "No skills found"}</h2>
+      <h2>
+        {t(filtered ? "inventory.empty.noMatching" : "inventory.empty.noSkills")}
+      </h2>
       <p>
-        {filtered
-          ? "Change the current search or scope filter."
-          : "Project and global inventory are empty. Refresh this Target, or install a skill via npx skills."}
+        {t(
+          filtered
+            ? "inventory.empty.changeFilter"
+            : "inventory.empty.installHint",
+        )}
       </p>
       {filtered ? (
         <button
@@ -184,7 +200,7 @@ function EmptyInventory({
           type="button"
         >
           <RotateCcw aria-hidden="true" size={15} />
-          Clear filters
+          {t("inventory.empty.clearFilters")}
         </button>
       ) : null}
     </div>
@@ -196,23 +212,21 @@ function MissingInventoryEvidence({
 }: {
   readonly phase: PublicInventoryState["phase"];
 }) {
+  const { t } = useTranslator();
   const copy =
     phase === "loading"
       ? {
-          heading: "Waiting for inventory",
-          message:
-            "A complete project and global observation has not finished yet. Wait for the refresh to complete.",
+          heading: t("inventory.missing.waiting"),
+          message: t("inventory.missing.waitingBody"),
         }
       : phase === "error"
         ? {
-            heading: "Inventory unavailable",
-            message:
-              "No complete inventory evidence is available for this Target. Refresh this Target to try again.",
+            heading: t("inventory.missing.unavailable"),
+            message: t("inventory.missing.unavailableBody"),
           }
         : {
-            heading: "No inventory evidence",
-            message:
-              "No complete inventory evidence yet. Refresh this Target to establish one.",
+            heading: t("inventory.missing.none"),
+            message: t("inventory.missing.noneBody"),
           };
   return (
     <div className="empty-state" role="status">
@@ -223,7 +237,31 @@ function MissingInventoryEvidence({
   );
 }
 
+/**
+ * Hosts the workspace under the main-owned locale so every view, including
+ * the boot and error states, renders in the resolved language.
+ */
 export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
+  const [preferences, setPreferences] =
+    useState<WorkspaceSnapshot["preferences"]>();
+  useDocumentPreferences(preferences);
+  return (
+    <LocaleProvider locale={preferences?.locale}>
+      <InventoryWorkspace client={client} onPreferences={setPreferences} />
+    </LocaleProvider>
+  );
+}
+
+function InventoryWorkspace({
+  client,
+  onPreferences,
+}: {
+  readonly client: DesktopBridge;
+  readonly onPreferences: (
+    preferences: WorkspaceSnapshot["preferences"],
+  ) => void;
+}) {
+  const { locale, t, tc } = useTranslator();
   const [baseSnapshot, setBaseSnapshot] = useState<WorkspaceSnapshot>();
   const [bootstrapError, setBootstrapError] = useState<RendererError>();
   const [bootstrapAttempt, setBootstrapAttempt] = useState(0);
@@ -286,6 +324,11 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
   const lastClosedReviewIdRef = useRef<string | undefined>(undefined);
   const inventory = snapshot?.inventory;
   const preparedMutationId = preparedMutationContext?.operationId;
+  const snapshotPreferences = baseSnapshot?.preferences;
+
+  useEffect(() => {
+    onPreferences(snapshotPreferences);
+  }, [onPreferences, snapshotPreferences]);
 
   useEffect(() => {
     let active = true;
@@ -401,7 +444,7 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
             ? opener
             : (mutationOutcomeRef.current ??
               document.querySelector<HTMLButtonElement>(
-                'button[aria-label="Inventory"]',
+                'button[data-nav-view="inventory"]',
               ));
         if (target === null) {
           if (focusChecks >= REVIEW_FOCUS_MAX_CHECKS) intent.exhausted = true;
@@ -547,10 +590,10 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
           <AlertCircle aria-hidden="true" size={24} />
           <UserFacingErrorCopy error={bootstrapError} />
           <button
-            aria-label="Retry opening inventory"
+            aria-label={t("inventory.boot.retry")}
             className="icon-button"
             onClick={() => setBootstrapAttempt((attempt) => attempt + 1)}
-            title="Retry opening inventory"
+            title={t("inventory.boot.retry")}
             type="button"
           >
             <RefreshCw aria-hidden="true" size={17} />
@@ -561,7 +604,7 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
     return (
       <main className="boot-state" aria-busy="true" id="workspace-main" tabIndex={-1}>
         <Boxes aria-hidden="true" size={24} />
-        <span>Opening local inventory</span>
+        <span>{t("inventory.boot.opening")}</span>
       </main>
     );
   }
@@ -575,13 +618,13 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
     snapshot.mutation.phase === "reconciliation-required" ||
     snapshot.mutation.phase === "running";
   const mutationBlockedReason = sshUnavailable
-    ? "SSH · 未在 V1 开放，无法准备变更"
+    ? t("inventory.blocked.ssh")
     : snapshot.inventory.freshness !== "fresh"
-      ? "需要先刷新 inventory 证据"
+      ? t("inventory.blocked.refresh")
       : snapshot.mutation.phase === "reconciliation-required"
-        ? "需要先完成 reconciliation"
+        ? t("inventory.blocked.reconcile")
         : snapshot.mutation.phase === "running"
-          ? "变更进行中，请等待"
+          ? t("inventory.blocked.running")
           : undefined;
   const mutationBlockedDescribedBy = sshUnavailable
     ? "inventory-ssh-unavailable-reason"
@@ -663,7 +706,7 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
     if (sshUnavailable) return;
     const source = addSource.trim();
     if (!isGithubOwnerRepository(source)) {
-      setAddSourceError(GITHUB_SOURCE_OWNER_REPOSITORY_COPY);
+      setAddSourceError(t("error.githubSource"));
       setActionError(undefined);
       return;
     }
@@ -739,13 +782,15 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
   };
   return (
     <div className="app-shell">
-      <a className="skip-link" href="#workspace-main">Skip to workspace</a>
+      <a className="skip-link" href="#workspace-main">
+        {t("app.skipToWorkspace")}
+      </a>
       <header className="app-header">
         <div className="brand-lockup">
           <span className="brand-mark">
             <Boxes aria-hidden="true" size={17} />
           </span>
-          <span>Skills Desktop</span>
+          <span>{t("app.name")}</span>
         </div>
         <div className="header-target">
           {snapshot.target.kind === "ssh" ? (
@@ -764,7 +809,7 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
             ) : (
               <Clock3 aria-hidden="true" size={14} />
             )}
-            {statusLabel(snapshot)}
+            {statusLabel(t, snapshot)}
           </span>
         </div>
       </header>
@@ -792,13 +837,13 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
             >
               <section className="page-heading">
                 <div>
-                  <h1>Inventory</h1>
+                  <h1>{t("inventory.title")}</h1>
                   <p>
-                    {inventorySubtitle(filteredEntries.length, isFiltered)}
+                    {inventorySubtitle(tc, filteredEntries.length, isFiltered)}
                   </p>
                   {targetStates.length > 1 ? (
                     <label className="inventory-target-chooser">
-                      Target
+                      {t("common.target")}
                       <select
                       onChange={(event) => {
                           selectTarget(event.currentTarget.value);
@@ -807,14 +852,14 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                       >
                         {targetStates.map((state) => (
                           <option key={state.target.id} value={state.target.id}>
-                            {targetOptionLabel(state.target)}
+                            {targetOptionLabel(t, state.target)}
                           </option>
                         ))}
                       </select>
                     </label>
                   ) : (
                     <p
-                      aria-label="Target summary"
+                      aria-label={t("inventory.targetSummary")}
                       className="mobile-target-summary"
                     >
                       {snapshot.target.kind === "ssh" ? (
@@ -830,24 +875,24 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                 {snapshot.inventory.phase === "loading" &&
                 activeOperationId !== null ? (
                   <button
-                    aria-label="Cancel refresh"
+                    aria-label={t("inventory.cancelRefresh")}
                     className="icon-button"
                     onClick={() =>
                       void client.cancelInventory(activeOperationId)
                     }
-                    title="Cancel refresh"
+                    title={t("inventory.cancelRefresh")}
                     type="button"
                   >
                     <Square aria-hidden="true" size={16} />
                   </button>
                 ) : (
                   <button
-                    aria-label="Refresh inventory"
+                    aria-label={t("inventory.refreshInventory")}
                     className="icon-button"
                     onClick={() =>
                       void client.refreshInventory(snapshot.target.id)
                     }
-                    title="Refresh inventory"
+                    title={t("inventory.refreshInventory")}
                     type="button"
                   >
                     <RefreshCw aria-hidden="true" size={17} />
@@ -863,11 +908,8 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                   role="status"
                 >
                   <Server aria-hidden="true" size={16} />
-                  <span>
-                    SSH · 未在 V1 开放。远程 Target
-                    仅保留只读痕迹，不能作为变更工作区。
-                  </span>
-                  <strong>未开放</strong>
+                  <span>{t("inventory.ssh.banner")}</span>
+                  <strong>{t("common.ssh.badge")}</strong>
                 </div>
               ) : null}
               {mutationBlockedReason && !sshUnavailable ? (
@@ -888,7 +930,7 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                       type="button"
                     >
                       <RefreshCw aria-hidden="true" size={15} />
-                      Refresh
+                      {t("common.refresh")}
                     </button>
                   ) : null}
                   {showReconcileMutationCta ? (
@@ -899,7 +941,7 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                       type="button"
                     >
                       <RefreshCw aria-hidden="true" size={15} />
-                      Reconcile
+                      {t("common.reconcile")}
                     </button>
                   ) : null}
                 </div>
@@ -911,9 +953,7 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                   role="status"
                 >
                   <ShieldCheck aria-hidden="true" size={16} />
-                  <span>
-                    主机身份复核 · 未在 V1 开放。当前版本不能启动该复核。
-                  </span>
+                  <span>{t("inventory.hostTrust.banner")}</span>
                 </div>
               ) : null}
               {snapshot.mutation.phase === "reconciliation-required" ? (
@@ -922,7 +962,7 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                   {snapshot.mutation.lastError !== null ? (
                     <UserFacingErrorCopy error={snapshot.mutation.lastError} />
                   ) : (
-                    <span>This Target requires reconciliation.</span>
+                    <span>{t("inventory.reconciliationRequired")}</span>
                   )}
                   {showReconcileMutationCta ? null : (
                     <button
@@ -931,7 +971,7 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                       type="button"
                     >
                       <RefreshCw aria-hidden="true" size={15} />
-                      Reconcile
+                      {t("common.reconcile")}
                     </button>
                   )}
                 </div>
@@ -941,7 +981,7 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                   role="status"
                 >
                   <RefreshCw aria-hidden="true" className="spin" size={16} />
-                  <span>Applying confirmed mutation</span>
+                  <span>{t("inventory.applyingMutation")}</span>
                   {snapshot.mutation.activeOperationId !== null ? (
                     <button
                       className="text-button"
@@ -953,7 +993,7 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                       type="button"
                     >
                       <ShieldCheck aria-hidden="true" size={15} />
-                      Review cancellation
+                      {t("inventory.reviewCancellation")}
                     </button>
                   ) : null}
                 </div>
@@ -973,9 +1013,9 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
               <div className="inventory-toolbar">
                 <div className="search-control">
                   <Search aria-hidden="true" size={16} />
-                  <span className="sr-only">Search inventory</span>
+                  <span className="sr-only">{t("inventory.search")}</span>
                   <input
-                    aria-label="Search inventory"
+                    aria-label={t("inventory.search")}
                     onChange={(event) => setQuery(event.currentTarget.value)}
                     onKeyDown={(event) => {
                       if (event.key === "Escape" && query !== "") {
@@ -983,17 +1023,17 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                         setQuery("");
                       }
                     }}
-                    placeholder="Search skills or sources"
+                    placeholder={t("inventory.searchPlaceholder")}
                     ref={searchInputRef}
                     type="search"
                     value={query}
                   />
                   {query !== "" ? (
                     <button
-                      aria-label="Clear inventory search"
+                      aria-label={t("inventory.clearSearch")}
                       className="search-clear"
                       onClick={() => setQuery("")}
-                      title="Clear inventory search"
+                      title={t("inventory.clearSearch")}
                       type="button"
                     >
                       <X aria-hidden="true" size={15} />
@@ -1001,11 +1041,11 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                   ) : null}
                 </div>
                 <span aria-live="polite" className="inventory-result-count">
-                  {filteredEntries.length} shown
+                  {t("inventory.shown", { count: filteredEntries.length })}
                 </span>
                 <div
                   className="segmented-control"
-                  aria-label="Inventory scope"
+                  aria-label={t("inventory.scopeFilter")}
                   role="group"
                 >
                   {(["all", "project", "global"] as const).map((value) => (
@@ -1016,8 +1056,8 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                       type="button"
                     >
                       {value === "all"
-                        ? "All scopes"
-                        : `${scopeLabel(value)} scope`}
+                        ? t("inventory.scopeFilter.all")
+                        : scopeFilterLabel(t, value)}
                     </button>
                   ))}
                 </div>
@@ -1030,13 +1070,13 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                   onClick={() => void prepareUpdateAll()}
                   title={
                     scope === "all"
-                      ? "Choose project or global scope first"
+                      ? t("inventory.updateScope.chooseFirst")
                       : mutationBlockedReason
                   }
                   type="button"
                 >
                   <RefreshCw aria-hidden="true" size={15} />
-                  Update scope
+                  {t("inventory.updateScope")}
                 </button>
               </div>
 
@@ -1055,15 +1095,15 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                 ) : (
                   <table className="inventory-table">
                     <caption className="sr-only">
-                      Skills observed on the selected Local Target
+                      {t("inventory.table.caption")}
                     </caption>
                     <thead>
                       <tr>
-                        <th>Skill</th>
-                        <th>Scope</th>
-                        <th>Harness</th>
-                        <th>Declared source</th>
-                        <th>Evidence</th>
+                        <th>{t("common.skill")}</th>
+                        <th>{t("common.scope")}</th>
+                        <th>{t("common.harness")}</th>
+                        <th>{t("inventory.table.declaredSource")}</th>
+                        <th>{t("inventory.table.evidence")}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1076,7 +1116,7 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                             className={selectedRow ? "is-selected" : undefined}
                             key={`${entry.scope}:${entry.name}`}
                           >
-                            <td data-label="Skill">
+                            <td data-label={t("common.skill")}>
                               <button
                                 className="skill-button"
                                 onClick={() =>
@@ -1091,12 +1131,12 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                                 <span>{entry.name}</span>
                               </button>
                             </td>
-                            <td data-label="Scope">
+                            <td data-label={t("common.scope")}>
                               <span className="scope-badge">
-                                {scopeLabel(entry.scope)}
+                                {scopeLabel(t, entry.scope)}
                               </span>
                             </td>
-                            <td data-label="Harness">
+                            <td data-label={t("common.harness")}>
                               {snapshot.target.harnessIds.every((harnessId) =>
                                 isInventoryEntryAvailableToHarness(
                                   entry,
@@ -1104,14 +1144,14 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                                 ),
                               )
                                 ? snapshot.target.harnessIds.join(", ")
-                                : "Not linked"}
+                                : t("inventory.table.notLinked")}
                             </td>
-                            <td data-label="Declared source">
+                            <td data-label={t("inventory.table.declaredSource")}>
                               <code className="wrapping-value">
-                                {sourceLabel(entry)}
+                                {sourceLabel(t, entry)}
                               </code>
                             </td>
-                            <td data-label="Evidence">
+                            <td data-label={t("inventory.table.evidence")}>
                               {entry.revision.status === "known" ? (
                                 <code className="wrapping-value">
                                   {entry.revision.value}
@@ -1119,7 +1159,7 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                               ) : (
                                 <span className="unknown-label">
                                   <CircleHelp aria-hidden="true" size={14} />
-                                  Unknown revision
+                                  {t("inventory.table.unknownRevision")}
                                 </span>
                               )}
                             </td>
@@ -1132,26 +1172,27 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
               </div>
             </main>
 
-            <aside className="inspector" aria-label="Selected skill evidence">
+            <aside
+              className="inspector"
+              aria-label={t("inventory.inspector.label")}
+            >
               {selected === undefined ? (
                 <div className="inspector-empty">
                   <CircleHelp aria-hidden="true" size={22} />
                   {(inventory?.entries.length ?? 0) === 0 ? (
                     <>
-                      <h2>No skills to inspect</h2>
-                      <p>
-                        Refresh this Target, or install a skill via npx skills.
-                      </p>
+                      <h2>{t("inventory.inspector.noSkills")}</h2>
+                      <p>{t("inventory.inspector.noSkillsBody")}</p>
                     </>
                   ) : filteredEntries.length === 0 ? (
                     <>
-                      <h2>No skill selected</h2>
-                      <p>No skills in the current filter.</p>
+                      <h2>{t("inventory.inspector.noneSelected")}</h2>
+                      <p>{t("inventory.inspector.noneInFilter")}</p>
                     </>
                   ) : (
                     <>
-                      <h2>No skill selected</h2>
-                      <p>Select a skill in the table to inspect evidence.</p>
+                      <h2>{t("inventory.inspector.noneSelected")}</h2>
+                      <p>{t("inventory.inspector.selectHint")}</p>
                     </>
                   )}
                 </div>
@@ -1160,37 +1201,43 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                   <header className="inspector-heading">
                     <FolderGit2 aria-hidden="true" size={18} />
                     <div>
-                      <p>Skill evidence</p>
+                      <p>{t("inventory.inspector.heading")}</p>
                       <h2>{selected.name}</h2>
                     </div>
                   </header>
                   <dl
-                    aria-label="Skill evidence details"
+                    aria-label={t("inventory.inspector.detailsLabel")}
                     className="evidence-list"
                     tabIndex={0}
                   >
                     <div>
-                      <dt>Scope</dt>
-                      <dd>{scopeLabel(selected.scope)}</dd>
+                      <dt>{t("common.scope")}</dt>
+                      <dd>{scopeLabel(t, selected.scope)}</dd>
                     </div>
                     <div>
-                      <dt>Harness</dt>
-                      <dd>{selected.agents.join(", ") || "None reported"}</dd>
+                      <dt>{t("common.harness")}</dt>
+                      <dd>
+                        {selected.agents.join(", ") ||
+                          t("inventory.inspector.noneReported")}
+                      </dd>
                     </div>
                     <div>
-                      <dt>Source type</dt>
-                      <dd>{selected.declaredSource.sourceType ?? "Unknown"}</dd>
+                      <dt>{t("inventory.inspector.sourceType")}</dt>
+                      <dd>
+                        {selected.declaredSource.sourceType ??
+                          t("common.unknown")}
+                      </dd>
                     </div>
                     <div>
-                      <dt>Declared source</dt>
+                      <dt>{t("inventory.table.declaredSource")}</dt>
                       <dd>
                         <code className="wrapping-value">
-                          {sourceLabel(selected)}
+                          {sourceLabel(t, selected)}
                         </code>
                       </dd>
                     </div>
                     <div>
-                      <dt>Revision</dt>
+                      <dt>{t("inventory.inspector.revision")}</dt>
                       <dd>
                         {selected.revision.status === "known" ? (
                           <code className="wrapping-value">
@@ -1199,13 +1246,13 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                         ) : (
                           <span className="unknown-label">
                             <CircleHelp aria-hidden="true" size={14} />
-                            Revision unknown
+                            {t("inventory.inspector.revisionUnknown")}
                           </span>
                         )}
                       </dd>
                     </div>
                     <div>
-                      <dt>Content fingerprint</dt>
+                      <dt>{t("inventory.inspector.contentFingerprint")}</dt>
                       <dd>
                         {selected.contentFingerprint.status === "known" ? (
                           <code className="wrapping-value">
@@ -1215,7 +1262,7 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                         ) : (
                           <span className="unknown-label">
                             <CircleHelp aria-hidden="true" size={14} />
-                            Unknown
+                            {t("common.unknown")}
                           </span>
                         )}
                       </dd>
@@ -1231,7 +1278,7 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                       type="button"
                     >
                       <RefreshCw aria-hidden="true" size={15} />
-                      Prepare update
+                      {t("inventory.prepareUpdate")}
                     </button>
                     <button
                       aria-describedby={mutationBlockedDescribedBy}
@@ -1242,7 +1289,7 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                       type="button"
                     >
                       <Trash2 aria-hidden="true" size={15} />
-                      Prepare removal
+                      {t("inventory.prepareRemoval")}
                     </button>
                   </div>
                   {selectedHandoff !== undefined ? (
@@ -1257,22 +1304,21 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                         type="button"
                       >
                         <ExternalLink aria-hidden="true" size={15} />
-                        Open on skills.sh
+                        {t("inventory.skillsSh.open")}
                       </button>
                       <p className="skills-sh-handoff__hint">
-                        Opens skills.sh/{selectedHandoff.owner}/
-                        {selectedHandoff.repository}
-                        {selectedHandoff.skill !== null
-                          ? `/${selectedHandoff.skill}`
-                          : ""}{" "}
-                        in your system browser. Nothing is submitted from this
-                        app.
+                        {t("inventory.skillsSh.hint", {
+                          path: `${selectedHandoff.owner}/${selectedHandoff.repository}${
+                            selectedHandoff.skill !== null
+                              ? `/${selectedHandoff.skill}`
+                              : ""
+                          }`,
+                        })}
                       </p>
                       {skillsShHandoff?.recordId === selectedHandoff.id &&
                       skillsShHandoff.status === "opened" ? (
                         <p className="skills-sh-handoff__status" role="status">
-                          Opened in your browser. Whatever happens on skills.sh
-                          stays there; this app cannot confirm a publication.
+                          {t("inventory.skillsSh.opened")}
                         </p>
                       ) : null}
                     </div>
@@ -1294,9 +1340,9 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                   void prepareAdd();
                 }}
               >
-                <h2>Add Skill</h2>
+                <h2>{t("inventory.add.heading")}</h2>
                 <label>
-                  <span>GitHub source</span>
+                  <span>{t("inventory.add.githubSource")}</span>
                   <input
                     aria-errormessage={
                       addSourceError !== undefined
@@ -1308,7 +1354,7 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                       setAddSource(event.currentTarget.value);
                       setAddSourceError(undefined);
                     }}
-                    placeholder="owner/repository"
+                    placeholder={t("inventory.add.githubPlaceholder")}
                     required
                     value={addSource}
                   />
@@ -1323,7 +1369,7 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                   </p>
                 ) : null}
                 <label>
-                  <span>Exact skill name</span>
+                  <span>{t("inventory.add.exactName")}</span>
                   <input
                     onChange={(event) => setAddName(event.currentTarget.value)}
                     required
@@ -1332,7 +1378,7 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                 </label>
                 <div
                   className="segmented-control segmented-control--compact"
-                  aria-label="Add scope"
+                  aria-label={t("inventory.add.scopeLabel")}
                   role="group"
                 >
                   {(["project", "global"] as const).map((value) => (
@@ -1342,7 +1388,7 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                       onClick={() => setAddScope(value)}
                       type="button"
                     >
-                      {scopeLabel(value)} scope
+                      {scopeFilterLabel(t, value)}
                     </button>
                   ))}
                 </div>
@@ -1354,7 +1400,7 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                   type="submit"
                 >
                   <PackagePlus aria-hidden="true" size={15} />
-                  Prepare add
+                  {t("inventory.add.prepare")}
                 </button>
               </form>
 
@@ -1365,26 +1411,30 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                 >
                   <header>
                     <ShieldCheck aria-hidden="true" size={17} />
-                    <h2 id="command-plan-heading">Command Plan</h2>
+                    <h2 id="command-plan-heading">{t("inventory.plan.heading")}</h2>
                   </header>
                   <dl>
                     <div>
-                      <dt>Operation</dt>
+                      <dt>{t("inventory.plan.operation")}</dt>
                       <dd>{snapshot.mutation.commandPlan.operation}</dd>
                     </div>
                     <div>
-                      <dt>Scope</dt>
-                      <dd>{scopeLabel(snapshot.mutation.commandPlan.scope)}</dd>
+                      <dt>{t("common.scope")}</dt>
+                      <dd>{scopeLabel(t, snapshot.mutation.commandPlan.scope)}</dd>
                     </div>
                     <div>
-                      <dt>Skills</dt>
+                      <dt>{t("common.skills")}</dt>
                       <dd>{snapshot.mutation.commandPlan.names.join(", ")}</dd>
                     </div>
                     <div>
-                      <dt>Harness effect</dt>
+                      <dt>{t("inventory.plan.harnessEffect")}</dt>
                       <dd>
-                        {describeHarnessEffect(snapshot.mutation.commandPlan)
-                          .summary}
+                        {
+                          describeHarnessEffect(
+                            snapshot.mutation.commandPlan,
+                            locale,
+                          ).summary
+                        }
                       </dd>
                     </div>
                   </dl>
@@ -1404,7 +1454,7 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                       type="button"
                     >
                       <ShieldCheck aria-hidden="true" size={15} />
-                      Open Trusted Review
+                      {t("common.openTrustedReview")}
                     </button>
                   ) : (
                     <p
@@ -1443,7 +1493,12 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
         ) : view === "collections" ? (
           <CollectionsView client={client} snapshot={snapshot} />
         ) : view === "about" ? (
-          <AboutView client={client.about} />
+          <AboutView client={client.about}>
+            <PreferencesPanel
+              onUpdate={(patch) => client.updatePreferences(patch)}
+              preferences={snapshot.preferences}
+            />
+          </AboutView>
         ) : view === "recovery" ? (
           <RecoveryView
             client={client}

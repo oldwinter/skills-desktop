@@ -9,11 +9,16 @@ import {
 
 import { HARNESS_OPTIONS } from "../../../contracts/harness-options.js";
 import type {
+  MessageKey,
+  Translator,
+} from "../../../contracts/i18n/translate.js";
+import type {
   BlockedTargetDefinition,
   RendererError,
   WorkspaceBridge,
   WorkspaceSnapshot,
 } from "../../../contracts/workspace.js";
+import { useTranslator } from "../../i18n/LocaleProvider.js";
 import { UserFacingErrorCopy } from "../../UserFacingErrorCopy.js";
 
 type TargetState = NonNullable<WorkspaceSnapshot["targets"]>[number];
@@ -50,11 +55,21 @@ export function recoveryItemCount(items: RecoveryItems): number {
   );
 }
 
-function formatDeadline(deadline: string | null): string {
-  if (deadline === null) return "No deadline recorded";
+function formatDeadline(
+  { locale, t }: Translator,
+  deadline: string | null,
+): string {
+  if (deadline === null) return t("recovery.noDeadline");
   const parsed = Date.parse(deadline);
   if (Number.isNaN(parsed)) return deadline;
-  return `Deadline ${new Date(parsed).toLocaleString()}`;
+  return t("recovery.deadline", {
+    when: new Date(parsed).toLocaleString(locale),
+  });
+}
+
+interface Notice {
+  readonly key: MessageKey;
+  readonly params?: Record<string, string | number>;
 }
 
 export function RecoveryView({
@@ -68,9 +83,11 @@ export function RecoveryView({
   readonly snapshot: WorkspaceSnapshot;
   readonly targets: readonly TargetState[];
 }) {
+  const translator = useTranslator();
+  const { t, tc } = translator;
   const items = recoveryItemsFor(snapshot, targets);
   const [error, setError] = useState<RendererError>();
-  const [notice, setNotice] = useState<string>();
+  const [notice, setNotice] = useState<Notice>();
   const [repairChoices, setRepairChoices] = useState<Record<string, string>>(
     {},
   );
@@ -83,7 +100,7 @@ export function RecoveryView({
     setBusyId(undefined);
     if (result.ok) {
       setError(undefined);
-      setNotice("Reconciliation started. The Target re-observes its Inventory.");
+      setNotice({ key: "recovery.reconcileStarted" });
       onSelectTarget(targetId);
     } else setError(result.error);
   };
@@ -95,7 +112,7 @@ export function RecoveryView({
       setError({
         code: "invalid_request",
         effects: "none",
-        message: "Choose a registry harness before repairing this Target.",
+        message: t("recovery.chooseHarness"),
         phase: "validate",
         retryable: false,
       });
@@ -106,7 +123,10 @@ export function RecoveryView({
     setBusyId(undefined);
     if (result.ok) {
       setError(undefined);
-      setNotice(`Saved ${blocked.label} with harness ${harnessId}.`);
+      setNotice({
+        key: "recovery.repaired",
+        params: { harnessId, label: blocked.label },
+      });
     } else setError(result.error);
   };
 
@@ -116,11 +136,11 @@ export function RecoveryView({
     <main className="recovery-workspace" id="workspace-main" tabIndex={-1}>
       <section className="page-heading">
         <div>
-          <h1>Recovery</h1>
+          <h1>{t("recovery.title")}</h1>
           <p>
             {total === 0
-              ? "Nothing needs recovery"
-              : `${total} item${total === 1 ? "" : "s"} need${total === 1 ? "s" : ""} a typed action`}
+              ? t("recovery.nothing")
+              : tc("recovery.count", total)}
           </p>
         </div>
       </section>
@@ -133,7 +153,7 @@ export function RecoveryView({
       {notice !== undefined ? (
         <div className="state-banner state-banner--loading" role="status">
           <CheckCircle2 aria-hidden="true" size={16} />
-          <span>{notice}</span>
+          <span>{t(notice.key, notice.params)}</span>
         </div>
       ) : null}
 
@@ -142,11 +162,8 @@ export function RecoveryView({
           aria-labelledby="recovery-restart-heading"
           className="recovery-section"
         >
-          <h2 id="recovery-restart-heading">Restart required</h2>
-          <p>
-            Repaired Target Definitions are saved. Restart Skills Desktop to
-            rebuild Target authority and resume Inventory for them.
-          </p>
+          <h2 id="recovery-restart-heading">{t("recovery.restart.heading")}</h2>
+          <p>{t("recovery.restart.body")}</p>
           <ul className="recovery-list">
             {repaired.map((target) => (
               <li className="recovery-item" key={target.id}>
@@ -154,7 +171,8 @@ export function RecoveryView({
                 <div>
                   <strong>{target.label}</strong>
                   <small>
-                    harness <code>{target.harnessId}</code>
+                    {t("recovery.restart.harness")}{" "}
+                    <code>{target.harnessId}</code>
                   </small>
                 </div>
               </li>
@@ -168,12 +186,10 @@ export function RecoveryView({
           aria-labelledby="recovery-reconcile-heading"
           className="recovery-section"
         >
-          <h2 id="recovery-reconcile-heading">Reconciliation required</h2>
-          <p>
-            A confirmed mutation ended without certainty about its effects.
-            Reconciliation waits for the original deadline and then observes a
-            new Fresh Inventory; refresh alone cannot clear it.
-          </p>
+          <h2 id="recovery-reconcile-heading">
+            {t("recovery.reconcile.heading")}
+          </h2>
+          <p>{t("recovery.reconcile.body")}</p>
           <ul className="recovery-list">
             {items.reconciliationTargets.map((state) => (
               <li className="recovery-item" key={state.target.id}>
@@ -181,7 +197,10 @@ export function RecoveryView({
                 <div>
                   <strong>{state.target.label}</strong>
                   <small>
-                    {formatDeadline(state.mutation.reconciliationDeadline)}
+                    {formatDeadline(
+                      translator,
+                      state.mutation.reconciliationDeadline,
+                    )}
                   </small>
                   {state.mutation.lastError !== null ? (
                     <UserFacingErrorCopy error={state.mutation.lastError} />
@@ -194,7 +213,7 @@ export function RecoveryView({
                   type="button"
                 >
                   <RefreshCw aria-hidden="true" size={15} />
-                  Reconcile {state.target.label}
+                  {t("recovery.reconcile.action", { label: state.target.label })}
                 </button>
               </li>
             ))}
@@ -207,12 +226,8 @@ export function RecoveryView({
           aria-labelledby="recovery-blocked-heading"
           className="recovery-section"
         >
-          <h2 id="recovery-blocked-heading">Blocked Target Definitions</h2>
-          <p>
-            These saved Targets name a harness the pinned registry does not
-            recognise, so the Target store stays read-only. Pick the registry
-            harness that replaces the legacy value; nothing is guessed for you.
-          </p>
+          <h2 id="recovery-blocked-heading">{t("recovery.blocked.heading")}</h2>
+          <p>{t("recovery.blocked.body")}</p>
           <ul className="recovery-list">
             {items.blockedTargets.map((blocked) => {
               const selectId = `recovery-repair-${blocked.id}`;
@@ -222,11 +237,14 @@ export function RecoveryView({
                   <div>
                     <strong>{blocked.label}</strong>
                     <small>
-                      legacy harness <code>{blocked.legacyHarness}</code> ·
-                      generation {blocked.generation}
+                      {t("recovery.blocked.legacy")}{" "}
+                      <code>{blocked.legacyHarness}</code> ·{" "}
+                      {t("recovery.blocked.generation", {
+                        generation: blocked.generation,
+                      })}
                     </small>
                     <label className="recovery-repair-choice" htmlFor={selectId}>
-                      <span>Replacement harness</span>
+                      <span>{t("recovery.blocked.replacement")}</span>
                       <select
                         id={selectId}
                         onChange={(event) =>
@@ -237,7 +255,7 @@ export function RecoveryView({
                         }
                         value={repairChoices[blocked.id] ?? ""}
                       >
-                        <option value="">Choose a harness</option>
+                        <option value="">{t("recovery.blocked.choose")}</option>
                         {HARNESS_OPTIONS.map((option) => (
                           <option key={option.id} value={option.id}>
                             {option.label} ({option.id})
@@ -253,7 +271,7 @@ export function RecoveryView({
                     type="button"
                   >
                     <Wrench aria-hidden="true" size={15} />
-                    Repair {blocked.label}
+                    {t("recovery.blocked.repair", { label: blocked.label })}
                   </button>
                 </li>
               );
@@ -263,15 +281,13 @@ export function RecoveryView({
       ) : null}
 
       {total === 0 ? (
-        <section className="recovery-empty" aria-label="Recovery empty state">
+        <section
+          className="recovery-empty"
+          aria-label={t("recovery.empty.label")}
+        >
           <LifeBuoy aria-hidden="true" size={28} />
-          <h2>No recovery work</h2>
-          <p>
-            This page lists Targets that need reconciliation after an uncertain
-            mutation and saved Targets blocked by an unknown harness. Each entry
-            offers exactly one typed action; there is no generic clear or
-            retry.
-          </p>
+          <h2>{t("recovery.empty.heading")}</h2>
+          <p>{t("recovery.empty.body")}</p>
         </section>
       ) : null}
     </main>

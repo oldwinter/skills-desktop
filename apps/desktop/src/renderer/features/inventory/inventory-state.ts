@@ -1,14 +1,16 @@
+import type { Translator } from "../../../contracts/i18n/translate.js";
 import type {
   PublicInventoryEntry,
   WorkspaceSnapshot,
 } from "../../../contracts/workspace.js";
 
 export function freshnessLabel(
+  t: Translator["t"],
   freshness: WorkspaceSnapshot["inventory"]["freshness"],
 ) {
-  if (freshness === "fresh") return "Fresh evidence";
-  if (freshness === "stale") return "Stale evidence";
-  return "No evidence";
+  if (freshness === "fresh") return t("common.freshness.fresh");
+  if (freshness === "stale") return t("common.freshness.stale");
+  return t("common.freshness.none");
 }
 
 export function isTargetOffline(snapshot: WorkspaceSnapshot) {
@@ -21,16 +23,19 @@ export function isTargetOffline(snapshot: WorkspaceSnapshot) {
   );
 }
 
-export function statusLabel(snapshot: WorkspaceSnapshot) {
+export function statusLabel(t: Translator["t"], snapshot: WorkspaceSnapshot) {
   const { freshness, phase } = snapshot.inventory;
-  if (phase === "loading") return `Refreshing - ${freshnessLabel(freshness)}`;
+  const label = freshnessLabel(t, freshness);
+  if (phase === "loading") return t("status.refreshing", { freshness: label });
   if (phase === "cancelled")
-    return `Refresh cancelled - ${freshnessLabel(freshness)}`;
+    return t("status.refreshCancelled", { freshness: label });
   if (phase === "error" && isTargetOffline(snapshot))
-    return `Offline - ${freshnessLabel(freshness)}`;
+    return t("status.offline", { freshness: label });
   if (phase === "error")
-    return freshness === "stale" ? "Stale after error" : "Refresh error";
-  return freshnessLabel(freshness);
+    return freshness === "stale"
+      ? t("status.staleAfterError")
+      : t("status.refreshError");
+  return label;
 }
 
 export function statusTone(snapshot: WorkspaceSnapshot) {
@@ -44,14 +49,33 @@ export function statusTone(snapshot: WorkspaceSnapshot) {
   return snapshot.inventory.freshness === "fresh" ? "healthy" : "neutral";
 }
 
-export function scopeLabel(scope: PublicInventoryEntry["scope"]) {
-  return scope === "project" ? "Project" : "Global";
+export function scopeLabel(
+  t: Translator["t"],
+  scope: PublicInventoryEntry["scope"],
+) {
+  return scope === "project"
+    ? t("common.scope.project")
+    : t("common.scope.global");
 }
 
-export function targetOptionLabel(target: WorkspaceSnapshot["target"]) {
-  return target.kind === "ssh" ? `${target.label} · 未开放` : target.label;
+export function scopeFilterLabel(
+  t: Translator["t"],
+  scope: PublicInventoryEntry["scope"],
+) {
+  return scope === "project"
+    ? t("common.scope.projectScope")
+    : t("common.scope.globalScope");
 }
 
-export function sourceLabel(entry: PublicInventoryEntry) {
-  return entry.declaredSource.source ?? "Provenance unavailable";
+export function targetOptionLabel(
+  t: Translator["t"],
+  target: WorkspaceSnapshot["target"],
+) {
+  return target.kind === "ssh"
+    ? t("common.ssh.targetOption", { label: target.label })
+    : target.label;
+}
+
+export function sourceLabel(t: Translator["t"], entry: PublicInventoryEntry) {
+  return entry.declaredSource.source ?? t("inventory.provenanceUnavailable");
 }

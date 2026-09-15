@@ -6,6 +6,7 @@ import {
   matchesHarnessQuery,
   normalizeHarnessSelection,
 } from "../../../contracts/harness-options.js";
+import { useTranslator } from "../../i18n/LocaleProvider.js";
 
 export function HarnessPicker({
   disabled = false,
@@ -16,6 +17,7 @@ export function HarnessPicker({
   readonly onChange: (harnessIds: readonly string[]) => void;
   readonly value: readonly string[];
 }) {
+  const { t, tc } = useTranslator();
   const [query, setQuery] = useState("");
   const [notice, setNotice] = useState<string>();
   const noticeId = useId();
@@ -51,20 +53,21 @@ export function HarnessPicker({
       className="harness-picker"
       disabled={disabled}
     >
-      <legend>Harness</legend>
+      <legend>{t("harnessPicker.legend")}</legend>
       <p className="harness-picker-summary" data-testid="harness-selection">
-        {selectedOptions.length === 1
-          ? "1 harness selected"
-          : `${selectedOptions.length} harnesses selected`}
+        {tc("harnessPicker.selected", selectedOptions.length)}
       </p>
       {selectedOptions.length > 0 ? (
-        <ul aria-label="Selected harnesses" className="harness-chip-list">
+        <ul
+          aria-label={t("harnessPicker.selectedList")}
+          className="harness-chip-list"
+        >
           {selectedOptions.map((option) => (
             <li className="harness-chip" key={option.id}>
               <span>{option.label}</span>
               <code>{option.id}</code>
               <button
-                aria-label={`Remove ${option.label}`}
+                aria-label={t("harnessPicker.remove", { label: option.label })}
                 className="harness-chip-remove"
                 disabled={disabled}
                 onClick={() => toggle(option.id, false)}
@@ -77,23 +80,23 @@ export function HarnessPicker({
         </ul>
       ) : null}
       <label className="harness-picker-filter">
-        <span>Filter harnesses</span>
+        <span>{t("harnessPicker.filter")}</span>
         <input
           autoComplete="off"
           onChange={(event) => setQuery(event.currentTarget.value)}
-          placeholder="Search by name or CLI id"
+          placeholder={t("harnessPicker.filterPlaceholder")}
           type="search"
           value={query}
         />
       </label>
       <div
-        aria-label="Available harnesses"
+        aria-label={t("harnessPicker.available")}
         className="harness-option-list"
         role="group"
       >
         {visible.length === 0 ? (
           <p className="harness-picker-empty">
-            No harness matches “{query.trim()}”.
+            {t("harnessPicker.noMatch", { query: query.trim() })}
           </p>
         ) : (
           visible.map((option) => (
@@ -112,7 +115,9 @@ export function HarnessPicker({
                 <code>{option.id}</code>
               </span>
               {option.globalScopeSupported ? null : (
-                <span className="harness-option-note">project only</span>
+                <span className="harness-option-note">
+                  {t("harnessPicker.projectOnly")}
+                </span>
               )}
             </label>
           ))

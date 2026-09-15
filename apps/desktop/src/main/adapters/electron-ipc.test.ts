@@ -439,6 +439,26 @@ describe("Electron IPC sender authorization", () => {
         "b".repeat(64),
       ),
     ).resolves.toMatchObject({ error: { code: "unauthorized" }, ok: false });
+    // Preferences travel as a typed patch; the session validates the shape.
+    await expect(
+      handlers.get("workspace:preferences:update")!(
+        authorizedEvent as never,
+        "epoch-1",
+        { appearance: "dark", localePreference: "zh-CN" },
+      ),
+    ).resolves.toMatchObject({ error: { code: "invalid_request" }, ok: false });
+    expect(session.request).toHaveBeenLastCalledWith({
+      patch: { appearance: "dark", localePreference: "zh-CN" },
+      type: "preferences.update",
+      version: 2,
+    });
+    await expect(
+      handlers.get("workspace:preferences:update")!(
+        hostileEvent as never,
+        "epoch-1",
+        { appearance: "dark" },
+      ),
+    ).resolves.toMatchObject({ error: { code: "unauthorized" }, ok: false });
 
     const reviewMainFrame = { url: "skills-desktop://review/index.html" };
     const reviewContents = {

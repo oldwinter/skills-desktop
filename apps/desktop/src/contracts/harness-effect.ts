@@ -1,3 +1,5 @@
+import { createTranslator } from "./i18n/translate.js";
+import { DEFAULT_LOCALE, type Locale } from "./preferences.js";
 import type { CommandPlan, CommandPlanHarnessEffect } from "./workspace.js";
 
 export interface HarnessEffectDescription {
@@ -7,18 +9,17 @@ export interface HarnessEffectDescription {
   readonly title: string;
 }
 
-function scopeWord(scope: CommandPlan["scope"]): string {
-  return scope === "project" ? "project" : "global";
-}
-
 /**
  * Describes which harness links a Command Plan can touch (ADR 0014). Plans
  * produced before `harnessEffect` existed fall back to the operation: only
- * `update` runs without `--agent`, so only `update` is CLI-unscoped.
+ * `update` runs without `--agent`, so only `update` is CLI-unscoped. Harness
+ * IDs are interpolated verbatim; only the surrounding prose is localized.
  */
 export function describeHarnessEffect(
   commandPlan: CommandPlan,
+  locale: Locale = DEFAULT_LOCALE,
 ): HarnessEffectDescription {
+  const { t, tc } = createTranslator(locale);
   const effect: CommandPlanHarnessEffect =
     commandPlan.harnessEffect ??
     (commandPlan.operation === "update"
@@ -31,18 +32,26 @@ export function describeHarnessEffect(
           kind: "bound",
         });
   if (effect.kind === "bound") {
-    const list = effect.harnessIds.join(", ");
     return {
       harnessIds: effect.harnessIds,
       kind: "bound",
-      summary: `Only the ${list} link${effect.harnessIds.length === 1 ? "" : "s"} for the listed Skills change. Links for other harnesses stay as they are.`,
-      title: "Bound to selected harnesses",
+      summary: tc("harnessEffect.bound.summary", effect.harnessIds.length, {
+        list: effect.harnessIds.join(", "),
+      }),
+      title: t("harnessEffect.bound.title"),
     };
   }
   return {
     harnessIds: effect.targetHarnessIds,
     kind: "cli-unscoped",
-    summary: `The pinned Skills CLI cannot limit update to a harness. It updates every CLI-managed link for the listed Skills in ${scopeWord(commandPlan.scope)} scope, including harnesses this Target does not bind. This Target binds ${effect.targetHarnessIds.join(", ")}.`,
-    title: "Affects every CLI-managed harness",
+    summary: t("harnessEffect.unscoped.summary", {
+      list: effect.targetHarnessIds.join(", "),
+      scope: t(
+        commandPlan.scope === "project"
+          ? "common.scope.project"
+          : "common.scope.global",
+      ).toLocaleLowerCase(locale),
+    }),
+    title: t("harnessEffect.unscoped.title"),
   };
 }

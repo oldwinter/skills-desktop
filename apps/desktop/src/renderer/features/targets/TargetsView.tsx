@@ -15,25 +15,27 @@ import type {
   WorkspaceBridge,
   WorkspaceSnapshot,
 } from "../../../contracts/workspace.js";
+import type { MessageKey } from "../../../contracts/i18n/translate.js";
+import { useTranslator } from "../../i18n/LocaleProvider.js";
 import { UserFacingErrorCopy } from "../../UserFacingErrorCopy.js";
 import { HarnessPicker } from "./HarnessPicker.js";
 
 type TargetState = NonNullable<WorkspaceSnapshot["targets"]>[number];
 
 function inventoryPill(state: TargetState): {
-  readonly label: string;
+  readonly label: MessageKey;
   readonly tone: "healthy" | "neutral" | "warning";
 } {
   if (state.inventory.phase === "loading") {
-    return { label: "Loading", tone: "neutral" };
+    return { label: "targets.pill.loading", tone: "neutral" };
   }
   if (state.inventory.freshness === "fresh") {
-    return { label: "Fresh", tone: "healthy" };
+    return { label: "targets.pill.fresh", tone: "healthy" };
   }
   if (state.inventory.freshness === "stale") {
-    return { label: "Stale", tone: "warning" };
+    return { label: "targets.pill.stale", tone: "warning" };
   }
-  return { label: "No evidence", tone: "neutral" };
+  return { label: "targets.pill.none", tone: "neutral" };
 }
 
 
@@ -54,10 +56,11 @@ export function TargetsView({
   readonly onSelected: (targetId: string) => void;
   readonly targets: readonly TargetState[];
 }) {
+  const { t, tc } = useTranslator();
   const [editingTargetId, setEditingTargetId] = useState<string>();
   const [draft, setDraft] = useState<TargetDraft>(blankTarget);
   const [error, setError] = useState<RendererError>();
-  const [savedMessage, setSavedMessage] = useState<string>();
+  const [savedMessage, setSavedMessage] = useState<MessageKey>();
 
   useEffect(() => {
     if (
@@ -94,7 +97,7 @@ export function TargetsView({
     if (result.ok) {
       setError(undefined);
       setSavedMessage(
-        editingTargetId === undefined ? "Target created" : "Target updated",
+        editingTargetId === undefined ? "targets.created" : "targets.updated",
       );
       onSelected(result.value.operationId);
       if (editingTargetId === undefined)
@@ -106,7 +109,7 @@ export function TargetsView({
     const result = await client.deleteTarget(state.target.id);
     if (result.ok) {
       setError(undefined);
-      setSavedMessage("Target deleted");
+      setSavedMessage("targets.deleted");
       const remaining = targets.find(
         ({ target }) => target.id !== state.target.id,
       );
@@ -119,12 +122,12 @@ export function TargetsView({
       <main className="targets-workspace" id="workspace-main" tabIndex={-1}>
         <section className="page-heading">
           <div>
-            <h1>Targets</h1>
-            <p>{targets.length} Target Definitions · V1 is Local-only</p>
+            <h1>{t("targets.title")}</h1>
+            <p>{tc("targets.subtitle", targets.length)}</p>
           </div>
           <button className="text-button" onClick={() => edit()} type="button">
             <Plus aria-hidden="true" size={15} />
-            New Target
+            {t("targets.new")}
           </button>
         </section>
         {error !== undefined ? (
@@ -136,7 +139,7 @@ export function TargetsView({
         {savedMessage !== undefined ? (
           <div className="state-banner state-banner--loading" role="status">
             <Save aria-hidden="true" size={16} />
-            <span>{savedMessage}</span>
+            <span>{t(savedMessage)}</span>
           </div>
         ) : null}
         <div className="target-list">
@@ -163,44 +166,44 @@ export function TargetsView({
                 </div>
                 {state.target.kind === "ssh" ? (
                   <span
-                    aria-label="SSH 未开放"
+                    aria-label={t("common.ssh.badgeLabel")}
                     className="scope-badge"
-                    title="SSH · 未在 V1 开放"
+                    title={t("common.ssh.notInV1")}
                   >
-                    未开放
+                    {t("common.ssh.badge")}
                   </span>
                 ) : null}
                 <span className={`status-pill status-pill--${pill.tone}`}>
-                  {pill.label}
+                  {t(pill.label)}
                 </span>
               </header>
               <dl>
                 <div>
-                  <dt>Kind</dt>
+                  <dt>{t("targets.kind")}</dt>
                   <dd>
                     {state.target.kind === "local"
-                      ? "Local"
-                      : "SSH · 未在 V1 开放"}
+                      ? t("common.local")
+                      : t("common.ssh.notInV1")}
                   </dd>
                 </div>
                 <div>
-                  <dt>Harness</dt>
+                  <dt>{t("common.harness")}</dt>
                   <dd>{state.target.harnessIds.join(", ")}</dd>
                 </div>
                 <div>
-                  <dt>Connection</dt>
+                  <dt>{t("targets.connection")}</dt>
                   <dd>
                     {state.target.kind === "ssh"
-                      ? (state.target.connectionReference ?? "SSH host")
-                      : "This device"}
+                      ? (state.target.connectionReference ?? t("targets.sshHost"))
+                      : t("targets.thisDevice")}
                   </dd>
                 </div>
               </dl>
               <details className="target-item-advanced">
-                <summary>Advanced</summary>
+                <summary>{t("targets.advanced")}</summary>
                 <dl>
                   <div>
-                    <dt>Generation</dt>
+                    <dt>{t("targets.generation")}</dt>
                     <dd>{state.target.generation}</dd>
                   </div>
                 </dl>
@@ -212,23 +215,23 @@ export function TargetsView({
               ) : null}
               <div className="target-item-actions">
                 <button
-                  aria-label={`Edit ${state.target.label}`}
+                  aria-label={t("targets.edit", { label: state.target.label })}
                   className="icon-button"
                   onClick={() => edit(state)}
-                  title={`Edit ${state.target.label}`}
+                  title={t("targets.edit", { label: state.target.label })}
                   type="button"
                 >
                   <Pencil aria-hidden="true" size={15} />
                 </button>
                 <button
-                  aria-label={`Delete ${state.target.label}`}
+                  aria-label={t("targets.delete", { label: state.target.label })}
                   className="icon-button icon-button--danger"
                   disabled={state.deletionBlocked}
                   onClick={() => void remove(state)}
                   title={
                     state.deletionBlocked
-                      ? "Target deletion is blocked"
-                      : `Delete ${state.target.label}`
+                      ? t("targets.deletionBlocked")
+                      : t("targets.delete", { label: state.target.label })
                   }
                   type="button"
                 >
@@ -243,7 +246,7 @@ export function TargetsView({
 
       <aside
         className="inspector target-editor"
-        aria-label="Target Definition editor"
+        aria-label={t("targets.editor.label")}
       >
         <header className="inspector-heading">
           {draft.kind === "local" ? (
@@ -254,10 +257,10 @@ export function TargetsView({
           <div>
             <p>
               {editingTargetId === undefined
-                ? "New Definition"
-                : "Edit Definition"}
+                ? t("targets.editor.new")
+                : t("targets.editor.edit")}
             </p>
-            <h2>{draft.label || "Untitled Target"}</h2>
+            <h2>{draft.label || t("targets.editor.untitled")}</h2>
           </div>
         </header>
         <form
@@ -270,27 +273,25 @@ export function TargetsView({
           {draft.kind === "ssh" ? (
             <div className="state-banner state-banner--loading" role="status">
               <Server aria-hidden="true" size={16} />
-              <span>
-                SSH · 未在 V1 开放，不能作为可保存的 Target Definition。
-              </span>
+              <span>{t("targets.editor.sshBanner")}</span>
             </div>
           ) : null}
           <fieldset>
-            <legend>Target kind</legend>
+            <legend>{t("targets.editor.kind")}</legend>
             {draft.kind === "ssh" ? (
               <p className="target-kind-readonly">
-                Kind: SSH · 未在 V1 开放
+                {t("targets.editor.kindSsh")}
               </p>
             ) : (
               <div className="segmented-control segmented-control--compact">
                 <button aria-pressed={true} type="button">
-                  Local
+                  {t("common.local")}
                 </button>
               </div>
             )}
           </fieldset>
           <label>
-            <span>Display label</span>
+            <span>{t("targets.editor.displayLabel")}</span>
             <input
               maxLength={256}
               onChange={(event) =>
@@ -302,7 +303,7 @@ export function TargetsView({
             />
           </label>
           <label>
-            <span>Canonical workspace</span>
+            <span>{t("targets.editor.workspace")}</span>
             <input
               maxLength={4096}
               onChange={(event) =>
@@ -322,7 +323,7 @@ export function TargetsView({
           />
           {draft.kind === "ssh" ? (
             <label>
-              <span>OpenSSH connection reference</span>
+              <span>{t("targets.editor.connectionReference")}</span>
               <input
                 maxLength={256}
                 onChange={(event) =>
@@ -341,14 +342,12 @@ export function TargetsView({
             className="text-button text-button--primary"
             disabled={draft.kind === "ssh"}
             title={
-              draft.kind === "ssh"
-                ? "SSH · 未在 V1 开放，无法保存"
-                : undefined
+              draft.kind === "ssh" ? t("targets.editor.sshCannotSave") : undefined
             }
             type="submit"
           >
             <Save aria-hidden="true" size={15} />
-            Save Target
+            {t("targets.editor.save")}
           </button>
         </form>
       </aside>
