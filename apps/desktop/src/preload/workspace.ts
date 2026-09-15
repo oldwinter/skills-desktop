@@ -11,6 +11,11 @@ import {
   type DesktopBridge,
   type ReviewWindowClosedEvent,
 } from "../contracts/desktop.js";
+import {
+  applicationMenuResultSchema,
+  menuCommandEventSchema,
+  type MenuBridge,
+} from "../contracts/menu.js";
 import type { PreferencesPatch } from "../contracts/preferences.js";
 import {
   desktopEventSchema,
@@ -85,6 +90,21 @@ const about: AboutBridge = Object.freeze({
   },
 });
 
+const menu: MenuBridge = Object.freeze({
+  async getMenu() {
+    return applicationMenuResultSchema.parse(
+      await invoke("menu:application:get"),
+    );
+  },
+  subscribeMenuCommand(listener: Parameters<MenuBridge["subscribeMenuCommand"]>[0]) {
+    const receive = (_event: Electron.IpcRendererEvent, value: unknown) => {
+      listener(menuCommandEventSchema.parse(value));
+    };
+    ipcRenderer.on("menu:command", receive);
+    return () => ipcRenderer.removeListener("menu:command", receive);
+  },
+});
+
 const bridge: DesktopBridge = Object.freeze({
   about,
   async cancelInventory(operationId: string) {
@@ -117,6 +137,7 @@ const bridge: DesktopBridge = Object.freeze({
       await invoke("workspace:handoff:skills-sh", recordId),
     );
   },
+  menu,
   async updatePreferences(patch: PreferencesPatch) {
     return workspaceRequestResultSchema.parse(
       await invoke("workspace:preferences:update", patch),

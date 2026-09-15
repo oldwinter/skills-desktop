@@ -128,14 +128,15 @@ export async function createCompositionRoot(options?: {
     v1LocalOnlyTargets: true,
   });
   await capabilities.initialize();
+  const releaseChannel = "unsigned-preview";
   const updates = await createElectronUpdateComposition({
     app,
     architecture: process.arch,
     autoUpdater,
     diagnosticsExporter: createElectronReleaseDiagnosticsExporter({ dialog }),
     platform: process.platform,
-    releaseChannel: "unsigned-preview",
+    releaseChannel,
     restartSafety: () => capabilities.restartSafety(),
   });
-  return { capabilities, updates };
+  return { capabilities, preferences, releaseChannel, updates };
 }

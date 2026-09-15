@@ -13,6 +13,14 @@ import {
 } from "../../contracts/about.js";
 import { reviewWindowClosedEventSchema } from "../../contracts/desktop.js";
 import {
+  applicationMenuResultSchema,
+  applicationMenuSchema,
+  menuCommandEventSchema,
+  type ApplicationMenu,
+  type ApplicationMenuResult,
+  type RendererMenuCommand,
+} from "../../contracts/menu.js";
+import {
   WORKSPACE_PROTOCOL_VERSION,
   desktopEventSchema,
   workspaceRequestResultSchema,
@@ -58,6 +66,8 @@ const CHANNELS = {
   reviewApprove: "review:decision:approve",
   reviewReject: "review:decision:reject",
   reviewSnapshot: "review:snapshot:get",
+  menuCommand: "menu:command",
+  menuGet: "menu:application:get",
   snapshot: "workspace:snapshot:get",
   targetCreate: "workspace:target:create",
   targetDelete: "workspace:target:delete",
@@ -145,6 +155,24 @@ function aboutFailure(
   return aboutUpdateResultSchema.parse(failure);
 }
 
+function menuFailure(
+  code: "internal_error" | "invalid_request" | "unauthorized",
+): ApplicationMenuResult {
+  return applicationMenuResultSchema.parse({
+    error: {
+      code,
+      message:
+        code === "unauthorized"
+          ? "This window cannot make that request."
+          : code === "invalid_request"
+            ? "The menu request is not supported."
+            : "The menu could not be read.",
+      retryable: code === "internal_error",
+    },
+    ok: false,
+  });
+}
+
 export function isAuthorizedSender(
   endpoint: Pick<RegisteredEndpoint, "expectedUrl" | "role"> & {
     readonly webContentsId: number;
@@ -168,6 +196,10 @@ export function registerDesktopIpc(input: {
   readonly capabilities: DesktopCapabilities;
   readonly ipcMain: IpcMain;
   readonly newEpoch: () => string;
+  /** Main-owned application menu projection (ADR 0023). */
+  readonly menu?: {
+    current(): ApplicationMenu;
+  };
   readonly updates: {
     exportDiagnostics(): Promise<"cancelled" | "saved">;
     getSnapshot(): AboutUpdateSnapshot;
@@ -301,6 +333,25 @@ export function registerDesktopIpc(input: {
         return aboutDiagnosticsExportResultSchema.parse(
           aboutFailure("internal_error"),
         );
+      }
+    },
+  );
+
+  input.ipcMain.handle(
+    CHANNELS.menuGet,
+    async (event, attachmentEpoch: unknown, ...args) => {
+      if (authorized(event, "workspace", attachmentEpoch) === undefined) {
+        return menuFailure("unauthorized");
+      }
+      if (args.length !== 0) return menuFailure("invalid_request");
+      if (input.menu === undefined) return menuFailure("internal_error");
+      try {
+        return applicationMenuResultSchema.parse({
+          ok: true,
+          value: applicationMenuSchema.parse(input.menu.current()),
+        });
+      } catch {
+        return menuFailure("internal_error");
       }
     },
   );
@@ -791,6 +842,35 @@ export function registerDesktopIpc(input: {
     }
   };
 
+  /**
+   * Relay one menu activation to the workspace renderer that owns
+   * `owner`. The renderer then issues the same closed Workspace v2 request
+   * its own control would; main never invents a request on its behalf.
+   */
+  const notifyMenuCommand = (
+    command: RendererMenuCommand,
+    owner: DesktopIpcAttachment,
+  ) => {
+    const parsed = menuCommandEventSchema.safeParse({
+      command,
+      schemaVersion: 1,
+    });
+    if (!parsed.success) return false;
+    const endpoint = endpoints.get(owner.webContentsId);
+    if (
+      endpoint?.role !== "workspace" ||
+      endpoint.attachmentEpoch !== owner.attachmentEpoch ||
+      endpoint.webContents.isDestroyed()
+    )
+      return false;
+    try {
+      endpoint.webContents.send(CHANNELS.menuCommand, parsed.data);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
   const detach = (webContentsId: number) => {
     const prior = endpoints.get(webContentsId);
     if (prior === undefined) return;
@@ -845,10 +925,12 @@ export function registerDesktopIpc(input: {
   return {
     attach,
     detach,
+    notifyMenuCommand,
     notifyReviewWindowClosed,
     dispose() {
       unsubscribeUpdates();
       for (const webContentsId of endpoints.keys()) detach(webContentsId);
+      input.ipcMain.removeHandler(CHANNELS.menuGet);
       input.ipcMain.removeHandler(CHANNELS.aboutSnapshot);
       input.ipcMain.removeHandler(CHANNELS.aboutCheck);
       input.ipcMain.removeHandler(CHANNELS.aboutRestart);

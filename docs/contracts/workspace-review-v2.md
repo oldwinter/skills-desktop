@@ -72,3 +72,23 @@ unknown fields or values is `invalid_request`. Message catalogs live in
 test refuses a `zh-CN` catalog that adds, drops, or changes placeholders on
 any key. Identifiers, Harness IDs, source values, digests, and command
 previews are interpolated into messages and never translated.
+
+The application menu is main-owned (ADR 0023) and described by the separate
+`apps/desktop/src/contracts/menu.ts` contract beside the About bridge, not by
+Workspace v2. `buildApplicationMenu(locale, platform)` is a pure projection of
+top-level menus and items (ids, catalog labels, optional Electron accelerator,
+its `aria-keyshortcuts` mirror, and either an allowlisted Electron role or one
+closed command); the Electron adapter renders exactly that projection and
+reinstalls it after every durable preference change, and the native About
+panel is set from the same version and release channel the update snapshot
+reports. The workspace bridge exposes `menu.getMenu()` (read-only, workspace
+main frame only) so the renderer can mirror accelerators and packaged QA can
+enumerate the menu, and `menu.subscribeMenuCommand` for the closed relay
+event `{ command, schemaVersion: 1 }`. Relayed commands carry no arguments:
+`inventory.refresh`, `navigate.*`, and `update.check` are resolved by the
+renderer against its own Snapshot and executed through the existing closed
+requests (`inventory.refresh` with the active Target, the About update
+check); `about.show` and `workspace.show` never reach a renderer. Main relays
+only to the workspace attachment that is live at activation and otherwise
+recreates or focuses the workspace window; no menu item bypasses
+`DesktopCapabilities`.

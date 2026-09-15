@@ -20,6 +20,8 @@ export interface PreferenceAuthority {
   /** Current renderer-facing projection (defaults before `initialize`). */
   current(): PublicPreferences;
   initialize(): Promise<void>;
+  /** Observe the projection after each durable change (never on failure). */
+  subscribe(listener: (preferences: PublicPreferences) => void): () => void;
   /** Persist first, then expose; a failed write leaves the old value live. */
   update(patch: unknown): Promise<Result<PublicPreferences, RendererError>>;
   /** Non-fatal startup problem with the durable record, if any. */
@@ -41,6 +43,7 @@ export function createPreferenceAuthority(
 ): PreferenceAuthority {
   let stored: StoredPreferences = DEFAULT_STORED_PREFERENCES;
   let warning: string | undefined;
+  const listeners = new Set<(preferences: PublicPreferences) => void>();
 
   const systemLocale = (): Locale =>
     resolveSystemLocale(options.systemLocaleTag());
@@ -93,7 +96,21 @@ export function createPreferenceAuthority(
       }
       stored = next;
       warning = undefined;
-      return { ok: true, value: projectPreferences(stored, systemLocale()) };
+      const projected = projectPreferences(stored, systemLocale());
+      for (const listener of listeners) {
+        try {
+          listener(projected);
+        } catch {
+          // One faulty observer must not block the renderer's result.
+        }
+      }
+      return { ok: true, value: projected };
+    },
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
     },
     warning() {
       return warning;

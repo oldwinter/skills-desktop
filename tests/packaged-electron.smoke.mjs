@@ -504,6 +504,7 @@ try {
   const rendererBoundary = await first.page.evaluate(`({
     aboutBridgeKeys: Object.keys(window.skillsDesktop.about).sort(),
     bridgeKeys: Object.keys(window.skillsDesktop).sort(),
+    menuBridgeKeys: Object.keys(window.skillsDesktop.menu).sort(),
     hasNodeProcess: typeof window.process !== "undefined",
     hasRequire: typeof window.require !== "undefined",
     text: document.body.textContent ?? "",
@@ -526,6 +527,7 @@ try {
       "deleteTarget",
       "getSnapshot",
       "handoffSkillsSh",
+      "menu",
       "prepareCollection",
       "prepareCollectionAcrossTargets",
       "prepareComparison",
@@ -549,12 +551,78 @@ try {
         "requestCheck",
         "requestRestart",
         "subscribe",
-      ])
+      ]) ||
+    JSON.stringify(rendererBoundary.menuBridgeKeys) !==
+      JSON.stringify(["getMenu", "subscribeMenuCommand"])
   ) {
     throw new Error(
       `Unexpected preload surface: ${rendererBoundary.bridgeKeys.join(", ")}`,
     );
   }
+
+  // ADR 0023 / #211: the main-owned application menu is enumerable from the
+  // packaged build and its accelerators are mirrored by the renderer.
+  const applicationMenu = await first.page.evaluate(`(async () => {
+    const result = await window.skillsDesktop.menu.getMenu();
+    if (!result.ok) throw new Error("Menu read failed: " + result.error.code);
+    const items = result.value.menus.flatMap((menu) => menu.items);
+    const labelsOf = (menu) =>
+      menu.items.filter((item) => item.kind !== "separator").map((item) => item.label);
+    return {
+      commands: items
+        .filter((item) => item.kind === "command")
+        .map((item) => item.command)
+        .sort(),
+      locale: result.value.locale,
+      platform: result.value.platform,
+      refreshShortcut: document
+        .querySelector('button[aria-label="Refresh inventory"]')
+        ?.getAttribute("aria-keyshortcuts"),
+      topLevel: result.value.menus.map((menu) => ({ id: menu.id, label: menu.label })),
+      viewLabels: labelsOf(result.value.menus.find((menu) => menu.id === "view")),
+      aboutShortcut: document
+        .querySelector('button[data-nav-view="about"]')
+        ?.getAttribute("aria-keyshortcuts"),
+    };
+  })()`);
+  const expectedMenu = {
+    commands: [
+      "about.show",
+      "inventory.refresh",
+      "navigate.about",
+      "navigate.collections",
+      "navigate.comparison",
+      "navigate.inventory",
+      "navigate.recovery",
+      "navigate.targets",
+      "update.check",
+      "workspace.show",
+    ],
+    locale: "en",
+    platform: "linux",
+    topLevel: [
+      { id: "file", label: "File" },
+      { id: "edit", label: "Edit" },
+      { id: "view", label: "View" },
+      { id: "window", label: "Window" },
+      { id: "help", label: "Help" },
+    ],
+  };
+  if (
+    JSON.stringify(applicationMenu.commands) !== JSON.stringify(expectedMenu.commands) ||
+    applicationMenu.locale !== expectedMenu.locale ||
+    applicationMenu.platform !== expectedMenu.platform ||
+    JSON.stringify(applicationMenu.topLevel) !== JSON.stringify(expectedMenu.topLevel) ||
+    !applicationMenu.viewLabels.includes("Refresh Inventory") ||
+    !applicationMenu.viewLabels.includes("Go to Inventory") ||
+    applicationMenu.refreshShortcut !== "Control+R" ||
+    applicationMenu.aboutShortcut !== "Control+6"
+  ) {
+    throw new Error(
+      `Packaged application menu failed: ${JSON.stringify(applicationMenu)}`,
+    );
+  }
+  console.log("packaged smoke: application menu enumerated");
   await first.page.evaluate(`(() => {
     const button = document.querySelector('button[aria-label="About"]');
     if (!(button instanceof HTMLButtonElement)) throw new Error("About navigation is unavailable.");

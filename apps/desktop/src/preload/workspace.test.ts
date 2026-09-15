@@ -108,6 +108,10 @@ async function loadBridge() {
       destinationTargetId: string,
     ): Promise<unknown>;
     handoffSkillsSh(recordId: string): Promise<unknown>;
+    readonly menu: {
+      getMenu(): Promise<unknown>;
+      subscribeMenuCommand(listener: (event: unknown) => void): () => void;
+    };
     updatePreferences(patch: Record<string, unknown>): Promise<unknown>;
     reconcileMutation(targetId: string): Promise<unknown>;
     repairTarget(targetId: string, harnessId: string): Promise<unknown>;
@@ -358,6 +362,55 @@ describe("workspace preload authority", () => {
     );
 
     expect(() => receive({}, { schemaVersion: 999 })).toThrow();
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
+
+  it("exposes only a read of the application menu and a closed menu-command relay", async () => {
+    const bridge = await loadBridge();
+    expect(Object.keys(bridge.menu).sort()).toEqual([
+      "getMenu",
+      "subscribeMenuCommand",
+    ]);
+
+    const menuError = {
+      error: {
+        code: "unauthorized",
+        message: "This window cannot make that request.",
+        retryable: false,
+      },
+      ok: false,
+    };
+    electron.invoke.mockResolvedValue(menuError);
+    await expect(bridge.menu.getMenu()).resolves.toEqual(menuError);
+    expect(electron.invoke).toHaveBeenCalledWith(
+      "menu:application:get",
+      "attachment-epoch",
+    );
+    electron.invoke.mockResolvedValue({ ok: true, value: { menus: [] } });
+    await expect(bridge.menu.getMenu()).rejects.toThrow();
+
+    const listener = vi.fn();
+    const cleanup = bridge.menu.subscribeMenuCommand(listener);
+    const receive = electron.on.mock.calls.find(
+      ([channel]) => channel === "menu:command",
+    )?.[1] as (event: unknown, value: unknown) => void;
+    receive({}, { command: "inventory.refresh", schemaVersion: 1 });
+    expect(listener).toHaveBeenCalledWith({
+      command: "inventory.refresh",
+      schemaVersion: 1,
+    });
+    // Main-only commands never reach the renderer, nor do free-form strings.
+    expect(() =>
+      receive({}, { command: "workspace.show", schemaVersion: 1 }),
+    ).toThrow();
+    expect(() =>
+      receive({}, { command: "navigate.about", schemaVersion: 2 }),
+    ).toThrow();
+    expect(() =>
+      receive({}, { command: "navigate.about", schemaVersion: 1, targetId: "x" }),
+    ).toThrow();
+    cleanup();
+    expect(electron.removeListener).toHaveBeenCalledWith("menu:command", receive);
     expect(listener).toHaveBeenCalledTimes(1);
   });
 });

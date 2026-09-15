@@ -2,7 +2,14 @@ import { randomUUID } from "node:crypto";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { app, autoUpdater, BrowserWindow, ipcMain, protocol } from "electron";
+import {
+  app,
+  autoUpdater,
+  BrowserWindow,
+  ipcMain,
+  Menu,
+  protocol,
+} from "electron";
 
 import {
   registerAssetProtocol,
@@ -12,10 +19,12 @@ import {
   workspaceWindowOptions,
   WORKSPACE_URL,
 } from "./adapters/electron-security.js";
+import { createElectronApplicationMenu } from "./adapters/electron-application-menu.js";
 import {
   registerDesktopIpc,
   type DesktopIpcAttachment,
 } from "./adapters/electron-ipc.js";
+import { RENDERER_MENU_COMMANDS } from "../contracts/menu.js";
 import { onWindowClosed } from "./adapters/electron-window-lifecycle.js";
 import { createCompositionRoot } from "./composition-root.js";
 
@@ -45,20 +54,63 @@ if (!app.requestSingleInstanceLock()) {
     .whenReady()
     .then(async () => {
       let presentReview = (_reviewId: string) => undefined;
-      const { capabilities, updates } = await createCompositionRoot({
-        onReviewRequested(reviewId) {
-          presentReview(reviewId);
-        },
-      });
+      const { capabilities, preferences, releaseChannel, updates } =
+        await createCompositionRoot({
+          onReviewRequested(reviewId) {
+            presentReview(reviewId);
+          },
+        });
       registerAssetProtocol(protocol, {
         review: resolve(currentDirectory, "../review-renderer"),
         workspace: resolve(currentDirectory, "../renderer"),
       });
+      // ADR 0023: main owns the localized menu. Renderer-bound commands are
+      // relayed to the live workspace, which issues the same closed request
+      // its own controls would; nothing here bypasses DesktopCapabilities.
+      const applicationMenu = createElectronApplicationMenu({
+        about: () => {
+          const { application } = updates.getSnapshot();
+          return {
+            architecture: application.architecture,
+            releaseChannel,
+            version: application.version,
+          };
+        },
+        locale: () => preferences.current().locale,
+        onCommand(command) {
+          if (command === "about.show") {
+            app.showAboutPanel();
+            return;
+          }
+          if (workspaceWindow === undefined) {
+            createWorkspaceWindow();
+            return;
+          }
+          workspaceWindow.focus();
+          if (command === "workspace.show") return;
+          if (
+            workspaceAttachment !== undefined &&
+            (RENDERER_MENU_COMMANDS as readonly string[]).includes(command)
+          ) {
+            desktopIpc.notifyMenuCommand(
+              command as (typeof RENDERER_MENU_COMMANDS)[number],
+              workspaceAttachment,
+            );
+          }
+        },
+        platform: process.platform,
+        runtime: { app, menu: Menu },
+      });
       const desktopIpc = registerDesktopIpc({
         capabilities,
         ipcMain,
+        menu: { current: () => applicationMenu.current() },
         newEpoch: randomUUID,
         updates,
+      });
+      applicationMenu.install();
+      const unsubscribePreferences = preferences.subscribe(() => {
+        applicationMenu.install();
       });
 
       const createWorkspaceWindow = () => {
@@ -166,6 +218,7 @@ if (!app.requestSingleInstanceLock()) {
       let updaterOwnedQuit = false;
       autoUpdater.on("before-quit-for-update", () => {
         updaterOwnedQuit = true;
+        unsubscribePreferences();
         updates.dispose();
         desktopIpc.dispose();
         void capabilities.shutdown();
@@ -177,6 +230,7 @@ if (!app.requestSingleInstanceLock()) {
         if (shutdownStarted) return;
         if (!updates.prepareNormalQuit()) return;
         shutdownStarted = true;
+        unsubscribePreferences();
         updates.dispose();
         void capabilities.shutdown().finally(() => {
           desktopIpc.dispose();
