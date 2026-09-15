@@ -37,7 +37,9 @@ export function parseReleaseIntegrityOptions(argv, allowedNames) {
     const name = argv[index];
     const value = argv[index + 1];
     if (!allowed.has(name)) {
-      throw new Error(`Unknown release integrity argument: ${name}`);
+      throw new Error(
+        `Unknown release integrity argument: ${name} (allowed: ${[...allowed].join(", ")})`,
+      );
     }
     if (
       value === undefined ||
@@ -477,6 +479,20 @@ const commands = new Map([
   ["verify-release", verifyRelease],
 ]);
 
+const HELP_FLAGS = new Set(["--help", "-h", "help"]);
+
+export function releaseIntegrityUsage(commandHandlers = commands) {
+  const names = [...commandHandlers.keys()].sort();
+  return [
+    "Usage: node scripts/release/release-integrity-cli.mjs <command> [--option value ...]",
+    "",
+    "Commands:",
+    ...names.map((name) => `  ${name}`),
+    "",
+    "Every command takes a fixed set of --option value pairs; a missing or unknown option fails closed.",
+  ].join("\n");
+}
+
 export async function runReleaseIntegrityCommand(
   [commandName, ...argv],
   {
@@ -484,9 +500,15 @@ export async function runReleaseIntegrityCommand(
     writeOutput = (value) => process.stdout.write(value),
   } = {},
 ) {
+  if (commandName === undefined || HELP_FLAGS.has(commandName)) {
+    writeOutput(`${releaseIntegrityUsage(commandHandlers)}\n`);
+    return undefined;
+  }
   const command = commandHandlers.get(commandName);
   if (command === undefined) {
-    throw new Error(`Unknown release integrity command: ${commandName}`);
+    throw new Error(
+      `Unknown release integrity command: ${commandName} (try: node scripts/release/release-integrity-cli.mjs --help)`,
+    );
   }
   const result = await command(argv);
   writeOutput(`${JSON.stringify(result)}\n`);
