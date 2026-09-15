@@ -528,6 +528,23 @@ export async function runPackagedUiQa({
         `document.documentElement.dataset.appearance === ${JSON.stringify(appearance)}`,
         `${appearance} appearance applied`,
       );
+      // Appearance tokens swap instantly; wait until inactive nav paint matches the
+      // active palette so axe does not sample a mid-transition light secondary.
+      await page.waitFor(
+        `(() => {
+          const root = getComputedStyle(document.documentElement);
+          const expected = root.getPropertyValue("--text-secondary").trim();
+          const item = document.querySelector(".nav-item:not(.nav-item--active)");
+          if (item === null || expected.length === 0) return true;
+          const probe = document.createElement("span");
+          probe.style.color = expected;
+          document.body.append(probe);
+          const want = getComputedStyle(probe).color;
+          probe.remove();
+          return getComputedStyle(item).color === want;
+        })()`,
+        `${appearance} nav secondary settled`,
+      );
       const palette = await page.evaluate(`(() => {
         const root = getComputedStyle(document.documentElement);
         const body = getComputedStyle(document.body);

@@ -201,7 +201,9 @@ code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; fo
 .primary-nav { display: grid; gap: 2px; }
 .nav-item { width: 100%; min-height: 40px; gap: 10px; padding: 0 10px; color: var(--text-secondary); background: transparent; border: 0; border-radius: var(--radius-control); text-align: left; }
 .nav-item:not(:disabled):hover { background: var(--surface-hover); }
-.nav-item, .target-row, .text-button, .icon-button { transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease, box-shadow 140ms ease; }
+.nav-item, .target-row, .text-button, .icon-button { transition: background-color 140ms ease, border-color 140ms ease, box-shadow 140ms ease; }
+/* Color must not transition across appearance tokens — mid-fade fails axe AA (e.g. light #5f6368 on dark #202124). */
+.nav-item > span, .nav-item > svg { color: inherit; }
 .nav-item--active { color: var(--text); background: var(--surface-muted); font-weight: 500; }
 .nav-count { display: inline-grid; min-width: 20px; height: 20px; margin-left: auto; padding: 0 6px; place-items: center; color: var(--warning); background: var(--warning-soft); border-radius: 10px; font-size: var(--font-size-micro); font-weight: 600; }
 .nav-item:disabled { opacity: 0.52; }
