@@ -25,6 +25,7 @@ export const RENDERER_MENU_COMMANDS = [
   "navigate.collections",
   "navigate.comparison",
   "navigate.inventory",
+  "navigate.publish",
   "navigate.recovery",
   "navigate.targets",
   "update.check",

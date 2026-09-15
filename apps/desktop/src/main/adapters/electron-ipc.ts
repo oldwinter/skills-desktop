@@ -54,6 +54,12 @@ const CHANNELS = {
   collectionPrepareMany: "workspace:collection:prepare-many",
   collectionReview: "workspace:collection:review-request",
   packageImport: "workspace:package:import",
+  publicationChooseSource: "workspace:publication:choose-source",
+  publicationExport: "workspace:publication:export",
+  publicationPrepare: "workspace:publication:prepare",
+  publicationReview: "workspace:publication:review-request",
+  publicationDiscard: "workspace:publication:discard",
+  publicationReconcile: "workspace:publication:reconcile",
   event: "workspace:event",
   handoffSkillsSh: "workspace:handoff:skills-sh",
   updatePreferences: "workspace:preferences:update",
@@ -720,6 +726,57 @@ export function registerDesktopIpc(input: {
       }
     },
   );
+  const publicationHandler =
+    (build: (...args: readonly unknown[]) => Record<string, unknown>) =>
+    async (
+      event: IpcMainInvokeEvent,
+      attachmentEpoch: unknown,
+      ...args: unknown[]
+    ) => {
+      const endpoint = authorized(event, "workspace", attachmentEpoch);
+      if (endpoint === undefined) return authorizationFailure();
+      try {
+        return workspaceRequestResultSchema.parse(
+          await endpoint.session.request({
+            ...build(...args),
+            version: WORKSPACE_PROTOCOL_VERSION,
+          }),
+        );
+      } catch {
+        return internalFailure();
+      }
+    };
+  input.ipcMain.handle(
+    CHANNELS.publicationChooseSource,
+    publicationHandler(() => ({ type: "publication.choose-source" })),
+  );
+  input.ipcMain.handle(
+    CHANNELS.publicationExport,
+    publicationHandler(() => ({ type: "publication.export" })),
+  );
+  input.ipcMain.handle(
+    CHANNELS.publicationPrepare,
+    publicationHandler((remote, branch) => ({
+      branch,
+      remote,
+      type: "publication.prepare",
+    })),
+  );
+  input.ipcMain.handle(
+    CHANNELS.publicationReview,
+    publicationHandler((planId) => ({
+      planId,
+      type: "publication.review.request",
+    })),
+  );
+  input.ipcMain.handle(
+    CHANNELS.publicationDiscard,
+    publicationHandler((planId) => ({ planId, type: "publication.discard" })),
+  );
+  input.ipcMain.handle(
+    CHANNELS.publicationReconcile,
+    publicationHandler(() => ({ type: "publication.reconcile" })),
+  );
   input.ipcMain.handle(
     CHANNELS.handoffSkillsSh,
     async (event, attachmentEpoch: unknown, recordId: unknown) => {
@@ -988,6 +1045,12 @@ export function registerDesktopIpc(input: {
       input.ipcMain.removeHandler(CHANNELS.collectionPrepareMany);
       input.ipcMain.removeHandler(CHANNELS.collectionReview);
       input.ipcMain.removeHandler(CHANNELS.packageImport);
+      input.ipcMain.removeHandler(CHANNELS.publicationChooseSource);
+      input.ipcMain.removeHandler(CHANNELS.publicationExport);
+      input.ipcMain.removeHandler(CHANNELS.publicationPrepare);
+      input.ipcMain.removeHandler(CHANNELS.publicationReview);
+      input.ipcMain.removeHandler(CHANNELS.publicationDiscard);
+      input.ipcMain.removeHandler(CHANNELS.publicationReconcile);
       input.ipcMain.removeHandler(CHANNELS.targetCreate);
       input.ipcMain.removeHandler(CHANNELS.targetDelete);
       input.ipcMain.removeHandler(CHANNELS.targetRepair);

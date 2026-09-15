@@ -57,7 +57,16 @@ describe("message catalogs", () => {
 
   it("keep every renderer error code in the catalog", () => {
     const codes = [
+      "branch_unsupported",
       "cancelled",
+      "export_invalid",
+      "git_unavailable",
+      "publication_drift",
+      "publication_guarded",
+      "publication_invalid",
+      "publication_unavailable",
+      "remote_unreachable",
+      "remote_unsupported",
       "cli_incompatible",
       "conflicting_inventory_entry",
       "duplicate_inventory_entry",
@@ -122,9 +131,7 @@ describe("createTranslator", () => {
     const chinese = createTranslator("zh-CN");
     expect(chinese.locale).toBe("zh-CN");
     expect(chinese.t("nav.inventory")).toBe("库存");
-    expect(chinese.t("about.version", { version: "0.1.0" })).toBe(
-      "版本 0.1.0",
-    );
+    expect(chinese.t("about.version", { version: "0.1.0" })).toBe("版本 0.1.0");
     expect(chinese.t("common.details")).toBe("详情");
   });
 

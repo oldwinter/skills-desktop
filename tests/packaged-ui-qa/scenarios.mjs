@@ -290,6 +290,7 @@ export async function runPackagedUiQa({
           "Comparison",
           "Collections",
           "Targets",
+          "Publish",
           "Recovery",
           "About",
         ])
@@ -463,12 +464,12 @@ export async function runPackagedUiQa({
         .map((button) => button.getAttribute("aria-label"));
       const english = [...document.querySelectorAll("nav button, h1, h2, .page-heading p")]
         .map((element) => element.textContent?.trim() ?? "")
-        .filter((text) => /^(Inventory|Comparison|Collections|Recovery|About)$/.test(text));
+        .filter((text) => /^(Inventory|Comparison|Collections|Publish|Recovery|About)$/.test(text));
       return { english, nav, preferencesHeading: document.getElementById("preferences-heading")?.textContent ?? "" };
     })()`);
     if (
       JSON.stringify(chinese.nav) !==
-        JSON.stringify(["库存", "对比", "合集", "Targets", "恢复", "关于"]) ||
+        JSON.stringify(["库存", "对比", "合集", "Targets", "发布", "恢复", "关于"]) ||
       chinese.english.length > 0 ||
       chinese.preferencesHeading !== "语言与外观"
     ) {

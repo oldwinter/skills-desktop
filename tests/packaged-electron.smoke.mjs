@@ -522,9 +522,12 @@ try {
       JSON.stringify([
         "about",
         "cancelInventory",
+        "choosePublicationSource",
         "compareTargets",
         "createTarget",
         "deleteTarget",
+        "discardPublication",
+        "exportPublication",
         "getSnapshot",
         "handoffSkillsSh",
         "importPackage",
@@ -534,12 +537,15 @@ try {
         "prepareCollectionAcrossTargets",
         "prepareComparison",
         "prepareMutation",
+        "preparePublication",
         "reconcileMutation",
+        "reconcilePublication",
         "refreshInventory",
         "repairTarget",
         "requestCancellationReview",
         "requestCollectionReview",
         "requestHostTrustReview",
+        "requestPublicationReview",
         "requestReview",
         "subscribe",
         "subscribeReviewWindowClosed",
@@ -595,6 +601,7 @@ try {
       "navigate.collections",
       "navigate.comparison",
       "navigate.inventory",
+      "navigate.publish",
       "navigate.recovery",
       "navigate.targets",
       "update.check",
@@ -620,7 +627,7 @@ try {
     !applicationMenu.viewLabels.includes("Refresh Inventory") ||
     !applicationMenu.viewLabels.includes("Go to Inventory") ||
     applicationMenu.refreshShortcut !== "Control+R" ||
-    applicationMenu.aboutShortcut !== "Control+6"
+    applicationMenu.aboutShortcut !== "Control+7"
   ) {
     throw new Error(
       `Packaged application menu failed: ${JSON.stringify(applicationMenu)}`,
@@ -1226,6 +1233,7 @@ try {
         "Comparison",
         "Collections",
         "Targets",
+        "Publish",
         "Recovery",
         "About",
       ]) ||

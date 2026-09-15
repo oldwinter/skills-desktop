@@ -144,6 +144,36 @@ const bridge: DesktopBridge = Object.freeze({
       await invoke("workspace:package:import"),
     );
   },
+  async choosePublicationSource() {
+    return workspaceRequestResultSchema.parse(
+      await invoke("workspace:publication:choose-source"),
+    );
+  },
+  async exportPublication() {
+    return workspaceRequestResultSchema.parse(
+      await invoke("workspace:publication:export"),
+    );
+  },
+  async preparePublication(remote: string, branch: string) {
+    return workspaceRequestResultSchema.parse(
+      await invoke("workspace:publication:prepare", remote, branch),
+    );
+  },
+  async requestPublicationReview(planId: string) {
+    return workspaceRequestResultSchema.parse(
+      await invoke("workspace:publication:review-request", planId),
+    );
+  },
+  async discardPublication(planId: string) {
+    return workspaceRequestResultSchema.parse(
+      await invoke("workspace:publication:discard", planId),
+    );
+  },
+  async reconcilePublication() {
+    return workspaceRequestResultSchema.parse(
+      await invoke("workspace:publication:reconcile"),
+    );
+  },
   async inspectSource(targetId: string, source: string) {
     return workspaceRequestResultSchema.parse(
       await invoke("workspace:source:inspect", targetId, source),

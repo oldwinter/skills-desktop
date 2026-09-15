@@ -177,7 +177,9 @@ describe("Trusted Review surface", () => {
     expect(screen.getByText(`sha256:${"a".repeat(64)}`)).toBeInTheDocument();
     expect(screen.getByText(`sha256:${"e".repeat(64)}`)).toBeInTheDocument();
     expect(screen.getAllByText("Details")[0]).toBeInTheDocument();
-    expect(screen.queryByText("2026-08-22T05:00:00.000Z")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("2026-08-22T05:00:00.000Z"),
+    ).not.toBeInTheDocument();
     expect(screen.getByText("Collection author")).toBeInTheDocument();
     expect(screen.getByText("Reviewer B")).toBeInTheDocument();
     expect(
@@ -638,7 +640,9 @@ describe("Trusted Review surface", () => {
       await screen.findByRole("heading", { name: "复核更新" }),
     ).toBeInTheDocument();
     expect(document.documentElement.lang).toBe("zh-CN");
-    expect(document.documentElement.dataset["appearance"]).toBe("high-contrast");
+    expect(document.documentElement.dataset["appearance"]).toBe(
+      "high-contrast",
+    );
     const effect = screen.getByTestId("review-harness-effect");
     expect(effect).toHaveTextContent("影响所有由 CLI 管理的 Harness");
     expect(effect).toHaveTextContent("该 Target 绑定 amp, codex。");
@@ -646,7 +650,9 @@ describe("Trusted Review surface", () => {
     expect(
       screen.getByText("npx skills@1.5.23 update tdd --project --yes"),
     ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "批准变更" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "批准变更" }),
+    ).toBeInTheDocument();
   });
 
   it("closes the dedicated window after a successful rejection", async () => {
@@ -759,6 +765,89 @@ describe("Trusted Review surface", () => {
     await waitFor(() => expect(approve).toHaveBeenCalledWith());
     expect(await screen.findByRole("status")).toHaveTextContent(
       "Host trust confirmed",
+    );
+  });
+
+  it("shows every fact the fast-forward push binds to and approves without any Git argument (#207)", async () => {
+    const approve = vi.fn(async () => ({
+      ok: true as const,
+      value: { operationId: "publish-op-1" },
+    }));
+    const digest = `sha256:${"d".repeat(64)}` as const;
+    const client: ReviewBridge = {
+      approve,
+      async getReview() {
+        return {
+          ok: true as const,
+          value: {
+            projection: {
+              expiresAt: "2026-09-15T10:11:00.000Z",
+              plan: {
+                base: { commit: "a".repeat(40), kind: "commit" as const },
+                branch: "main",
+                candidateCommit: "c".repeat(40),
+                createdAt: "2026-09-15T10:01:00.000Z",
+                expiresAt: "2026-09-15T10:11:00.000Z",
+                exporterVersion: 1 as const,
+                files: [
+                  {
+                    digest,
+                    path: ".well-known/agent-skills/hello/SKILL.md",
+                  },
+                  { digest, path: ".well-known/agent-skills/index.json" },
+                ],
+                id: "plan-1",
+                planDigest: `sha256:${"e".repeat(64)}` as const,
+                ref: "refs/heads/main",
+                remote: {
+                  host: "github.com",
+                  kind: "https" as const,
+                  url: "https://github.com/acme/skills.git",
+                },
+                schemaVersion: 1 as const,
+                skills: ["hello"],
+                treeDigest: `sha256:${"f".repeat(64)}` as const,
+              },
+              purpose: "publication-push" as const,
+              reviewId: "publish-review-1",
+            },
+            schemaVersion: 2 as const,
+            status: "pending" as const,
+          },
+        };
+      },
+      async reject() {
+        return {
+          ok: true as const,
+          value: { operationId: "publish-review-1" },
+        };
+      },
+    };
+    render(<ReviewSurface client={client} />);
+
+    expect(
+      await screen.findByRole("heading", { name: "Review Git publication" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("https://github.com/acme/skills.git"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("refs/heads/main")).toBeInTheDocument();
+    expect(screen.getByText("a".repeat(40))).toBeInTheDocument();
+    expect(screen.getByText("c".repeat(40))).toBeInTheDocument();
+    expect(
+      screen.getByText(".well-known/agent-skills/hello/SKILL.md"),
+    ).toBeInTheDocument();
+    expect(screen.getByText(`sha256:${"e".repeat(64)}`)).toBeInTheDocument();
+    expect(
+      screen.getByText(/no force, tags, hooks, or deletes/),
+    ).toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Approve fast-forward push" }),
+    );
+    await waitFor(() => expect(approve).toHaveBeenCalledWith());
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "Publication attempted",
     );
   });
 });

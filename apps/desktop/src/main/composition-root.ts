@@ -12,6 +12,14 @@ import {
 } from "./adapters/local-skills-process.js";
 import { createElectronReleaseDiagnosticsExporter } from "./adapters/electron-release-diagnostics.js";
 import { createElectronSkillpackPicker } from "./adapters/electron-skillpack-picker.js";
+import { createNodePublicationHost } from "./adapters/node-publication-host.js";
+import { createNodeWellKnownCodec } from "./adapters/node-well-known-codec.js";
+import { createSystemGitPublisher } from "./git/git-publisher.js";
+import {
+  createNodePublicationWorkspace,
+  createSpawnGitRunner,
+  sha256Hex,
+} from "./git/node-git-tools.js";
 import { assertAllowlistedSkillsShUrl } from "./application/skills-sh-handoff.js";
 import {
   createSshSkillsProcess,
@@ -123,6 +131,19 @@ export async function createCompositionRoot(options?: {
     officialCollectionCatalog: BUNDLED_OFFICIAL_COLLECTION_CATALOG,
     onReviewRequested: options?.onReviewRequested,
     preferences,
+    // ADR 0019 / ADR 0020: export-only needs no Git; publication runs system
+    // Git only inside an application-owned 0700 root with hardened config.
+    publication: {
+      codec: createNodeWellKnownCodec(),
+      host: createNodePublicationHost({ dialog }),
+      publisher: createSystemGitPublisher({
+        clock: () => new Date(),
+        environment: process.env,
+        runner: createSpawnGitRunner(),
+        sha256Hex,
+        workspace: createNodePublicationWorkspace(),
+      }),
+    },
     recoveryRecords,
     platform: process.platform,
     skillpackPicker: createElectronSkillpackPicker({ dialog }),

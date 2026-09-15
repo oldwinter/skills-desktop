@@ -252,6 +252,24 @@ function clientFor(
     async importPackage() {
       return { ok: true, value: { operationId: "import-1" } };
     },
+    async choosePublicationSource() {
+      return { ok: true, value: { operationId: "publication-1" } };
+    },
+    async exportPublication() {
+      return { ok: true, value: { operationId: "publication-1" } };
+    },
+    async preparePublication() {
+      return { ok: true, value: { operationId: "publication-1" } };
+    },
+    async requestPublicationReview() {
+      return { ok: true, value: { operationId: "publication-1" } };
+    },
+    async discardPublication() {
+      return { ok: true, value: { operationId: "publication-1" } };
+    },
+    async reconcilePublication() {
+      return { ok: true, value: { operationId: "publication-1" } };
+    },
     async inspectSource() {
       return { ok: true, value: { operationId: "inspection-1" } };
     },
@@ -3933,7 +3951,7 @@ describe("Local Target Inventory shell", () => {
     );
     expect(screen.getByRole("button", { name: "About" })).toHaveAttribute(
       "aria-keyshortcuts",
-      "Control+6",
+      "Control+7",
     );
     expect(screen.getByRole("button", { name: "Inventory" })).toHaveAttribute(
       "aria-keyshortcuts",

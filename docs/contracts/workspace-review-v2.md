@@ -168,3 +168,51 @@ Trusted Review titles the approval as an Imported Package and shows the
 import evidence in place of an Official review receipt; approval creates the
 same Mutation Guard and stop-on-failure execution without rollback. SSH
 Targets stay excluded as for every other Collection prepare.
+
+Publication (ADR 0019 / ADR 0020) is projected as an optional
+`publication` state on the Workspace Snapshot; a build without a
+main-owned publication host omits it and answers every publication request
+with `publication_unavailable`. The renderer never sees a path or a Git
+argument. `publication.choose-source` opens main's native folder dialog,
+reads every `<folder>/<skill>/**` regular file (no links, no dot-entries,
+exporter limits) and runs the deterministic well-known exporter; the
+Snapshot then carries `publication.source` as an opaque `grantId`, a display
+`label`, the sorted Skill names, `fileCount`, `treeDigest`, and
+`exporterVersion`. `publication.export` writes the exact tree into a new or
+empty folder chosen in a second main-owned dialog and invokes no Git
+(`publication.export` projection: `destinationLabel`, `fileCount`,
+`treeDigest`, `writtenAt`); a non-empty destination or a folder without
+Skills is `export_invalid`. `publication.prepare` carries exactly two user
+strings, `remote` and `branch`. Main sanitizes the remote to `https://`,
+loopback `http://`, `ssh://`, or `user@host:path` with no credentials,
+options, query, or other scheme (`remote_unsupported`), and the branch to one
+exact `refs/heads/*` name (`branch_unsupported`); a build without a
+`GitPublisher` answers `git_unavailable` while export-only keeps working. A
+request with any other field is `invalid_request`. Preparation runs system
+Git only inside an application-owned 0700 temporary root with hooks,
+signing, attributes, redirects, and every other transport disabled, and the
+Snapshot publishes the sealed `PublicationPlanV1` (`remote`, `branch`, `ref`,
+`base` as a commit or `unborn`, `candidateCommit`, every managed path with
+its digest, `treeDigest`, `skills`, `createdAt`, `expiresAt`, `planDigest`)
+as `publication.plan` with `phase: "planned"`.
+
+`publication.review.request` names a `planId` and opens a `publication-push`
+Trusted Review whose projection is the sealed plan and its expiry; an
+unknown or expired plan is `review_invalid`. Approval revalidates every byte
+against the plan, commits the durable Publication Guard through the single
+`publication.guard.replace` `DurableChange` (`publication-guard.json`,
+schema version 1, quarantined when corrupt or newer than the app), fetches
+the exact branch again, and pushes one exact fast-forward refspec with no
+force, lease, tags, hooks, or deletes. Drift, revalidation, or reachability
+failures before transport cause no push and release the Guard
+(`publication_drift`, `publication_invalid`, `remote_unreachable`). Exact
+remote-ref readback records `publication.lastOutcome` as `published`,
+`not-published`, `diverged`, or `uncertain`; an uncertain result (including
+Git dying mid-transport) retains the Guard as `publication.guard` with
+`phase: "uncertain"`, blocks another `publication.prepare`
+(`publication_guarded`), and survives restart. `publication.reconcile`
+performs readback only, never a second push, and clears the Guard on any
+known result. `publication.discard` releases the prepared root for the named
+plan; rejecting or closing the review does the same. Rejecting, closing, or
+shutting down never touches a user worktree: cleanup removes only the proven
+application-owned root.

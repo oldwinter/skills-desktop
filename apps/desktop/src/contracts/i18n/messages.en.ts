@@ -108,6 +108,24 @@ export const en = {
   "error.unauthorized": "You are not allowed to perform this operation.",
   "error.unsupported_schema":
     "The data format is not supported. Upgrade the app, then try again.",
+  "error.branch_unsupported":
+    "The branch name is not supported. Use one exact branch name such as main.",
+  "error.export_invalid":
+    "The Skills folder could not be exported. Check that each Skill folder has a valid SKILL.md and no links.",
+  "error.git_unavailable":
+    "System Git is unavailable. Install Git, or use export-only.",
+  "error.publication_drift":
+    "The remote branch moved since the plan was reviewed. Nothing was pushed; plan again.",
+  "error.publication_guarded":
+    "A prior publication has an uncertain result. Reconcile it before planning another push.",
+  "error.publication_invalid":
+    "The publication plan is no longer valid. Plan again.",
+  "error.publication_unavailable":
+    "Publication is unavailable in this session.",
+  "error.remote_unreachable":
+    "The remote could not be read. Check the remote and your network, then try again.",
+  "error.remote_unsupported":
+    "The remote is not supported. Use an https:// or ssh:// URL without credentials, or user@host:path.",
 
   "nav.workspaceNavigation": "Workspace navigation",
   "nav.primary": "Primary",
@@ -115,6 +133,7 @@ export const en = {
   "nav.comparison": "Comparison",
   "nav.collections": "Collections",
   "nav.targets": "Targets",
+  "nav.publish": "Publish",
   "nav.recovery": "Recovery",
   "nav.about": "About",
   "nav.pending.one": "{label}, {count} item pending",
@@ -675,4 +694,71 @@ export const en = {
   "review.mutation.workspace": "Workspace",
   "review.mutation.approveCancellation": "Approve cancellation",
   "review.mutation.approveMutation": "Approve mutation",
+  "review.publication.title": "Review Git publication",
+  "review.publication.remote": "Remote",
+  "review.publication.remoteKind": "Transport",
+  "review.publication.branch": "Exact branch",
+  "review.publication.base": "Reviewed base",
+  "review.publication.base.unborn": "Unborn branch (will be created)",
+  "review.publication.candidateCommit": "Candidate commit",
+  "review.publication.treeDigest": "Export tree digest",
+  "review.publication.planDigest": "Plan digest",
+  "review.publication.managedFiles": "Managed files",
+  "review.publication.fastForwardOnly":
+    "Approval fetches the exact branch again and pushes one fast-forward refspec with no force, tags, hooks, or deletes. Any remote drift cancels the push.",
+  "review.publication.approve": "Approve fast-forward push",
+  "review.publication.pushing": "Pushing",
+  "review.publication.settled":
+    "Publication attempted — see Publish for the recorded outcome",
+
+  "publish.title": "Publish",
+  "publish.subtitle":
+    "Export a deterministic .well-known/agent-skills tree from a Skills folder, then optionally publish it through isolated, guarded Git.",
+  "publish.unavailable": "Publication is unavailable in this session.",
+  "publish.source.heading": "1. Source folder",
+  "publish.source.body":
+    "Choose a folder whose sub-folders each contain a SKILL.md. The app reads the folder in main; the path never reaches this window.",
+  "publish.source.choose": "Choose Skills folder",
+  "publish.source.choosing": "Choosing",
+  "publish.source.none": "No folder chosen yet.",
+  "publish.source.chosenAt": "Chosen at",
+  "publish.source.fileCount.one": "{count} file",
+  "publish.source.fileCount.other": "{count} files",
+  "publish.export.heading": "2. Export-only",
+  "publish.export.body":
+    "Writes the exact tree into a new or empty folder and invokes no Git.",
+  "publish.export.action": "Export to folder",
+  "publish.export.exporting": "Exporting",
+  "publish.export.written": "Exported to {label} at {time}",
+  "publish.git.heading": "3. Publish through Git (optional)",
+  "publish.git.body":
+    "Only the remote text and one exact branch name leave this window. Main sanitizes both, prepares a candidate commit in an application-owned temporary root, and asks for a Trusted Review before any push.",
+  "publish.git.remote": "Remote",
+  "publish.git.remoteHint":
+    "https://host/path, ssh://[user@]host/path, or user@host:path. No credentials, options, or file: URLs.",
+  "publish.git.branch": "Branch",
+  "publish.git.plan": "Plan publication",
+  "publish.git.planning": "Preparing plan",
+  "publish.git.planReady": "Plan ready for review",
+  "publish.git.planExpires": "Plan expires at {time}",
+  "publish.git.review": "Open Trusted Review",
+  "publish.git.discard": "Discard plan",
+  "publish.git.pushing": "Pushing",
+  "publish.guard.heading": "Publication needs reconciliation",
+  "publish.guard.body":
+    "A push to {remote} ({branch}) ended with an uncertain result. Read the remote back before planning another push; nothing is pushed automatically.",
+  "publish.guard.reconcile": "Read remote back",
+  "publish.guard.reconciling": "Reading back",
+  "publish.guard.committedAt": "Guard committed at",
+  "publish.guard.lastReadback": "Last readback",
+  "publish.outcome.heading": "Last outcome",
+  "publish.outcome.published": "Published",
+  "publish.outcome.not-published": "Not published",
+  "publish.outcome.diverged": "Diverged",
+  "publish.outcome.uncertain": "Uncertain",
+  "publish.outcome.detail":
+    "{remote} · {branch} · candidate {commit} · recorded {time}",
+  "publish.outcome.observed": "Remote now points at {commit}",
+  "publish.outcome.observedAbsent": "Remote branch is absent",
+  "publish.outcome.observedUnknown": "Remote branch could not be read",
 } as const satisfies Readonly<Record<string, string>>;

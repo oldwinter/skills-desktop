@@ -97,6 +97,12 @@ function bridge(overrides: Partial<WorkspaceBridge> = {}): WorkspaceBridge {
     deleteTarget: ok,
     handoffSkillsSh: ok,
     importPackage: ok,
+    choosePublicationSource: ok,
+    exportPublication: ok,
+    preparePublication: ok,
+    requestPublicationReview: ok,
+    discardPublication: ok,
+    reconcilePublication: ok,
     inspectSource: ok,
     updatePreferences: ok,
     async getSnapshot() {

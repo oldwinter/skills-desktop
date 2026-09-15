@@ -8,6 +8,7 @@ import {
   Server,
   Settings2,
   Terminal,
+  UploadCloud,
   type LucideIcon,
 } from "lucide-react";
 
@@ -27,6 +28,7 @@ export type WorkspaceView =
   | "collections"
   | "comparison"
   | "inventory"
+  | "publish"
   | "recovery"
   | "targets";
 
@@ -41,6 +43,7 @@ const navigationItems: readonly {
   { view: "comparison", label: "nav.comparison", icon: MonitorCog },
   { view: "collections", label: "nav.collections", icon: LibraryBig },
   { view: "targets", label: "nav.targets", icon: Settings2 },
+  { view: "publish", label: "nav.publish", icon: UploadCloud },
   { view: "recovery", label: "nav.recovery", icon: LifeBuoy },
   { view: "about", label: "nav.about", icon: Info },
 ];
@@ -74,36 +77,38 @@ export function WorkspaceNavigation({
   return (
     <aside className="scope-rail" aria-label={t("nav.workspaceNavigation")}>
       <nav className="primary-nav" aria-label={t("nav.primary")}>
-        {navigationItems.map(({ icon: Icon, label: labelKey, view: itemView }) => {
-          const label = t(labelKey);
-          const pending = itemView === "recovery" ? recoveryCount : 0;
-          const accessibleLabel =
-            pending > 0 ? tc("nav.pending", pending, { label }) : label;
-          return (
-            <button
-              aria-current={view === itemView ? "page" : undefined}
-              aria-keyshortcuts={
-                menuCommandItem(applicationMenu, `navigate.${itemView}`)
-                  ?.ariaKeyShortcuts
-              }
-              aria-label={accessibleLabel}
-              className={`nav-item${view === itemView ? " nav-item--active" : ""}`}
-              data-nav-view={itemView}
-              key={itemView}
-              onClick={() => onViewChange(itemView)}
-              title={accessibleLabel}
-              type="button"
-            >
-              <Icon aria-hidden="true" size={17} />
-              <span>{label}</span>
-              {pending > 0 ? (
-                <span aria-hidden="true" className="nav-count">
-                  {pending}
-                </span>
-              ) : null}
-            </button>
-          );
-        })}
+        {navigationItems.map(
+          ({ icon: Icon, label: labelKey, view: itemView }) => {
+            const label = t(labelKey);
+            const pending = itemView === "recovery" ? recoveryCount : 0;
+            const accessibleLabel =
+              pending > 0 ? tc("nav.pending", pending, { label }) : label;
+            return (
+              <button
+                aria-current={view === itemView ? "page" : undefined}
+                aria-keyshortcuts={
+                  menuCommandItem(applicationMenu, `navigate.${itemView}`)
+                    ?.ariaKeyShortcuts
+                }
+                aria-label={accessibleLabel}
+                className={`nav-item${view === itemView ? " nav-item--active" : ""}`}
+                data-nav-view={itemView}
+                key={itemView}
+                onClick={() => onViewChange(itemView)}
+                title={accessibleLabel}
+                type="button"
+              >
+                <Icon aria-hidden="true" size={17} />
+                <span>{label}</span>
+                {pending > 0 ? (
+                  <span aria-hidden="true" className="nav-count">
+                    {pending}
+                  </span>
+                ) : null}
+              </button>
+            );
+          },
+        )}
       </nav>
 
       <section className="target-section" aria-labelledby="target-heading">
