@@ -583,7 +583,9 @@ export async function runPackagedUiQa({
         );
       }
       if (appearance === "high-contrast") {
-        // Not the dark RGB wait — only HC literals, after dark leftover #e8eaed.
+        // HC iteration only. Mirrors the dark RGB settle; does not wait for #e8eaed.
+        // #e8eaed pins are html[data-appearance=dark] or system+prefers-color-scheme:dark
+        // — neither matches after the HC attribute flip (no inline color).
         await page.waitFor(
           `(() => {
             if (document.documentElement.dataset.appearance !== "high-contrast") {
@@ -591,9 +593,25 @@ export async function runPackagedUiQa({
             }
             document.documentElement.offsetHeight;
             const span = document.querySelector(".nav-item--active > span");
-            return span !== null && getComputedStyle(span).color === "rgb(0, 0, 0)";
+            const pill = document.querySelector(".status-pill");
+            if (span === null || pill === null) return false;
+            const spanColor = getComputedStyle(span).color;
+            const pillColor = getComputedStyle(pill).color;
+            const pillBg = getComputedStyle(pill).backgroundColor;
+            const spanOk = spanColor === "rgb(0, 0, 0)";
+            const pillFgOk =
+              pillColor === "rgb(0, 77, 26)" ||
+              pillColor === "rgb(31, 31, 31)" ||
+              pillColor === "rgb(90, 58, 0)" ||
+              pillColor === "rgb(161, 0, 0)";
+            const pillBgOk =
+              pillBg === "rgb(220, 245, 227)" ||
+              pillBg === "rgb(242, 242, 242)" ||
+              pillBg === "rgb(255, 240, 194)" ||
+              pillBg === "rgb(255, 224, 224)";
+            return spanOk && pillFgOk && pillBgOk;
           })()`,
-          "high-contrast active nav ink settled",
+          "high-contrast appearance contrast pins settled",
           8_000,
           { stableMs: 50 },
         );
