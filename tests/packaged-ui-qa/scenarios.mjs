@@ -118,6 +118,14 @@ export function createPackagedUiQaScenarioError(
   failure.qaCheck = check;
   failure.qaDiagnostic = diagnostic;
   failure.qaStage = stage;
+  if (
+    cause !== null &&
+    typeof cause === "object" &&
+    "qaAxeViolations" in cause &&
+    Array.isArray(cause.qaAxeViolations)
+  ) {
+    failure.qaAxeViolations = cause.qaAxeViolations;
+  }
   return failure;
 }
 
@@ -150,14 +158,29 @@ async function scanWithAxe(page, axeSource, label) {
           id: violation.id,
           impact: violation.impact,
           nodes: violation.nodes.length,
-          samples: violation.nodes.slice(0, 6).map((node) => ({
-            target: node.target,
-            html: typeof node.html === "string" ? node.html.slice(0, 180) : "",
-            failureSummary:
-              typeof node.failureSummary === "string"
-                ? node.failureSummary.slice(0, 320)
-                : "",
-          })),
+          samples: violation.nodes.slice(0, 6).map((node) => {
+            const contrast = (node.any ?? []).find(
+              (check) => check?.id === "color-contrast",
+            );
+            const data =
+              contrast !== undefined &&
+              contrast.data !== null &&
+              typeof contrast.data === "object"
+                ? contrast.data
+                : {};
+            return {
+              target: node.target,
+              html: typeof node.html === "string" ? node.html.slice(0, 180) : "",
+              fgColor: typeof data.fgColor === "string" ? data.fgColor : "",
+              bgColor: typeof data.bgColor === "string" ? data.bgColor : "",
+              contrastRatio:
+                typeof data.contrastRatio === "number" ? data.contrastRatio : null,
+              failureSummary:
+                typeof node.failureSummary === "string"
+                  ? node.failureSummary.slice(0, 320)
+                  : "",
+            };
+          }),
         })),
       };
     })()`);
@@ -186,7 +209,7 @@ async function scanWithAxe(page, axeSource, label) {
       .sort()[0]}`;
     throw Object.assign(
       new Error(`Axe violations in ${label}: ${JSON.stringify(blocking)}`),
-      { qaDiagnostic: diagnostic },
+      { qaDiagnostic: diagnostic, qaAxeViolations: blocking },
     );
   }
   return result;

@@ -113,6 +113,68 @@ const allowedDiagnosticsByCheck = new Map([
   ],
 ]);
 
+const hexColor = /^#[0-9A-Fa-f]{3,8}$/;
+
+function sanitizeAxeViolations(value) {
+  if (!Array.isArray(value)) return undefined;
+  const cleaned = [];
+  for (const violation of value.slice(0, 4)) {
+    if (violation === null || typeof violation !== "object") continue;
+    const id = typeof violation.id === "string" ? violation.id.slice(0, 64) : "";
+    if (id.length === 0) continue;
+    const samples = [];
+    const rawSamples = Array.isArray(violation.samples) ? violation.samples : [];
+    for (const sample of rawSamples.slice(0, 6)) {
+      if (sample === null || typeof sample !== "object") continue;
+      const target = Array.isArray(sample.target)
+        ? sample.target
+            .filter((part) => typeof part === "string")
+            .map((part) => part.slice(0, 96))
+            .slice(0, 4)
+        : [];
+      const html =
+        typeof sample.html === "string"
+          ? sample.html
+              .replace(/https?:\/\/\S+/g, "")
+              .replace(/\/(?:Users|home|tmp)\/\S+/gi, "")
+              .slice(0, 160)
+          : "";
+      const fgColor =
+        typeof sample.fgColor === "string" && hexColor.test(sample.fgColor)
+          ? sample.fgColor
+          : undefined;
+      const bgColor =
+        typeof sample.bgColor === "string" && hexColor.test(sample.bgColor)
+          ? sample.bgColor
+          : undefined;
+      const contrastRatio =
+        typeof sample.contrastRatio === "number" &&
+        Number.isFinite(sample.contrastRatio)
+          ? sample.contrastRatio
+          : undefined;
+      samples.push({
+        ...(bgColor !== undefined ? { bgColor } : {}),
+        ...(contrastRatio !== undefined ? { contrastRatio } : {}),
+        ...(fgColor !== undefined ? { fgColor } : {}),
+        ...(html.length > 0 ? { html } : {}),
+        ...(target.length > 0 ? { target } : {}),
+      });
+    }
+    cleaned.push({
+      id,
+      ...(typeof violation.impact === "string"
+        ? { impact: violation.impact.slice(0, 32) }
+        : {}),
+      nodes:
+        typeof violation.nodes === "number" && Number.isFinite(violation.nodes)
+          ? violation.nodes
+          : samples.length,
+      ...(samples.length > 0 ? { samples } : {}),
+    });
+  }
+  return cleaned.length > 0 ? cleaned : undefined;
+}
+
 export function failureReceipt(error, fallbackStage = "unknown") {
   const proposedClass = error instanceof Error ? error.name : "Error";
   const proposedStage =
@@ -131,8 +193,14 @@ export function failureReceipt(error, fallbackStage = "unknown") {
     typeof proposedCheck === "string" && allowedFailureChecks.has(proposedCheck)
       ? proposedCheck
       : "unknown";
+  const axe = sanitizeAxeViolations(
+    error !== null && typeof error === "object" && "qaAxeViolations" in error
+      ? error.qaAxeViolations
+      : undefined,
+  );
   return {
     architecture: process.arch,
+    ...(axe !== undefined ? { axe } : {}),
     check,
     diagnostic:
       typeof proposedDiagnostic === "string" &&

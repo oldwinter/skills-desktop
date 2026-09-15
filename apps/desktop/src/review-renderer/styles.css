@@ -93,7 +93,7 @@
   button:focus-visible { outline: 3px solid Highlight; }
 }
 * { box-sizing: border-box; }
-html, body, #root { width: 100%; min-width: 320px; height: 100%; margin: 0; }
+html, body, #root { width: 100%; min-width: 320px; height: 100%; margin: 0; background: var(--canvas); }
 body { overflow: auto; }
 button { color: inherit; font: inherit; letter-spacing: 0; }
 button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
