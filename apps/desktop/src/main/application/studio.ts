@@ -9,12 +9,12 @@ import {
   type StudioValidation,
 } from "@skills-desktop/skills-runtime";
 
-import { MAX_STUDIO_GRANTS } from "../../contracts/workspace.js";
-import type {
-  PublicStudioDraft,
-  PublicStudioGrant,
-  PublicStudioState,
-  RendererError,
+import {
+  MAX_STUDIO_GRANTS,
+  type PublicStudioDraft,
+  type PublicStudioGrant,
+  type PublicStudioState,
+  type RendererError,
 } from "../../contracts/workspace.js";
 import {
   STUDIO_DRAFT_SCHEMA_VERSION,

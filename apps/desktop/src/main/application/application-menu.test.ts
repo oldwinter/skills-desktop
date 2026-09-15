@@ -48,12 +48,16 @@ describe("buildApplicationMenu", () => {
         "navigate.collections",
         "navigate.targets",
         "navigate.publish",
+        "navigate.studio",
         "navigate.recovery",
         "navigate.about",
         "update.check",
         "workspace.show",
       ] as const) {
-        expect(menuCommandItem(menu, command), `${platform} ${command}`).toBeDefined();
+        expect(
+          menuCommandItem(menu, command),
+          `${platform} ${command}`,
+        ).toBeDefined();
       }
       const nativeAbout = menuCommandItem(menu, "about.show");
       const aboutRole = menu.menus
@@ -81,8 +85,8 @@ describe("buildApplicationMenu", () => {
       ariaKeyShortcuts: "Control+R",
     });
     expect(menuCommandItem(linux, "navigate.about")).toMatchObject({
-      accelerator: "CmdOrCtrl+7",
-      ariaKeyShortcuts: "Control+7",
+      accelerator: "CmdOrCtrl+8",
+      ariaKeyShortcuts: "Control+8",
     });
     expect(menuCommandItem(linux, "update.check")?.accelerator).toBeUndefined();
     const accelerators = linux.menus
@@ -100,8 +104,14 @@ describe("buildApplicationMenu", () => {
     const en = buildApplicationMenu({ locale: "en", platform: "linux" });
     const zh = buildApplicationMenu({ locale: "zh-CN", platform: "linux" });
     expect(zh.locale).toBe("zh-CN");
-    const enLabels = en.menus.flatMap(({ items, label }) => [label, ...labelled(items)]);
-    const zhLabels = zh.menus.flatMap(({ items, label }) => [label, ...labelled(items)]);
+    const enLabels = en.menus.flatMap(({ items, label }) => [
+      label,
+      ...labelled(items),
+    ]);
+    const zhLabels = zh.menus.flatMap(({ items, label }) => [
+      label,
+      ...labelled(items),
+    ]);
     expect(zhLabels).toHaveLength(enLabels.length);
     for (const label of [...enLabels, ...zhLabels]) {
       expect(label).not.toMatch(/^(menu|nav|app)\./);
@@ -139,7 +149,10 @@ describe("buildApplicationMenu", () => {
         ...menu,
         menus: menu.menus.map((topLevel) =>
           topLevel.id === "view"
-            ? { ...topLevel, items: [...topLevel.items, { ...refresh, id: "dup" }] }
+            ? {
+                ...topLevel,
+                items: [...topLevel.items, { ...refresh, id: "dup" }],
+              }
             : topLevel,
         ),
       }).success,
@@ -158,7 +171,9 @@ describe("ariaKeyShortcutsFor", () => {
     expect(ariaKeyShortcutsFor("CmdOrCtrl+Shift+R", "darwin")).toBe(
       "Meta+Shift+R",
     );
-    expect(ariaKeyShortcutsFor("CommandOrControl+1", "win32")).toBe("Control+1");
+    expect(ariaKeyShortcutsFor("CommandOrControl+1", "win32")).toBe(
+      "Control+1",
+    );
     expect(ariaKeyShortcutsFor("Ctrl+Alt+Delete", "linux")).toBe(
       "Control+Alt+Delete",
     );

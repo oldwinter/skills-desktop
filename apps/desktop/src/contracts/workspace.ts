@@ -1559,6 +1559,15 @@ export type PublicPublicationGuard = z.infer<
   typeof publicPublicationGuardSchema
 >;
 export type PublicStudioState = z.infer<typeof publicStudioStateSchema>;
+export type PublicStudioValidation = z.infer<typeof studioValidationSchema>;
+export type PublicStudioFinding = PublicStudioValidation["findings"][number];
+export type PublicStudioPreviewBlock = z.infer<
+  typeof studioPreviewSchema
+>["blocks"][number];
+export type PublicStudioPreviewInline = Extract<
+  PublicStudioPreviewBlock,
+  { kind: "paragraph" }
+>["children"][number];
 export type PublicStudioGrant = z.infer<typeof publicStudioGrantSchema>;
 export type PublicStudioDraft = z.infer<typeof publicStudioDraftSchema>;
 export type PublicStudioPreview = z.infer<typeof publicStudioPreviewSchema>;

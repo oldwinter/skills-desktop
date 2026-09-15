@@ -51,6 +51,7 @@ import { PreferencesPanel } from "../preferences/PreferencesPanel.js";
 import { ComparisonView } from "../comparison/ComparisonView.js";
 import { CollectionsView } from "../collections/CollectionsView.js";
 import { PublishView } from "../publish/PublishView.js";
+import { StudioView } from "../studio/StudioView.js";
 import { TargetsView } from "../targets/TargetsView.js";
 import {
   HarnessSubsetControl,
@@ -560,6 +561,7 @@ function InventoryWorkspace({
       "navigate.inventory": () => navigate("inventory"),
       "navigate.publish": () => navigate("publish"),
       "navigate.recovery": () => navigate("recovery"),
+      "navigate.studio": () => navigate("studio"),
       "navigate.targets": () => navigate("targets"),
       "update.check": () => {
         navigate("about");
@@ -1788,6 +1790,8 @@ function InventoryWorkspace({
           <CollectionsView client={client} snapshot={snapshot} />
         ) : view === "publish" ? (
           <PublishView client={client} publication={snapshot.publication} />
+        ) : view === "studio" ? (
+          <StudioView client={client} studio={snapshot.studio} />
         ) : view === "about" ? (
           <AboutView client={client.about}>
             <PreferencesPanel

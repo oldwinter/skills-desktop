@@ -216,3 +216,46 @@ known result. `publication.discard` releases the prepared root for the named
 plan; rejecting or closing the review does the same. Rejecting, closing, or
 shutting down never touches a user worktree: cleanup removes only the proven
 application-owned root.
+
+Studio authoring (ADR 0018) is Local-only and projects `studio` on the
+Workspace Snapshot; a build without a Studio module omits it and answers
+every `studio.*` request with `studio_unavailable`, while a build with a Draft
+store but no filesystem host publishes `studio.available: false`, keeps
+Drafts working, and refuses folder grants and export. The renderer never
+holds a path: `studio.open` runs main's native directory dialog, main
+canonicalizes the root and observes it without following links, and the
+Snapshot carries an opaque, purpose-bound (`author`) Filesystem Grant as
+`studio.grants[]` with a display `label`, `grantedAt`, and a `validation`
+projection (`profileVersion`, `ok`, `name`, `description`, `fileCount`,
+`totalBytes`, and `findings[]` of stable `code`, `severity`, root-relative
+`path`, and optional `line`, never raw content). A grant belongs to the
+endpoint that opened it: `studio.validate` and `studio.release` from another
+endpoint, after release, or after that document is torn down are
+`studio_grant_invalid`, and grants never persist across restart. The static
+validator profile (version 1) fails closed on symbolic links, hard links,
+special files, traversal segments, invalid or case-conflicting paths,
+over-limit files or Skills, missing or malformed `SKILL.md`, a frontmatter
+name that is invalid or disagrees with the folder, and Markdown links that
+escape the Skill, use a non-`http(s)`/`mailto` scheme, or do not resolve;
+raw HTML is a warning because preview renders it as inert text.
+
+Drafts are one-record-per-file (`studio-drafts/<id>.json`, schema version 1)
+with compare-and-swap on `revision`: `studio.draft.create` (optionally
+seeded from a granted folder's `SKILL.md`), `studio.draft.save` with
+`expectedRevision` and `skillMd`, and `studio.draft.delete` with
+`expectedRevision`. A stale revision is `studio_draft_conflict` and never
+overwrites; an oversized or malformed record is `studio_draft_invalid`. Each
+`studio.drafts[]` entry projects `id`, `name`, `revision`, `skillMd`,
+timestamps, and its `validation`; a corrupt, unreadable, or newer record is
+quarantined on its own at restore and listed in `studio.draftFailures[]` by
+id and reason only. `studio.preview` publishes `studio.preview` as a closed
+semantic block vocabulary (headings, paragraphs, lists, quotes, fenced code,
+rules; inline text, emphasis, strong, code, link and image targets as inert
+text) bounded by a block budget with `truncated`; there is no HTML, plugin,
+resource fetch, or navigation. `studio.export` refuses a Draft with any error
+finding (`studio_validation_failed`), opens a second main-owned dialog for
+the parent folder, writes an owned sibling temporary tree, verifies every
+byte, flushes, and commits by rename into `<parent>/<name>` only when that
+path does not exist; any failure removes only the temporary tree and is
+`studio_export_failed`. The Snapshot records `studio.lastExport` as
+`destinationLabel`, `name`, `fileCount`, and `writtenAt`.

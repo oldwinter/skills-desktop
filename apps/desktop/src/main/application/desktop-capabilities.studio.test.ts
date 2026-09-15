@@ -115,6 +115,13 @@ async function createFixture(options: {
   return { attach, capabilities, workspace: attach("workspace-1") };
 }
 
+type Endpoint = ReturnType<Awaited<ReturnType<typeof createFixture>>["attach"]>;
+
+async function studioOf(endpoint: Endpoint) {
+  const snapshot = await endpoint.snapshot();
+  return "studio" in snapshot ? snapshot.studio : undefined;
+}
+
 const open = { type: "studio.open", version: 2 } as const;
 
 describe("DesktopCapabilities Studio contract (ADR 0018)", () => {
@@ -184,7 +191,7 @@ describe("DesktopCapabilities Studio contract (ADR 0018)", () => {
       }),
     ).toEqual({ ok: true, value: { operationId: "op-2" } });
     fixture.workspace.teardown();
-    expect((await other.snapshot()).studio?.grants).toEqual([]);
+    expect((await studioOf(other))?.grants).toEqual([]);
   });
 
   it("keeps Drafts revisioned with compare-and-swap and exports only valid ones", async () => {
@@ -200,8 +207,7 @@ describe("DesktopCapabilities Studio contract (ADR 0018)", () => {
         version: 2,
       }),
     ).toEqual({ ok: true, value: { operationId: "op-1" } });
-    let snapshot = await fixture.workspace.snapshot();
-    expect(snapshot.studio?.drafts).toMatchObject([
+    expect((await studioOf(fixture.workspace))?.drafts).toMatchObject([
       { id: "draft-1", revision: 1 },
     ]);
 
@@ -248,8 +254,7 @@ describe("DesktopCapabilities Studio contract (ADR 0018)", () => {
         version: 2,
       }),
     ).toEqual({ ok: true, value: { operationId: "op-4" } });
-    snapshot = await fixture.workspace.snapshot();
-    expect(snapshot.studio?.preview).toMatchObject({
+    expect((await studioOf(fixture.workspace))?.preview).toMatchObject({
       draftId: "draft-1",
       preview: { blocks: [{ kind: "heading", level: 1 }] },
       revision: 3,
@@ -264,8 +269,8 @@ describe("DesktopCapabilities Studio contract (ADR 0018)", () => {
     expect(studioHost.exports).toEqual([
       { name: "hello", parent: "/private/out", paths: ["SKILL.md"] },
     ]);
-    snapshot = await fixture.workspace.snapshot();
-    expect(snapshot.studio?.lastExport).toMatchObject({
+    const snapshot = await fixture.workspace.snapshot();
+    expect((await studioOf(fixture.workspace))?.lastExport).toMatchObject({
       destinationLabel: "out",
       draftId: "draft-1",
       name: "hello",
@@ -281,7 +286,7 @@ describe("DesktopCapabilities Studio contract (ADR 0018)", () => {
       ids: ["draft-1", "op-1"],
       studio: { drafts: createMemoryStudioDraftRecords() },
     });
-    expect((await fixture.workspace.snapshot()).studio).toMatchObject({
+    expect(await studioOf(fixture.workspace)).toMatchObject({
       available: false,
     });
     expect(await fixture.workspace.request(open)).toMatchObject({

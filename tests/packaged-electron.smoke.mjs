@@ -524,33 +524,41 @@ try {
         "cancelInventory",
         "choosePublicationSource",
         "compareTargets",
+        "createStudioDraft",
         "createTarget",
+        "deleteStudioDraft",
         "deleteTarget",
         "discardPublication",
         "exportPublication",
+        "exportStudioDraft",
         "getSnapshot",
         "handoffSkillsSh",
         "importPackage",
         "inspectSource",
         "menu",
+        "openStudioFolder",
         "prepareCollection",
         "prepareCollectionAcrossTargets",
         "prepareComparison",
         "prepareMutation",
         "preparePublication",
+        "previewStudioDraft",
         "reconcileMutation",
         "reconcilePublication",
         "refreshInventory",
+        "releaseStudioGrant",
         "repairTarget",
         "requestCancellationReview",
         "requestCollectionReview",
         "requestHostTrustReview",
         "requestPublicationReview",
         "requestReview",
+        "saveStudioDraft",
         "subscribe",
         "subscribeReviewWindowClosed",
         "updatePreferences",
         "updateTarget",
+        "validateStudioGrant",
       ]) ||
     JSON.stringify(rendererBoundary.aboutBridgeKeys) !==
       JSON.stringify([
@@ -603,6 +611,7 @@ try {
       "navigate.inventory",
       "navigate.publish",
       "navigate.recovery",
+      "navigate.studio",
       "navigate.targets",
       "update.check",
       "workspace.show",
@@ -627,7 +636,7 @@ try {
     !applicationMenu.viewLabels.includes("Refresh Inventory") ||
     !applicationMenu.viewLabels.includes("Go to Inventory") ||
     applicationMenu.refreshShortcut !== "Control+R" ||
-    applicationMenu.aboutShortcut !== "Control+7"
+    applicationMenu.aboutShortcut !== "Control+8"
   ) {
     throw new Error(
       `Packaged application menu failed: ${JSON.stringify(applicationMenu)}`,
@@ -1234,6 +1243,7 @@ try {
         "Collections",
         "Targets",
         "Publish",
+        "Studio",
         "Recovery",
         "About",
       ]) ||
