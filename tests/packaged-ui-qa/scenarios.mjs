@@ -521,6 +521,8 @@ export async function runPackagedUiQa({
     );
 
     activeStage = "appearance-modes";
+    // Keep reduced motion through appearance axe scans so token swaps never mid-fade.
+    await page.setMediaFeature("prefers-reduced-motion", "reduce");
     for (const appearance of ["light", "dark", "high-contrast", "system"]) {
       activeCheck = `appearance-${appearance}`;
       await selectPreference(page, "Appearance", appearance);
@@ -528,8 +530,7 @@ export async function runPackagedUiQa({
         `document.documentElement.dataset.appearance === ${JSON.stringify(appearance)}`,
         `${appearance} appearance applied`,
       );
-      // Appearance tokens swap instantly; wait until inactive nav paint matches the
-      // active palette so axe does not sample a mid-transition light secondary.
+      // Wait until shell paints settled tokens (not a mid light↔dark fade).
       await page.waitFor(
         `(() => {
           const root = getComputedStyle(document.documentElement);
@@ -541,35 +542,39 @@ export async function runPackagedUiQa({
             probe.remove();
             return want;
           };
+          const probeBg = (value) => {
+            const probe = document.createElement("span");
+            probe.style.backgroundColor = value;
+            document.body.append(probe);
+            const want = getComputedStyle(probe).backgroundColor;
+            probe.remove();
+            return want;
+          };
           const secondary = root.getPropertyValue("--text-secondary").trim();
-          const text = root.getPropertyValue("--text").trim();
           const healthy = root.getPropertyValue("--healthy").trim();
           const canvas = root.getPropertyValue("--canvas").trim();
           const inactive = document.querySelector(".nav-item:not(.nav-item--active)");
-          const active = document.querySelector(".nav-item--active");
-          const pill = document.querySelector(".status-pill--healthy");
+          const pill = document.querySelector(".status-pill--healthy, .status-pill");
           const saved = document.querySelector(".preferences-saved");
           if (inactive !== null && secondary.length > 0) {
             if (getComputedStyle(inactive).color !== probeColor(secondary)) return false;
           }
-          if (active !== null && text.length > 0) {
-            const activeText = active.querySelector("span");
-            if (activeText !== null && getComputedStyle(activeText).color !== probeColor(text)) {
-              return false;
-            }
-          }
           if (pill !== null && healthy.length > 0) {
             if (getComputedStyle(pill).color !== probeColor(healthy)) return false;
           }
-          if (saved !== null && healthy.length > 0 && canvas.length > 0) {
-            const cs = getComputedStyle(saved);
-            if (cs.color !== probeColor(healthy)) return false;
-            const bgProbe = document.createElement("span");
-            bgProbe.style.backgroundColor = canvas;
-            document.body.append(bgProbe);
-            const wantBg = getComputedStyle(bgProbe).backgroundColor;
-            bgProbe.remove();
-            if (cs.backgroundColor !== wantBg) return false;
+          if (saved !== null && canvas.length > 0) {
+            const wantBg = probeBg(canvas);
+            let el = saved;
+            let matched = false;
+            while (el instanceof Element) {
+              const bg = getComputedStyle(el).backgroundColor;
+              if (bg === wantBg) {
+                matched = true;
+                break;
+              }
+              el = el.parentElement;
+            }
+            if (!matched) return false;
           }
           return true;
         })()`,

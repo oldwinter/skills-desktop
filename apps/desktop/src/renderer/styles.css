@@ -191,17 +191,6 @@ code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; fo
 .header-status { justify-content: flex-end; }
 .status-pill { min-height: 28px; gap: 6px; padding: 4px 9px; border-radius: 999px; font-size: var(--font-size-meta); font-weight: 500; white-space: nowrap; }
 .status-pill--healthy { color: var(--healthy); background: var(--healthy-soft); }
-/* Pin healthy ink/soft under dark so axe never samples light tokens or window chrome. */
-:root[data-appearance="dark"] .status-pill--healthy {
-  color: #b6e2c1;
-  background-color: #102418;
-}
-@media (prefers-color-scheme: dark) {
-  :root[data-appearance="system"] .status-pill--healthy {
-    color: #b6e2c1;
-    background-color: #102418;
-  }
-}
 .status-pill--warning { color: var(--warning); background: var(--warning-soft); }
 .status-pill--danger { color: var(--danger); background: var(--danger-soft); }
 .status-pill--neutral { color: var(--text-secondary); background: var(--surface-muted); }
@@ -212,7 +201,7 @@ code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; fo
 .primary-nav { display: grid; gap: 2px; }
 .nav-item { width: 100%; min-height: 40px; gap: 10px; padding: 0 10px; color: var(--text-secondary); background: transparent; border: 0; border-radius: var(--radius-control); text-align: left; }
 .nav-item:not(:disabled):hover { background: var(--surface-hover); }
-.nav-item, .target-row, .text-button, .icon-button { transition: background-color 140ms ease, border-color 140ms ease, box-shadow 140ms ease; }
+.nav-item, .target-row, .text-button, .icon-button { transition: border-color 140ms ease, box-shadow 140ms ease; }
 /* Color must not transition across appearance tokens — mid-fade fails axe AA (e.g. light #5f6368 on dark #202124). */
 .nav-item > span, .nav-item > svg { color: inherit; }
 .nav-item--active,
@@ -372,16 +361,6 @@ code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; fo
   color: var(--healthy);
   background: var(--canvas);
   font-size: var(--font-size-meta);
-}
-:root[data-appearance="dark"] .preferences-saved {
-  color: #b6e2c1;
-  background-color: var(--canvas);
-}
-@media (prefers-color-scheme: dark) {
-  :root[data-appearance="system"] .preferences-saved {
-    color: #b6e2c1;
-    background-color: var(--canvas);
-  }
 }
 @media (max-width: 480px) { .preferences-grid { grid-template-columns: minmax(0, 1fr); } }
 
