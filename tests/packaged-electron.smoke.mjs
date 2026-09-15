@@ -531,6 +531,7 @@ try {
       "prepareMutation",
       "reconcileMutation",
       "refreshInventory",
+      "repairTarget",
       "requestCancellationReview",
       "requestCollectionReview",
       "requestHostTrustReview",
@@ -1351,6 +1352,39 @@ try {
     throw new Error("Packaged Linux claimed automatic update eligibility.");
   }
 } finally {
-  for (const child of activeChildren) child.kill("SIGKILL");
-  await rm(temporaryRoot, { force: true, recursive: true });
+  // Killed Chromium helpers may still be flushing profile files; a cleanup
+  // ENOTEMPTY must not replace the real failure, so retry briefly and never
+  // throw from here.
+  const survivors = [...activeChildren];
+  for (const child of survivors) child.kill("SIGKILL");
+  await Promise.all(
+    survivors.map(
+      (child) =>
+        new Promise((resolveExit) => {
+          if (child.exitCode !== null || child.signalCode !== null) {
+            resolveExit();
+            return;
+          }
+          const timer = setTimeout(resolveExit, 2_000);
+          child.once("exit", () => {
+            clearTimeout(timer);
+            resolveExit();
+          });
+        }),
+    ),
+  );
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    try {
+      await rm(temporaryRoot, { force: true, recursive: true });
+      break;
+    } catch (error) {
+      if (attempt === 4) {
+        console.warn(
+          `packaged smoke: temporary root not removed (${error?.code ?? "unknown"}): ${temporaryRoot}`,
+        );
+        break;
+      }
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, 200));
+    }
+  }
 }
