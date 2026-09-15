@@ -441,6 +441,25 @@ code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; fo
 .recovery-section .target-form { max-width: 72ch; padding-top: 4px; }
 .recovery-section .target-form small { color: var(--text-tertiary); font-size: var(--font-size-meta); }
 .publish-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
+.publish-actions .studio-draft-select { display: flex; align-items: center; gap: 8px; color: var(--text-tertiary); font-size: var(--font-size-meta); }
+.publish-actions .studio-draft-select select { min-width: 0; max-width: 360px; height: 40px; padding: 0 9px; color: var(--text); background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--radius-control); }
+.studio-grant-body, .studio-editor { display: grid; gap: 10px; min-width: 0; }
+.studio-grant-body .state-banner, .studio-editor .state-banner { margin: 0; }
+.studio-findings .recovery-item[data-severity="warning"] { color: var(--text-secondary); }
+.studio-findings .recovery-item[data-severity="error"] { color: var(--danger); }
+.studio-editor { max-width: 92ch; margin-top: 12px; }
+.studio-editor-field { display: grid; gap: 5px; color: var(--text-tertiary); font-size: var(--font-size-meta); }
+.studio-editor-textarea { min-height: 280px; padding: 10px; color: var(--text); background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--radius-control); font-family: var(--font-mono, ui-monospace, monospace); font-size: 13px; line-height: 1.5; resize: vertical; }
+.studio-editor-status { margin: 0; color: var(--text-tertiary); font-size: var(--font-size-meta); }
+.studio-preview { padding: 14px 16px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-panel); }
+.studio-preview h3 { margin: 0 0 8px; font-size: var(--font-size-meta); font-weight: 600; color: var(--text-tertiary); }
+.studio-preview-body { font-size: 14px; line-height: 1.55; overflow-wrap: anywhere; }
+.studio-preview-body h1, .studio-preview-body h2, .studio-preview-body h3, .studio-preview-body h4, .studio-preview-body h5, .studio-preview-body h6 { margin: 12px 0 6px; color: var(--text); }
+.studio-preview-body pre { padding: 10px; overflow: auto; background: var(--surface-muted, var(--surface)); border: 1px solid var(--line); border-radius: var(--radius-control); }
+.studio-preview-body blockquote { margin: 8px 0; padding-left: 12px; color: var(--text-secondary); border-left: 3px solid var(--line-strong); }
+.studio-preview-link { text-decoration: underline dotted; }
+.studio-preview-link small, .studio-preview-image { color: var(--text-tertiary); }
+.studio-preview-truncated { color: var(--text-tertiary); font-size: var(--font-size-meta); }
 .recovery-repair-choice { display: grid; gap: 5px; margin-top: 6px; color: var(--text-tertiary); font-size: var(--font-size-meta); }
 .recovery-repair-choice select { min-width: 0; max-width: 360px; height: 40px; padding: 0 9px; color: var(--text); background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--radius-control); }
 .recovery-empty { display: grid; justify-items: start; gap: 8px; max-width: 60ch; margin: 8px 20px 20px; padding: 20px; color: var(--text-secondary); background: var(--surface); border: 1px dashed var(--line-strong); border-radius: var(--radius-panel); }

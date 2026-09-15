@@ -13,6 +13,10 @@ import {
   SKILLS_DIALECT_ID,
   SOURCE_FAMILIES,
   sourceDescriptorV1Schema,
+  STUDIO_MAX_DRAFT_TEXT_LENGTH,
+  studioPreviewSchema,
+  studioValidationSchema,
+  WELL_KNOWN_LIMITS,
 } from "@skills-desktop/skills-runtime";
 
 import {
@@ -65,6 +69,12 @@ export const rendererErrorCodeSchema = z.enum([
   "source_unavailable",
   "source_unsupported",
   "stale_inventory",
+  "studio_draft_conflict",
+  "studio_draft_invalid",
+  "studio_export_failed",
+  "studio_grant_invalid",
+  "studio_unavailable",
+  "studio_validation_failed",
   "ssh_config_invalid",
   "target_not_found",
   "target_unavailable",
@@ -1013,6 +1023,145 @@ export const reconcilePublicationRequestSchema = z
   })
   .strict();
 
+/**
+ * Studio authoring (ADR 0018). The renderer holds opaque grant ids and Draft
+ * ids only: main owns the native directory dialogs, the canonical roots, the
+ * static validator, the structured preview, the Draft store, and the atomic
+ * export. Findings carry root-relative locations, never raw content.
+ */
+export const MAX_STUDIO_GRANTS = 8;
+
+export const publicStudioGrantSchema = z
+  .object({
+    grantedAt: z.string().datetime({ offset: true }),
+    id: z.string().min(1).max(256),
+    label: z.string().min(1).max(256),
+    purpose: z.literal("author"),
+    validation: studioValidationSchema,
+  })
+  .strict();
+
+export const publicStudioDraftSchema = z
+  .object({
+    createdAt: z.string().datetime({ offset: true }),
+    id: z.string().min(1).max(64),
+    name: z.string().max(WELL_KNOWN_LIMITS.maxSkillNameLength),
+    revision: z.number().int().positive(),
+    skillMd: z.string().max(STUDIO_MAX_DRAFT_TEXT_LENGTH),
+    updatedAt: z.string().datetime({ offset: true }),
+    validation: studioValidationSchema,
+  })
+  .strict();
+
+export const publicStudioPreviewSchema = z
+  .object({
+    draftId: z.string().min(1).max(64),
+    preview: studioPreviewSchema,
+    renderedAt: z.string().datetime({ offset: true }),
+    revision: z.number().int().positive(),
+  })
+  .strict();
+
+export const publicStudioExportSchema = z
+  .object({
+    destinationLabel: z.string().min(1).max(256),
+    draftId: z.string().min(1).max(64),
+    fileCount: z.number().int().positive(),
+    name: z.string().min(1).max(WELL_KNOWN_LIMITS.maxSkillNameLength),
+    writtenAt: z.string().datetime({ offset: true }),
+  })
+  .strict();
+
+export const publicStudioStateSchema = z
+  .object({
+    activeOperationId: z.string().min(1).max(256).nullable(),
+    available: z.boolean(),
+    /** Draft ids quarantined at restore; content is never surfaced. */
+    draftFailures: z
+      .array(
+        z
+          .object({
+            draftId: z.string().min(1).max(64),
+            reason: z.enum(["corrupt", "newer-schema", "unreadable"]),
+          })
+          .strict(),
+      )
+      .max(256),
+    drafts: z.array(publicStudioDraftSchema).max(32),
+    grants: z.array(publicStudioGrantSchema).max(MAX_STUDIO_GRANTS),
+    lastError: rendererErrorSchema.nullable(),
+    lastExport: publicStudioExportSchema.nullable(),
+    preview: publicStudioPreviewSchema.nullable(),
+  })
+  .strict();
+
+export const openStudioFolderRequestSchema = z
+  .object({
+    type: z.literal("studio.open"),
+    version: z.literal(WORKSPACE_PROTOCOL_VERSION),
+  })
+  .strict();
+
+export const releaseStudioGrantRequestSchema = z
+  .object({
+    grantId: z.string().min(1).max(256),
+    type: z.literal("studio.release"),
+    version: z.literal(WORKSPACE_PROTOCOL_VERSION),
+  })
+  .strict();
+
+export const validateStudioGrantRequestSchema = z
+  .object({
+    grantId: z.string().min(1).max(256),
+    type: z.literal("studio.validate"),
+    version: z.literal(WORKSPACE_PROTOCOL_VERSION),
+  })
+  .strict();
+
+export const createStudioDraftRequestSchema = z
+  .object({
+    /** When present, seeds the Draft from the granted folder's SKILL.md. */
+    grantId: z.string().min(1).max(256).optional(),
+    type: z.literal("studio.draft.create"),
+    version: z.literal(WORKSPACE_PROTOCOL_VERSION),
+  })
+  .strict();
+
+export const saveStudioDraftRequestSchema = z
+  .object({
+    draftId: z.string().min(1).max(64),
+    expectedRevision: z.number().int().positive(),
+    skillMd: z.string().max(STUDIO_MAX_DRAFT_TEXT_LENGTH),
+    type: z.literal("studio.draft.save"),
+    version: z.literal(WORKSPACE_PROTOCOL_VERSION),
+  })
+  .strict();
+
+export const deleteStudioDraftRequestSchema = z
+  .object({
+    draftId: z.string().min(1).max(64),
+    expectedRevision: z.number().int().positive(),
+    type: z.literal("studio.draft.delete"),
+    version: z.literal(WORKSPACE_PROTOCOL_VERSION),
+  })
+  .strict();
+
+export const previewStudioDraftRequestSchema = z
+  .object({
+    draftId: z.string().min(1).max(64),
+    type: z.literal("studio.preview"),
+    version: z.literal(WORKSPACE_PROTOCOL_VERSION),
+  })
+  .strict();
+
+export const exportStudioDraftRequestSchema = z
+  .object({
+    draftId: z.string().min(1).max(64),
+    type: z.literal("studio.export"),
+    version: z.literal(WORKSPACE_PROTOCOL_VERSION),
+  })
+  .strict();
+
 export const workspaceSnapshotSchema = z
   .object({
     blockedTargets: z
@@ -1021,6 +1170,7 @@ export const workspaceSnapshotSchema = z
       .optional(),
     preferences: publicPreferencesSchema.optional(),
     publication: publicPublicationStateSchema.optional(),
+    studio: publicStudioStateSchema.optional(),
     recovery: publicRecoveryStateSchema.optional(),
     skillsShHandoffs: z
       .array(publicSkillsShHandoffRecordSchema)
@@ -1352,6 +1502,14 @@ export const workspaceRequestSchema = z.discriminatedUnion("type", [
   requestPublicationReviewSchema,
   discardPublicationRequestSchema,
   reconcilePublicationRequestSchema,
+  openStudioFolderRequestSchema,
+  releaseStudioGrantRequestSchema,
+  validateStudioGrantRequestSchema,
+  createStudioDraftRequestSchema,
+  saveStudioDraftRequestSchema,
+  deleteStudioDraftRequestSchema,
+  previewStudioDraftRequestSchema,
+  exportStudioDraftRequestSchema,
 ]);
 
 export const workspaceRequestResultSchema = z.discriminatedUnion("ok", [
@@ -1400,6 +1558,20 @@ export type PublicPublicationOutcome = z.infer<
 export type PublicPublicationGuard = z.infer<
   typeof publicPublicationGuardSchema
 >;
+export type PublicStudioState = z.infer<typeof publicStudioStateSchema>;
+export type PublicStudioValidation = z.infer<typeof studioValidationSchema>;
+export type PublicStudioFinding = PublicStudioValidation["findings"][number];
+export type PublicStudioPreviewBlock = z.infer<
+  typeof studioPreviewSchema
+>["blocks"][number];
+export type PublicStudioPreviewInline = Extract<
+  PublicStudioPreviewBlock,
+  { kind: "paragraph" }
+>["children"][number];
+export type PublicStudioGrant = z.infer<typeof publicStudioGrantSchema>;
+export type PublicStudioDraft = z.infer<typeof publicStudioDraftSchema>;
+export type PublicStudioPreview = z.infer<typeof publicStudioPreviewSchema>;
+export type PublicStudioExport = z.infer<typeof publicStudioExportSchema>;
 export type PrepareCollectionRequest = z.infer<
   typeof prepareCollectionRequestSchema
 >;
@@ -1457,6 +1629,21 @@ export interface WorkspaceBridge {
   requestPublicationReview(planId: string): Promise<WorkspaceRequestResult>;
   discardPublication(planId: string): Promise<WorkspaceRequestResult>;
   reconcilePublication(): Promise<WorkspaceRequestResult>;
+  openStudioFolder(): Promise<WorkspaceRequestResult>;
+  releaseStudioGrant(grantId: string): Promise<WorkspaceRequestResult>;
+  validateStudioGrant(grantId: string): Promise<WorkspaceRequestResult>;
+  createStudioDraft(grantId?: string): Promise<WorkspaceRequestResult>;
+  saveStudioDraft(
+    draftId: string,
+    expectedRevision: number,
+    skillMd: string,
+  ): Promise<WorkspaceRequestResult>;
+  deleteStudioDraft(
+    draftId: string,
+    expectedRevision: number,
+  ): Promise<WorkspaceRequestResult>;
+  previewStudioDraft(draftId: string): Promise<WorkspaceRequestResult>;
+  exportStudioDraft(draftId: string): Promise<WorkspaceRequestResult>;
   inspectSource(
     targetId: string,
     source: string,

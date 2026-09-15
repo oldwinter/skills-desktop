@@ -5,6 +5,7 @@ import {
   LifeBuoy,
   ListFilter,
   MonitorCog,
+  PenLine,
   Server,
   Settings2,
   Terminal,
@@ -30,6 +31,7 @@ export type WorkspaceView =
   | "inventory"
   | "publish"
   | "recovery"
+  | "studio"
   | "targets";
 
 type TargetState = NonNullable<WorkspaceSnapshot["targets"]>[number];
@@ -44,6 +46,7 @@ const navigationItems: readonly {
   { view: "collections", label: "nav.collections", icon: LibraryBig },
   { view: "targets", label: "nav.targets", icon: Settings2 },
   { view: "publish", label: "nav.publish", icon: UploadCloud },
+  { view: "studio", label: "nav.studio", icon: PenLine },
   { view: "recovery", label: "nav.recovery", icon: LifeBuoy },
   { view: "about", label: "nav.about", icon: Info },
 ];

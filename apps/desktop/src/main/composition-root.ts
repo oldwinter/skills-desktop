@@ -13,6 +13,8 @@ import {
 import { createElectronReleaseDiagnosticsExporter } from "./adapters/electron-release-diagnostics.js";
 import { createElectronSkillpackPicker } from "./adapters/electron-skillpack-picker.js";
 import { createNodePublicationHost } from "./adapters/node-publication-host.js";
+import { createNodeStudioHost } from "./adapters/node-studio-host.js";
+import { createJsonStudioDraftRecords } from "./persistence/studio-draft-records.js";
 import { createNodeWellKnownCodec } from "./adapters/node-well-known-codec.js";
 import { createSystemGitPublisher } from "./git/git-publisher.js";
 import {
@@ -148,6 +150,15 @@ export async function createCompositionRoot(options?: {
     platform: process.platform,
     skillpackPicker: createElectronSkillpackPicker({ dialog }),
     skillsTargets,
+    // ADR 0018: Drafts live one-per-file under userData; folder grants are
+    // in-memory only and never survive restart.
+    studio: {
+      drafts: createJsonStudioDraftRecords({
+        directory: resolve(userData, "studio-drafts"),
+        id: randomUUID,
+      }),
+      host: createNodeStudioHost({ dialog }),
+    },
     v1LocalOnlyTargets: true,
   });
   await capabilities.initialize();

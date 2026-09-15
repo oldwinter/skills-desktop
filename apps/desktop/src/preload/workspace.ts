@@ -174,6 +174,55 @@ const bridge: DesktopBridge = Object.freeze({
       await invoke("workspace:publication:reconcile"),
     );
   },
+  async openStudioFolder() {
+    return workspaceRequestResultSchema.parse(
+      await invoke("workspace:studio:open"),
+    );
+  },
+  async releaseStudioGrant(grantId: string) {
+    return workspaceRequestResultSchema.parse(
+      await invoke("workspace:studio:release", grantId),
+    );
+  },
+  async validateStudioGrant(grantId: string) {
+    return workspaceRequestResultSchema.parse(
+      await invoke("workspace:studio:validate", grantId),
+    );
+  },
+  async createStudioDraft(grantId?: string) {
+    return workspaceRequestResultSchema.parse(
+      await invoke("workspace:studio:draft-create", grantId),
+    );
+  },
+  async saveStudioDraft(
+    draftId: string,
+    expectedRevision: number,
+    skillMd: string,
+  ) {
+    return workspaceRequestResultSchema.parse(
+      await invoke(
+        "workspace:studio:draft-save",
+        draftId,
+        expectedRevision,
+        skillMd,
+      ),
+    );
+  },
+  async deleteStudioDraft(draftId: string, expectedRevision: number) {
+    return workspaceRequestResultSchema.parse(
+      await invoke("workspace:studio:draft-delete", draftId, expectedRevision),
+    );
+  },
+  async previewStudioDraft(draftId: string) {
+    return workspaceRequestResultSchema.parse(
+      await invoke("workspace:studio:preview", draftId),
+    );
+  },
+  async exportStudioDraft(draftId: string) {
+    return workspaceRequestResultSchema.parse(
+      await invoke("workspace:studio:export", draftId),
+    );
+  },
   async inspectSource(targetId: string, source: string) {
     return workspaceRequestResultSchema.parse(
       await invoke("workspace:source:inspect", targetId, source),

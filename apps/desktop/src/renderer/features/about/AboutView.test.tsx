@@ -160,12 +160,8 @@ describe("About surface", () => {
     expect(
       screen.getByRole("button", { name: "Check for updates" }),
     ).toBeDisabled();
-    expect(
-      screen.getByText("2026-08-22T06:00:00.000Z"),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText("2026-08-23T06:00:00.000Z"),
-    ).toBeInTheDocument();
+    expect(screen.getByText("2026-08-22T06:00:00.000Z")).toBeInTheDocument();
+    expect(screen.getByText("2026-08-23T06:00:00.000Z")).toBeInTheDocument();
   });
 
   it("renders updater events as status only without install or restart commands", async () => {
@@ -203,13 +199,21 @@ describe("About surface", () => {
     render(<AboutView client={client} />);
     await screen.findByText("Ready to check");
 
-    act(() => publish?.({ ...idleSnapshot, state: { kind: "update-available" } }));
+    act(() =>
+      publish?.({ ...idleSnapshot, state: { kind: "update-available" } }),
+    );
     expect(screen.getByText("Update available")).toBeInTheDocument();
     expect(screen.getByText("Downloading the update")).toBeInTheDocument();
 
-    act(() => publish?.({ ...idleSnapshot, state: { kind: "update-downloaded" } }));
-    expect(screen.getByText("Update ready for next launch")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /install|restart/i })).toBeNull();
+    act(() =>
+      publish?.({ ...idleSnapshot, state: { kind: "update-downloaded" } }),
+    );
+    expect(
+      screen.getByText("Update ready for next launch"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /install|restart/i }),
+    ).toBeNull();
 
     act(() =>
       publish?.({
@@ -225,14 +229,14 @@ describe("About surface", () => {
       }),
     );
     const updateAlert = screen.getByRole("alert");
-    expect(updateAlert).toHaveTextContent("The update check could not complete. Try again later.");
+    expect(updateAlert).toHaveTextContent(
+      "The update check could not complete. Try again later.",
+    );
   });
 
   it("does not let the initial fetch overwrite a newer pushed snapshot", async () => {
     let resolveInitial:
-      | ((
-          result: Awaited<ReturnType<AboutBridge["getSnapshot"]>>,
-        ) => void)
+      | ((result: Awaited<ReturnType<AboutBridge["getSnapshot"]>>) => void)
       | undefined;
     let publish: ((snapshot: AboutUpdateSnapshot) => void) | undefined;
     const initialSnapshot: AboutUpdateSnapshot = {
@@ -319,7 +323,10 @@ describe("About surface", () => {
     };
     const requestRestart = vi.fn(async () => ({
       ok: true as const,
-      value: { ...snapshot, restart: { ...snapshot.restart, kind: "restarting" as const } },
+      value: {
+        ...snapshot,
+        restart: { ...snapshot.restart, kind: "restarting" as const },
+      },
     }));
     const exportDiagnostics = vi.fn(async () => ({
       ok: true as const,
@@ -340,7 +347,9 @@ describe("About surface", () => {
     };
     render(<AboutView client={client} />);
 
-    expect(await screen.findByText("Version 0.2.0 is ready")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Version 0.2.0 is ready"),
+    ).toBeInTheDocument();
     expect(screen.queryByText(/Candidate/)).not.toBeInTheDocument();
     expect(screen.queryByText(/Electron/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Restart to update" }));

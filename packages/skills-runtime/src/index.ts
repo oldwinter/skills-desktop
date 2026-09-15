@@ -7,3 +7,4 @@ export * from "./well-known.js";
 export * from "./skillpack.js";
 export * from "./source.js";
 export * from "./publication.js";
+export * from "./studio.js";

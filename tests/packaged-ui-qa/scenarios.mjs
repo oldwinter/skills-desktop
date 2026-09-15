@@ -76,7 +76,9 @@ async function selectPreference(page, labelText, value) {
     return true;
   })()`);
   if (!changed) {
-    throw new Error(`Preference could not be changed: ${labelText} -> ${value}`);
+    throw new Error(
+      `Preference could not be changed: ${labelText} -> ${value}`,
+    );
   }
 }
 
@@ -106,7 +108,9 @@ export function mutationOutcomeFocusDiagnostic(state) {
   if (state === undefined) return "focus-state-unavailable";
   if (state.documentFocused !== true) return "workspace-unfocused";
   if (state.targetPresent !== true) return "mutation-outcome-missing";
-  return state.targetActive === true ? "unknown" : "mutation-outcome-not-active";
+  return state.targetActive === true
+    ? "unknown"
+    : "mutation-outcome-not-active";
 }
 
 export function createPackagedUiQaScenarioError(
@@ -128,14 +132,20 @@ async function scanWithAxe(page, axeSource, label) {
       `${axeSource}; typeof window.axe?.run === "function"`,
     );
   } catch (cause) {
-    throw Object.assign(new Error("Axe installation evaluation failed.", { cause }), {
-      qaDiagnostic: "axe-install-evaluation-failed",
-    });
+    throw Object.assign(
+      new Error("Axe installation evaluation failed.", { cause }),
+      {
+        qaDiagnostic: "axe-install-evaluation-failed",
+      },
+    );
   }
   if (installed !== true) {
-    throw Object.assign(new Error(`Axe did not install in the ${label} renderer.`), {
-      qaDiagnostic: "axe-install-unavailable",
-    });
+    throw Object.assign(
+      new Error(`Axe did not install in the ${label} renderer.`),
+      {
+        qaDiagnostic: "axe-install-unavailable",
+      },
+    );
   }
   let result;
   try {
@@ -173,9 +183,9 @@ async function scanWithAxe(page, axeSource, label) {
       violation.impact === "serious" || violation.impact === "critical",
   );
   if (blocking.length > 0) {
-    const diagnostic = `axe-rule-${blocking
-      .map((violation) => violation.id)
-      .sort()[0]}`;
+    const diagnostic = `axe-rule-${
+      blocking.map((violation) => violation.id).sort()[0]
+    }`;
     throw Object.assign(
       new Error(`Axe violations in ${label}: ${JSON.stringify(blocking)}`),
       { qaDiagnostic: diagnostic },
@@ -291,6 +301,7 @@ export async function runPackagedUiQa({
           "Collections",
           "Targets",
           "Publish",
+          "Studio",
           "Recovery",
           "About",
         ])
@@ -450,7 +461,9 @@ export async function runPackagedUiQa({
       lang: document.documentElement.lang,
     })`);
     if (initialLocale.lang !== "en" || initialLocale.appearance !== "system") {
-      throw new Error(`Initial locale failed: ${JSON.stringify(initialLocale)}`);
+      throw new Error(
+        `Initial locale failed: ${JSON.stringify(initialLocale)}`,
+      );
     }
     activeCheck = "locale-switch-zh-cn";
     await selectPreference(page, "Language", "zh-CN");
@@ -469,7 +482,16 @@ export async function runPackagedUiQa({
     })()`);
     if (
       JSON.stringify(chinese.nav) !==
-        JSON.stringify(["库存", "对比", "合集", "Targets", "发布", "恢复", "关于"]) ||
+        JSON.stringify([
+          "库存",
+          "对比",
+          "合集",
+          "Targets",
+          "发布",
+          "Studio",
+          "恢复",
+          "关于",
+        ]) ||
       chinese.english.length > 0 ||
       chinese.preferencesHeading !== "语言与外观"
     ) {
@@ -494,8 +516,12 @@ export async function runPackagedUiQa({
     for (const appearance of ["light", "dark", "high-contrast", "system"]) {
       activeCheck = `appearance-${appearance}`;
       await selectPreference(page, "Appearance", appearance);
+      // Theme tokens swap instantly but `.nav-item`/`.text-button` colors
+      // transition over 140ms; scanning mid-transition reports stale
+      // light-mode foregrounds on the dark canvas as contrast failures.
       await page.waitFor(
-        `document.documentElement.dataset.appearance === ${JSON.stringify(appearance)}`,
+        `document.documentElement.dataset.appearance === ${JSON.stringify(appearance)} &&
+          document.getAnimations().every((animation) => animation.playState !== "running")`,
         `${appearance} appearance applied`,
       );
       const palette = await page.evaluate(`(() => {
@@ -513,7 +539,9 @@ export async function runPackagedUiQa({
         );
       }
       if (appearance === "dark" && palette.colorScheme !== "dark") {
-        throw new Error(`Dark mode color-scheme failed: ${JSON.stringify(palette)}`);
+        throw new Error(
+          `Dark mode color-scheme failed: ${JSON.stringify(palette)}`,
+        );
       }
       await scanWithAxe(page, axeSource, `${appearance} appearance`);
     }
@@ -662,7 +690,8 @@ export async function runPackagedUiQa({
       );
     } catch (error) {
       const state = await page
-        .evaluate(`(() => {
+        .evaluate(
+          `(() => {
           const action = [...document.querySelectorAll("button")].find(
             (button) => button.textContent?.trim() === "Open Trusted Review",
           );
@@ -672,7 +701,8 @@ export async function runPackagedUiQa({
             targetDisabled: action instanceof HTMLButtonElement && action.disabled,
             targetPresent: action instanceof HTMLButtonElement,
           };
-        })()`)
+        })()`,
+        )
         .catch(() => undefined);
       failureDiagnostic = reviewActionFocusDiagnostic(state);
       throw error;
@@ -753,14 +783,16 @@ export async function runPackagedUiQa({
       );
     } catch (error) {
       const state = await page
-        .evaluate(`(() => {
+        .evaluate(
+          `(() => {
           const outcome = document.querySelector("p.mutation-outcome");
           return {
             documentFocused: document.hasFocus(),
             targetActive: document.activeElement === outcome,
             targetPresent: outcome instanceof HTMLParagraphElement,
           };
-        })()`)
+        })()`,
+        )
         .catch(() => undefined);
       failureDiagnostic = mutationOutcomeFocusDiagnostic(state);
       throw error;
@@ -854,7 +886,10 @@ export async function runPackagedUiQa({
     if (session !== undefined) {
       const errors = rendererErrors(session.page, { errors: reviewErrors });
       if (errors.length > 0) {
-        if (scenarioFailure === undefined && finalizationFailures.length === 0) {
+        if (
+          scenarioFailure === undefined &&
+          finalizationFailures.length === 0
+        ) {
           failureCheck = "renderer-console";
           failureStage = "console-failures";
         }

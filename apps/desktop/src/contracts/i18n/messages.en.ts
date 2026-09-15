@@ -126,6 +126,17 @@ export const en = {
     "The remote could not be read. Check the remote and your network, then try again.",
   "error.remote_unsupported":
     "The remote is not supported. Use an https:// or ssh:// URL without credentials, or user@host:path.",
+  "error.studio_draft_conflict":
+    "The Draft changed elsewhere. Reload it before saving again.",
+  "error.studio_draft_invalid":
+    "The Draft could not be stored. Keep SKILL.md under the size limit.",
+  "error.studio_export_failed":
+    "The Skill could not be exported. Nothing partial was written; choose a folder where the Skill does not exist yet.",
+  "error.studio_grant_invalid":
+    "That folder is no longer open in this window. Open it again.",
+  "error.studio_unavailable": "Studio is unavailable in this session.",
+  "error.studio_validation_failed":
+    "Fix every validation error before continuing.",
 
   "nav.workspaceNavigation": "Workspace navigation",
   "nav.primary": "Primary",
@@ -134,6 +145,7 @@ export const en = {
   "nav.collections": "Collections",
   "nav.targets": "Targets",
   "nav.publish": "Publish",
+  "nav.studio": "Studio",
   "nav.recovery": "Recovery",
   "nav.about": "About",
   "nav.pending.one": "{label}, {count} item pending",
@@ -761,4 +773,77 @@ export const en = {
   "publish.outcome.observed": "Remote now points at {commit}",
   "publish.outcome.observedAbsent": "Remote branch is absent",
   "publish.outcome.observedUnknown": "Remote branch could not be read",
+
+  "studio.title": "Studio",
+  "studio.subtitle":
+    "Author Skills statically: open a folder as a grant, validate it, edit SKILL.md Drafts with autosave, preview inertly, and export atomically.",
+  "studio.unavailable": "Studio is unavailable in this session.",
+  "studio.hostUnavailable":
+    "Folder access and export are unavailable in this session; Drafts still save locally.",
+  "studio.folders.heading": "1. Open a Skill folder",
+  "studio.folders.body":
+    "Main opens the folder through a native dialog and hands this window an opaque grant. The path never reaches the renderer, and the grant expires when this window closes.",
+  "studio.folders.open": "Open Skill folder",
+  "studio.folders.none": "No folder is open.",
+  "studio.folders.grantedAt": "Opened {time}",
+  "studio.folders.revalidate": "Validate again",
+  "studio.folders.release": "Release",
+  "studio.folders.draftFrom": "New Draft from SKILL.md",
+  "studio.validation.ok": "Valid",
+  "studio.validation.errors.one": "{count} error",
+  "studio.validation.errors.other": "{count} errors",
+  "studio.validation.warnings.one": "{count} warning",
+  "studio.validation.warnings.other": "{count} warnings",
+  "studio.validation.fileCount.one": "{count} file",
+  "studio.validation.fileCount.other": "{count} files",
+  "studio.finding.case_conflict": "Paths differ only by letter case",
+  "studio.finding.description_invalid": "Description is blank",
+  "studio.finding.file_too_large": "File exceeds the size limit",
+  "studio.finding.frontmatter_invalid": "SKILL.md frontmatter is invalid",
+  "studio.finding.hardlink": "Hard-linked file",
+  "studio.finding.html_inert": "Raw HTML is shown as plain text in preview",
+  "studio.finding.link_escape": "Link points outside the Skill",
+  "studio.finding.link_unresolved": "Link target does not exist",
+  "studio.finding.link_unsafe": "Link uses a scheme Studio never follows",
+  "studio.finding.name_invalid":
+    "Skill name must be lowercase letters, digits, and single hyphens",
+  "studio.finding.name_mismatch": "Frontmatter name must match the folder name",
+  "studio.finding.not_utf8": "File is not valid UTF-8",
+  "studio.finding.path_invalid": "Path uses unsupported characters or length",
+  "studio.finding.path_traversal": "Path contains a traversal segment",
+  "studio.finding.skill_md_missing": "SKILL.md is missing",
+  "studio.finding.skill_too_large": "Skill exceeds the total size limit",
+  "studio.finding.special_file": "Special file",
+  "studio.finding.symlink": "Symbolic link",
+  "studio.finding.too_many_files": "Skill has too many files",
+  "studio.drafts.heading": "2. Drafts",
+  "studio.drafts.body":
+    "Each Draft is its own versioned record. Autosave is compare-and-swap on the revision, so a change made elsewhere is reported instead of overwritten.",
+  "studio.drafts.new": "New Draft",
+  "studio.drafts.select": "Draft",
+  "studio.drafts.none": "No Drafts yet.",
+  "studio.drafts.untitled": "Untitled",
+  "studio.drafts.name": "Skill name",
+  "studio.drafts.revision": "Revision",
+  "studio.drafts.updatedAt": "Updated",
+  "studio.drafts.saving": "Saving",
+  "studio.drafts.saved": "Saved",
+  "studio.drafts.unsaved": "Unsaved changes",
+  "studio.drafts.conflict":
+    "This Draft changed elsewhere. Reload to continue from the latest revision.",
+  "studio.drafts.reload": "Reload",
+  "studio.drafts.delete": "Delete Draft",
+  "studio.drafts.quarantined.one":
+    "{count} Draft could not be read and was set aside.",
+  "studio.drafts.quarantined.other":
+    "{count} Drafts could not be read and were set aside.",
+  "studio.editor.label": "SKILL.md",
+  "studio.preview.heading": "Preview",
+  "studio.preview.show": "Preview",
+  "studio.preview.stale": "rendered from an earlier revision",
+  "studio.preview.image": "[image: {alt} ({target})]",
+  "studio.preview.truncated": "Preview truncated at the block limit.",
+  "studio.export.action": "Export Skill",
+  "studio.export.blocked": "Fix every validation error before exporting.",
+  "studio.export.written": "Exported {name} into {label} at {time}",
 } as const satisfies Readonly<Record<string, string>>;
