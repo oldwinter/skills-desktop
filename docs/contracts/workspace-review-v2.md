@@ -26,3 +26,13 @@ place, Target writes remain blocked, and Workspace v2 exposes the affected
 Target through `blockedTargets` so recovery UI can name it without treating it
 as executable authority. Stores newer than the current reader are likewise
 left byte-identical and write-blocked.
+
+The only repair is the typed `target.repair` request, which names one blocked
+Target and one pinned-registry harness. Main commits it as the closed
+`target.repair-legacy-harness` durable change: the legacy document is backed
+up verbatim, rewritten with the reviewed harness at the same legacy schema
+version, and migrated to v4 only once every Target resolves. A surviving
+Mutation Guard refuses the repair. Workspace v2 reports repairs that reached
+disk through `recovery.repairedTargets`, and `recovery.restartRequired` tells
+the renderer that Target authority is rebuilt on the next start rather than
+in place.

@@ -620,9 +620,32 @@ export const publicTargetStateSchema = z
   })
   .strict();
 
+/**
+ * Main-owned Recovery Center projection. Repairs that already reached durable
+ * storage but need a restart before the Target authority is rebuilt are listed
+ * here so the renderer can explain the next step without inventing one.
+ */
+export const publicRecoveryStateSchema = z
+  .object({
+    repairedTargets: z
+      .array(
+        z
+          .object({
+            harnessId: z.string().min(1).max(128),
+            id: targetIdSchema,
+            label: z.string().min(1).max(256),
+          })
+          .strict(),
+      )
+      .max(1_000),
+    restartRequired: z.boolean(),
+  })
+  .strict();
+
 export const workspaceSnapshotSchema = z
   .object({
     blockedTargets: z.array(blockedTargetDefinitionSchema).max(1_000).optional(),
+    recovery: publicRecoveryStateSchema.optional(),
     eventSequence: z.number().int().nonnegative(),
     comparison: publicComparisonSchema.nullable().optional(),
     collections: publicCollectionsStateSchema.optional(),
@@ -757,6 +780,20 @@ export const deleteTargetRequestSchema = z
   })
   .strict();
 
+/**
+ * Typed repair for a Target whose legacy singular harness could not be
+ * mapped during the v3 -> v4 migration. The renderer only names the blocked
+ * Target and the registry harness that replaces the unknown legacy value.
+ */
+export const repairTargetRequestSchema = z
+  .object({
+    harnessId: z.string().min(1).max(128),
+    targetId: targetIdSchema,
+    type: z.literal("target.repair"),
+    version: z.literal(WORKSPACE_PROTOCOL_VERSION),
+  })
+  .strict();
+
 export const openComparisonRequestSchema = z
   .object({
     leftTargetId: targetIdSchema,
@@ -859,6 +896,7 @@ export const workspaceRequestSchema = z.discriminatedUnion("type", [
   createTargetRequestSchema,
   updateTargetRequestSchema,
   deleteTargetRequestSchema,
+  repairTargetRequestSchema,
   openComparisonRequestSchema,
   prepareComparisonRequestSchema,
   prepareCollectionRequestSchema,
@@ -909,6 +947,7 @@ export type TargetDefinition = z.infer<typeof targetDefinitionSchema>;
 export type BlockedTargetDefinition = z.infer<
   typeof blockedTargetDefinitionSchema
 >;
+export type PublicRecoveryState = z.infer<typeof publicRecoveryStateSchema>;
 export type TargetDraft = z.infer<typeof targetDraftSchema>;
 export type WorkspaceRequest = z.infer<typeof workspaceRequestSchema>;
 export type WorkspaceRequestResult = z.infer<
@@ -944,6 +983,10 @@ export interface WorkspaceBridge {
     intent: MutationIntent,
   ): Promise<WorkspaceRequestResult>;
   reconcileMutation(targetId: string): Promise<WorkspaceRequestResult>;
+  repairTarget(
+    targetId: string,
+    harnessId: string,
+  ): Promise<WorkspaceRequestResult>;
   refreshInventory(targetId: string): Promise<WorkspaceRequestResult>;
   requestHostTrustReview(targetId: string): Promise<WorkspaceRequestResult>;
   requestCollectionReview(

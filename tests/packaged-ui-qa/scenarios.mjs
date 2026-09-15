@@ -265,6 +265,7 @@ export async function runPackagedUiQa({
           "Comparison",
           "Collections",
           "Targets",
+          "Recovery",
           "About",
         ])
     ) {

@@ -397,6 +397,28 @@ describe("Electron IPC sender authorization", () => {
       type: "target.create",
       version: 2,
     });
+    await expect(
+      handlers.get("workspace:target:repair")!(
+        authorizedEvent as never,
+        "epoch-1",
+        "00000000-0000-4000-8000-000000000024",
+        "claude-code",
+      ),
+    ).resolves.toMatchObject({ error: { code: "invalid_request" }, ok: false });
+    expect(session.request).toHaveBeenLastCalledWith({
+      harnessId: "claude-code",
+      targetId: "00000000-0000-4000-8000-000000000024",
+      type: "target.repair",
+      version: 2,
+    });
+    await expect(
+      handlers.get("workspace:target:repair")!(
+        hostileEvent as never,
+        "epoch-1",
+        "00000000-0000-4000-8000-000000000024",
+        "claude-code",
+      ),
+    ).resolves.toMatchObject({ error: { code: "unauthorized" }, ok: false });
 
     const reviewMainFrame = { url: "skills-desktop://review/index.html" };
     const reviewContents = {

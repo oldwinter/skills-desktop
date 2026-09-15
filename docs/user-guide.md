@@ -220,7 +220,21 @@ Inventory 是对当前 Target 一次只读 `npx skills list --json` 的归一化
 
 ---
 
-## 7. 常见问题
+## 7. Recovery（恢复）
+
+侧栏 **Recovery** 汇总需要你亲自做一个「有类型」动作的状态；有待处理项时导航上会显示数量。这里没有通用的「清除 / 重试」按钮，每一项只有一个明确动作：
+
+| 状态 | 含义 | 你能做什么 |
+| --- | --- | --- |
+| Reconciliation required | 某次已确认的变更结束时无法确定效果（进程被中断、超时等），Mutation Guard 仍然保留 | 到达原操作 deadline 后点 **Reconcile**，应用会重新观察一份 Fresh Inventory；单纯刷新不能解除 |
+| Blocked Target Definitions | 旧版本保存的 Target 写着当前 pinned 注册表不认识的 harness，迁移被挡住，Target 存储保持只读 | 为它选一个注册表里的 **Replacement harness** 再点 **Repair**；应用不会替你猜。原始文件会先备份，然后才改写 |
+| Restart required | 修复已经写入磁盘，但本次运行的 Target 权威还未重建 | 重启 Skills Desktop，修好的 Target 会回到 Targets 列表并推进 Generation |
+
+修复只改写那个被挡住的 Target；若同一个文件里还有别的未知 harness，会继续列在 Blocked 里，逐个修复即可。若该 Target 还挂着未完成的 Mutation Guard，Repair 会被拒绝，需先处理 Guard。
+
+---
+
+## 8. 常见问题
 
 **Q：和直接跑 `npx skills` 有什么区别？**  
 A：桌面端把 project+global 清单、对比、变更计划和确认做成可审阅流程；真正的 list/add/remove/update 仍委托给 `npx skills`。

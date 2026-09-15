@@ -70,6 +70,7 @@ code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; fo
 .nav-item:not(:disabled):hover { background: var(--surface-hover); }
 .nav-item, .target-row, .text-button, .icon-button { transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease, box-shadow 140ms ease; }
 .nav-item--active { color: var(--text); background: var(--surface-muted); font-weight: 500; }
+.nav-count { display: inline-grid; min-width: 20px; height: 20px; margin-left: auto; padding: 0 6px; place-items: center; color: var(--warning); background: var(--warning-soft); border-radius: 10px; font-size: var(--font-size-micro); font-weight: 600; }
 .nav-item:disabled { opacity: 0.52; }
 .target-section { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--line); }
 .target-section h2 { padding: 0 10px 8px; color: var(--text-tertiary); font-size: var(--font-size-meta); font-weight: 600; }
@@ -287,6 +288,21 @@ code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; fo
 .comparison-evidence-detail span, .comparison-evidence-detail code { min-width: 0; color: var(--text-secondary); overflow-wrap: anywhere; }
 
 .targets-workspace { grid-template-rows: auto auto minmax(0, 1fr); }
+.recovery-workspace { display: grid; grid-auto-rows: max-content; grid-column: 2 / -1; min-width: 0; min-height: 0; overflow: auto; }
+.recovery-section { padding: 0 20px 20px; }
+.recovery-section h2 { margin: 0 0 4px; font-size: var(--font-size-panel); font-weight: 600; }
+.recovery-section > p { max-width: 68ch; margin: 0 0 12px; color: var(--text-secondary); font-size: var(--font-size-meta); }
+.recovery-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.recovery-item { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; gap: 12px; padding: 12px 14px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-panel); }
+.recovery-item > svg { margin-top: 2px; color: var(--warning); }
+.recovery-item > div { display: grid; gap: 4px; min-width: 0; }
+.recovery-item strong { font-size: var(--font-size-ui); font-weight: 600; overflow-wrap: anywhere; }
+.recovery-item small { color: var(--text-tertiary); font-size: var(--font-size-meta); overflow-wrap: anywhere; }
+.recovery-repair-choice { display: grid; gap: 5px; margin-top: 6px; color: var(--text-tertiary); font-size: var(--font-size-meta); }
+.recovery-repair-choice select { min-width: 0; max-width: 360px; height: 40px; padding: 0 9px; color: var(--text); background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--radius-control); }
+.recovery-empty { display: grid; justify-items: start; gap: 8px; max-width: 60ch; margin: 8px 20px 20px; padding: 20px; color: var(--text-secondary); background: var(--surface); border: 1px dashed var(--line-strong); border-radius: var(--radius-panel); }
+.recovery-empty h2 { margin: 0; color: var(--text); font-size: var(--font-size-panel); font-weight: 600; }
+.recovery-empty p { margin: 0; font-size: var(--font-size-meta); }
 .target-list { min-width: 0; min-height: 0; overflow: auto; padding: 0 20px 20px; }
 .target-item { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(280px, 1fr) auto; align-items: center; gap: 18px; min-width: 0; padding: 14px 0; border-bottom: 1px solid var(--line); }
 .target-item:first-child { border-top: 1px solid var(--line); }
@@ -334,6 +350,8 @@ code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; fo
   .scope-rail { grid-row: 1 / span 2; }
   .evidence-list { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 16px; }
   .target-item { grid-template-columns: minmax(0, 1fr) auto; }
+  .recovery-item { grid-template-columns: auto minmax(0, 1fr); }
+  .recovery-item > .text-button { grid-column: 2; justify-self: start; }
   .target-item dl { grid-column: 1 / -1; }
 }
 
@@ -348,7 +366,7 @@ code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; fo
   .nav-item { width: auto; flex: 0 0 auto; }
   .target-section, .target-facts, .rail-version { display: none; }
   .inventory-workspace { display: block; overflow: visible; }
-  .about-workspace, .comparison-workspace, .collections-workspace, .targets-workspace { display: block; overflow: visible; }
+  .about-workspace, .comparison-workspace, .collections-workspace, .recovery-workspace, .targets-workspace { display: block; overflow: visible; }
   .about-content { width: auto; margin: 0 14px 24px; }
   .page-heading { padding: 16px 14px 10px; }
   .comparison-workspace .page-heading { flex-wrap: wrap; }
