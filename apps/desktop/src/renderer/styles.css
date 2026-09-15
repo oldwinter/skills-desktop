@@ -145,10 +145,14 @@
 }
 :root[data-appearance="light"] .nav-item,
 :root[data-appearance="high-contrast"] .nav-item { color: var(--text-secondary); }
-:root[data-appearance="light"] .nav-item--active,
-:root[data-appearance="high-contrast"] .nav-item--active { color: var(--text); }
 :root[data-appearance="light"] .nav-item > span,
 :root[data-appearance="high-contrast"] .nav-item > span { color: inherit; }
+:root[data-appearance="light"] .nav-item--active,
+:root[data-appearance="light"] .nav-item--active > span,
+:root[data-appearance="high-contrast"] .nav-item--active,
+:root[data-appearance="high-contrast"] .nav-item--active > span {
+  color: var(--text);
+}
 :root[data-appearance="light"] .status-pill--healthy,
 :root[data-appearance="light"] .preferences-saved,
 :root[data-appearance="high-contrast"] .status-pill--healthy,
