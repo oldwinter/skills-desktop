@@ -26,6 +26,8 @@ export interface Copy {
     readonly cli: string;
     readonly github: string;
     readonly download: string;
+    readonly menu: string;
+    readonly menuClose: string;
     readonly switchLocale: string;
     readonly switchLocaleLabel: string;
   };
@@ -308,6 +310,8 @@ const en: Copy = {
     github: "GitHub",
     harnesses: "Harnesses",
     inventory: "Inventory",
+    menu: "Menu",
+    menuClose: "Close menu",
     switchLocale: "中文",
     switchLocaleLabel: "切换到中文",
   },
@@ -520,6 +524,8 @@ const zh: Copy = {
     github: "GitHub",
     harnesses: "Harness",
     inventory: "清单",
+    menu: "菜单",
+    menuClose: "关闭菜单",
     switchLocale: "English",
     switchLocaleLabel: "Switch to English",
   },

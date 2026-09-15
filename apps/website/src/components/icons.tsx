@@ -47,3 +47,13 @@ export function FileIcon(): ReactElement {
     </svg>
   );
 }
+
+export function MenuIcon(): ReactElement {
+  return (
+    <svg {...shared}>
+      <path d="M4 7h16" />
+      <path d="M4 12h16" />
+      <path d="M4 17h16" />
+    </svg>
+  );
+}
