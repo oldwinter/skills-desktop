@@ -36,7 +36,8 @@ export const zhCN: Readonly<Record<keyof typeof en, string>> = {
   "common.freshness.none": "暂无证据",
 
   "error.fallback": "操作未能完成。请重试；若持续失败可导出诊断查看详情。",
-  "error.githubSource": "GitHub 来源必须是 owner/repository。",
+  "error.githubSource":
+    "直接添加只支持 GitHub owner/repository。要添加其他类型的来源，请先检视来源。",
   "error.cancelled": "操作已取消。需要时请重试。",
   "error.check_failed": "更新检查未能完成。请稍后重试。",
   "error.cli_incompatible": "skills CLI 版本不兼容。请升级 CLI 后刷新。",
@@ -63,6 +64,14 @@ export const zhCN: Readonly<Record<keyof typeof en, string>> = {
   "error.remote_runtime_unavailable": "远程运行时不可用。请检查远端环境后重试。",
   "error.review_expired": "复核已过期。请重新打开复核。",
   "error.review_invalid": "复核无效。请重新打开复核。",
+  "error.source_inspection_incompatible":
+    "固定版本的 Skills CLI 输出的来源列表格式无法被本应用读取。请检查应用更新。",
+  "error.source_inspection_stale":
+    "来源列表与该 Target 已不匹配。请重新检视来源。",
+  "error.source_unavailable":
+    "固定版本的 Skills CLI 无法获取该来源。请检查来源与网络后重新检视。",
+  "error.source_unsupported":
+    "此处不支持这种来源。请使用 GitHub owner/repository、Git 或 HTTPS URL，或 skills.sh 包。",
   "error.ssh_config_invalid": "SSH 配置无效。V1 仅支持 Local Target。",
   "error.stale_inventory": "库存证据已过期。请先刷新。",
   "error.target_not_found": "找不到该 Target。请返回 Targets 列表确认。",
@@ -215,14 +224,44 @@ export const zhCN: Readonly<Record<keyof typeof en, string>> = {
   "inventory.skillsSh.opened":
     "已在浏览器中打开。skills.sh 上发生的一切都留在那里；本应用无法确认是否已发布。",
   "inventory.add.heading": "添加 Skill",
-  "inventory.add.githubSource": "GitHub 来源",
-  "inventory.add.githubPlaceholder": "owner/repository",
+  "inventory.add.source": "来源",
+  "inventory.add.sourcePlaceholder": "owner/repository、Git URL 或 https://…",
+  "inventory.add.inspect": "检视来源",
+  "inventory.add.inspecting": "正在检视 {source}…",
+  "inventory.add.cancelInspection": "取消检视",
+  "inventory.add.inspectedHint":
+    "只读操作：固定版本的 Skills CLI 仅列出了该来源，未安装任何内容。",
+  "inventory.add.candidates": "{source} 中列出的 Skill",
+  "inventory.add.candidateCount.one": "列出 {count} 个 Skill",
+  "inventory.add.candidateCount.other": "列出 {count} 个 Skill",
+  "inventory.add.noCandidates": "该来源未列出可添加的 Skill。",
+  "inventory.add.selectCandidates": "至少选择一个列出的 Skill。",
+  "inventory.add.prepareSelected": "准备添加所选 Skill",
   "inventory.add.exactName": "Skill 的准确名称",
+  "inventory.add.directHint":
+    "未经检视时，只能按准确名称添加 GitHub owner/repository 来源。",
   "inventory.add.scopeLabel": "添加范围",
   "inventory.add.prepare": "准备添加",
   "inventory.plan.heading": "Command Plan",
   "inventory.plan.operation": "操作",
+  "inventory.plan.source": "来源",
   "inventory.plan.harnessEffect": "Harness 影响",
+
+  "source.family.git": "Git 仓库",
+  "source.family.github": "GitHub 仓库",
+  "source.family.gitlab": "GitLab 仓库",
+  "source.family.httpArchive": "HTTP 归档",
+  "source.family.httpSkill": "HTTP Skill 文件",
+  "source.family.localArchive": "本地归档",
+  "source.family.localDirectory": "本地目录",
+  "source.family.skillsShPack": "skills.sh 包",
+  "source.family.wellKnown": "Well-known Skill 索引",
+  "source.mutability.pinned.title": "固定来源",
+  "source.mutability.pinned.summary":
+    "{source} 指向一个确切的提交。检视时列出的内容就是将要安装的内容。",
+  "source.mutability.mutable.title": "可变来源",
+  "source.mutability.mutable.summary":
+    "{source} 会在执行时重新获取。若期间发生变化，实际安装的内容可能与检视结果不同。",
 
   "harnessSubset.legend": "添加与移除仅绑定到",
   "harnessSubset.hint":

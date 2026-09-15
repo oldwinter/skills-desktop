@@ -35,7 +35,8 @@ export const en = {
 
   "error.fallback":
     "The operation could not be completed. Try again; if it keeps failing, export diagnostics for details.",
-  "error.githubSource": "GitHub source must be owner/repository.",
+  "error.githubSource":
+    "Direct add needs a GitHub owner/repository. Inspect the source to add from other kinds of source.",
   "error.cancelled": "The operation was cancelled. Try again when needed.",
   "error.check_failed": "The update check could not complete. Try again later.",
   "error.cli_incompatible":
@@ -81,6 +82,14 @@ export const en = {
     "The remote runtime is unavailable. Check the remote environment, then try again.",
   "error.review_expired": "The review expired. Open the review again.",
   "error.review_invalid": "The review is invalid. Open the review again.",
+  "error.source_inspection_incompatible":
+    "The pinned Skills CLI listed this source in a form this app cannot read. Check for an app update.",
+  "error.source_inspection_stale":
+    "The source listing no longer matches this Target. Inspect the source again.",
+  "error.source_unavailable":
+    "The pinned Skills CLI could not fetch this source. Check the source and your network, then inspect again.",
+  "error.source_unsupported":
+    "This kind of source is not supported here. Use a GitHub owner/repository, a Git or HTTPS URL, or a skills.sh pack.",
   "error.ssh_config_invalid":
     "The SSH configuration is invalid. V1 supports Local Targets only.",
   "error.stale_inventory": "The inventory evidence is stale. Refresh first.",
@@ -246,14 +255,44 @@ export const en = {
   "inventory.skillsSh.opened":
     "Opened in your browser. Whatever happens on skills.sh stays there; this app cannot confirm a publication.",
   "inventory.add.heading": "Add Skill",
-  "inventory.add.githubSource": "GitHub source",
-  "inventory.add.githubPlaceholder": "owner/repository",
+  "inventory.add.source": "Source",
+  "inventory.add.sourcePlaceholder": "owner/repository, Git URL, or https://…",
+  "inventory.add.inspect": "Inspect source",
+  "inventory.add.inspecting": "Inspecting {source}…",
+  "inventory.add.cancelInspection": "Cancel inspection",
+  "inventory.add.inspectedHint":
+    "Read-only: the pinned Skills CLI listed this source without installing anything.",
+  "inventory.add.candidates": "Skills listed in {source}",
+  "inventory.add.candidateCount.one": "{count} Skill listed",
+  "inventory.add.candidateCount.other": "{count} Skills listed",
+  "inventory.add.noCandidates": "The source lists no Skills to add.",
+  "inventory.add.selectCandidates": "Select at least one listed Skill.",
+  "inventory.add.prepareSelected": "Prepare add of selected Skills",
   "inventory.add.exactName": "Exact skill name",
+  "inventory.add.directHint":
+    "Without inspection, only a GitHub owner/repository can be added by exact name.",
   "inventory.add.scopeLabel": "Add scope",
   "inventory.add.prepare": "Prepare add",
   "inventory.plan.heading": "Command Plan",
   "inventory.plan.operation": "Operation",
+  "inventory.plan.source": "Source",
   "inventory.plan.harnessEffect": "Harness effect",
+
+  "source.family.git": "Git repository",
+  "source.family.github": "GitHub repository",
+  "source.family.gitlab": "GitLab repository",
+  "source.family.httpArchive": "HTTP archive",
+  "source.family.httpSkill": "HTTP skill file",
+  "source.family.localArchive": "Local archive",
+  "source.family.localDirectory": "Local directory",
+  "source.family.skillsShPack": "skills.sh pack",
+  "source.family.wellKnown": "Well-known skills index",
+  "source.mutability.pinned.title": "Pinned source",
+  "source.mutability.pinned.summary":
+    "{source} names an exact commit. The content listed at inspection is the content that will be installed.",
+  "source.mutability.mutable.title": "Mutable source",
+  "source.mutability.mutable.summary":
+    "{source} is fetched again at execution. If it changes in between, the installed content can differ from the inspected listing.",
 
   "harnessSubset.legend": "Bind add and removal to",
   "harnessSubset.hint":

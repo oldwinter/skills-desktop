@@ -10,6 +10,7 @@ import {
   HardDrive,
   PackagePlus,
   RefreshCw,
+  ScanSearch,
   RotateCcw,
   Search,
   Server,
@@ -27,6 +28,8 @@ import {
   type RendererMenuCommand,
 } from "../../../contracts/menu.js";
 import { describeHarnessEffect } from "../../../contracts/harness-effect.js";
+import { describeCommandPlanSource } from "../../../contracts/source-disclosure.js";
+import { userFacingErrorMessage } from "../../../contracts/user-facing-error.js";
 import type { Translator } from "../../../contracts/i18n/translate.js";
 import { isInventoryEntryAvailableToHarness } from "../../../contracts/inventory-availability.js";
 import {
@@ -282,6 +285,9 @@ function InventoryWorkspace({
   const [addName, setAddName] = useState("");
   const [addSource, setAddSource] = useState("");
   const [addSourceError, setAddSourceError] = useState<string>();
+  const [selectedCandidates, setSelectedCandidates] = useState<
+    readonly string[]
+  >([]);
   const [addScope, setAddScope] = useState<"global" | "project">("project");
   const [excludedHarnessIds, setExcludedHarnessIds] = useState<
     readonly string[]
@@ -761,10 +767,52 @@ function InventoryWorkspace({
       });
     } else setActionError(result.error);
   };
+  const trimmedAddSource = addSource.trim();
+  const sourceInspection = snapshot.sourceInspection;
+  // ADR 0015: the listing is usable only while it is the current session
+  // evidence for this exact Target, Generation, and source text.
+  const currentInspection =
+    sourceInspection?.phase === "ready" &&
+    sourceInspection.inspection !== null &&
+    sourceInspection.inspection.targetId === snapshot.target.id &&
+    sourceInspection.inspection.targetGeneration ===
+      snapshot.target.generation &&
+    sourceInspection.inspection.descriptor.source === trimmedAddSource
+      ? sourceInspection.inspection
+      : undefined;
+  const inspecting =
+    sourceInspection?.phase === "inspecting" &&
+    sourceInspection.activeOperationId !== null
+      ? sourceInspection.activeOperationId
+      : undefined;
+  const inspectionBlocked = mutationBlocked || inspecting !== undefined;
+  const selectedCandidateNames =
+    currentInspection === undefined
+      ? []
+      : currentInspection.candidates
+          .map((candidate) => candidate.name)
+          .filter((name) => selectedCandidates.includes(name));
+  const inspectSource = async () => {
+    if (inspectionBlocked || trimmedAddSource === "") return;
+    setAddSourceError(undefined);
+    setActionError(undefined);
+    setSelectedCandidates([]);
+    const result = await client.inspectSource(
+      snapshot.target.id,
+      trimmedAddSource,
+    );
+    if (!result.ok) setAddSourceError(userFacingErrorMessage(result.error, locale));
+  };
   const prepareAdd = async () => {
     if (sshUnavailable) return;
-    const source = addSource.trim();
-    if (!isGithubOwnerRepository(source)) {
+    const source = trimmedAddSource;
+    if (currentInspection !== undefined) {
+      if (selectedCandidateNames.length === 0) {
+        setAddSourceError(t("inventory.add.selectCandidates"));
+        setActionError(undefined);
+        return;
+      }
+    } else if (!isGithubOwnerRepository(source)) {
       setAddSourceError(t("error.githubSource"));
       setActionError(undefined);
       return;
@@ -772,9 +820,20 @@ function InventoryWorkspace({
     setAddSourceError(undefined);
     const result = await client.prepareMutation(snapshot.target.id, {
       ...harnessSubsetIntent(snapshot.target.harnessIds, excludedHarnessIds),
-      names: [addName],
+      names:
+        currentInspection !== undefined ? selectedCandidateNames : [addName],
       scope: addScope,
-      source: { source, sourceType: "github" },
+      source:
+        currentInspection !== undefined
+          ? {
+              descriptor: currentInspection.descriptor,
+              inspection: {
+                digest: currentInspection.digest,
+                id: currentInspection.inspectionId,
+              },
+              sourceType: "inspected",
+            }
+          : { source, sourceType: "github" },
       type: "add",
     });
     if (result.ok) {
@@ -1406,11 +1465,11 @@ function InventoryWorkspace({
               >
                 <h2>{t("inventory.add.heading")}</h2>
                 <label>
-                  <span>{t("inventory.add.githubSource")}</span>
+                  <span>{t("inventory.add.source")}</span>
                   <input
                     aria-errormessage={
                       addSourceError !== undefined
-                        ? "add-skill-github-source-error"
+                        ? "add-skill-source-error"
                         : undefined
                     }
                     aria-invalid={addSourceError !== undefined}
@@ -1418,7 +1477,7 @@ function InventoryWorkspace({
                       setAddSource(event.currentTarget.value);
                       setAddSourceError(undefined);
                     }}
-                    placeholder={t("inventory.add.githubPlaceholder")}
+                    placeholder={t("inventory.add.sourcePlaceholder")}
                     required
                     value={addSource}
                   />
@@ -1426,20 +1485,142 @@ function InventoryWorkspace({
                 {addSourceError !== undefined ? (
                   <p
                     className="field-error"
-                    id="add-skill-github-source-error"
+                    id="add-skill-source-error"
                     role="alert"
                   >
                     {addSourceError}
                   </p>
                 ) : null}
-                <label>
-                  <span>{t("inventory.add.exactName")}</span>
-                  <input
-                    onChange={(event) => setAddName(event.currentTarget.value)}
-                    required
-                    value={addName}
-                  />
-                </label>
+                <div className="add-skill-form__inspect">
+                  {inspecting !== undefined ? (
+                    <>
+                      <p className="add-skill-form__status" role="status">
+                        <RefreshCw
+                          aria-hidden="true"
+                          className="spin"
+                          size={14}
+                        />
+                        {t("inventory.add.inspecting", {
+                          source: trimmedAddSource,
+                        })}
+                      </p>
+                      <button
+                        className="text-button"
+                        onClick={() => void client.cancelInventory(inspecting)}
+                        type="button"
+                      >
+                        <Square aria-hidden="true" size={14} />
+                        {t("inventory.add.cancelInspection")}
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      aria-describedby={mutationBlockedDescribedBy}
+                      className="text-button"
+                      disabled={inspectionBlocked || trimmedAddSource === ""}
+                      onClick={() => void inspectSource()}
+                      title={mutationBlockedReason}
+                      type="button"
+                    >
+                      <ScanSearch aria-hidden="true" size={15} />
+                      {t("inventory.add.inspect")}
+                    </button>
+                  )}
+                </div>
+                {currentInspection !== undefined ? (
+                  <fieldset
+                    className="add-skill-form__candidates"
+                    data-testid="source-inspection"
+                  >
+                    <legend>
+                      {t("inventory.add.candidates", {
+                        source: currentInspection.descriptor.source,
+                      })}
+                    </legend>
+                    <p className="add-skill-form__hint">
+                      {tc(
+                        "inventory.add.candidateCount",
+                        currentInspection.candidates.length,
+                      )}
+                      {" · "}
+                      {
+                        describeCommandPlanSource(
+                          {
+                            family: currentInspection.descriptor.family,
+                            inspectionDigest: currentInspection.digest,
+                            inspectionId: currentInspection.inspectionId,
+                            mutability: currentInspection.descriptor.mutability,
+                            ref: currentInspection.descriptor.ref,
+                            source: currentInspection.descriptor.source,
+                            sourceType: "inspected",
+                          },
+                          locale,
+                        ).title
+                      }
+                    </p>
+                    {currentInspection.candidates.length === 0 ? (
+                      <p className="add-skill-form__hint">
+                        {t("inventory.add.noCandidates")}
+                      </p>
+                    ) : (
+                      <ul className="add-skill-form__candidate-list">
+                        {currentInspection.candidates.map((candidate) => (
+                          <li key={candidate.name}>
+                            <label>
+                              <input
+                                checked={selectedCandidates.includes(
+                                  candidate.name,
+                                )}
+                                onChange={(event) => {
+                                  const { checked } = event.currentTarget;
+                                  setAddSourceError(undefined);
+                                  setSelectedCandidates((current) =>
+                                    checked
+                                      ? [...current, candidate.name]
+                                      : current.filter(
+                                          (name) => name !== candidate.name,
+                                        ),
+                                  );
+                                }}
+                                type="checkbox"
+                              />
+                              <span>
+                                <strong>{candidate.name}</strong>
+                                {candidate.group !== null ? (
+                                  <span className="add-skill-form__group">
+                                    {candidate.group}
+                                  </span>
+                                ) : null}
+                                <span className="add-skill-form__description">
+                                  {candidate.description}
+                                </span>
+                              </span>
+                            </label>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    <p className="add-skill-form__hint">
+                      {t("inventory.add.inspectedHint")}
+                    </p>
+                  </fieldset>
+                ) : (
+                  <>
+                    <label>
+                      <span>{t("inventory.add.exactName")}</span>
+                      <input
+                        onChange={(event) =>
+                          setAddName(event.currentTarget.value)
+                        }
+                        required
+                        value={addName}
+                      />
+                    </label>
+                    <p className="add-skill-form__hint">
+                      {t("inventory.add.directHint")}
+                    </p>
+                  </>
+                )}
                 <div
                   className="segmented-control segmented-control--compact"
                   aria-label={t("inventory.add.scopeLabel")}
@@ -1464,7 +1645,11 @@ function InventoryWorkspace({
                   type="submit"
                 >
                   <PackagePlus aria-hidden="true" size={15} />
-                  {t("inventory.add.prepare")}
+                  {t(
+                    currentInspection !== undefined
+                      ? "inventory.add.prepareSelected"
+                      : "inventory.add.prepare",
+                  )}
                 </button>
               </form>
 
@@ -1490,6 +1675,32 @@ function InventoryWorkspace({
                       <dt>{t("common.skills")}</dt>
                       <dd>{snapshot.mutation.commandPlan.names.join(", ")}</dd>
                     </div>
+                    {snapshot.mutation.commandPlan.source !== null ? (
+                      <div data-testid="command-plan-source">
+                        <dt>{t("inventory.plan.source")}</dt>
+                        <dd>
+                          {(() => {
+                            const disclosure = describeCommandPlanSource(
+                              snapshot.mutation.commandPlan.source,
+                              locale,
+                            );
+                            return (
+                              <>
+                                <span className="wrapping-value">
+                                  {disclosure.source}
+                                </span>
+                                <span
+                                  className={`source-mutability source-mutability--${disclosure.mutability}`}
+                                  title={disclosure.summary}
+                                >
+                                  {disclosure.title}
+                                </span>
+                              </>
+                            );
+                          })()}
+                        </dd>
+                      </div>
+                    ) : null}
                     <div>
                       <dt>{t("inventory.plan.harnessEffect")}</dt>
                       <dd>
