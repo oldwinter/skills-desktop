@@ -530,8 +530,8 @@ export async function runPackagedUiQa({
         `document.documentElement.dataset.appearance === ${JSON.stringify(appearance)}`,
         `${appearance} appearance applied`,
       );
-      // Inactive nav secondary only — pill/prefs-saved equality waits were unsatisfiable
-      // (any .status-pill vs --healthy) and timed out as diagnostic "unknown".
+      // Inactive nav secondary only — token-equality waits against --healthy/--text
+      // were unsatisfiable when pins used literals.
       await page.waitFor(
         `(() => {
           const root = getComputedStyle(document.documentElement);
@@ -548,6 +548,37 @@ export async function runPackagedUiQa({
         `${appearance} nav secondary settled`,
         10_000,
       );
+      if (appearance === "dark") {
+        // Literal computed colors only. Token-equality waits raced on darwin arm64
+        // (stale light #5f6368/#202124 on already-dark surfaces).
+        await page.waitFor(
+          `(() => {
+            if (document.documentElement.dataset.appearance !== "dark") return false;
+            document.documentElement.offsetHeight;
+            const span = document.querySelector(".nav-item--active > span");
+            const pill = document.querySelector(".status-pill");
+            if (span === null || pill === null) return false;
+            const spanColor = getComputedStyle(span).color;
+            const pillColor = getComputedStyle(pill).color;
+            const pillBg = getComputedStyle(pill).backgroundColor;
+            const spanOk = spanColor === "rgb(232, 234, 237)";
+            const pillFgOk =
+              pillColor === "rgb(154, 212, 168)" ||
+              pillColor === "rgb(196, 199, 204)" ||
+              pillColor === "rgb(253, 214, 99)" ||
+              pillColor === "rgb(246, 161, 154)";
+            const pillBgOk =
+              pillBg === "rgb(16, 36, 24)" ||
+              pillBg === "rgb(41, 42, 45)" ||
+              pillBg === "rgb(42, 35, 15)" ||
+              pillBg === "rgb(42, 18, 16)";
+            return spanOk && pillFgOk && pillBgOk;
+          })()`,
+          "dark appearance contrast pins settled",
+          8_000,
+          { stableMs: 50 },
+        );
+      }
       const palette = await page.evaluate(`(() => {
         const root = getComputedStyle(document.documentElement);
         const body = getComputedStyle(document.body);

@@ -284,6 +284,45 @@ code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; fo
   color: var(--text);
 }
 .nav-item--active { background: var(--surface-muted); font-weight: 500; }
+/* Darwin arm64 can paint dark surfaces before attribute-selector color pins
+   flush. Literal ink/fill (not var()) so axe never samples stale light text
+   on an already-dark chip or active nav. */
+html[data-appearance="dark"] .nav-item.nav-item--active,
+html[data-appearance="dark"] .nav-item.nav-item--active > span {
+  color: #e8eaed !important;
+}
+html[data-appearance="dark"] .status-pill,
+html[data-appearance="dark"] .status-pill svg {
+  color: #9ad4a8 !important;
+}
+html[data-appearance="dark"] .status-pill {
+  background: #102418 !important;
+  background-color: #102418 !important;
+}
+html[data-appearance="dark"] .status-pill.status-pill--warning,
+html[data-appearance="dark"] .status-pill.status-pill--warning svg {
+  color: #fdd663 !important;
+}
+html[data-appearance="dark"] .status-pill.status-pill--warning {
+  background: #2a230f !important;
+  background-color: #2a230f !important;
+}
+html[data-appearance="dark"] .status-pill.status-pill--danger,
+html[data-appearance="dark"] .status-pill.status-pill--danger svg {
+  color: #f6a19a !important;
+}
+html[data-appearance="dark"] .status-pill.status-pill--danger {
+  background: #2a1210 !important;
+  background-color: #2a1210 !important;
+}
+html[data-appearance="dark"] .status-pill.status-pill--neutral,
+html[data-appearance="dark"] .status-pill.status-pill--neutral svg {
+  color: #c4c7cc !important;
+}
+html[data-appearance="dark"] .status-pill.status-pill--neutral {
+  background: #292a2d !important;
+  background-color: #292a2d !important;
+}
 .nav-count { display: inline-grid; min-width: 20px; height: 20px; margin-left: auto; padding: 0 6px; place-items: center; color: var(--warning); background: var(--warning-soft); border-radius: 10px; font-size: var(--font-size-micro); font-weight: 600; }
 .nav-item:disabled { opacity: 0.52; }
 .target-section { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--line); }
