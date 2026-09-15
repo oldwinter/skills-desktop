@@ -3998,7 +3998,7 @@ export function createDesktopCapabilities(
                 lastError: null,
                 phase: "ready",
               });
-              return { ok: true, value: { operationId: inspected.value.id } };
+              return { ok: true, value: { operationId } };
             })().finally(() => {
               if (activeInspection?.id === operationId) {
                 activeInspection = undefined;
