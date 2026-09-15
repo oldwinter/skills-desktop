@@ -143,6 +143,19 @@
   color: var(--text);
   background-color: var(--canvas);
 }
+:root[data-appearance="light"] .nav-item,
+:root[data-appearance="high-contrast"] .nav-item { color: var(--text-secondary); }
+:root[data-appearance="light"] .nav-item--active,
+:root[data-appearance="high-contrast"] .nav-item--active { color: var(--text); }
+:root[data-appearance="light"] .nav-item > span,
+:root[data-appearance="high-contrast"] .nav-item > span { color: inherit; }
+:root[data-appearance="light"] .status-pill--healthy,
+:root[data-appearance="light"] .preferences-saved,
+:root[data-appearance="high-contrast"] .status-pill--healthy,
+:root[data-appearance="high-contrast"] .preferences-saved {
+  color: var(--healthy);
+  background-color: var(--healthy-soft);
+}
 :root[data-appearance="high-contrast"] button,
 :root[data-appearance="high-contrast"] input,
 :root[data-appearance="high-contrast"] select { border-color: var(--line-strong); }
