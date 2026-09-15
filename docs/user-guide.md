@@ -99,7 +99,7 @@ npm run verify
 
 ![Inventory Target 选择器中的 SSH · 未开放](images/user-guide/inventory-ssh-unavailable.png)
 
-页眉会显示当前 Target 标签与工作区路径。侧栏 **Targets** 区可切换当前观察对象。
+页眉会显示当前 Target 标签与工作区路径。侧栏 **Active Target** 区可切换当前观察对象（这是会话级切换器；编辑 Target Definition 请进入主导航的 **Targets** 页）。侧栏底部显示实际观察到的 `skills` CLI 版本，尚未观察时显示 unobserved。
 
 ### 本机前提
 

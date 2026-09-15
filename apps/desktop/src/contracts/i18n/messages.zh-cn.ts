@@ -121,7 +121,9 @@ export const zhCN: Readonly<Record<keyof typeof en, string>> = {
   "nav.about": "关于",
   "nav.pending.one": "{label}，{count} 项待处理",
   "nav.pending.other": "{label}，{count} 项待处理",
+  "nav.activeTarget": "当前 Target",
   "nav.cliVersion": "skills {version}",
+  "nav.cliVersionUnobserved": "skills 版本尚未观察",
 
   "menu.file": "文件",
   "menu.edit": "编辑",

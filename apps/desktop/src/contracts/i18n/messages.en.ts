@@ -152,7 +152,9 @@ export const en = {
   "nav.about": "About",
   "nav.pending.one": "{label}, {count} item pending",
   "nav.pending.other": "{label}, {count} items pending",
+  "nav.activeTarget": "Active Target",
   "nav.cliVersion": "skills {version}",
+  "nav.cliVersionUnobserved": "skills version unobserved",
 
   "menu.file": "File",
   "menu.edit": "Edit",
