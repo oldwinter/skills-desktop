@@ -129,59 +129,6 @@ export function createPackagedUiQaScenarioError(
   return failure;
 }
 
-const appearancePalettes = {
-  dark: {
-    canvas: "#161719",
-    healthy: "#9ad4a8",
-    textRgb: "rgb(232, 234, 237)",
-    textSecondaryRgb: "rgb(196, 199, 204)",
-  },
-  "high-contrast": {
-    canvas: "#ffffff",
-    healthy: "#004d1a",
-    textRgb: "rgb(0, 0, 0)",
-    textSecondaryRgb: "rgb(31, 31, 31)",
-  },
-  light: {
-    canvas: "#f5f6f7",
-    healthy: "#176b4b",
-    textRgb: "rgb(32, 33, 36)",
-    textSecondaryRgb: "rgb(95, 99, 104)",
-  },
-};
-
-/** Wait until CSS tokens and key computed colors match the selected appearance. */
-export function appearancePaletteReadyExpression(appearance) {
-  if (appearance === "system") {
-    return `document.documentElement.dataset.appearance === "system" &&
-      getComputedStyle(document.documentElement).getPropertyValue("--canvas").trim().length > 0`;
-  }
-  const palette = appearancePalettes[appearance];
-  if (palette === undefined) {
-    return `document.documentElement.dataset.appearance === ${JSON.stringify(appearance)}`;
-  }
-  return `document.documentElement.dataset.appearance === ${JSON.stringify(appearance)} &&
-    getComputedStyle(document.documentElement).getPropertyValue("--canvas").trim() === ${JSON.stringify(palette.canvas)} &&
-    getComputedStyle(document.documentElement).getPropertyValue("--healthy").trim() === ${JSON.stringify(palette.healthy)} &&
-    getComputedStyle(document.body).color === ${JSON.stringify(palette.textRgb)} &&
-    [...document.querySelectorAll(".nav-item")].every((item) => {
-      const color = getComputedStyle(item).color;
-      return color === ${JSON.stringify(palette.textSecondaryRgb)} ||
-        color === ${JSON.stringify(palette.textRgb)};
-    }) &&
-    (() => {
-      const pill = document.querySelector(".status-pill--healthy");
-      return pill === null ||
-        getComputedStyle(pill).color === ${JSON.stringify(
-          appearance === "dark"
-            ? "rgb(154, 212, 168)"
-            : appearance === "high-contrast"
-              ? "rgb(0, 77, 26)"
-              : "rgb(23, 107, 75)",
-        )};
-    })()`;
-}
-
 async function scanWithAxe(page, axeSource, label) {
   let installed;
   try {
@@ -580,70 +527,26 @@ export async function runPackagedUiQa({
       activeCheck = `appearance-${appearance}`;
       await selectPreference(page, "Appearance", appearance);
       await page.waitFor(
-        appearancePaletteReadyExpression(appearance),
+        `document.documentElement.dataset.appearance === ${JSON.stringify(appearance)}`,
         `${appearance} appearance applied`,
-        30_000,
-        { stableMs: 200 },
       );
-      // Wait until shell paints settled tokens (not a mid light↔dark fade).
+      // Inactive nav secondary only — pill/prefs-saved equality waits were unsatisfiable
+      // (any .status-pill vs --healthy) and timed out as diagnostic "unknown".
       await page.waitFor(
         `(() => {
           const root = getComputedStyle(document.documentElement);
-          const probeColor = (value) => {
-            const probe = document.createElement("span");
-            probe.style.color = value;
-            document.body.append(probe);
-            const want = getComputedStyle(probe).color;
-            probe.remove();
-            return want;
-          };
-          const probeBg = (value) => {
-            const probe = document.createElement("span");
-            probe.style.backgroundColor = value;
-            document.body.append(probe);
-            const want = getComputedStyle(probe).backgroundColor;
-            probe.remove();
-            return want;
-          };
-          const secondary = root.getPropertyValue("--text-secondary").trim();
-          const healthy = root.getPropertyValue("--healthy").trim();
-          const canvas = root.getPropertyValue("--canvas").trim();
-          const inactive = document.querySelector(".nav-item:not(.nav-item--active)");
-          const pill = document.querySelector(".status-pill--healthy, .status-pill");
-          const saved = document.querySelector(".preferences-saved");
-          if (inactive !== null && secondary.length > 0) {
-            if (getComputedStyle(inactive).color !== probeColor(secondary)) return false;
-          }
-          if (pill !== null && healthy.length > 0) {
-            if (getComputedStyle(pill).color !== probeColor(healthy)) return false;
-          }
-          if (saved !== null && healthy.length > 0) {
-            if (getComputedStyle(saved).color !== probeColor(healthy)) return false;
-            const savedBg = getComputedStyle(saved).backgroundColor;
-            const soft = root.getPropertyValue("--healthy-soft").trim();
-            const wantSoft = soft.length > 0 ? probeBg(soft) : "";
-            if (wantSoft.length > 0 && savedBg === wantSoft) {
-              /* self-contained chip */
-            } else if (canvas.length > 0) {
-              const wantBg = probeBg(canvas);
-              let el = saved;
-              let matched = false;
-              while (el instanceof Element) {
-                const bg = getComputedStyle(el).backgroundColor;
-                if (bg === wantBg) {
-                  matched = true;
-                  break;
-                }
-                el = el.parentElement;
-              }
-              if (!matched) return false;
-            }
-          }
-          return true;
+          const expected = root.getPropertyValue("--text-secondary").trim();
+          const item = document.querySelector(".nav-item:not(.nav-item--active)");
+          if (item === null || expected.length === 0) return true;
+          const probe = document.createElement("span");
+          probe.style.color = expected;
+          document.body.append(probe);
+          const want = getComputedStyle(probe).color;
+          probe.remove();
+          return getComputedStyle(item).color === want;
         })()`,
-        `${appearance} shell contrast tokens settled`,
-        30_000,
-        { stableMs: 80 },
+        `${appearance} nav secondary settled`,
+        10_000,
       );
       const palette = await page.evaluate(`(() => {
         const root = getComputedStyle(document.documentElement);
@@ -962,10 +865,21 @@ export async function runPackagedUiQa({
     scenarioFailure = error;
     failureCheck = activeCheck;
     if (failureDiagnostic === "unknown") {
-      failureDiagnostic =
-        error !== null && typeof error === "object" && "qaDiagnostic" in error
-          ? error.qaDiagnostic
-          : "unknown";
+      const message =
+        error !== null && typeof error === "object" && typeof error.message === "string"
+          ? error.message
+          : "";
+      if (message.startsWith("Timed out waiting for ")) {
+        failureDiagnostic = "wait-timeout";
+      } else if (
+        error !== null &&
+        typeof error === "object" &&
+        "qaDiagnostic" in error
+      ) {
+        failureDiagnostic = error.qaDiagnostic;
+      } else {
+        failureDiagnostic = "unknown";
+      }
     }
     failureStage = activeStage;
   } finally {

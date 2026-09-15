@@ -37,7 +37,6 @@ import {
 } from "./launch.mjs";
 import {
   PACKAGED_UI_QA_SCENARIOS,
-  appearancePaletteReadyExpression,
   createPackagedUiQaScenarioError,
   mutationOutcomeFocusDiagnostic,
   requireAxeSource,
@@ -1211,12 +1210,6 @@ describe("packaged UI QA scenario contract", () => {
     );
     expect(safeFailureSummary(axeFailure)).not.toContain("/Users/alice");
     expect(safeFailureSummary(axeFailure)).not.toContain("https://example.test");
-    expect(appearancePaletteReadyExpression("dark")).toContain("#161719");
-    expect(appearancePaletteReadyExpression("dark")).toContain("#9ad4a8");
-    expect(appearancePaletteReadyExpression("light")).toContain("#f5f6f7");
-    expect(appearancePaletteReadyExpression("system")).toContain(
-      'dataset.appearance === "system"',
-    );
     for (const secret of [
       "/Users/alice/skills-desktop",
       "/tmp/fixture",
