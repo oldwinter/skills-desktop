@@ -304,6 +304,24 @@ code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; fo
 .target-form { display: grid; gap: 13px; padding-top: 16px; }
 .target-form fieldset { min-width: 0; padding: 0; border: 0; }
 .target-form legend { margin-bottom: 5px; color: var(--text-tertiary); font-size: var(--font-size-meta); }
+.harness-picker { display: grid; gap: 8px; }
+.harness-picker-summary { margin: 0; color: var(--text-secondary); font-size: var(--font-size-meta); }
+.harness-chip-list { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.harness-chip { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; padding: 0 4px 0 8px; background: var(--surface-selected); border: 1px solid var(--line); border-radius: var(--radius-control); font-size: var(--font-size-meta); }
+.harness-chip code { color: var(--text-tertiary); font-size: var(--font-size-micro); }
+.harness-chip-remove { display: inline-grid; width: 22px; height: 22px; place-items: center; color: var(--text-secondary); background: transparent; border: 0; border-radius: 4px; }
+.harness-chip-remove:hover { color: var(--text); background: var(--surface-hover); }
+.harness-picker-filter input { min-width: 0; width: 100%; height: 40px; padding: 0 9px; color: var(--text); background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--radius-control); }
+.harness-option-list { display: grid; max-height: 264px; overflow: auto; border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--surface); }
+.harness-option { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; min-height: 40px; padding: 0 10px; color: var(--text); font-size: var(--font-size-row); cursor: pointer; }
+.harness-option + .harness-option { border-top: 1px solid var(--line); }
+.harness-option:hover { background: var(--surface-hover); }
+.harness-option input { margin: 0; }
+.harness-option-label { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.harness-option-label code { color: var(--text-tertiary); font-size: var(--font-size-micro); overflow-wrap: anywhere; }
+.harness-option-note { color: var(--text-tertiary); font-size: var(--font-size-micro); white-space: nowrap; }
+.harness-picker-empty { margin: 0; padding: 12px 10px; color: var(--text-secondary); font-size: var(--font-size-meta); }
+.harness-picker-notice { margin: 0; color: var(--danger); font-size: var(--font-size-meta); }
 
 .spin { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }

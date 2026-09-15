@@ -197,15 +197,23 @@ describe("TargetsView", () => {
     fireEvent.change(screen.getByLabelText("Canonical workspace"), {
       target: { value: "/work/other" },
     });
-    fireEvent.change(screen.getByLabelText("Harness"), {
-      target: { value: "codex" },
+    fireEvent.change(screen.getByLabelText("Filter harnesses"), {
+      target: { value: "claude" },
     });
+    fireEvent.click(screen.getByRole("checkbox", { name: /Claude Code/ }));
+    fireEvent.change(screen.getByLabelText("Filter harnesses"), {
+      target: { value: "" },
+    });
+    fireEvent.click(screen.getByRole("checkbox", { name: /^Cursor/ }));
+    expect(screen.getByTestId("harness-selection")).toHaveTextContent(
+      "3 harnesses selected",
+    );
     fireEvent.click(screen.getByRole("button", { name: "Save Target" }));
 
     await waitFor(() =>
       expect(createTarget).toHaveBeenCalledWith({
         connectionReference: null,
-        harnessIds: ["codex"],
+        harnessIds: ["claude-code", "codex", "cursor"],
         kind: "local",
         label: "Local workspace",
         workspace: "/work/other",
@@ -404,5 +412,68 @@ describe("TargetsView", () => {
     expect(details).toHaveAttribute("open");
     expect(within(details as HTMLElement).getByText("Generation")).toBeInTheDocument();
     expect(within(details as HTMLElement).getByText("1")).toBeInTheDocument();
+  });
+
+  it("offers the whole pinned registry, prefills edits, and refuses an empty harness set (#199)", async () => {
+    const updateTarget = vi.fn(async () => ({
+      ok: true as const,
+      value: { operationId: localId },
+    }));
+    render(
+      <TargetsView
+        client={bridge({ updateTarget })}
+        onSelected={vi.fn()}
+        targets={[
+          targetState({ ...localTarget, harnessIds: ["claude-code", "codex"] }),
+        ]}
+      />,
+    );
+
+    expect(screen.getAllByRole("checkbox")).toHaveLength(77);
+    expect(screen.getByRole("checkbox", { name: /Eve/ })).toBeInTheDocument();
+    expect(
+      within(
+        screen.getByRole("checkbox", { name: /Eve/ }).closest("label") as HTMLElement,
+      ).getByText("project only"),
+    ).toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: `Edit ${localTarget.label}` }),
+    );
+    expect(screen.getByTestId("harness-selection")).toHaveTextContent(
+      "2 harnesses selected",
+    );
+    expect(screen.getByRole("checkbox", { name: /Claude Code/ })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: /^Codex/ })).toBeChecked();
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove Claude Code" }));
+    expect(screen.getByTestId("harness-selection")).toHaveTextContent(
+      "1 harness selected",
+    );
+
+    fireEvent.click(screen.getByRole("checkbox", { name: /^Codex/ }));
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "At least one harness is required.",
+    );
+    expect(screen.getByRole("checkbox", { name: /^Codex/ })).toBeChecked();
+
+    fireEvent.change(screen.getByLabelText("Filter harnesses"), {
+      target: { value: "no-such-harness" },
+    });
+    expect(screen.queryAllByRole("checkbox")).toHaveLength(0);
+    expect(
+      screen.getByText("No harness matches “no-such-harness”."),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Save Target" }));
+    await waitFor(() =>
+      expect(updateTarget).toHaveBeenCalledWith(localId, {
+        connectionReference: null,
+        harnessIds: ["codex"],
+        kind: "local",
+        label: localTarget.label,
+        workspace: localTarget.workspace,
+      }),
+    );
   });
 });
