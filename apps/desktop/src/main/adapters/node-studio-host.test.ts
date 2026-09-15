@@ -126,7 +126,9 @@ describe("exportStudioSkill (ADR 0018)", () => {
   });
 
   it("removes only its own temporary tree when the parent is not writable", async () => {
-    if (process.getuid?.() === 0) return;
+    // Directory mode bits do not block writes for root, and Windows ignores
+    // them entirely, so the read-only parent cannot be simulated there.
+    if (process.platform === "win32" || process.getuid?.() === 0) return;
     const parent = await scratch();
     await chmod(parent, 0o500);
     try {
