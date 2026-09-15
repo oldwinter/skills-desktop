@@ -486,12 +486,27 @@ describe("Local Target Inventory shell", () => {
     fireEvent.change(search, { target: { value: "no-match" } });
 
     expect(screen.getByText("0 shown")).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "No matching skills" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Change the current search or scope filter."),
+    ).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "No skill selected" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Clear inventory search" })).toBeInTheDocument();
+    expect(
+      screen.getAllByRole("button", { name: "Clear inventory search" }),
+    ).toHaveLength(1);
+    expect(search.closest(".search-control")?.querySelectorAll("button")).toHaveLength(
+      1,
+    );
 
     fireEvent.click(screen.getByRole("button", { name: "Clear inventory search" }));
 
     expect(await screen.findByText("2 shown")).toBeInTheDocument();
+    expect(search).toHaveValue("");
+    expect(
+      screen.queryByRole("button", { name: "Clear inventory search" }),
+    ).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Case-Sensitive-Skill" })).toBeInTheDocument();
   });
 
