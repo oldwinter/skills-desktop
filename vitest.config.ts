@@ -34,6 +34,7 @@ export default defineConfig({
       "tests/real-cli.smoke.test.ts",
       "tests/localhost-ssh.smoke.test.ts",
       "tests/well-known-http.smoke.test.ts",
+      "tests/git-publish.smoke.test.ts",
     ],
     include: ["**/*.test.ts", "**/*.test.tsx", "tests/packaged-ui-qa/**/*.test.mjs"],
     pool: "forks",
