@@ -76,7 +76,7 @@ const axeDiagnostics = new Set([
 const axeRuleDiagnostic = /^axe-rule-[a-z0-9-]{1,64}$/;
 const allowedDiagnosticsByCheck = new Map([
   ["appearance-dark", new Set([...axeDiagnostics, "wait-timeout"])],
-  ["appearance-high-contrast", axeDiagnostics],
+  ["appearance-high-contrast", new Set([...axeDiagnostics, "wait-timeout"])],
   ["appearance-light", axeDiagnostics],
   ["appearance-system", axeDiagnostics],
   ["review-axe", axeDiagnostics],

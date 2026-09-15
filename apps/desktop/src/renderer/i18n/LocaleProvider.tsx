@@ -33,6 +33,10 @@ export function useDocumentPreferences(
     const root = document.documentElement;
     root.lang = locale;
     root.dataset["appearance"] = appearance;
+    // Force style recalc so attribute-selector color pins apply before paint.
+    // Darwin arm64 otherwise keeps the previous appearance's computed ink
+    // (e.g. dark #e8eaed on high-contrast #f2f2f2).
+    void root.offsetHeight;
   }, [appearance, locale]);
 }
 

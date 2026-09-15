@@ -582,6 +582,22 @@ export async function runPackagedUiQa({
           { stableMs: 50 },
         );
       }
+      if (appearance === "high-contrast") {
+        // Not the dark RGB wait — only HC literals, after dark leftover #e8eaed.
+        await page.waitFor(
+          `(() => {
+            if (document.documentElement.dataset.appearance !== "high-contrast") {
+              return false;
+            }
+            document.documentElement.offsetHeight;
+            const span = document.querySelector(".nav-item--active > span");
+            return span !== null && getComputedStyle(span).color === "rgb(0, 0, 0)";
+          })()`,
+          "high-contrast active nav ink settled",
+          8_000,
+          { stableMs: 50 },
+        );
+      }
       const palette = await page.evaluate(`(() => {
         const root = getComputedStyle(document.documentElement);
         const body = getComputedStyle(document.body);
