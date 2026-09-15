@@ -419,6 +419,26 @@ describe("Electron IPC sender authorization", () => {
         "claude-code",
       ),
     ).resolves.toMatchObject({ error: { code: "unauthorized" }, ok: false });
+    // The handoff channel carries a record id only; a URL is never accepted.
+    await expect(
+      handlers.get("workspace:handoff:skills-sh")!(
+        authorizedEvent as never,
+        "epoch-1",
+        "b".repeat(64),
+      ),
+    ).resolves.toMatchObject({ error: { code: "invalid_request" }, ok: false });
+    expect(session.request).toHaveBeenLastCalledWith({
+      recordId: "b".repeat(64),
+      type: "handoff.skills-sh",
+      version: 2,
+    });
+    await expect(
+      handlers.get("workspace:handoff:skills-sh")!(
+        hostileEvent as never,
+        "epoch-1",
+        "b".repeat(64),
+      ),
+    ).resolves.toMatchObject({ error: { code: "unauthorized" }, ok: false });
 
     const reviewMainFrame = { url: "skills-desktop://review/index.html" };
     const reviewContents = {

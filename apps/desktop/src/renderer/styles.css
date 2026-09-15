@@ -344,6 +344,9 @@ code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; fo
 .harness-subset__list { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
 .harness-subset__list label { display: flex; align-items: center; gap: 8px; font-size: var(--font-size-meta); }
 .harness-subset[disabled] { opacity: 0.6; }
+.skills-sh-handoff { display: grid; gap: 6px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+.skills-sh-handoff__hint, .skills-sh-handoff__status { margin: 0; color: var(--text-secondary); font-size: var(--font-size-meta); overflow-wrap: anywhere; }
+.skills-sh-handoff__status { color: var(--text); }
 
 .spin { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }

@@ -111,6 +111,11 @@ const bridge: DesktopBridge = Object.freeze({
       await invoke("workspace:snapshot:get"),
     );
   },
+  async handoffSkillsSh(recordId: string) {
+    return workspaceRequestResultSchema.parse(
+      await invoke("workspace:handoff:skills-sh", recordId),
+    );
+  },
   async prepareMutation(targetId: string, intent: MutationIntent) {
     return workspaceRequestResultSchema.parse(
       await invoke("workspace:mutation:prepare", targetId, intent),

@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { realpath } from "node:fs/promises";
 import { resolve } from "node:path";
 
-import { app, autoUpdater, dialog } from "electron";
+import { app, autoUpdater, dialog, shell } from "electron";
 
 import { createDesktopCapabilities } from "./application/desktop-capabilities.js";
 import { BUNDLED_OFFICIAL_COLLECTION_CATALOG } from "./application/bundled-official-collections.js";
@@ -11,6 +11,7 @@ import {
   createLocalSkillsProcess,
 } from "./adapters/local-skills-process.js";
 import { createElectronReleaseDiagnosticsExporter } from "./adapters/electron-release-diagnostics.js";
+import { assertAllowlistedSkillsShUrl } from "./application/skills-sh-handoff.js";
 import {
   createSshSkillsProcess,
   createSshTransportRunner,
@@ -98,6 +99,15 @@ export async function createCompositionRoot(options?: {
   });
   const capabilities = createDesktopCapabilities({
     clock: () => new Date(),
+    externalBrowser: {
+      // Second, independent allowlist check at the process edge: only a
+      // canonical https://skills.sh URL ever reaches the operating system.
+      async openExternal(url) {
+        const allowed = assertAllowlistedSkillsShUrl(url);
+        if (!allowed.ok) throw new Error(allowed.error.message);
+        await shell.openExternal(allowed.value, { activate: true });
+      },
+    },
     id: randomUUID,
     officialCollectionCatalog: BUNDLED_OFFICIAL_COLLECTION_CATALOG,
     onReviewRequested: options?.onReviewRequested,

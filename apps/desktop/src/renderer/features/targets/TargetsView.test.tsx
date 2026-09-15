@@ -123,6 +123,9 @@ function bridge(
     async deleteTarget(targetId) {
       return { ok: true, value: { operationId: targetId } };
     },
+    async handoffSkillsSh(recordId) {
+      return { ok: true, value: { operationId: recordId } };
+    },
     async repairTarget(targetId) {
       return { ok: true, value: { operationId: targetId } };
     },

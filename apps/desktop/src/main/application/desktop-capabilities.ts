@@ -52,6 +52,11 @@ import {
 import type { HostTrustChallenge } from "../ssh/openssh-target.js";
 import { compareTargetInventories } from "./comparison.js";
 import {
+  buildSkillsShUrl,
+  deriveSkillsShHandoffRecords,
+  type ExternalBrowser,
+} from "./skills-sh-handoff.js";
+import {
   EMPTY_OFFICIAL_COLLECTION_CATALOG,
   digestCanonicalJson,
   projectOfficialCollections,
@@ -104,6 +109,8 @@ export interface DesktopCapabilities {
 
 export interface DesktopCapabilitiesOptions {
   readonly clock?: () => Date;
+  /** System browser for ADR 0021 handoffs. Absent means handoff is unavailable. */
+  readonly externalBrowser?: ExternalBrowser;
   readonly id: () => string;
   readonly officialCollectionCatalog?: unknown;
   readonly platform?: NodeJS.Platform;
@@ -654,12 +661,22 @@ export function createDesktopCapabilities(
       target: projectTarget(definition),
     });
 
+  const skillsShHandoffsFor = (endpoint: EndpointState) =>
+    inventoryState.freshness === "fresh"
+      ? deriveSkillsShHandoffRecords({
+          entries: inventoryState.entries,
+          sessionEpoch: endpoint.sessionEpoch,
+          targetId: target.id,
+        })
+      : [];
+
   const snapshotFor = (
     endpoint: EndpointState,
     eventSequence = endpoint.sequence,
   ): WorkspaceSnapshot => ({
     blockedTargets: structuredClone([...blockedTargetDefinitions]),
     recovery: structuredClone(recoveryState),
+    skillsShHandoffs: structuredClone([...skillsShHandoffsFor(endpoint)]),
     comparison: structuredClone(currentComparison()),
     collections: {
       ...collectionsForTarget(target, inventoryState),
@@ -2241,6 +2258,57 @@ export function createDesktopCapabilities(
             };
             publish({ ...inventoryState });
             return { ok: true, value: { operationId: blocked.id } };
+          }
+
+          if (parsed.data.type === "handoff.skills-sh") {
+            const handoffRequest = parsed.data;
+            const record = skillsShHandoffsFor(endpointState).find(
+              ({ id }) => id === handoffRequest.recordId,
+            );
+            if (record === undefined) {
+              return requestFailure(
+                publicError(
+                  "invalid_request",
+                  "No skills.sh handoff record matches this session's Fresh Inventory.",
+                  "validate",
+                  false,
+                ),
+              );
+            }
+            if (options.externalBrowser === undefined) {
+              return requestFailure(
+                publicError(
+                  "invalid_request",
+                  "Opening the system browser is not available in this build.",
+                  "handoff",
+                  false,
+                ),
+              );
+            }
+            const url = buildSkillsShUrl(record);
+            if (!url.ok) {
+              return requestFailure(
+                publicError(
+                  "invalid_request",
+                  url.error.message,
+                  "handoff",
+                  false,
+                ),
+              );
+            }
+            try {
+              await options.externalBrowser.openExternal(url.value);
+            } catch {
+              return requestFailure(
+                publicError(
+                  "process_failed",
+                  "The system browser could not be opened.",
+                  "handoff",
+                  true,
+                ),
+              );
+            }
+            return { ok: true, value: { operationId: record.id } };
           }
 
           if (targetAuthorityUnavailable) {
