@@ -516,8 +516,12 @@ export async function runPackagedUiQa({
     for (const appearance of ["light", "dark", "high-contrast", "system"]) {
       activeCheck = `appearance-${appearance}`;
       await selectPreference(page, "Appearance", appearance);
+      // Theme tokens swap instantly but `.nav-item`/`.text-button` colors
+      // transition over 140ms; scanning mid-transition reports stale
+      // light-mode foregrounds on the dark canvas as contrast failures.
       await page.waitFor(
-        `document.documentElement.dataset.appearance === ${JSON.stringify(appearance)}`,
+        `document.documentElement.dataset.appearance === ${JSON.stringify(appearance)} &&
+          document.getAnimations().every((animation) => animation.playState !== "running")`,
         `${appearance} appearance applied`,
       );
       const palette = await page.evaluate(`(() => {
