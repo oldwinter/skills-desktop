@@ -213,6 +213,21 @@ skills.sh 交接：
 
 执行不是跨机事务：每个子 Target 的确认变更独立；若某子项进入 reconciliation，按该 Target 单独处理。
 
+### 导入的包（Imported Package）
+
+除随应用分发的 Official Collections，也可以离线导入团队或个人分享的 `.skillpack` 文件：
+
+1. 在 **Collections** 点 **导入 .skillpack**；主进程弹出原生文件对话框（应用不接受手工输入路径，也不会联网）。
+2. 导入结果显示在列表上方：
+   - **已导入**：新的包 ID；
+   - **相同**：同 ID / release / digest 再次导入，幂等、无变化；
+   - **摘要冲突**：同 ID、同 release 但内容 digest 不同——被拒绝，并在已保留的记录上标记冲突，供你与分享方对照；
+   - **升级 / 降级**：同 ID 的另一个 release 替换了原记录，Inspector 里显示 release 增量。
+3. 导入的包归入列表中的 **导入的包** 分组，与 **官方合集** 区分；Inspector 展示文档 digest、导入时间、声明的 GitHub 源（未 pin 到 commit 时会标注 **未固定**，此时已存在的 skill 只能判定为 present-content-unknown，不能证明「未变化」）。
+4. 之后的流程与 Official 完全相同：选择 Target 与 scope、查看 Assessment、生成 Collection Plan、进入 Trusted Review（标题会写明是导入的包，并展示导入证据而非官方审阅收据）、再执行。失败或不确定即停止，不会回滚。
+
+导入只是把菜谱记录在本机的 Package store 中，**不代表任何 skill 已安装**。
+
 ### 空态与 SSH
 
 - 若当前构建 **没有** 捆绑任何 reviewed release：会看到空态说明（有合集包之后，才对 Local Target 可用）。

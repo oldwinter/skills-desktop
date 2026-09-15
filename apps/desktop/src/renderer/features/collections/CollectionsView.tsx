@@ -3,9 +3,11 @@ import {
   AlertCircle,
   CheckCircle2,
   CircleHelp,
+  FileDown,
   Laptop,
   LibraryBig,
   LoaderCircle,
+  Package,
   PackagePlus,
   RotateCcw,
   Server,
@@ -14,7 +16,9 @@ import {
 
 import type { MessageKey } from "../../../contracts/i18n/translate.js";
 import type {
+  PackageOrigin,
   PublicCollectionsState,
+  PublicImportedPackage,
   RendererError,
   WorkspaceBridge,
   WorkspaceSnapshot,
@@ -24,6 +28,25 @@ import { UserFacingErrorCopy } from "../../UserFacingErrorCopy.js";
 
 type Release = PublicCollectionsState["releases"][number];
 type TargetState = NonNullable<WorkspaceSnapshot["targets"]>[number];
+
+/**
+ * ADR 0017: one selectable recipe surface over two immutable origins. An
+ * Imported Package is never folded into the Official shape; the view keeps
+ * both records and only shares the dimensioned assessment and plan path.
+ */
+type Recipe = {
+  readonly assessments: Release["assessments"];
+  readonly blockers: readonly string[];
+  readonly description: string;
+  readonly digest: string;
+  readonly executable: boolean;
+  readonly id: string;
+  readonly imported: PublicImportedPackage | undefined;
+  readonly official: Release | undefined;
+  readonly origin: PackageOrigin;
+  readonly releaseNumber: number;
+  readonly title: string;
+};
 type Scope = "global" | "project";
 type SelectionMode = "add" | "reapply";
 type TargetInput = {
@@ -32,14 +55,47 @@ type TargetInput = {
   readonly selected: Readonly<Record<string, SelectionMode>>;
 };
 
-type EntryStatus =
-  NonNullable<Release["assessments"]>[number]["entries"][number]["status"];
+type EntryStatus = NonNullable<
+  Release["assessments"]
+>[number]["entries"][number]["status"];
 
 const statusKey = (status: EntryStatus): MessageKey =>
   `collections.status.${status}`;
 
-function releaseKey(release: Release) {
-  return `${release.collectionId}:${release.releaseNumber}:${release.manifestDigest}`;
+function recipeKey(recipe: Recipe) {
+  return `${recipe.origin}:${recipe.id}:${recipe.releaseNumber}:${recipe.digest}`;
+}
+
+function recipesFor(collections: PublicCollectionsState | undefined): Recipe[] {
+  if (collections === undefined) return [];
+  return [
+    ...collections.releases.map((release): Recipe => ({
+      assessments: release.assessments,
+      blockers: release.blockers,
+      description: release.description,
+      digest: release.manifestDigest,
+      executable: release.executable,
+      id: release.collectionId,
+      imported: undefined,
+      official: release,
+      origin: "official",
+      releaseNumber: release.releaseNumber,
+      title: release.title,
+    })),
+    ...(collections.packages ?? []).map((pkg): Recipe => ({
+      assessments: pkg.assessments,
+      blockers: pkg.blockers,
+      description: pkg.description,
+      digest: pkg.documentDigest,
+      executable: pkg.executable,
+      id: pkg.packageId,
+      imported: pkg,
+      official: undefined,
+      origin: "imported",
+      releaseNumber: pkg.release,
+      title: pkg.title,
+    })),
+  ];
 }
 
 function targetStatesFor(snapshot: WorkspaceSnapshot): TargetState[] {
@@ -78,15 +134,15 @@ export function CollectionsView({
 }) {
   const { t, tc } = useTranslator();
   const collections = snapshot.collections;
+  const recipes = useMemo(() => recipesFor(collections), [collections]);
   const targetStates = useMemo(() => targetStatesFor(snapshot), [snapshot]);
   const targetKey = targetStates
     .map(({ target }) => `${target.id}:${target.generation}`)
     .join("|");
   const [releaseSelection, setReleaseSelection] = useState(
-    collections?.releases[0] === undefined
-      ? ""
-      : releaseKey(collections.releases[0]),
+    recipes[0] === undefined ? "" : recipeKey(recipes[0]),
   );
+  const [importing, setImporting] = useState(false);
   const [inputs, setInputs] = useState<Record<string, TargetInput>>(() =>
     Object.fromEntries(
       targetStates.map(({ target }) => [
@@ -100,9 +156,8 @@ export function CollectionsView({
   const statusHeadingRef = useRef<HTMLHeadingElement>(null);
 
   const release =
-    collections?.releases.find(
-      (candidate) => releaseKey(candidate) === releaseSelection,
-    ) ?? collections?.releases[0];
+    recipes.find((candidate) => recipeKey(candidate) === releaseSelection) ??
+    recipes[0];
 
   useEffect(() => {
     setInputs(
@@ -128,9 +183,9 @@ export function CollectionsView({
   }, [collections]);
 
   const releaseFor = (targetState: TargetState) =>
-    targetState.collections?.releases.find(
+    recipesFor(targetState.collections).find(
       (candidate) =>
-        release !== undefined && releaseKey(candidate) === releaseKey(release),
+        release !== undefined && recipeKey(candidate) === recipeKey(release),
     );
 
   const assessmentFor = (targetState: TargetState, scope: Scope) =>
@@ -154,7 +209,13 @@ export function CollectionsView({
     const assessment = assessmentFor(targetState, input.scope);
     const blockers: string[] = [];
     if (targetRelease === undefined || !targetRelease.executable) {
-      blockers.push(t("collections.blocker.noRelease"));
+      blockers.push(
+        t(
+          release?.origin === "imported"
+            ? "collections.blocker.noRecipe"
+            : "collections.blocker.noRelease",
+        ),
+      );
     }
     if (assessment?.compatibility !== "compatible") {
       blockers.push(t("collections.blocker.incompatible"));
@@ -204,8 +265,9 @@ export function CollectionsView({
     setBusy(true);
     try {
       const result = await client.prepareCollectionAcrossTargets({
-        collectionId: release.collectionId,
-        manifestDigest: release.manifestDigest,
+        collectionId: release.id,
+        manifestDigest: release.digest,
+        origin: release.origin,
         releaseNumber: release.releaseNumber,
         targets: selectedTargets.map(({ input, selections, targetState }) => ({
           scope: input.scope,
@@ -254,7 +316,62 @@ export function CollectionsView({
     }
   };
 
-  if (collections === undefined || collections.releases.length === 0) {
+  const importPackage = async () => {
+    setImporting(true);
+    try {
+      const result = await client.importPackage();
+      if (result.ok) setError(undefined);
+      else setError(result.error);
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const lastImport = collections?.lastImport ?? null;
+  const importButton = (
+    <button
+      className="text-button"
+      data-testid="collections-import"
+      disabled={importing || busy}
+      onClick={() => void importPackage()}
+      type="button"
+    >
+      {importing ? (
+        <LoaderCircle className="spin" aria-hidden="true" size={15} />
+      ) : (
+        <FileDown aria-hidden="true" size={15} />
+      )}
+      {t(importing ? "collections.importing" : "collections.import")}
+    </button>
+  );
+  const importOutcome =
+    lastImport === null ? null : (
+      <div
+        className={`state-banner ${
+          lastImport.status === "conflict"
+            ? "state-banner--warning"
+            : "state-banner--loading"
+        }`}
+        data-testid="collections-import-outcome"
+        role="status"
+      >
+        {lastImport.status === "conflict" ? (
+          <AlertCircle aria-hidden="true" size={16} />
+        ) : (
+          <Package aria-hidden="true" size={16} />
+        )}
+        <span>
+          {t(`collections.import.status.${lastImport.status}`, {
+            packageId: lastImport.packageId ?? "",
+            relatedRelease: lastImport.relatedRelease ?? 0,
+            release: lastImport.release ?? 0,
+          })}
+          {lastImport.fileName === null ? "" : ` (${lastImport.fileName})`}
+        </span>
+      </div>
+    );
+
+  if (collections === undefined || recipes.length === 0) {
     return (
       <main className="collections-workspace" id="workspace-main" tabIndex={-1}>
         <section className="page-heading">
@@ -262,11 +379,20 @@ export function CollectionsView({
             <h1>{t("collections.title")}</h1>
             <p>{t("collections.noneBundled")}</p>
           </div>
+          {importButton}
         </section>
+        {importOutcome}
+        {error !== undefined ? (
+          <div className="state-banner state-banner--danger" role="alert">
+            <AlertCircle aria-hidden="true" size={16} />
+            <UserFacingErrorCopy error={error} />
+          </div>
+        ) : null}
         <div className="empty-state" role="status">
           <CircleHelp aria-hidden="true" size={22} />
           <h2>{t("collections.empty.heading")}</h2>
           <p>{t("collections.empty.body")}</p>
+          <p>{t("collections.import.hint")}</p>
         </div>
       </main>
     );
@@ -274,6 +400,17 @@ export function CollectionsView({
 
   const execution = collections.execution;
   const plan = collections.plan;
+  const officialRecipes = recipes.filter(({ origin }) => origin === "official");
+  const importedRecipes = recipes.filter(({ origin }) => origin === "imported");
+  const recipeOptions = (group: Recipe[]) =>
+    group.map((candidate) => (
+      <option key={recipeKey(candidate)} value={recipeKey(candidate)}>
+        {t("collections.releaseOption", {
+          release: candidate.releaseNumber,
+          title: candidate.title,
+        })}
+      </option>
+    ));
 
   return (
     <>
@@ -281,8 +418,14 @@ export function CollectionsView({
         <section className="page-heading">
           <div>
             <h1>{t("collections.title")}</h1>
-            <p>{tc("collections.bundled", collections.releases.length)}</p>
+            <p>
+              {tc("collections.bundled", officialRecipes.length)}
+              {importedRecipes.length === 0
+                ? ""
+                : ` · ${tc("collections.imported", importedRecipes.length)}`}
+            </p>
           </div>
+          {importButton}
         </section>
 
         <div className="collection-controls">
@@ -293,19 +436,22 @@ export function CollectionsView({
               onChange={(event) =>
                 setReleaseSelection(event.currentTarget.value)
               }
-              value={release === undefined ? "" : releaseKey(release)}
+              value={release === undefined ? "" : recipeKey(release)}
             >
-              {collections.releases.map((candidate) => (
-                <option
-                  key={releaseKey(candidate)}
-                  value={releaseKey(candidate)}
-                >
-                  {t("collections.releaseOption", {
-                    release: candidate.releaseNumber,
-                    title: candidate.title,
-                  })}
-                </option>
-              ))}
+              {importedRecipes.length === 0 ? (
+                recipeOptions(officialRecipes)
+              ) : (
+                <>
+                  {officialRecipes.length === 0 ? null : (
+                    <optgroup label={t("collections.originGroup.official")}>
+                      {recipeOptions(officialRecipes)}
+                    </optgroup>
+                  )}
+                  <optgroup label={t("collections.originGroup.imported")}>
+                    {recipeOptions(importedRecipes)}
+                  </optgroup>
+                </>
+              )}
             </select>
           </label>
           <button
@@ -319,6 +465,7 @@ export function CollectionsView({
           </button>
         </div>
 
+        {importOutcome}
         {release?.blockers.map((blocker) => (
           <div
             className="state-banner state-banner--warning"
@@ -423,7 +570,11 @@ export function CollectionsView({
           {targetStates.map((targetState) => {
             const input =
               inputs[targetState.target.id] ??
-              inputFor(targetState.target.id, snapshot.target.id, targetState.target.kind);
+              inputFor(
+                targetState.target.id,
+                snapshot.target.id,
+                targetState.target.kind,
+              );
             const assessment = assessmentFor(targetState, input.scope);
             const blockers = targetBlockers(targetState, input);
             const targetRelease = releaseFor(targetState);
@@ -501,7 +652,9 @@ export function CollectionsView({
                       }}
                       value={input.scope}
                     >
-                      <option value="project">{t("common.scope.project")}</option>
+                      <option value="project">
+                        {t("common.scope.project")}
+                      </option>
                       <option value="global">{t("common.scope.global")}</option>
                     </select>
                   </label>
@@ -559,7 +712,9 @@ export function CollectionsView({
                                     updateInput(
                                       targetState.target.id,
                                       (current) => {
-                                        const selected = { ...current.selected };
+                                        const selected = {
+                                          ...current.selected,
+                                        };
                                         if (!checked)
                                           delete selected[entry.name];
                                         else if (mode !== undefined)
@@ -605,45 +760,139 @@ export function CollectionsView({
 
       <aside
         className="inspector collection-inspector"
-        aria-label={t("collections.inspector.label")}
+        aria-label={t(
+          release?.origin === "imported"
+            ? "collections.inspector.importedLabel"
+            : "collections.inspector.label",
+        )}
       >
         {release === undefined ? null : (
           <>
             <header className="inspector-heading">
-              <LibraryBig aria-hidden="true" size={18} />
+              {release.origin === "imported" ? (
+                <Package aria-hidden="true" size={18} />
+              ) : (
+                <LibraryBig aria-hidden="true" size={18} />
+              )}
               <div>
-                <p>{release.collectionId}</p>
+                <p>{release.id}</p>
                 <h2>{release.title}</h2>
               </div>
             </header>
             <p className="collection-description">{release.description}</p>
-            <dl className="evidence-list">
+            <dl className="evidence-list" data-testid="collection-evidence">
               <div>
-                <dt>{t("collections.inspector.status")}</dt>
-                <dd>{release.status}</dd>
-              </div>
-              <div>
-                <dt>{t("collections.inspector.independentReview")}</dt>
-                <dd>{release.receipt.status}</dd>
-              </div>
-              <div>
-                <dt>{t("collections.inspector.pinnedSource")}</dt>
-                <dd>
-                  <code>{release.source.repository}</code>
+                <dt>{t("collections.inspector.origin")}</dt>
+                <dd data-testid="collection-origin">
+                  {t(
+                    release.origin === "imported"
+                      ? "collections.origin.imported"
+                      : "collections.origin.official",
+                  )}
                 </dd>
               </div>
-              <div>
-                <dt>{t("collections.inspector.reviewedRevision")}</dt>
-                <dd>
-                  <code>{release.source.reviewedRevision}</code>
-                </dd>
-              </div>
-              <div>
-                <dt>{t("collections.inspector.manifestDigest")}</dt>
-                <dd>
-                  <code>{release.manifestDigest}</code>
-                </dd>
-              </div>
+              {release.official !== undefined ? (
+                <>
+                  <div>
+                    <dt>{t("collections.inspector.status")}</dt>
+                    <dd>{release.official.status}</dd>
+                  </div>
+                  <div>
+                    <dt>{t("collections.inspector.independentReview")}</dt>
+                    <dd>{release.official.receipt.status}</dd>
+                  </div>
+                  <div>
+                    <dt>{t("collections.inspector.pinnedSource")}</dt>
+                    <dd>
+                      <code>{release.official.source.repository}</code>
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>{t("collections.inspector.reviewedRevision")}</dt>
+                    <dd>
+                      <code>{release.official.source.reviewedRevision}</code>
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>{t("collections.inspector.manifestDigest")}</dt>
+                    <dd>
+                      <code>{release.official.manifestDigest}</code>
+                    </dd>
+                  </div>
+                </>
+              ) : null}
+              {release.imported !== undefined ? (
+                <>
+                  <div>
+                    <dt>{t("collections.inspector.independentReview")}</dt>
+                    <dd>{t("collections.inspector.noOfficialReview")}</dd>
+                  </div>
+                  <div>
+                    <dt>{t("collections.inspector.source")}</dt>
+                    <dd>
+                      <code>{release.imported.source.repository}</code>
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>{t("collections.inspector.reviewedRevision")}</dt>
+                    <dd>
+                      <code>
+                        {release.imported.source.revision ??
+                          t("collections.inspector.unpinned")}
+                      </code>
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>{t("collections.inspector.documentDigest")}</dt>
+                    <dd>
+                      <code>{release.imported.documentDigest}</code>
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>{t("collections.inspector.importedAt")}</dt>
+                    <dd>
+                      <time dateTime={release.imported.importedAt}>
+                        {release.imported.importedAt}
+                      </time>
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>{t("collections.inspector.delta")}</dt>
+                    <dd data-testid="collection-delta">
+                      {release.imported.delta === null
+                        ? t("collections.inspector.delta.none")
+                        : t(
+                            release.imported.delta.kind === "upgrade"
+                              ? "collections.inspector.delta.upgrade"
+                              : "collections.inspector.delta.downgrade",
+                            {
+                              fromRelease: release.imported.delta.fromRelease,
+                              toRelease: release.imported.delta.toRelease,
+                            },
+                          )}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>{t("collections.inspector.conflicts")}</dt>
+                    <dd data-testid="collection-conflicts">
+                      {release.imported.conflicts.length === 0 ? (
+                        t("collections.inspector.conflicts.none")
+                      ) : (
+                        <ul>
+                          {release.imported.conflicts.map((conflict) => (
+                            <li key={conflict.documentDigest}>
+                              {t("collections.inspector.conflict", {
+                                digest: conflict.documentDigest,
+                                release: conflict.release,
+                              })}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </dd>
+                  </div>
+                </>
+              ) : null}
               <div>
                 <dt>{t("collections.inspector.targetsSelected")}</dt>
                 <dd>{selectedTargets.length}</dd>

@@ -107,9 +107,7 @@ const sshTarget: TargetDefinition = {
   workspaceLabel: "build-host",
 };
 
-function bridge(
-  overrides: Partial<WorkspaceBridge> = {},
-): WorkspaceBridge {
+function bridge(overrides: Partial<WorkspaceBridge> = {}): WorkspaceBridge {
   return {
     async cancelInventory(operationId) {
       return { ok: true, value: { operationId } };
@@ -125,6 +123,9 @@ function bridge(
     },
     async handoffSkillsSh(recordId) {
       return { ok: true, value: { operationId: recordId } };
+    },
+    async importPackage() {
+      return { ok: true, value: { operationId: "import-1" } };
     },
     async inspectSource() {
       return { ok: true, value: { operationId: "inspection-1" } };
@@ -268,7 +269,11 @@ describe("TargetsView", () => {
     expect(screen.getByText("SSH · Not available in V1")).toBeInTheDocument();
     expect(screen.getByText("Not available")).toBeInTheDocument();
     expect(screen.getByText("Loading")).toBeInTheDocument();
-    expect(screen.getByText("The request is invalid. Check the input, then try again.")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "The request is invalid. Check the input, then try again.",
+      ),
+    ).toBeInTheDocument();
 
     fireEvent.click(
       screen.getByRole("button", { name: `Edit ${localTarget.label}` }),
@@ -292,7 +297,9 @@ describe("TargetsView", () => {
     fireEvent.click(
       screen.getByRole("button", { name: `Edit ${sshTarget.label}` }),
     );
-    expect(screen.getByText(/SSH · Not available in V1; it cannot be saved/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/SSH · Not available in V1; it cannot be saved/),
+    ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save Target" })).toBeDisabled();
     expect(screen.getByLabelText("OpenSSH connection reference")).toHaveValue(
       "build-host",
@@ -413,7 +420,9 @@ describe("TargetsView", () => {
       throw new Error("expected local and SSH target articles");
     }
     expect(within(firstArticle).getByText("Local")).toBeInTheDocument();
-    expect(within(firstArticle).getAllByText("This device").length).toBeGreaterThan(0);
+    expect(
+      within(firstArticle).getAllByText("This device").length,
+    ).toBeGreaterThan(0);
     expect(within(sshArticle).getByText("build-host")).toBeInTheDocument();
 
     const advanced = within(firstArticle).getByText("Advanced");
@@ -422,7 +431,9 @@ describe("TargetsView", () => {
     expect(details).not.toHaveAttribute("open");
     fireEvent.click(advanced);
     expect(details).toHaveAttribute("open");
-    expect(within(details as HTMLElement).getByText("Generation")).toBeInTheDocument();
+    expect(
+      within(details as HTMLElement).getByText("Generation"),
+    ).toBeInTheDocument();
     expect(within(details as HTMLElement).getByText("1")).toBeInTheDocument();
   });
 
@@ -445,7 +456,9 @@ describe("TargetsView", () => {
     expect(screen.getByRole("checkbox", { name: /Eve/ })).toBeInTheDocument();
     expect(
       within(
-        screen.getByRole("checkbox", { name: /Eve/ }).closest("label") as HTMLElement,
+        screen
+          .getByRole("checkbox", { name: /Eve/ })
+          .closest("label") as HTMLElement,
       ).getByText("project only"),
     ).toBeInTheDocument();
 

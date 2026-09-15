@@ -127,3 +127,44 @@ inspectionDigest }`; `describeCommandPlanSource` in
 pinned/mutable status that the Inventory Command Plan and the Trusted Review
 disclose before approval. SSH Targets reject `source.inspect` and inspected
 adds as next scope; the Wire protocol is unchanged.
+
+Imported Packages (ADR 0017) enter through the closed `package.import`
+request, which carries no payload: main opens its own native file dialog
+(`SkillpackPicker`), reads at most `SKILLPACK_MAX_BYTES` from the chosen
+`.skillpack`, and parses it with the canonical codec; a renderer can never
+name a path, and a request with extra fields is `invalid_request`. A build
+without a main-owned picker answers `package_import_unavailable`; a document
+that fails the codec, its digest, or its schema is `skillpack_invalid`; a
+second import while one is open is `mutation_conflict`. Everything is
+offline. Accepted documents land in the isolated Package store
+(`packages.json`, schema version 1, atomic replace, quarantined when corrupt
+or newer than the app understands) through the single `packages.replace`
+`DurableChange`; the store keeps at most one record per package ID and never
+touches Official acknowledgements. Importing the same ID, release, and
+document digest again is idempotent (`identical`); the same ID and release
+with a different digest is refused and retained as a bounded `conflict` on the
+kept record; a different release replaces the record and records an explicit
+`upgrade` or `downgrade` delta. The Workspace Snapshot publishes the result in
+`collections.lastImport` (`status`, `packageId`, `release`, `relatedRelease`,
+`documentDigest`, `fileName`, `recordedAt`) and the store in
+`collections.packages`, each `PublicImportedPackage` carrying
+`origin: "imported"`, the document digest, `importedAt`, the declared GitHub
+source with a nullable pinned revision, compatibility, retained conflicts, the
+last delta, and the same two dimensioned assessments Official releases get;
+an unpinned source can never prove a present skill `unchanged`. A Package is
+never described as installed.
+
+Applying an Imported Package reuses the guarded Collection path:
+`collection.prepare` and `collection.prepare-many` accept an optional
+`origin` (`official` by default, or `imported`), where for imported recipes
+`collectionId` is the package ID and `manifestDigest` the document digest.
+Main resolves the recipe strictly by origin, so a matching ID, release, and
+digest never promotes an import to Official (`mutation_ineligible`). The
+resulting Collection Plan carries `releaseEvidence` as a union: the Official
+shape (`status`, `receipt`, review facts) or the Imported shape (`origin:
+"imported"`, `documentDigest`, `importedAt`, `compatibility`, the declared
+source), and `source.reviewedRevision` is `null` for an unpinned import. The
+Trusted Review titles the approval as an Imported Package and shows the
+import evidence in place of an Official review receipt; approval creates the
+same Mutation Guard and stop-on-failure execution without rollback. SSH
+Targets stay excluded as for every other Collection prepare.

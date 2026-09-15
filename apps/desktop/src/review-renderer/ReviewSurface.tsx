@@ -11,7 +11,11 @@ import { describeCommandPlanSource } from "../contracts/source-disclosure.js";
 import type { MessageKey, Translator } from "../contracts/i18n/translate.js";
 import type { Locale } from "../contracts/preferences.js";
 import { userFacingErrorMessage } from "../contracts/user-facing-error.js";
-import type { CommandPlan, RendererError } from "../contracts/workspace.js";
+import type {
+  CommandPlan,
+  PublicCollectionPlan,
+  RendererError,
+} from "../contracts/workspace.js";
 import {
   LocaleProvider,
   useDocumentPreferences,
@@ -19,7 +23,9 @@ import {
 } from "../renderer/i18n/LocaleProvider.js";
 
 function scopeLabel(t: Translator["t"], scope: "global" | "project") {
-  return t(scope === "project" ? "common.scope.project" : "common.scope.global");
+  return t(
+    scope === "project" ? "common.scope.project" : "common.scope.global",
+  );
 }
 
 function formatReviewInstant(locale: Locale, iso: string): string {
@@ -80,13 +86,128 @@ function SourceDisclosure({
       data-testid="review-source-disclosure"
     >
       <h2 id="review-source-heading">
-        {t("inventory.plan.source")}: {disclosure.familyLabel} · {disclosure.title}
+        {t("inventory.plan.source")}: {disclosure.familyLabel} ·{" "}
+        {disclosure.title}
       </h2>
       <p>
         <code>{disclosure.source}</code>
       </p>
       <p>{disclosure.summary}</p>
     </section>
+  );
+}
+
+type CollectionPlanProjection = PublicCollectionPlan;
+
+/**
+ * ADR 0017: Official releases show their independent review receipt; an
+ * Imported Package shows its origin and canonical digest instead and is never
+ * presented as reviewed. The source line names an unpinned repository as such.
+ */
+function RecipeEvidenceFacts({
+  plan,
+  showCompatibility = false,
+}: {
+  readonly plan: CollectionPlanProjection;
+  readonly showCompatibility?: boolean;
+}) {
+  const { t } = useTranslator();
+  const evidence = plan.releaseEvidence;
+  const sourceFact = (
+    <div className="review-facts__wide">
+      <dt>
+        {t(
+          plan.source.reviewedRevision === null
+            ? "review.collection.unpinnedSource"
+            : "review.collection.pinnedSource",
+        )}
+      </dt>
+      <dd data-testid="review-collection-source">
+        {plan.source.repository}
+        {plan.source.reviewedRevision === null
+          ? ""
+          : `@${plan.source.reviewedRevision}`}
+      </dd>
+    </div>
+  );
+  if ("origin" in evidence) {
+    return (
+      <>
+        {sourceFact}
+        <div>
+          <dt>{t("review.collection.origin")}</dt>
+          <dd data-testid="review-collection-origin">
+            {t("collections.origin.imported")}
+          </dd>
+        </div>
+        <div>
+          <dt>{t("review.collection.independentReviewer")}</dt>
+          <dd>{t("review.collection.noOfficialReview")}</dd>
+        </div>
+        <div>
+          <dt>{t("review.collection.importedAt")}</dt>
+          <dd>
+            <ReviewInstant value={evidence.importedAt} />
+          </dd>
+        </div>
+        {showCompatibility ? (
+          <div>
+            <dt>{t("review.collection.compatibility")}</dt>
+            <dd>
+              {evidence.compatibility.dialectId} /{" "}
+              {evidence.compatibility.harnessIds.join(", ")}
+            </dd>
+          </div>
+        ) : null}
+        <div className="review-facts__wide">
+          <dt>{t("collections.inspector.documentDigest")}</dt>
+          <dd>{evidence.documentDigest}</dd>
+        </div>
+      </>
+    );
+  }
+  return (
+    <>
+      {sourceFact}
+      <div>
+        <dt>{t("review.collection.releaseStatus")}</dt>
+        <dd>{evidence.status}</dd>
+      </div>
+      {showCompatibility ? (
+        <div>
+          <dt>{t("review.collection.compatibility")}</dt>
+          <dd>
+            CLI {evidence.compatibility.cliVersion} /{" "}
+            {evidence.compatibility.platforms.join(", ")} /{" "}
+            {evidence.compatibility.harnesses.join(", ")}
+          </dd>
+        </div>
+      ) : null}
+      {showCompatibility ? (
+        <div>
+          <dt>{t("review.collection.manifestAuthor")}</dt>
+          <dd>{evidence.receipt.author}</dd>
+        </div>
+      ) : null}
+      <div>
+        <dt>{t("review.collection.independentReviewer")}</dt>
+        <dd>{evidence.receipt.reviewer}</dd>
+      </div>
+      <div>
+        <dt>{t("review.collection.reviewedAt")}</dt>
+        <dd>
+          <ReviewInstant value={evidence.receipt.reviewedAt} />
+        </dd>
+      </div>
+      <div>
+        <dt>{t("review.collection.reviewPolicy")}</dt>
+        <dd>{evidence.receipt.reviewPolicy}</dd>
+      </div>
+      <div className="review-facts__wide">
+        <dt>{t("review.collection.reviewLocation")}</dt>
+        <dd>{evidence.receipt.reviewLocation}</dd>
+      </div>
+    </>
   );
 }
 
@@ -330,10 +451,19 @@ function ReviewContent({
 
   if ("collectionPlan" in snapshot.projection) {
     const { collectionPlan, target } = snapshot.projection;
+    const imported = "origin" in collectionPlan.releaseEvidence;
+    const collectionTitle = t(
+      imported ? "review.collection.importedTitle" : "review.collection.title",
+    );
+    const approveLabel = t(
+      imported
+        ? "review.collection.approveImported"
+        : "review.collection.approve",
+    );
     if (collectionPlan.schemaVersion === 2) {
       return (
         <main className="review-surface">
-          <ReviewHeading title={t("review.collection.title")} />
+          <ReviewHeading title={collectionTitle} />
           <dl className="review-facts">
             <div>
               <dt>{t("review.collection.collection")}</dt>
@@ -351,37 +481,7 @@ function ReviewContent({
               <dt>{t("review.collection.execution")}</dt>
               <dd>{t("collections.plan.semantics")}</dd>
             </div>
-            <div className="review-facts__wide">
-              <dt>{t("review.collection.pinnedSource")}</dt>
-              <dd>
-                {collectionPlan.source.repository}@
-                {collectionPlan.source.reviewedRevision}
-              </dd>
-            </div>
-            <div>
-              <dt>{t("review.collection.releaseStatus")}</dt>
-              <dd>{collectionPlan.releaseEvidence.status}</dd>
-            </div>
-            <div>
-              <dt>{t("review.collection.independentReviewer")}</dt>
-              <dd>{collectionPlan.releaseEvidence.receipt.reviewer}</dd>
-            </div>
-            <div>
-              <dt>{t("review.collection.reviewedAt")}</dt>
-              <dd>
-                <ReviewInstant
-                  value={collectionPlan.releaseEvidence.receipt.reviewedAt}
-                />
-              </dd>
-            </div>
-            <div>
-              <dt>{t("review.collection.reviewPolicy")}</dt>
-              <dd>{collectionPlan.releaseEvidence.receipt.reviewPolicy}</dd>
-            </div>
-            <div className="review-facts__wide">
-              <dt>{t("review.collection.reviewLocation")}</dt>
-              <dd>{collectionPlan.releaseEvidence.receipt.reviewLocation}</dd>
-            </div>
+            <RecipeEvidenceFacts plan={collectionPlan} />
             <div>
               <dt>{t("review.collection.expires")}</dt>
               <dd>
@@ -405,7 +505,9 @@ function ReviewContent({
             className="review-plan"
             aria-labelledby="review-plan-heading"
           >
-            <h2 id="review-plan-heading">{t("review.collection.childOrder")}</h2>
+            <h2 id="review-plan-heading">
+              {t("review.collection.childOrder")}
+            </h2>
             <ol className="review-child-list">
               {collectionPlan.children.map((child) => (
                 <li key={child.target.id}>
@@ -453,14 +555,14 @@ function ReviewContent({
           </section>
           <div className="review-actions">
             {rejectButton}
-            {approveButton(t("review.collection.approve"), "review.applying")}
+            {approveButton(approveLabel, "review.applying")}
           </div>
         </main>
       );
     }
     return (
       <main className="review-surface">
-        <ReviewHeading title={t("review.collection.title")} />
+        <ReviewHeading title={collectionTitle} />
         <dl className="review-facts">
           <div>
             <dt>{t("review.collection.collection")}</dt>
@@ -483,54 +585,7 @@ function ReviewContent({
             <dt>{t("common.scope")}</dt>
             <dd>{scopeLabel(t, collectionPlan.scope)}</dd>
           </div>
-          <div className="review-facts__wide">
-            <dt>{t("review.collection.pinnedSource")}</dt>
-            <dd>
-              {collectionPlan.source.repository}@
-              {collectionPlan.source.reviewedRevision}
-            </dd>
-          </div>
-          <div>
-            <dt>{t("review.collection.releaseStatus")}</dt>
-            <dd>{collectionPlan.releaseEvidence.status}</dd>
-          </div>
-          <div>
-            <dt>{t("review.collection.compatibility")}</dt>
-            <dd>
-              CLI {collectionPlan.releaseEvidence.compatibility.cliVersion} /{" "}
-              {collectionPlan.releaseEvidence.compatibility.platforms.join(
-                ", ",
-              )}{" "}
-              /{" "}
-              {collectionPlan.releaseEvidence.compatibility.harnesses.join(
-                ", ",
-              )}
-            </dd>
-          </div>
-          <div>
-            <dt>{t("review.collection.manifestAuthor")}</dt>
-            <dd>{collectionPlan.releaseEvidence.receipt.author}</dd>
-          </div>
-          <div>
-            <dt>{t("review.collection.independentReviewer")}</dt>
-            <dd>{collectionPlan.releaseEvidence.receipt.reviewer}</dd>
-          </div>
-          <div>
-            <dt>{t("review.collection.reviewedAt")}</dt>
-            <dd>
-              <ReviewInstant
-                value={collectionPlan.releaseEvidence.receipt.reviewedAt}
-              />
-            </dd>
-          </div>
-          <div>
-            <dt>{t("review.collection.reviewPolicy")}</dt>
-            <dd>{collectionPlan.releaseEvidence.receipt.reviewPolicy}</dd>
-          </div>
-          <div className="review-facts__wide">
-            <dt>{t("review.collection.reviewLocation")}</dt>
-            <dd>{collectionPlan.releaseEvidence.receipt.reviewLocation}</dd>
-          </div>
+          <RecipeEvidenceFacts plan={collectionPlan} showCompatibility />
           <div className="review-facts__wide">
             <dt>{t("review.collection.selectedSkills")}</dt>
             <dd>
@@ -582,7 +637,7 @@ function ReviewContent({
         </section>
         <div className="review-actions">
           {rejectButton}
-          {approveButton(t("review.collection.approve"), "review.applying")}
+          {approveButton(approveLabel, "review.applying")}
         </div>
       </main>
     );
