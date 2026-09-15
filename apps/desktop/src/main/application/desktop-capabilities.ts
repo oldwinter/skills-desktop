@@ -1,8 +1,10 @@
 import { posix } from "node:path";
 
 import {
+  describeSource,
   normalizeHarnessIds,
   type Result,
+  type SourceDescriptorV1,
 } from "@skills-desktop/skills-runtime";
 
 import type { RestartGuardReason } from "../../contracts/about.js";
@@ -21,6 +23,7 @@ import {
   type PublicSingleTargetCollectionPlan,
   type PublicMutationState,
   type PublicRecoveryState,
+  type PublicSourceInspectionState,
   type RendererError,
   type BlockedTargetDefinition,
   type DurableTargetDefinition,
@@ -33,7 +36,10 @@ import {
   type ReviewSnapshot,
 } from "../../contracts/review.js";
 
-import type { PreparedMutation } from "../adapters/skills-process.js";
+import type {
+  PreparedMutation,
+  SourceInspection,
+} from "../adapters/skills-process.js";
 import type {
   CollectionAcknowledgement,
   InventorySnapshot,
@@ -173,6 +179,14 @@ interface ActiveMutation {
   readonly id: string;
   readonly prepared?: PreparedMutation;
   readonly promise: Promise<Result<RequestValue, RequestError>>;
+}
+
+interface ActiveInspection {
+  readonly controller: AbortController;
+  readonly id: string;
+  readonly ownerEndpointId: string;
+  readonly promise: Promise<Result<RequestValue, RequestError>>;
+  readonly targetId: string;
 }
 
 interface ActivePreparation {
@@ -375,6 +389,52 @@ function projectCommandPlan(plan: PreparedMutation["commandPlan"]) {
   };
 }
 
+function emptySourceInspectionState(): PublicSourceInspectionState {
+  return {
+    activeOperationId: null,
+    inspection: null,
+    lastError: null,
+    phase: "idle",
+  };
+}
+
+function projectSourceInspection(
+  inspection: SourceInspection,
+): NonNullable<PublicSourceInspectionState["inspection"]> {
+  return {
+    candidates: inspection.candidates.map((candidate) => ({ ...candidate })),
+    descriptor: { ...inspection.descriptor },
+    digest: inspection.digest,
+    inspectedAt: inspection.inspectedAt,
+    inspectionId: inspection.id,
+    targetGeneration: inspection.targetGeneration,
+    targetId: inspection.targetId,
+  };
+}
+
+function sameDescriptor(
+  left: SourceDescriptorV1,
+  right: SourceDescriptorV1,
+): boolean {
+  return (
+    left.family === right.family &&
+    left.locality === right.locality &&
+    left.mutability === right.mutability &&
+    left.ref === right.ref &&
+    left.schemaVersion === right.schemaVersion &&
+    left.source === right.source
+  );
+}
+
+function sourceInspectionStaleError() {
+  return publicError(
+    "source_inspection_stale",
+    "The Source Inspection no longer matches this Target; inspect the source again.",
+    "prepare",
+    true,
+  );
+}
+
 export function createDesktopCapabilities(
   options: DesktopCapabilitiesOptions,
 ): DesktopCapabilities {
@@ -406,7 +466,13 @@ export function createDesktopCapabilities(
   let activeObservation: ActiveObservation | undefined;
   let activeMutation: ActiveMutation | undefined;
   let activePreparation: ActivePreparation | undefined;
+  let activeInspection: ActiveInspection | undefined;
   let freshTargetSession: FreshTargetSession | undefined;
+  // ADR 0015 session evidence, keyed by Target. Never persisted.
+  const sourceInspections = new Map<string, SourceInspection>();
+  const sourceInspectionStates = new Map<string, PublicSourceInspectionState>();
+  let sourceInspectionState: PublicSourceInspectionState =
+    emptySourceInspectionState();
   const preparedMutations = new Map<string, PreparedMutation>();
   const preparedDependencies = new Map<string, readonly string[]>();
   const reviews = new Map<string, TrustedReview>();
@@ -482,6 +548,10 @@ export function createDesktopCapabilities(
   const storeActiveTargetState = () => {
     inventoryStates.set(target.id, structuredClone(inventoryState));
     mutationStates.set(target.id, structuredClone(mutationState));
+    sourceInspectionStates.set(
+      target.id,
+      structuredClone(sourceInspectionState),
+    );
     if (freshTargetSession === undefined) freshTargetSessions.delete(target.id);
     else freshTargetSessions.set(target.id, freshTargetSession);
   };
@@ -495,7 +565,38 @@ export function createDesktopCapabilities(
     mutationState = structuredClone(
       mutationStates.get(definition.id) ?? emptyMutationState(),
     );
+    sourceInspectionState = structuredClone(
+      sourceInspectionStates.get(definition.id) ??
+        emptySourceInspectionState(),
+    );
     freshTargetSession = freshTargetSessions.get(definition.id);
+  };
+
+  const clearSourceInspection = (targetId: string) => {
+    sourceInspections.delete(targetId);
+    sourceInspectionStates.delete(targetId);
+    if (targetId === target.id) {
+      sourceInspectionState = emptySourceInspectionState();
+    }
+  };
+
+  /**
+   * The inspection an add intent may bind to: the current evidence for the
+   * Target, at the current Generation, with the exact id and digest.
+   */
+  const boundSourceInspection = (
+    targetId: string,
+    generation: number,
+    binding: { readonly digest: string; readonly id: string },
+  ): SourceInspection | undefined => {
+    const inspection = sourceInspections.get(targetId);
+    return inspection !== undefined &&
+      inspection.id === binding.id &&
+      inspection.digest === binding.digest &&
+      inspection.targetId === targetId &&
+      inspection.targetGeneration === generation
+      ? inspection
+      : undefined;
   };
 
   const inventoryForTarget = (targetId: string) =>
@@ -693,6 +794,7 @@ export function createDesktopCapabilities(
     mutation: structuredClone(mutationState),
     schemaVersion: WORKSPACE_PROTOCOL_VERSION,
     sessionEpoch: endpoint.sessionEpoch,
+    sourceInspection: structuredClone(sourceInspectionState),
     stateRevision,
     target: projectTarget(target),
     targets: targetDefinitions().map((definition) => {
@@ -764,6 +866,23 @@ export function createDesktopCapabilities(
 
   const publishMutation = (next: PublicMutationState) => {
     mutationState = next;
+    storeActiveTargetState();
+    stateRevision += 1;
+    for (const endpoint of endpoints.values()) {
+      if (endpoint.closed || endpoint.role !== "workspace") continue;
+      const sequence = endpoint.sequence + 1;
+      enqueue(endpoint, {
+        sequence,
+        sessionEpoch: endpoint.sessionEpoch,
+        snapshot: snapshotFor(endpoint, sequence),
+        stateRevision,
+        type: "snapshot.changed",
+      });
+    }
+  };
+
+  const publishSourceInspection = (next: PublicSourceInspectionState) => {
+    sourceInspectionState = next;
     storeActiveTargetState();
     stateRevision += 1;
     for (const endpoint of endpoints.values()) {
@@ -919,6 +1038,7 @@ export function createDesktopCapabilities(
       freshTargetSession = undefined;
       freshTargetSessions.delete(target.id);
       invalidatePreparedForTarget(target.id);
+      clearSourceInspection(target.id);
       inventoryState = {
         ...inventoryState,
         freshness: staleAfterFailure(inventoryState.freshness),
@@ -2085,10 +2205,43 @@ export function createDesktopCapabilities(
               });
               return requestFailure(error);
             }
+            // ADR 0015: an inspected add must still match the exact session
+            // inspection it was bound to before a Guard is created.
+            const plannedSource = prepared.commandPlan.source;
+            if (
+              plannedSource !== null &&
+              plannedSource.sourceType === "inspected"
+            ) {
+              const inspection = boundSourceInspection(
+                prepared.targetId,
+                prepared.targetGeneration,
+                {
+                  digest: plannedSource.inspectionDigest,
+                  id: plannedSource.inspectionId,
+                },
+              );
+              if (
+                inspection === undefined ||
+                inspection.descriptor.source !== plannedSource.source
+              ) {
+                const error = {
+                  ...sourceInspectionStaleError(),
+                  phase: "review",
+                };
+                publishMutation({
+                  ...mutationState,
+                  activeOperationId: null,
+                  lastError: error,
+                  phase: "failed",
+                });
+                return requestFailure(error);
+              }
+            }
             if (
               activeMutation !== undefined ||
               activeObservation !== undefined ||
-              activePreparation !== undefined
+              activePreparation !== undefined ||
+              activeInspection !== undefined
             ) {
               return requestFailure(
                 publicError(
@@ -2671,9 +2824,15 @@ export function createDesktopCapabilities(
               mutationStates.delete(existing.id);
               freshTargetSessions.delete(existing.id);
               invalidatePreparedForTarget(existing.id);
+              sourceInspections.delete(existing.id);
+              sourceInspectionStates.delete(existing.id);
               if (target.id === existing.id) {
                 target = targetDefinitions()[0]!;
                 freshTargetSession = freshTargetSessions.get(target.id);
+                sourceInspectionState = structuredClone(
+                  sourceInspectionStates.get(target.id) ??
+                    emptySourceInspectionState(),
+                );
                 inventoryState = structuredClone(
                   inventoryStates.get(target.id) ?? emptyInventoryState(),
                 );
@@ -2738,7 +2897,8 @@ export function createDesktopCapabilities(
             if (
               activeMutation !== undefined ||
               activeObservation !== undefined ||
-              activePreparation !== undefined
+              activePreparation !== undefined ||
+              activeInspection !== undefined
             ) {
               return requestFailure(
                 publicError(
@@ -2940,7 +3100,8 @@ export function createDesktopCapabilities(
             if (
               activeMutation !== undefined ||
               activeObservation !== undefined ||
-              activePreparation !== undefined
+              activePreparation !== undefined ||
+              activeInspection !== undefined
             ) {
               return requestFailure(
                 publicError(
@@ -3366,7 +3527,8 @@ export function createDesktopCapabilities(
             if (
               activeMutation !== undefined ||
               activeObservation !== undefined ||
-              activePreparation !== undefined
+              activePreparation !== undefined ||
+              activeInspection !== undefined
             ) {
               return requestFailure(
                 publicError(
@@ -3516,6 +3678,11 @@ export function createDesktopCapabilities(
             if (activeObservation?.id === parsed.data.operationId) {
               activeObservation.controller.abort();
             }
+            // ADR 0015: a running Source Inspection is cancelled the same
+            // way; cancellation publishes no partial candidate list.
+            if (activeInspection?.id === parsed.data.operationId) {
+              activeInspection.controller.abort();
+            }
             return {
               ok: true,
               value: { operationId: parsed.data.operationId },
@@ -3617,7 +3784,8 @@ export function createDesktopCapabilities(
             if (
               activeMutation !== undefined ||
               activeObservation !== undefined ||
-              activePreparation !== undefined
+              activePreparation !== undefined ||
+              activeInspection !== undefined
             ) {
               return requestFailure(
                 publicError(
@@ -3689,7 +3857,8 @@ export function createDesktopCapabilities(
             if (
               activeMutation !== undefined ||
               activeObservation !== undefined ||
-              activePreparation !== undefined
+              activePreparation !== undefined ||
+              activeInspection !== undefined
             ) {
               return requestFailure(
                 publicError(
@@ -3700,11 +3869,149 @@ export function createDesktopCapabilities(
                 ),
               );
             }
-            return runPreparation(
-              endpointState,
-              freshTargetSession,
-              parsed.data.intent,
-            );
+            const { intent } = parsed.data;
+            if (intent.type === "add" && intent.source.sourceType === "inspected") {
+              const inspection = boundSourceInspection(
+                target.id,
+                freshTargetSession.binding.generation,
+                intent.source.inspection,
+              );
+              if (
+                inspection === undefined ||
+                !sameDescriptor(inspection.descriptor, intent.source.descriptor) ||
+                intent.names.some(
+                  (name) =>
+                    !inspection.candidates.some(
+                      (candidate) => candidate.name === name,
+                    ),
+                )
+              ) {
+                return requestFailure(sourceInspectionStaleError());
+              }
+            }
+            return runPreparation(endpointState, freshTargetSession, intent);
+          }
+
+          if (parsed.data.type === "source.inspect") {
+            if (
+              activeMutation !== undefined ||
+              activeObservation !== undefined ||
+              activePreparation !== undefined ||
+              activeInspection !== undefined
+            ) {
+              return requestFailure(
+                publicError(
+                  "mutation_conflict",
+                  "Another operation is active for this Target.",
+                  "coordinate",
+                  true,
+                ),
+              );
+            }
+            const described = describeSource(parsed.data.source);
+            if (!described.ok) {
+              const error = publicError(
+                "source_unsupported",
+                described.error.message,
+                "inspect",
+                false,
+              );
+              publishSourceInspection({
+                ...sourceInspectionState,
+                activeOperationId: null,
+                lastError: error,
+                phase: "failed",
+              });
+              return requestFailure(error);
+            }
+            if (described.value.locality === "local-only") {
+              // ADR 0015: local paths enter only through a main-owned
+              // filesystem grant, which this build does not yet issue.
+              const error = publicError(
+                "source_unsupported",
+                "Local directories and archives need a filesystem grant, which is not available yet.",
+                "inspect",
+                false,
+              );
+              publishSourceInspection({
+                ...sourceInspectionState,
+                activeOperationId: null,
+                lastError: error,
+                phase: "failed",
+              });
+              return requestFailure(error);
+            }
+            const session = freshTargetSession;
+            if (session === undefined) {
+              return requestFailure(
+                publicError(
+                  "stale_inventory",
+                  "Refresh this Target before inspecting a source.",
+                  "inspect",
+                  true,
+                ),
+              );
+            }
+            const operationId = options.id();
+            const controller = new AbortController();
+            publishSourceInspection({
+              ...sourceInspectionState,
+              activeOperationId: operationId,
+              lastError: null,
+              phase: "inspecting",
+            });
+            const inspectedTargetId = target.id;
+            const promise = (async (): Promise<
+              Result<RequestValue, RequestError>
+            > => {
+              const inspected = await session.process.inspectSource({
+                descriptor: described.value,
+                signal: controller.signal,
+              });
+              const publishFor = (next: PublicSourceInspectionState) => {
+                if (inspectedTargetId === target.id) {
+                  publishSourceInspection(next);
+                } else {
+                  sourceInspectionStates.set(inspectedTargetId, next);
+                  publish({ ...inventoryState });
+                }
+              };
+              const priorInspection =
+                sourceInspections.get(inspectedTargetId) ?? null;
+              if (!inspected.ok) {
+                const error = inspected.error as RequestError;
+                publishFor({
+                  activeOperationId: null,
+                  inspection:
+                    priorInspection === null
+                      ? null
+                      : projectSourceInspection(priorInspection),
+                  lastError: error,
+                  phase: error.code === "cancelled" ? "idle" : "failed",
+                });
+                return requestFailure(error);
+              }
+              sourceInspections.set(inspectedTargetId, inspected.value);
+              publishFor({
+                activeOperationId: null,
+                inspection: projectSourceInspection(inspected.value),
+                lastError: null,
+                phase: "ready",
+              });
+              return { ok: true, value: { operationId } };
+            })().finally(() => {
+              if (activeInspection?.id === operationId) {
+                activeInspection = undefined;
+              }
+            });
+            activeInspection = {
+              controller,
+              id: operationId,
+              ownerEndpointId: endpointState.endpointId,
+              promise,
+              targetId: inspectedTargetId,
+            };
+            return promise;
           }
 
           if (parsed.data.type === "mutation.reconcile") {
@@ -3735,7 +4042,8 @@ export function createDesktopCapabilities(
             if (
               activeMutation !== undefined ||
               activeObservation !== undefined ||
-              activePreparation !== undefined
+              activePreparation !== undefined ||
+              activeInspection !== undefined
             ) {
               return requestFailure(
                 publicError(
@@ -3764,7 +4072,11 @@ export function createDesktopCapabilities(
             return promise;
           }
 
-          if (activeMutation !== undefined || activePreparation !== undefined) {
+          if (
+            activeMutation !== undefined ||
+            activePreparation !== undefined ||
+            activeInspection !== undefined
+          ) {
             return requestFailure(
               publicError(
                 "mutation_conflict",
@@ -3815,6 +4127,9 @@ export function createDesktopCapabilities(
           }
           if (activePreparation?.ownerEndpointId === endpointState.endpointId) {
             activePreparation.invalidated = true;
+          }
+          if (activeInspection?.ownerEndpointId === endpointState.endpointId) {
+            activeInspection.controller.abort();
           }
           if (
             endpointState.role === "review" &&
@@ -4156,7 +4471,9 @@ export function createDesktopCapabilities(
       const observation = activeObservation;
       const mutation = activeMutation;
       const preparation = activePreparation;
+      const inspection = activeInspection;
       observation?.controller.abort();
+      inspection?.controller.abort();
       if (preparation !== undefined) preparation.invalidated = true;
       rejectPendingReviews();
       rejectPendingHostTrustReviews();
@@ -4165,6 +4482,7 @@ export function createDesktopCapabilities(
           observation?.promise,
           mutation?.promise,
           preparation?.promise,
+          inspection?.promise,
         ].filter(
           (
             operation,

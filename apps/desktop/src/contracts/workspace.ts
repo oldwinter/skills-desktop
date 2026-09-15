@@ -3,9 +3,12 @@ import { z } from "zod";
 import {
   HARNESS_REGISTRY_DIGEST,
   HARNESS_REGISTRY_VERSION,
+  MAX_SOURCE_CANDIDATES,
   mutationIntentSchema,
   normalizeHarnessIds,
   SKILLS_DIALECT_ID,
+  SOURCE_FAMILIES,
+  sourceDescriptorV1Schema,
 } from "@skills-desktop/skills-runtime";
 
 import {
@@ -42,6 +45,10 @@ export const rendererErrorCodeSchema = z.enum([
   "reconciliation_wait",
   "review_expired",
   "review_invalid",
+  "source_inspection_incompatible",
+  "source_inspection_stale",
+  "source_unavailable",
+  "source_unsupported",
   "stale_inventory",
   "ssh_config_invalid",
   "target_not_found",
@@ -207,6 +214,39 @@ export type CommandPlanHarnessEffect = z.infer<
   typeof commandPlanHarnessEffectSchema
 >;
 
+const inspectionDigestSchema = z.string().regex(/^[a-f0-9]{64}$/);
+
+/**
+ * ADR 0015: the reviewed add source. The legacy GitHub shape is unchanged so
+ * shipped plans stay valid; inspected sources expose the exact descriptor
+ * text, its family, whether it is mutable, and the inspection binding.
+ */
+export const commandPlanSourceSchema = z.discriminatedUnion("sourceType", [
+  z
+    .object({
+      revision: z
+        .string()
+        .regex(/^[a-f0-9]{40}$/)
+        .optional(),
+      source: z.string().min(1).max(256),
+      sourceType: z.literal("github"),
+    })
+    .strict(),
+  z
+    .object({
+      family: z.enum(SOURCE_FAMILIES),
+      inspectionDigest: inspectionDigestSchema,
+      inspectionId: z.string().min(1).max(256),
+      mutability: z.enum(["mutable", "pinned"]),
+      ref: z.string().min(1).max(256).nullable(),
+      source: z.string().min(1).max(2_048),
+      sourceType: z.literal("inspected"),
+    })
+    .strict(),
+]);
+
+export type CommandPlanSource = z.infer<typeof commandPlanSourceSchema>;
+
 export const commandPlanSchema = z
   .object({
     harness: z.string().min(1).max(128),
@@ -217,17 +257,7 @@ export const commandPlanSchema = z
     preview: z.string().min(1).max(16_384),
     schemaVersion: z.literal(1),
     scope: z.enum(["global", "project"]),
-    source: z
-      .object({
-        revision: z
-          .string()
-          .regex(/^[a-f0-9]{40}$/)
-          .optional(),
-        source: z.string().min(1).max(256),
-        sourceType: z.literal("github"),
-      })
-      .strict()
-      .nullable(),
+    source: commandPlanSourceSchema.nullable(),
     targetId: targetIdSchema,
     timeoutMs: z.number().int().positive().max(600_000),
   })
@@ -254,6 +284,49 @@ export const publicMutationOutcomeSchema = z
       .strict(),
   })
   .strict();
+
+export const publicSourceCandidateSchema = z
+  .object({
+    description: z.string().min(1).max(4_096),
+    group: z.string().min(1).max(256).nullable(),
+    name: z.string().min(1).max(256),
+  })
+  .strict();
+
+/**
+ * ADR 0015: the public projection of one read-only Source Inspection for the
+ * active Target. It is session evidence only: never persisted, cleared when
+ * the Target or its Generation changes, and carrying no mutation authority.
+ * The renderer echoes `descriptor`, `inspectionId`, and `digest` back inside
+ * an inspected add intent; main revalidates them before planning and again
+ * before Guard creation.
+ */
+export const publicSourceInspectionSchema = z
+  .object({
+    candidates: z.array(publicSourceCandidateSchema).max(MAX_SOURCE_CANDIDATES),
+    descriptor: sourceDescriptorV1Schema,
+    digest: inspectionDigestSchema,
+    inspectedAt: z.string().datetime({ offset: true }),
+    inspectionId: z.string().min(1).max(256),
+    targetGeneration: z.number().int().positive(),
+    targetId: targetIdSchema,
+  })
+  .strict();
+
+export const publicSourceInspectionStateSchema = z
+  .object({
+    activeOperationId: z.string().min(1).max(256).nullable(),
+    inspection: publicSourceInspectionSchema.nullable(),
+    lastError: rendererErrorSchema.nullable(),
+    phase: z.enum(["failed", "idle", "inspecting", "ready"]),
+  })
+  .strict();
+
+export type PublicSourceCandidate = z.infer<typeof publicSourceCandidateSchema>;
+export type PublicSourceInspection = z.infer<typeof publicSourceInspectionSchema>;
+export type PublicSourceInspectionState = z.infer<
+  typeof publicSourceInspectionStateSchema
+>;
 
 export const publicMutationStateSchema = z
   .object({
@@ -704,6 +777,7 @@ export const workspaceSnapshotSchema = z
     mutation: publicMutationStateSchema,
     schemaVersion: z.literal(WORKSPACE_PROTOCOL_VERSION),
     sessionEpoch: z.string().min(1).max(256),
+    sourceInspection: publicSourceInspectionStateSchema.optional(),
     stateRevision: z.number().int().nonnegative(),
     target: targetDefinitionSchema,
     targets: z.array(publicTargetStateSchema).max(1_000).optional(),
@@ -773,6 +847,20 @@ export function isGithubOwnerRepository(source: string): boolean {
     type: "add",
   }).success;
 }
+
+/**
+ * ADR 0015: the renderer sends only the exact source text. Main classifies
+ * it into a Source Descriptor, rejects unsupported forms before any spawn,
+ * and runs the read-only listing through the Target's Skills Process.
+ */
+export const inspectSourceRequestSchema = z
+  .object({
+    source: z.string().min(1).max(2_048),
+    targetId: targetIdSchema,
+    type: z.literal("source.inspect"),
+    version: z.literal(WORKSPACE_PROTOCOL_VERSION),
+  })
+  .strict();
 
 export const requestReviewSchema = z
   .object({
@@ -966,6 +1054,7 @@ export const workspaceRequestSchema = z.discriminatedUnion("type", [
   refreshRequestSchema,
   cancelRequestSchema,
   prepareMutationRequestSchema,
+  inspectSourceRequestSchema,
   requestReviewSchema,
   requestHostTrustReviewSchema,
   requestCancellationReviewSchema,
@@ -1059,6 +1148,10 @@ export interface WorkspaceBridge {
   ): Promise<WorkspaceRequestResult>;
   getSnapshot(): Promise<WorkspaceSnapshotResult>;
   handoffSkillsSh(recordId: string): Promise<WorkspaceRequestResult>;
+  inspectSource(
+    targetId: string,
+    source: string,
+  ): Promise<WorkspaceRequestResult>;
   prepareMutation(
     targetId: string,
     intent: MutationIntent,

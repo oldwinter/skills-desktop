@@ -504,6 +504,77 @@ describe("Trusted Review surface", () => {
     );
     expect(effect).toHaveTextContent("This Target binds amp, codex.");
     expect(effect).toHaveClass("review-effect--cli-unscoped");
+    expect(screen.queryByTestId("review-source-disclosure")).toBeNull();
+  });
+
+  it("discloses an inspected add source and whether it can still move before execution (#201)", async () => {
+    const client: ReviewBridge = {
+      async approve() {
+        return { ok: true, value: { operationId: "mutation-3" } };
+      },
+      async getReview() {
+        return {
+          ok: true,
+          value: {
+            projection: {
+              commandPlan: {
+                harness: "codex",
+                harnessEffect: { harnessIds: ["codex"], kind: "bound" },
+                harnessIds: ["codex"],
+                names: ["find-skills"],
+                operation: "add",
+                preview:
+                  "npx skills@1.5.23 add vercel-labs/skills#main --skill find-skills --agent codex --yes",
+                schemaVersion: 1,
+                scope: "project",
+                source: {
+                  family: "github",
+                  inspectionDigest: "a".repeat(64),
+                  inspectionId: "inspection-1",
+                  mutability: "mutable",
+                  ref: "main",
+                  source: "vercel-labs/skills#main",
+                  sourceType: "inspected",
+                },
+                targetId: "00000000-0000-4000-8000-000000000001",
+                timeoutMs: 600_000,
+              },
+              expiresAt: "2026-08-21T10:10:00.000Z",
+              purpose: "execute",
+              reviewId: "review-3",
+              target: {
+                ...targetV4Metadata,
+                generation: 1,
+                id: "00000000-0000-4000-8000-000000000001",
+                kind: "local",
+                label: "This device",
+                workspace: "/work/skills-desktop",
+                workspaceLabel: "skills-desktop",
+              },
+            },
+            schemaVersion: 2,
+            status: "pending",
+          },
+        };
+      },
+      async reject() {
+        return { ok: true, value: { operationId: "review-3" } };
+      },
+    };
+    render(<ReviewSurface client={client} />);
+
+    expect(
+      await screen.findByRole("heading", { name: "Review add" }),
+    ).toBeInTheDocument();
+    const disclosure = screen.getByTestId("review-source-disclosure");
+    expect(disclosure).toHaveTextContent(
+      "Source: GitHub repository · Mutable source",
+    );
+    expect(disclosure).toHaveTextContent("vercel-labs/skills#main");
+    expect(disclosure).toHaveTextContent(
+      "vercel-labs/skills#main is fetched again at execution.",
+    );
+    expect(disclosure).toHaveClass("review-source--mutable");
   });
 
   it("renders in the locale and appearance carried by the Review Snapshot without translating identifiers (#210)", async () => {

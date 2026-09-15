@@ -7,6 +7,7 @@ import {
   type ReviewSnapshot,
 } from "../contracts/review.js";
 import { describeHarnessEffect } from "../contracts/harness-effect.js";
+import { describeCommandPlanSource } from "../contracts/source-disclosure.js";
 import type { MessageKey, Translator } from "../contracts/i18n/translate.js";
 import type { Locale } from "../contracts/preferences.js";
 import { userFacingErrorMessage } from "../contracts/user-facing-error.js";
@@ -55,6 +56,36 @@ function HarnessEffectDisclosure({
     >
       <h2 id="review-effect-heading">{effect.title}</h2>
       <p>{effect.summary}</p>
+    </section>
+  );
+}
+
+/**
+ * ADR 0015: an add plan discloses its source and whether that source can
+ * still move before execution, so a mutable listing is never mistaken for a
+ * pinned one at the moment of approval.
+ */
+function SourceDisclosure({
+  commandPlan,
+}: {
+  readonly commandPlan: CommandPlan;
+}) {
+  const { locale, t } = useTranslator();
+  if (commandPlan.source === null) return null;
+  const disclosure = describeCommandPlanSource(commandPlan.source, locale);
+  return (
+    <section
+      aria-labelledby="review-source-heading"
+      className={`review-effect review-source review-source--${disclosure.mutability}`}
+      data-testid="review-source-disclosure"
+    >
+      <h2 id="review-source-heading">
+        {t("inventory.plan.source")}: {disclosure.familyLabel} · {disclosure.title}
+      </h2>
+      <p>
+        <code>{disclosure.source}</code>
+      </p>
+      <p>{disclosure.summary}</p>
     </section>
   );
 }
@@ -598,6 +629,7 @@ function ReviewContent({
         <code>{commandPlan.preview}</code>
       </section>
 
+      <SourceDisclosure commandPlan={commandPlan} />
       <HarnessEffectDisclosure commandPlan={commandPlan} />
 
       <div className="review-actions">

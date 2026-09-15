@@ -11,6 +11,7 @@ import {
   MAX_WIRE_FRAME_BYTES,
   parseCliInventory,
   resolveLegacyHarnessAlias,
+  sourceDescriptorV1Schema,
   type Inventory,
   type PublicError,
   type Result,
@@ -22,9 +23,10 @@ import {
   mutationPreparationFailure,
   observedMutationEffects,
   prepareMutationPlan,
-  type NormalizedMutation,
+  sourceInspectionFailure,
   type MutationExecutionError,
   type MutationOutcome,
+  type NormalizedMutation,
   type ObservationError,
   type PreparedMutation,
   type SkillsProcess,
@@ -36,6 +38,16 @@ import {
 } from "../ssh/openssh-target.js";
 
 const SSH_TIMEOUT_MS = 60_000;
+
+/** Wire v2 only carries GitHub add sources; inspected sources stay local. */
+type SshMutation =
+  | Exclude<NormalizedMutation, { readonly type: "add" }>
+  | (Extract<NormalizedMutation, { readonly type: "add" }> & {
+      readonly source: Extract<
+        Extract<NormalizedMutation, { readonly type: "add" }>["source"],
+        { readonly sourceType: "github" }
+      >;
+    });
 const MAX_SSH_STDOUT_BYTES = MAX_WIRE_FRAME_BYTES + 4 + 1_024;
 const MAX_SSH_STDERR_BYTES = 64 * 1024;
 
@@ -484,11 +496,29 @@ export function createSshSkillsProcess(options: {
   const privatePlans = new Map<
     string,
     {
-      readonly mutation: NormalizedMutation;
+      readonly mutation: SshMutation;
       readonly prepared: PreparedMutation;
     }
   >();
   return {
+    // ADR 0015: source listing has not crossed the Wire yet. Desktop-local
+    // directories and archives are rejected before any SSH spawn or upload;
+    // portable sources wait for Wire v3.
+    async inspectSource({ descriptor }) {
+      const parsed = sourceDescriptorV1Schema.safeParse(descriptor);
+      if (!parsed.success) {
+        return sourceInspectionFailure(
+          "source_unsupported",
+          "The Source Descriptor is not supported.",
+        );
+      }
+      return sourceInspectionFailure(
+        "source_unsupported",
+        parsed.data.locality === "local-only"
+          ? "Desktop-local directories and archives cannot be inspected on an SSH Target."
+          : "Source inspection over SSH is next-scope and not available yet.",
+      );
+    },
     async executeConfirmed({ confirmation, signal }) {
       const privatePlan = privatePlans.get(confirmation.preparedMutationId);
       if (privatePlan === undefined) {
@@ -848,10 +878,23 @@ export function createSshSkillsProcess(options: {
         input,
       });
       if (!planned.ok) return planned;
+      const { mutation } = planned.value;
+      let sshMutation: SshMutation;
+      if (mutation.type === "add") {
+        if (mutation.source.sourceType !== "github") {
+          return mutationPreparationFailure(
+            "mutation_ineligible",
+            "Inspected sources cannot cross the SSH transport yet.",
+          );
+        }
+        sshMutation = { ...mutation, source: mutation.source };
+      } else {
+        sshMutation = mutation;
+      }
 
       privatePlans.clear();
       privatePlans.set(planned.value.prepared.id, {
-        mutation: planned.value.mutation,
+        mutation: sshMutation,
         prepared: planned.value.prepared,
       });
       return { ok: true, value: structuredClone(planned.value.prepared) };

@@ -5,3 +5,4 @@ export * from "./result.js";
 export * from "./wire.js";
 export * from "./well-known.js";
 export * from "./skillpack.js";
+export * from "./source.js";

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { en } from "./i18n/messages.en.js";
+import { zhCN } from "./i18n/messages.zh-cn.js";
 import {
   GITHUB_SOURCE_OWNER_REPOSITORY_COPY,
   userFacingErrorMessage,
@@ -102,7 +103,7 @@ describe("userFacingErrorMessage", () => {
         code: "invalid_request",
         message: GITHUB_SOURCE_OWNER_REPOSITORY_COPY,
       }),
-    ).toBe(GITHUB_SOURCE_OWNER_REPOSITORY_COPY);
+    ).toBe(en["error.githubSource"]);
     expect(
       userFacingErrorMessage(
         {
@@ -111,7 +112,7 @@ describe("userFacingErrorMessage", () => {
         },
         "zh-CN",
       ),
-    ).toBe("GitHub 来源必须是 owner/repository。");
+    ).toBe(zhCN["error.githubSource"]);
     expect(
       userFacingErrorMessage({
         code: "invalid_request",

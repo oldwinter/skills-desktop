@@ -52,6 +52,18 @@ const sshBinding: OpenSshEffectiveBinding = {
   },
 };
 const process: SkillsProcess = {
+  async inspectSource() {
+    return {
+      error: {
+        code: "source_unsupported" as const,
+        effects: "none" as const,
+        message: "Source inspection is not exercised by this contract.",
+        phase: "inspect",
+        retryable: false,
+      },
+      ok: false as const,
+    };
+  },
   async executeConfirmed() {
     return {
       error: {

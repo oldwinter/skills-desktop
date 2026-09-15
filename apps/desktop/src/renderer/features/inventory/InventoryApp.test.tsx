@@ -248,6 +248,9 @@ function clientFor(
     async handoffSkillsSh(recordId) {
       return { ok: true, value: { operationId: recordId } };
     },
+    async inspectSource() {
+      return { ok: true, value: { operationId: "inspection-1" } };
+    },
     async updatePreferences() {
       return { ok: true, value: { operationId: "preferences" } };
     },
@@ -813,7 +816,7 @@ describe("Local Target Inventory shell", () => {
       screen.getByRole("button", { name: "Case-Sensitive-Skill" }),
     ).toBeInTheDocument();
 
-    const source = screen.getByRole("textbox", { name: "GitHub source" });
+    const source = screen.getByRole("textbox", { name: "Source" });
     source.focus();
     fireEvent.keyDown(source, { key: "/" });
     expect(source).toHaveFocus();
@@ -926,7 +929,7 @@ describe("Local Target Inventory shell", () => {
       "The selected scope cannot be updated.",
     );
 
-    fireEvent.change(screen.getByRole("textbox", { name: "GitHub source" }), {
+    fireEvent.change(screen.getByRole("textbox", { name: "Source" }), {
       target: { value: "example/skills" },
     });
     fireEvent.change(
@@ -997,7 +1000,7 @@ describe("Local Target Inventory shell", () => {
       }),
     );
 
-    fireEvent.change(screen.getByRole("textbox", { name: "GitHub source" }), {
+    fireEvent.change(screen.getByRole("textbox", { name: "Source" }), {
       target: { value: "example/skills" },
     });
     fireEvent.change(screen.getByRole("textbox", { name: "Exact skill name" }), {
@@ -1108,7 +1111,7 @@ describe("Local Target Inventory shell", () => {
     );
 
     fireEvent.change(
-      await screen.findByRole("textbox", { name: "GitHub source" }),
+      await screen.findByRole("textbox", { name: "Source" }),
       {
         target: { value: "not-a-repo" },
       },
@@ -1127,14 +1130,233 @@ describe("Local Target Inventory shell", () => {
     expect(form).not.toBeNull();
     const alert = await screen.findByRole("alert");
     expect(form!).toContainElement(alert);
-    expect(alert).toHaveTextContent("GitHub source must be owner/repository.");
+    expect(alert).toHaveTextContent(
+      "Direct add needs a GitHub owner/repository. Inspect the source to add from other kinds of source.",
+    );
     expect(
       screen.queryByText("The request is not supported."),
     ).not.toBeInTheDocument();
     expect(
-      screen.getByRole("textbox", { name: "GitHub source" }),
+      screen.getByRole("textbox", { name: "Source" }),
     ).toHaveAttribute("aria-invalid", "true");
     expect(prepareMutation).not.toHaveBeenCalled();
+  });
+
+  it("inspects a source read-only, then binds the selected listed Skills to that inspection (#201)", async () => {
+    const descriptor = {
+      family: "github" as const,
+      locality: "portable" as const,
+      mutability: "mutable" as const,
+      ref: null,
+      schemaVersion: 1 as const,
+      source: "vercel-labs/skills",
+    };
+    const inspectedSnapshot: WorkspaceSnapshot = {
+      ...snapshot,
+      eventSequence: 2,
+      sourceInspection: {
+        activeOperationId: null,
+        inspection: {
+          candidates: [
+            {
+              description: "Helps users discover skills.",
+              group: null,
+              name: "find-skills",
+            },
+            {
+              description: "Reviews pull requests.",
+              group: "review",
+              name: "code-review",
+            },
+          ],
+          descriptor,
+          digest: "a".repeat(64),
+          inspectedAt: "2026-08-21T10:00:30.000Z",
+          inspectionId: "inspection-1",
+          targetGeneration: snapshot.target.generation,
+          targetId: snapshot.target.id,
+        },
+        lastError: null,
+        phase: "ready",
+      },
+      stateRevision: 3,
+    };
+    let listener: ((event: DesktopEvent) => void) | undefined;
+    let current: WorkspaceSnapshot = snapshot;
+    const inspectingSnapshot: WorkspaceSnapshot = {
+      ...snapshot,
+      eventSequence: 1,
+      sourceInspection: {
+        activeOperationId: "inspect-1",
+        inspection: null,
+        lastError: null,
+        phase: "inspecting",
+      },
+      stateRevision: 2,
+    };
+    const publish = async (next: WorkspaceSnapshot) => {
+      current = next;
+      await act(async () => {
+        listener?.({
+          sequence: next.eventSequence,
+          sessionEpoch: "epoch-1",
+          snapshot: next,
+          stateRevision: next.stateRevision,
+          type: "snapshot.changed",
+        });
+      });
+    };
+    const cancelInventory = vi.fn(async (operationId: string) => ({
+      ok: true as const,
+      value: { operationId },
+    }));
+    const inspectSource = vi.fn(async () => ({
+      ok: true as const,
+      value: { operationId: "inspect-1" },
+    }));
+    const prepareMutation = vi.fn(async () => ({
+      ok: true as const,
+      value: { operationId: "prepared-add" },
+    }));
+    const client: DesktopBridge = {
+      ...clientFor(snapshot),
+      cancelInventory,
+      async getSnapshot() {
+        return { ok: true, value: current };
+      },
+      inspectSource,
+      prepareMutation,
+      subscribe(next) {
+        listener = next;
+        return () => undefined;
+      },
+    };
+    render(<InventoryApp client={client} />);
+
+    const source = await screen.findByRole("textbox", { name: "Source" });
+    const inspect = screen.getByRole("button", { name: "Inspect source" });
+    expect(inspect).toBeDisabled();
+    fireEvent.change(source, { target: { value: " vercel-labs/skills " } });
+    expect(inspect).toBeEnabled();
+    expect(
+      screen.getByRole("textbox", { name: "Exact skill name" }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(inspect);
+    await waitFor(() =>
+      expect(inspectSource).toHaveBeenCalledWith(
+        snapshot.target.id,
+        "vercel-labs/skills",
+      ),
+    );
+    await publish(inspectingSnapshot);
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "Inspecting vercel-labs/skills…",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Cancel inspection" }));
+    expect(cancelInventory).toHaveBeenCalledWith("inspect-1");
+
+    await publish(inspectedSnapshot);
+    const listing = await screen.findByTestId("source-inspection");
+    expect(listing).toHaveTextContent("Skills listed in vercel-labs/skills");
+    expect(listing).toHaveTextContent("2 Skills listed · Mutable source");
+    expect(listing).toHaveTextContent("Helps users discover skills.");
+    expect(
+      screen.queryByRole("textbox", { name: "Exact skill name" }),
+    ).not.toBeInTheDocument();
+
+    const prepare = screen.getByRole("button", {
+      name: "Prepare add of selected Skills",
+    });
+    fireEvent.click(prepare);
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Select at least one listed Skill.",
+    );
+    expect(prepareMutation).not.toHaveBeenCalled();
+
+    fireEvent.click(within(listing).getByRole("checkbox", { name: /code-review/ }));
+    fireEvent.click(within(listing).getByRole("checkbox", { name: /find-skills/ }));
+    fireEvent.click(prepare);
+    await waitFor(() =>
+      expect(prepareMutation).toHaveBeenCalledWith(snapshot.target.id, {
+        names: ["find-skills", "code-review"],
+        scope: "project",
+        source: {
+          descriptor,
+          inspection: { digest: "a".repeat(64), id: "inspection-1" },
+          sourceType: "inspected",
+        },
+        type: "add",
+      }),
+    );
+
+    // Editing the source text detaches the form from the listing: the direct
+    // GitHub path returns until the new text is inspected.
+    fireEvent.change(source, { target: { value: "vercel-labs/other" } });
+    expect(screen.queryByTestId("source-inspection")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("textbox", { name: "Exact skill name" }),
+    ).toBeInTheDocument();
+  });
+
+  it("surfaces inspection failures next to the source field and discloses a planned source's mutability (#201)", async () => {
+    const inspectSource = vi.fn(async () => ({
+      error: {
+        code: "source_unavailable" as const,
+        effects: "none" as const,
+        message: "The pinned Skills CLI could not list Skills from this source.",
+        phase: "inspect",
+        retryable: true,
+      },
+      ok: false as const,
+    }));
+    const plannedAdd: WorkspaceSnapshot = {
+      ...snapshot,
+      mutation: {
+        ...snapshot.mutation,
+        commandPlan: {
+          harness: "codex",
+          names: ["find-skills"],
+          operation: "add",
+          preview:
+            "npx skills@1.5.23 add vercel-labs/skills --skill find-skills --agent codex --yes",
+          schemaVersion: 1,
+          scope: "project",
+          source: {
+            family: "github",
+            inspectionDigest: "a".repeat(64),
+            inspectionId: "inspection-1",
+            mutability: "mutable",
+            ref: null,
+            source: "vercel-labs/skills",
+            sourceType: "inspected",
+          },
+          targetId: snapshot.target.id,
+          timeoutMs: 600_000,
+        },
+        phase: "planned",
+      },
+    };
+    render(
+      <InventoryApp client={{ ...clientFor(plannedAdd), inspectSource }} />,
+    );
+
+    const planSource = await screen.findByTestId("command-plan-source");
+    expect(planSource).toHaveTextContent("vercel-labs/skills");
+    expect(planSource).toHaveTextContent("Mutable source");
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Source" }), {
+      target: { value: "vercel-labs/missing" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Inspect source" }));
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(
+      "The pinned Skills CLI could not fetch this source.",
+    );
+    expect(screen.getByRole("textbox", { name: "Source" })).toHaveAttribute(
+      "aria-invalid",
+      "true",
+    );
   });
 
   it("routes reconciliation failure through the visible action surface", async () => {

@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   constants,
   closeSync,
@@ -19,18 +20,26 @@ import {
   INVENTORY_SCHEMA_VERSION,
   MAX_CLI_OUTPUT_BYTES,
   parseCliInventory,
+  parseSourceListing,
+  sourceDescriptorV1Schema,
   type Inventory,
   type Result,
 } from "@skills-desktop/skills-runtime";
 
 import {
+  SOURCE_INSPECTION_TIMEOUT_MS,
   mutationExecutionFailure,
   observedMutationEffects,
   prepareMutationPlan,
+  sourceInspectionArguments,
+  sourceInspectionDigest,
+  sourceInspectionFailure,
   type MutationOutcome,
   type ObservationError,
   type PreparedMutation,
   type SkillsProcess,
+  type SourceInspection,
+  type SourceInspectionError,
 } from "./skills-process.js";
 import { createWindowsProcessTreeKiller } from "./windows-process-tree.js";
 
@@ -46,6 +55,8 @@ export type {
   PreparedMutation,
   PrepareMutationInput,
   SkillsProcess,
+  SourceInspection,
+  SourceInspectionError,
 } from "./skills-process.js";
 
 export interface ProcessInvocation {
@@ -721,7 +732,7 @@ export function createLocalSkillsProcess(
       readonly prepared: PreparedMutation;
     }
   >();
-  let activeOperation: "mutation" | "observation" | undefined;
+  let activeOperation: "inspection" | "mutation" | "observation" | undefined;
 
   const invoke = async (
     args: readonly string[],
@@ -905,6 +916,110 @@ export function createLocalSkillsProcess(
     }
   };
 
+  const inspectSource = async ({
+    descriptor: candidateDescriptor,
+    signal,
+  }: Parameters<SkillsProcess["inspectSource"]>[0]): Promise<
+    Result<SourceInspection, SourceInspectionError>
+  > => {
+    if (options.binding === undefined) {
+      return sourceInspectionFailure(
+        "mutation_ineligible",
+        "This Skills Process is not bound to a Target.",
+      );
+    }
+    const parsedDescriptor = sourceDescriptorV1Schema.safeParse(candidateDescriptor);
+    if (!parsedDescriptor.success) {
+      return sourceInspectionFailure(
+        "source_unsupported",
+        "The Source Descriptor is not supported.",
+      );
+    }
+    const descriptor = parsedDescriptor.data;
+    if (activeOperation !== undefined) {
+      return sourceInspectionFailure(
+        "mutation_conflict",
+        "Another operation is active for this Target.",
+        true,
+      );
+    }
+    activeOperation = "inspection";
+    const cancelled = () =>
+      sourceInspectionFailure(
+        "cancelled",
+        "Source inspection was cancelled.",
+        true,
+      );
+    try {
+      if (signal.aborted) return cancelled();
+      const verified = await verifyDialect(signal);
+      if (!verified.ok) {
+        if (verified.error.code === "cancelled") return cancelled();
+        return sourceInspectionFailure(
+          verified.error.code === "cli_incompatible"
+            ? "cli_incompatible"
+            : "process_failed",
+          verified.error.message,
+          verified.error.retryable,
+        );
+      }
+      let outcome: ProcessResult;
+      try {
+        outcome = await invoke(
+          sourceInspectionArguments(descriptor),
+          signal,
+          SOURCE_INSPECTION_TIMEOUT_MS,
+        );
+      } catch (error) {
+        if (signal.aborted) return cancelled();
+        const boundary =
+          error instanceof ProcessBoundaryError ? error : undefined;
+        return sourceInspectionFailure(
+          "process_failed",
+          boundary?.disposition === "timed-out"
+            ? "Source inspection exceeded its time limit."
+            : "Source inspection failed.",
+          true,
+        );
+      }
+      if (signal.aborted) return cancelled();
+      if (outcome.exitCode !== 0) {
+        return sourceInspectionFailure(
+          "source_unavailable",
+          "The pinned Skills CLI could not list Skills from this source.",
+          true,
+        );
+      }
+      const listing = parseSourceListing(outcome.stdout);
+      if (!listing.ok) return listing;
+      const inspectedAt = options.clock().toISOString();
+      const digest = sourceInspectionDigest({
+        descriptor,
+        listing: listing.value,
+      });
+      return {
+        ok: true,
+        value: {
+          candidates: listing.value.candidates,
+          cliVersion: listing.value.cliVersion,
+          descriptor,
+          dialectVersion: listing.value.dialectVersion,
+          digest,
+          id:
+            options.id?.() ??
+            createHash("sha256")
+              .update(`${inspectedAt}\0${options.binding.targetId}\0${digest}`)
+              .digest("hex"),
+          inspectedAt,
+          targetGeneration: options.binding.generation,
+          targetId: options.binding.targetId,
+        },
+      };
+    } finally {
+      if (activeOperation === "inspection") activeOperation = undefined;
+    }
+  };
+
   return {
     async executeConfirmed({ confirmation, signal }) {
       const privatePlan = privatePlans.get(confirmation.preparedMutationId);
@@ -1020,6 +1135,7 @@ export function createLocalSkillsProcess(
         if (activeOperation === "mutation") activeOperation = undefined;
       }
     },
+    inspectSource,
     observeInventory,
     async prepareMutation(input) {
       const planned = prepareMutationPlan({

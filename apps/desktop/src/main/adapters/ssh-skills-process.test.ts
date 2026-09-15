@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   decodeWireFrames,
+  describeSource,
   encodeWireFrame,
   WIRE_PROTOCOL_VERSION,
   type WireFrame,
@@ -288,6 +289,53 @@ describe("SSH SkillsProcess observation contract", () => {
       },
     });
     expect(prepared.ok && prepared.value.digest).toMatch(/^[a-f0-9]{64}$/);
+    expect(runner.invocations).toHaveLength(1);
+  });
+
+  it("declines Source Inspection and inspected adds without opening SSH (next scope)", async () => {
+    const runner = scriptedTransport();
+    const skillsProcess = createSshSkillsProcess({
+      binding,
+      clock: () => new Date("2026-08-22T10:00:00.000Z"),
+      id: () => "request-1",
+      runner,
+    });
+    const descriptor = describeSource("vercel-labs/skills");
+    if (!descriptor.ok) throw new Error("fixture descriptor failed");
+
+    expect(
+      await skillsProcess.inspectSource({
+        descriptor: descriptor.value,
+        signal: new AbortController().signal,
+      }),
+    ).toMatchObject({
+      error: { code: "source_unsupported", effects: "none", retryable: false },
+      ok: false,
+    });
+
+    const observed = await skillsProcess.observeInventory({
+      signal: new AbortController().signal,
+    });
+    if (!observed.ok) throw new Error("fixture observation failed");
+    const prepared = await skillsProcess.prepareMutation({
+      freshness: "fresh",
+      intent: {
+        names: ["find-skills"],
+        scope: "project",
+        source: {
+          descriptor: descriptor.value,
+          inspection: { digest: "a".repeat(64), id: "inspection-1" },
+          sourceType: "inspected",
+        },
+        type: "add",
+      },
+      inventory: observed.value,
+      inventoryId: "inventory-ssh-1",
+    });
+    expect(prepared).toMatchObject({
+      error: { code: "mutation_ineligible", effects: "none" },
+      ok: false,
+    });
     expect(runner.invocations).toHaveLength(1);
   });
 

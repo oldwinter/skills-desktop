@@ -460,6 +460,30 @@ describe("Electron IPC sender authorization", () => {
         { appearance: "dark" },
       ),
     ).resolves.toMatchObject({ error: { code: "unauthorized" }, ok: false });
+    // ADR 0015: source inspection carries only the exact source text; main
+    // classifies it and refuses hostile frames before any spawn.
+    await expect(
+      handlers.get("workspace:source:inspect")!(
+        authorizedEvent as never,
+        "epoch-1",
+        "00000000-0000-4000-8000-000000000001",
+        "vercel-labs/skills",
+      ),
+    ).resolves.toMatchObject({ error: { code: "invalid_request" }, ok: false });
+    expect(session.request).toHaveBeenLastCalledWith({
+      source: "vercel-labs/skills",
+      targetId: "00000000-0000-4000-8000-000000000001",
+      type: "source.inspect",
+      version: 2,
+    });
+    await expect(
+      handlers.get("workspace:source:inspect")!(
+        hostileEvent as never,
+        "epoch-1",
+        "00000000-0000-4000-8000-000000000001",
+        "vercel-labs/skills",
+      ),
+    ).resolves.toMatchObject({ error: { code: "unauthorized" }, ok: false });
 
     const reviewMainFrame = { url: "skills-desktop://review/index.html" };
     const reviewContents = {

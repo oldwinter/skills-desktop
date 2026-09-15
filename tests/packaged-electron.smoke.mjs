@@ -527,6 +527,7 @@ try {
       "deleteTarget",
       "getSnapshot",
       "handoffSkillsSh",
+      "inspectSource",
       "menu",
       "prepareCollection",
       "prepareCollectionAcrossTargets",

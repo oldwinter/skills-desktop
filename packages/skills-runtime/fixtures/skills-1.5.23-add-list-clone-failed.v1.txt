@@ -1,0 +1,23 @@
+
+│
+●   cursor-cli  Agent detected — installing non-interactively
+[?25l│
+◇  Source: https://github.com/oldwinter/definitely-missing-repo-xyz.git
+[?25h[?25l│
+◒  Cloning repository…[1G[J◐  Cloning repository…[1G[J◓  Cloning repository…[1G[J◑  Cloning repository…[1G[J◒  Cloning repository…[1G[J◐  Cloning repository…[1G[J◓  Cloning repository…│
+■  Failed to clone repository
+│
+│  Authentication failed for https://github.com/oldwinter/definitely-missing-repo-xyz.git.
+│
+│    - For private repos, ensure you have access
+│
+│    - Retry with SSH: npx skills add git@github.com:oldwinter/definitely-missing-repo-xyz.git
+│
+│    - Check access with: gh auth status -h github.com or ssh -T git@github.com
+│
+│  Tip: use the --yes (-y) and --global (-g) flags to install without prompts.
+│
+└  Installation failed
+
+[1G[J■  Canceled
+[?25h

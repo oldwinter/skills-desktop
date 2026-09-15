@@ -43,6 +43,18 @@ const failure = <Code extends string>(code: Code) => ({
 });
 
 const idleProcess = {
+  async inspectSource() {
+    return {
+      error: {
+        code: "source_unsupported" as const,
+        effects: "none" as const,
+        message: "Source inspection is not exercised by this contract.",
+        phase: "inspect",
+        retryable: false,
+      },
+      ok: false as const,
+    };
+  },
   async executeConfirmed() {
     return failure("confirmation_invalid" as const);
   },
