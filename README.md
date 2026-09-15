@@ -51,6 +51,7 @@ foundation.
 npm install
 npm run verify
 npm run smoke:cli
+npm run smoke:well-known
 npm run smoke:packaged
 ```
 
@@ -58,6 +59,10 @@ Development and local observation require Node.js 22.20 or newer so the pinned
 Skills CLI can run through `npx`.
 
 `npm run smoke:cli` uses an isolated temporary home, workspace, and npm cache.
+`npm run smoke:well-known` serves the deterministic well-known export from an
+ephemeral 127.0.0.1 HTTP server on an OS-selected port and has the same pinned
+CLI list it back read-only; it is Linux/localhost evidence only and proves
+nothing about live hosting.
 The packaged smoke uses a fake pinned CLI boundary in temporary state so it can
 exercise fresh observation, redaction, restart, and stale recovery without
 reading or changing developer inventory.

@@ -63,6 +63,13 @@ describe("verify workflow contract", () => {
     expect(source).not.toContain("self-hosted");
     expect(packagedSmokeSource).not.toContain("startDisposableSshd");
     expect(packagedSmokeSource).not.toContain("/usr/sbin/sshd");
+    // ADR 0024 mission tracers that need the network run on push only.
+    for (const script of ["npm run smoke:cli", "npm run smoke:well-known"]) {
+      const step = linuxJob.steps.find(
+        (candidate: { run?: string }) => candidate.run === script,
+      );
+      expect(step?.if).toBe("github.event_name == 'push'");
+    }
 
     const platformJob = workflow.jobs["platform-contracts"];
     expect(platformJob.strategy.matrix.os).toEqual([
