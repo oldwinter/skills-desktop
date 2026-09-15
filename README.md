@@ -99,6 +99,13 @@ npm run build --workspace @skills-desktop/website
 different base). Publishing requires GitHub Pages to be enabled for the
 repository with the "GitHub Actions" source.
 
+The Vercel Git integration deploys the same page from the domain root. The
+root `vercel.json` pins that deployment to the website workspace: install with
+`npm ci --ignore-scripts` (no Electron binary download), build only
+`@skills-desktop/website`, and serve `apps/website/dist`. Without it Vercel
+falls back to the root `build` script, which fans out to every workspace and
+produces no output directory.
+
 The page's section structure follows skillsmanager.dev. A comparison of that
 project's skill-management architecture with the accepted ADRs, and the
 resulting adoption roadmap, lives in
