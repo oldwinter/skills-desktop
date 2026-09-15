@@ -52,4 +52,23 @@ describe("website workflow contract", () => {
       expect(step.uses).toMatch(pinnedAction);
     }
   });
+
+  it("points the Vercel Git integration at the website workspace instead of the repository root", async () => {
+    const config = JSON.parse(
+      await readFile(new URL("../vercel.json", import.meta.url), "utf8"),
+    ) as Record<string, unknown>;
+
+    expect(config.framework).toBe("vite");
+    // The root build script fans out to every workspace, including the
+    // Electron app; Vercel must build only the static landing page and skip
+    // Electron's binary download during install.
+    expect(config.installCommand).toBe("npm ci --ignore-scripts");
+    expect(config.buildCommand).toBe(
+      "npm run build --workspace @skills-desktop/website",
+    );
+    expect(config.outputDirectory).toBe("apps/website/dist");
+    // Vercel serves from the domain root, so the GitHub Pages base path must
+    // not leak into this build.
+    expect(config.buildCommand).not.toContain("WEBSITE_BASE_PATH");
+  });
 });
