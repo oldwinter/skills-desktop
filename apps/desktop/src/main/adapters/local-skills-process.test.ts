@@ -18,6 +18,7 @@ import {
   CLI_PACKAGE,
   CLI_VERSION,
   type Inventory,
+  type MutationIntent,
 } from "@skills-desktop/skills-runtime";
 
 import {
@@ -873,7 +874,140 @@ describe("Local SkillsProcess mutation contract", () => {
         prepared: {
           commandPlan: {
             harness: "amp codex",
+            harnessEffect: { harnessIds: ["amp", "codex"], kind: "bound" },
             harnessIds: ["amp", "codex"],
+          },
+        },
+      },
+    });
+  });
+
+  it("binds add and remove to an explicit subset of the Target harness set", () => {
+    const binding = {
+      generation: 1,
+      harnessIds: ["amp", "codex", "cursor"],
+      targetId: "00000000-0000-4000-8000-000000000001",
+    };
+    const inventory: Inventory = {
+      cliVersion: CLI_VERSION,
+      entries: [
+        {
+          agents: ["amp", "codex", "cursor"],
+          contentFingerprint: { status: "unknown" },
+          declaredSource: { source: null, sourceType: null },
+          extensions: {},
+          name: "shared-skill",
+          path: "/workspace/.agents/skills/shared-skill",
+          revision: { status: "unknown" },
+          scope: "project",
+          sourceUrl: null,
+        },
+      ],
+      observedAt: "2026-08-22T06:00:00.000Z",
+      schemaVersion: 1,
+    };
+    const plan = (intent: MutationIntent) =>
+      prepareMutationPlan({
+        binding,
+        clock: () => new Date("2026-08-22T06:00:00.000Z"),
+        id: () => "subset-plan",
+        input: {
+          freshness: "fresh",
+          intent,
+          inventory,
+          inventoryId: "canonical-inventory",
+        },
+      });
+
+    // Subset order is normalized to registry order and `--agent` narrows to it.
+    expect(
+      plan({
+        harnessIds: ["cursor", "amp"],
+        names: ["shared-skill"],
+        scope: "project",
+        type: "remove",
+      }),
+    ).toMatchObject({
+      ok: true,
+      value: {
+        args: ["remove", "shared-skill", "--agent", "amp", "cursor", "--yes"],
+        boundHarnessIds: ["amp", "cursor"],
+        prepared: {
+          commandPlan: {
+            harness: "amp cursor",
+            harnessEffect: { harnessIds: ["amp", "cursor"], kind: "bound" },
+            harnessIds: ["amp", "cursor"],
+          },
+        },
+      },
+    });
+
+    // A single-harness subset keeps the legacy single `harness` shape.
+    expect(
+      plan({
+        harnessIds: ["codex"],
+        names: ["new-skill"],
+        scope: "project",
+        source: { source: "example/skills", sourceType: "github" },
+        type: "add",
+      }),
+    ).toMatchObject({
+      ok: true,
+      value: {
+        args: [
+          "add",
+          "example/skills",
+          "--skill",
+          "new-skill",
+          "--agent",
+          "codex",
+          "--yes",
+        ],
+        boundHarnessIds: ["codex"],
+        prepared: {
+          commandPlan: {
+            harness: "codex",
+            harnessEffect: { harnessIds: ["codex"], kind: "bound" },
+          },
+        },
+      },
+    });
+    expect(plan({
+      harnessIds: ["codex"],
+      names: ["new-skill"],
+      scope: "project",
+      source: { source: "example/skills", sourceType: "github" },
+      type: "add",
+    })).not.toHaveProperty("value.prepared.commandPlan.harnessIds");
+
+    // Harnesses outside the Target set, or unknown to the dialect, are refused.
+    for (const harnessIds of [["claude-code"], ["codex", "not-a-harness"]]) {
+      expect(
+        plan({
+          harnessIds,
+          names: ["shared-skill"],
+          scope: "project",
+          type: "remove",
+        }),
+      ).toMatchObject({
+        error: { code: "mutation_ineligible", effects: "none" },
+        ok: false,
+      });
+    }
+
+    // Update is CLI-unscoped: no `--agent`, and the plan says so.
+    expect(
+      plan({ names: ["shared-skill"], scope: "project", type: "update" }),
+    ).toMatchObject({
+      ok: true,
+      value: {
+        args: ["update", "shared-skill", "--project", "--yes"],
+        prepared: {
+          commandPlan: {
+            harnessEffect: {
+              kind: "cli-unscoped",
+              targetHarnessIds: ["amp", "codex", "cursor"],
+            },
           },
         },
       },

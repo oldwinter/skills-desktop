@@ -26,6 +26,10 @@ h1, h2, p, dl, dd { margin: 0; }
 .review-plan { display: grid; gap: 8px; padding-top: 16px; border-top: 1px solid var(--line); }
 .review-plan h2 { font-size: 13px; }
 .review-plan code { display: block; padding: 11px; overflow-wrap: anywhere; color: #202124; background: #f0f2f4; border-radius: 6px; font-family: "SFMono-Regular", Consolas, monospace; font-size: 12px; }
+.review-effect { display: grid; gap: 6px; padding: 11px 12px; border-left: 3px solid #1267c4; border-radius: 6px; background: #f0f4fa; }
+.review-effect h2 { font-size: 12px; }
+.review-effect p { margin: 0; color: #3c4043; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.review-effect--cli-unscoped { border-left-color: #b45309; background: #fdf4e7; }
 .review-child-list { display: grid; gap: 14px; margin: 0; padding-left: 24px; }
 .review-child-list > li { min-width: 0; padding-top: 12px; border-top: 1px solid var(--line); }
 .review-child-list > li > header { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; min-width: 0; font-size: 13px; }

@@ -716,6 +716,7 @@ export function createLocalSkillsProcess(
     string,
     {
       readonly args: readonly string[];
+      readonly boundHarnessIds: readonly string[];
       readonly mutation: Parameters<typeof observedMutationEffects>[0];
       readonly prepared: PreparedMutation;
     }
@@ -1008,10 +1009,7 @@ export function createLocalSkillsProcess(
             effects: observedMutationEffects(
               privatePlan.mutation,
               postflight.value,
-              options.binding?.harnessIds ??
-                (options.binding?.harness === undefined
-                  ? []
-                  : [options.binding.harness]),
+              privatePlan.boundHarnessIds,
             ),
             inventory: postflight.value,
             preparedMutationId: privatePlan.prepared.id,

@@ -917,6 +917,102 @@ describe("Local Target Inventory shell", () => {
     await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
   });
 
+  it("binds add and removal to a chosen harness subset while update stays unscoped (#200)", async () => {
+    const prepareMutation = vi.fn(async () => ({
+      ok: true as const,
+      value: { operationId: "prepared" },
+    }));
+    const multiHarness: WorkspaceSnapshot = {
+      ...snapshot,
+      inventory: {
+        ...snapshot.inventory,
+        entries: [{ ...snapshot.inventory.entries[0]!, agents: ["amp", "codex"] }],
+      },
+      target: { ...snapshot.target, harnessIds: ["amp", "codex"] },
+    };
+    render(
+      <InventoryApp
+        client={{ ...clientFor(multiHarness), prepareMutation }}
+      />,
+    );
+
+    const subset = await screen.findByRole("group", {
+      name: "Bind add and removal to",
+    });
+    fireEvent.click(within(subset).getByRole("checkbox", { name: "Amp (amp)" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Prepare removal" }));
+    await waitFor(() =>
+      expect(prepareMutation).toHaveBeenLastCalledWith(multiHarness.target.id, {
+        harnessIds: ["codex"],
+        names: ["Case-Sensitive-Skill"],
+        scope: "project",
+        type: "remove",
+      }),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Prepare update" }));
+    await waitFor(() =>
+      expect(prepareMutation).toHaveBeenLastCalledWith(multiHarness.target.id, {
+        names: ["Case-Sensitive-Skill"],
+        scope: "project",
+        type: "update",
+      }),
+    );
+
+    fireEvent.change(screen.getByRole("textbox", { name: "GitHub source" }), {
+      target: { value: "example/skills" },
+    });
+    fireEvent.change(screen.getByRole("textbox", { name: "Exact skill name" }), {
+      target: { value: "find-skills" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Prepare add" }));
+    await waitFor(() =>
+      expect(prepareMutation).toHaveBeenLastCalledWith(multiHarness.target.id, {
+        harnessIds: ["codex"],
+        names: ["find-skills"],
+        scope: "project",
+        source: { source: "example/skills", sourceType: "github" },
+        type: "add",
+      }),
+    );
+
+    // Re-checking restores the whole set, which is sent as the legacy shape.
+    fireEvent.click(within(subset).getByRole("checkbox", { name: "Amp (amp)" }));
+    fireEvent.click(screen.getByRole("button", { name: "Prepare removal" }));
+    await waitFor(() =>
+      expect(prepareMutation).toHaveBeenLastCalledWith(multiHarness.target.id, {
+        names: ["Case-Sensitive-Skill"],
+        scope: "project",
+        type: "remove",
+      }),
+    );
+  });
+
+  it("shows the harness effect of a planned update beside its Command Plan", async () => {
+    render(
+      <InventoryApp
+        client={clientFor({
+          ...reviewableSnapshot,
+          mutation: {
+            ...reviewableSnapshot.mutation,
+            commandPlan: {
+              ...reviewableSnapshot.mutation.commandPlan!,
+              harnessEffect: {
+                kind: "cli-unscoped",
+                targetHarnessIds: ["codex"],
+              },
+            },
+          },
+        })}
+      />,
+    );
+    expect(await screen.findByText("Harness effect")).toBeInTheDocument();
+    expect(
+      screen.getByText(/updates every CLI-managed link for the listed Skills/),
+    ).toBeInTheDocument();
+  });
+
   it("explains invalid GitHub source next to Add Skill instead of an unsupported request (#138)", async () => {
     const prepareMutation = vi.fn();
     render(

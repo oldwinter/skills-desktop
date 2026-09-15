@@ -36,3 +36,13 @@ Mutation Guard refuses the repair. Workspace v2 reports repairs that reached
 disk through `recovery.repairedTargets`, and `recovery.restartRequired` tells
 the renderer that Target authority is rebuilt on the next start rather than
 in place.
+
+Add and remove intents may carry an optional `harnessIds` subset. Preparation
+resolves it against the Target's scoped harness set and refuses any harness
+outside that set; an omitted subset binds the whole set, so pre-existing
+intents are unchanged. The resulting Command Plan records what it can touch in
+`harnessEffect`: `bound` lists the harnesses whose links change (the exact
+`--agent` set), while `cli-unscoped` marks `update`, which the pinned CLI runs
+across every CLI-managed link in the scope regardless of the Target's set.
+Trusted Review and the Inventory Command Plan render that field; a plan
+without it is read as bound unless its operation is `update`.

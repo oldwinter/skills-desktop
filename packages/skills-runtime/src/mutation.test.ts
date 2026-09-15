@@ -75,4 +75,44 @@ describe("Mutation Intent schema", () => {
       }).success,
     ).toBe(false);
   });
+
+  it("carries an optional non-empty unique harness subset for add and remove only", () => {
+    expect(
+      mutationIntentSchema.parse({
+        harnessIds: ["codex", "amp"],
+        names: ["tdd"],
+        scope: "project",
+        type: "remove",
+      }),
+    ).toEqual({
+      harnessIds: ["codex", "amp"],
+      names: ["tdd"],
+      scope: "project",
+      type: "remove",
+    });
+    expect(
+      mutationIntentSchema.safeParse({
+        harnessIds: ["codex"],
+        names: ["tdd"],
+        scope: "project",
+        source: { source: "example/skills", sourceType: "github" },
+        type: "add",
+      }).success,
+    ).toBe(true);
+
+    for (const unsafe of [
+      { harnessIds: [], names: ["tdd"], scope: "project", type: "remove" },
+      {
+        harnessIds: ["codex", "codex"],
+        names: ["tdd"],
+        scope: "project",
+        type: "remove",
+      },
+      { harnessIds: [""], names: ["tdd"], scope: "project", type: "remove" },
+      { harnessIds: ["codex"], names: ["tdd"], scope: "project", type: "update" },
+      { harnessIds: ["codex"], scope: "project", type: "update-all" },
+    ]) {
+      expect(mutationIntentSchema.safeParse(unsafe).success).toBe(false);
+    }
+  });
 });
