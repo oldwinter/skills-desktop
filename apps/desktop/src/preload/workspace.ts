@@ -96,7 +96,9 @@ const menu: MenuBridge = Object.freeze({
       await invoke("menu:application:get"),
     );
   },
-  subscribeMenuCommand(listener: Parameters<MenuBridge["subscribeMenuCommand"]>[0]) {
+  subscribeMenuCommand(
+    listener: Parameters<MenuBridge["subscribeMenuCommand"]>[0],
+  ) {
     const receive = (_event: Electron.IpcRendererEvent, value: unknown) => {
       listener(menuCommandEventSchema.parse(value));
     };
@@ -135,6 +137,11 @@ const bridge: DesktopBridge = Object.freeze({
   async handoffSkillsSh(recordId: string) {
     return workspaceRequestResultSchema.parse(
       await invoke("workspace:handoff:skills-sh", recordId),
+    );
+  },
+  async importPackage() {
+    return workspaceRequestResultSchema.parse(
+      await invoke("workspace:package:import"),
     );
   },
   async inspectSource(targetId: string, source: string) {

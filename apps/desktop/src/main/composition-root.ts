@@ -11,6 +11,7 @@ import {
   createLocalSkillsProcess,
 } from "./adapters/local-skills-process.js";
 import { createElectronReleaseDiagnosticsExporter } from "./adapters/electron-release-diagnostics.js";
+import { createElectronSkillpackPicker } from "./adapters/electron-skillpack-picker.js";
 import { assertAllowlistedSkillsShUrl } from "./application/skills-sh-handoff.js";
 import {
   createSshSkillsProcess,
@@ -124,6 +125,7 @@ export async function createCompositionRoot(options?: {
     preferences,
     recoveryRecords,
     platform: process.platform,
+    skillpackPicker: createElectronSkillpackPicker({ dialog }),
     skillsTargets,
     v1LocalOnlyTargets: true,
   });

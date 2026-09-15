@@ -138,9 +138,7 @@ class CdpPage {
         message.params.type === "error"
       ) {
         const diagnostic = message.params.args
-          .map(
-            (argument) => argument.value ?? argument.description ?? "Error",
-          )
+          .map((argument) => argument.value ?? argument.description ?? "Error")
           .join(" ");
         if (!isElectronSandboxStartupDiagnostic(diagnostic)) {
           this.errors.push(diagnostic);
@@ -494,7 +492,9 @@ try {
       tabIndices: [0, 0, 0],
     },
   };
-  if (JSON.stringify(scopeSemantics) !== JSON.stringify(expectedScopeSemantics)) {
+  if (
+    JSON.stringify(scopeSemantics) !== JSON.stringify(expectedScopeSemantics)
+  ) {
     throw new Error(
       `Packaged scope group semantics failed: ${JSON.stringify(scopeSemantics)}`,
     );
@@ -519,32 +519,33 @@ try {
   }
   if (
     JSON.stringify(rendererBoundary.bridgeKeys) !==
-    JSON.stringify([
-      "about",
-      "cancelInventory",
-      "compareTargets",
-      "createTarget",
-      "deleteTarget",
-      "getSnapshot",
-      "handoffSkillsSh",
-      "inspectSource",
-      "menu",
-      "prepareCollection",
-      "prepareCollectionAcrossTargets",
-      "prepareComparison",
-      "prepareMutation",
-      "reconcileMutation",
-      "refreshInventory",
-      "repairTarget",
-      "requestCancellationReview",
-      "requestCollectionReview",
-      "requestHostTrustReview",
-      "requestReview",
-      "subscribe",
-      "subscribeReviewWindowClosed",
-      "updatePreferences",
-      "updateTarget",
-    ]) ||
+      JSON.stringify([
+        "about",
+        "cancelInventory",
+        "compareTargets",
+        "createTarget",
+        "deleteTarget",
+        "getSnapshot",
+        "handoffSkillsSh",
+        "importPackage",
+        "inspectSource",
+        "menu",
+        "prepareCollection",
+        "prepareCollectionAcrossTargets",
+        "prepareComparison",
+        "prepareMutation",
+        "reconcileMutation",
+        "refreshInventory",
+        "repairTarget",
+        "requestCancellationReview",
+        "requestCollectionReview",
+        "requestHostTrustReview",
+        "requestReview",
+        "subscribe",
+        "subscribeReviewWindowClosed",
+        "updatePreferences",
+        "updateTarget",
+      ]) ||
     JSON.stringify(rendererBoundary.aboutBridgeKeys) !==
       JSON.stringify([
         "exportDiagnostics",
@@ -610,10 +611,12 @@ try {
     ],
   };
   if (
-    JSON.stringify(applicationMenu.commands) !== JSON.stringify(expectedMenu.commands) ||
+    JSON.stringify(applicationMenu.commands) !==
+      JSON.stringify(expectedMenu.commands) ||
     applicationMenu.locale !== expectedMenu.locale ||
     applicationMenu.platform !== expectedMenu.platform ||
-    JSON.stringify(applicationMenu.topLevel) !== JSON.stringify(expectedMenu.topLevel) ||
+    JSON.stringify(applicationMenu.topLevel) !==
+      JSON.stringify(expectedMenu.topLevel) ||
     !applicationMenu.viewLabels.includes("Refresh Inventory") ||
     !applicationMenu.viewLabels.includes("Go to Inventory") ||
     applicationMenu.refreshShortcut !== "Control+R" ||
@@ -900,7 +903,6 @@ try {
     );
   }
   console.log("packaged smoke: V1 rejected SSH Target creation");
-
 
   await first.page.evaluate(`(() => {
     const targets = [...document.querySelectorAll("button")].find(

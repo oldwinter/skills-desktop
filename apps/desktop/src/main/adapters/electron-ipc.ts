@@ -53,6 +53,7 @@ const CHANNELS = {
   collectionPrepare: "workspace:collection:prepare",
   collectionPrepareMany: "workspace:collection:prepare-many",
   collectionReview: "workspace:collection:review-request",
+  packageImport: "workspace:package:import",
   event: "workspace:event",
   handoffSkillsSh: "workspace:handoff:skills-sh",
   updatePreferences: "workspace:preferences:update",
@@ -703,6 +704,23 @@ export function registerDesktopIpc(input: {
     },
   );
   input.ipcMain.handle(
+    CHANNELS.packageImport,
+    async (event, attachmentEpoch: unknown) => {
+      const endpoint = authorized(event, "workspace", attachmentEpoch);
+      if (endpoint === undefined) return authorizationFailure();
+      try {
+        return workspaceRequestResultSchema.parse(
+          await endpoint.session.request({
+            type: "package.import",
+            version: WORKSPACE_PROTOCOL_VERSION,
+          }),
+        );
+      } catch {
+        return internalFailure();
+      }
+    },
+  );
+  input.ipcMain.handle(
     CHANNELS.handoffSkillsSh,
     async (event, attachmentEpoch: unknown, recordId: unknown) => {
       const endpoint = authorized(event, "workspace", attachmentEpoch);
@@ -969,6 +987,7 @@ export function registerDesktopIpc(input: {
       input.ipcMain.removeHandler(CHANNELS.collectionPrepare);
       input.ipcMain.removeHandler(CHANNELS.collectionPrepareMany);
       input.ipcMain.removeHandler(CHANNELS.collectionReview);
+      input.ipcMain.removeHandler(CHANNELS.packageImport);
       input.ipcMain.removeHandler(CHANNELS.targetCreate);
       input.ipcMain.removeHandler(CHANNELS.targetDelete);
       input.ipcMain.removeHandler(CHANNELS.targetRepair);
