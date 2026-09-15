@@ -58,3 +58,17 @@ system browser; the composition root repeats the allowlist check at the
 process edge. Success means a page was opened, never that anything was
 published. A record id from another session or a renderer-supplied URL is
 `invalid_request`.
+
+Both Snapshots carry an optional `preferences` projection (ADR 0023): the
+resolved `locale` (`en` or `zh-CN`), the stored `localePreference` (`system`
+or an explicit locale), the OS-derived `systemLocale`, and the `appearance`
+(`system`, `light`, `dark`, or `high-contrast`). Main owns the projection and
+the durable `preferences.json` record; the renderer applies `lang` and
+`data-appearance` to the document from the Snapshot and never flips locally.
+The only way to change them is the closed `preferences.update` request whose
+patch names at least one of `appearance` or `localePreference`; a patch with
+unknown fields or values is `invalid_request`. Message catalogs live in
+`apps/desktop/src/contracts/i18n/`; `en` defines the key set and the parity
+test refuses a `zh-CN` catalog that adds, drops, or changes placeholders on
+any key. Identifiers, Harness IDs, source values, digests, and command
+previews are interpolated into messages and never translated.

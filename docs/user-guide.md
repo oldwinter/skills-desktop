@@ -228,6 +228,17 @@ skills.sh 交接：
 
 若更新/重启被拦住，常见原因：变更进行中、Trusted Review 打开、Reconciliation required 等——先处理完再重启。
 
+### 语言与外观
+
+About 页顶部的 **Language & appearance / 语言与外观** 面板管理两项偏好（ADR 0023）：
+
+| 偏好 | 可选值 | 行为 |
+| --- | --- | --- |
+| Language / 语言 | 跟随系统、English、简体中文 | 首次启动跟随操作系统语言（仅识别 `zh*` 为简体中文，其余为英文）；一旦显式选择，以选择为准。切换后整个工作区与 Trusted Review 一起换语言，`html lang` 随之变化 |
+| Appearance / 外观 | 跟随系统、浅色、深色、高对比度 | 仅 **跟随系统** 会随操作系统深浅色变化；显式模式固定不变。系统开启强制颜色（Windows 高对比度）时，两个渲染器都遵循 `forced-colors` |
+
+偏好保存在用户数据目录的 `preferences.json`，由主进程持有并通过 Snapshot 下发；界面不会在主进程落盘前先行切换。Skill 名、Harness ID、来源、修订、digest 与 Command Plan 预览始终原样显示，不做翻译。
+
 ---
 
 ## 7. Recovery（恢复）
