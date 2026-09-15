@@ -16,6 +16,8 @@ export const PACKAGED_UI_QA_SCENARIOS = [
   "axe-semantics",
   "narrow-layout",
   "reduced-motion",
+  "locale-switch",
+  "appearance-modes",
   "empty-state",
   "error-state",
   "console-failures",
@@ -53,6 +55,29 @@ async function clickNamedButton(page, name, { focus = false } = {}) {
     return true;
   })()`);
   if (!clicked) throw new Error(`Button not found: ${name}`);
+}
+
+async function selectPreference(page, labelText, value) {
+  const changed = await page.evaluate(`(() => {
+    const label = [...document.querySelectorAll('[data-testid="preferences-panel"] label')].find(
+      (candidate) =>
+        candidate.querySelector("span")?.textContent?.trim() === ${JSON.stringify(labelText)},
+    );
+    const select = label?.control ?? label?.querySelector("select");
+    if (!(select instanceof HTMLSelectElement) || select.disabled) return false;
+    const option = [...select.options].find((candidate) => candidate.value === ${JSON.stringify(value)});
+    if (option === undefined) return false;
+    const nativeSetter = Object.getOwnPropertyDescriptor(
+      HTMLSelectElement.prototype,
+      "value",
+    )?.set;
+    nativeSetter?.call(select, ${JSON.stringify(value)});
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+    return true;
+  })()`);
+  if (!changed) {
+    throw new Error(`Preference could not be changed: ${labelText} -> ${value}`);
+  }
 }
 
 async function focusNamedButton(page, name) {
@@ -409,6 +434,106 @@ export async function runPackagedUiQa({
         `Reduced-motion styles failed: ${JSON.stringify(reduced)}`,
       );
     }
+
+    activeStage = "locale-switch";
+    activeCheck = "about-open";
+    await clickNamedButton(page, "About", { focus: true });
+    await page.waitFor(
+      `document.querySelector("h1")?.textContent === "About" &&
+        document.querySelector('[data-testid="preferences-panel"] select') !== null`,
+      "About page with preferences",
+    );
+    activeCheck = "locale-initial";
+    const initialLocale = await page.evaluate(`({
+      appearance: document.documentElement.dataset.appearance ?? "",
+      lang: document.documentElement.lang,
+    })`);
+    if (initialLocale.lang !== "en" || initialLocale.appearance !== "system") {
+      throw new Error(`Initial locale failed: ${JSON.stringify(initialLocale)}`);
+    }
+    activeCheck = "locale-switch-zh-cn";
+    await selectPreference(page, "Language", "zh-CN");
+    await page.waitFor(
+      `document.documentElement.lang === "zh-CN" &&
+        document.querySelector("h1")?.textContent === "关于"`,
+      "zh-CN locale applied from the Snapshot",
+    );
+    const chinese = await page.evaluate(`(() => {
+      const nav = [...document.querySelectorAll('nav[aria-label="主导航"] button')]
+        .map((button) => button.getAttribute("aria-label"));
+      const english = [...document.querySelectorAll("nav button, h1, h2, .page-heading p")]
+        .map((element) => element.textContent?.trim() ?? "")
+        .filter((text) => /^(Inventory|Comparison|Collections|Recovery|About)$/.test(text));
+      return { english, nav, preferencesHeading: document.getElementById("preferences-heading")?.textContent ?? "" };
+    })()`);
+    if (
+      JSON.stringify(chinese.nav) !==
+        JSON.stringify(["库存", "对比", "合集", "Targets", "恢复", "关于"]) ||
+      chinese.english.length > 0 ||
+      chinese.preferencesHeading !== "语言与外观"
+    ) {
+      throw new Error(`zh-CN workspace failed: ${JSON.stringify(chinese)}`);
+    }
+    activeCheck = "locale-persisted";
+    const persisted = await fixture.readPreferences();
+    if (persisted?.preferences?.localePreference !== "zh-CN") {
+      throw new Error(
+        `Locale preference was not persisted: ${JSON.stringify(persisted)}`,
+      );
+    }
+    activeCheck = "locale-switch-en";
+    await selectPreference(page, "语言", "en");
+    await page.waitFor(
+      `document.documentElement.lang === "en" &&
+        document.querySelector("h1")?.textContent === "About"`,
+      "English locale restored",
+    );
+
+    activeStage = "appearance-modes";
+    for (const appearance of ["light", "dark", "high-contrast", "system"]) {
+      activeCheck = `appearance-${appearance}`;
+      await selectPreference(page, "Appearance", appearance);
+      await page.waitFor(
+        `document.documentElement.dataset.appearance === ${JSON.stringify(appearance)}`,
+        `${appearance} appearance applied`,
+      );
+      const palette = await page.evaluate(`(() => {
+        const root = getComputedStyle(document.documentElement);
+        const body = getComputedStyle(document.body);
+        return {
+          canvas: root.getPropertyValue("--canvas").trim(),
+          colorScheme: root.colorScheme,
+          text: body.color,
+        };
+      })()`);
+      if (palette.canvas === "" || palette.text === "") {
+        throw new Error(
+          `${appearance} palette failed: ${JSON.stringify(palette)}`,
+        );
+      }
+      if (appearance === "dark" && palette.colorScheme !== "dark") {
+        throw new Error(`Dark mode color-scheme failed: ${JSON.stringify(palette)}`);
+      }
+      await scanWithAxe(page, axeSource, `${appearance} appearance`);
+    }
+    await page.setMediaFeature("forced-colors", "active");
+    activeCheck = "appearance-forced-colors";
+    const forced = await page.evaluate(`(() => {
+      const primary = document.querySelector(".text-button--primary, .brand-mark");
+      return {
+        adjust: primary === null ? "" : getComputedStyle(primary).forcedColorAdjust,
+        matches: window.matchMedia("(forced-colors: active)").matches,
+      };
+    })()`);
+    if (forced.matches !== true || forced.adjust !== "none") {
+      throw new Error(`Forced-colors failed: ${JSON.stringify(forced)}`);
+    }
+    await page.setMediaFeature("forced-colors", "none");
+    await clickNamedButton(page, "Inventory", { focus: true });
+    await page.waitFor(
+      `document.querySelector("h1")?.textContent === "Inventory"`,
+      "return to inventory after preferences",
+    );
 
     activeStage = "keyboard-workflow";
     activeCheck = "mutation-prepare";

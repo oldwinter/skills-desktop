@@ -1063,6 +1063,8 @@ describe("packaged UI QA scenario contract", () => {
       "axe-semantics",
       "narrow-layout",
       "reduced-motion",
+      "locale-switch",
+      "appearance-modes",
       "empty-state",
       "error-state",
       "console-failures",

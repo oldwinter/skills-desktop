@@ -125,6 +125,17 @@ export async function createPackagedQaFixture({
   );
   await writeFile(modePath, "success");
   await writeFile(invocationLog, "");
+  // Pin the locale so scenario assertions do not depend on the runner's OS
+  // language; the locale-switch scenario exercises zh-CN explicitly.
+  const preferencesPath = join(userData, "preferences.json");
+  await writeFile(
+    preferencesPath,
+    JSON.stringify({
+      kind: "preferences",
+      preferences: { appearance: "system", localePreference: "en" },
+      schemaVersion: 1,
+    }),
+  );
 
   const npxScript = join(bin, platform === "win32" ? "npx.cmd" : "npx");
   const npxProgram = join(bin, "qa-npx.cjs");
@@ -223,6 +234,7 @@ if (args.at(-1) === "--version") {
     home,
     invocationLog,
     inventoryPath,
+    preferencesPath,
     recovery,
     root,
     temporary,
@@ -239,6 +251,9 @@ if (args.at(-1) === "--version") {
             .trim()
             .split("\n")
             .map((line) => JSON.parse(line));
+    },
+    async readPreferences() {
+      return JSON.parse(await readFile(preferencesPath, "utf8"));
     },
     async readProcessMode() {
       return (await readFile(modePath, "utf8")).trim();
