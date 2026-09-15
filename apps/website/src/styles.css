@@ -1041,13 +1041,19 @@ pre {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  overflow: hidden;
   padding: 1.25rem;
 }
 
 .download-list {
   display: grid;
   gap: 0.375rem;
+  min-width: 0;
   margin-top: 1rem;
+}
+
+.download-list > li {
+  min-width: 0;
 }
 
 .download-link {
@@ -1056,6 +1062,7 @@ pre {
   gap: 0.75rem;
   min-width: 0;
   max-width: 100%;
+  overflow: hidden;
   padding: 0.5rem 0.625rem;
   border: 1px solid transparent;
   border-radius: 0.5rem;
@@ -1178,8 +1185,7 @@ pre {
     display: inline-flex;
   }
   .download-grid {
-    /* 3-up is too tight before 1024; long asset rows overflow ~28px at 768. */
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
   .bullets--grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1219,9 +1225,6 @@ pre {
 }
 
 @media (min-width: 1024px) {
-  .download-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
   .shell {
     padding-inline: 2.5rem;
   }
