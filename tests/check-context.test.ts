@@ -30,6 +30,18 @@ describe("CONTEXT.md glossary check", () => {
     ]);
   });
 
+  it("accepts CRLF checkouts", () => {
+    const source = [
+      "## Language",
+      "",
+      "**Alpha**: One.",
+      "",
+      "**Beta**: Two.",
+      "",
+    ].join("\r\n");
+    expect(checkGlossary(source)).toEqual([]);
+  });
+
   it("requires a Language section", () => {
     expect(checkGlossary("# Context\n")).toEqual([
       "CONTEXT.md has no `## Language` section.",

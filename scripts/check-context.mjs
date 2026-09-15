@@ -6,7 +6,7 @@ const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const termPattern = /^\*\*([^*]+)\*\*:/;
 
 export function checkGlossary(source) {
-  const lines = source.split("\n");
+  const lines = source.split(/\r?\n/);
   const seen = new Map();
   const problems = [];
   const languageStart = lines.indexOf("## Language");
