@@ -126,6 +126,9 @@ function bridge(
     async handoffSkillsSh(recordId) {
       return { ok: true, value: { operationId: recordId } };
     },
+    async updatePreferences() {
+      return { ok: true, value: { operationId: "preferences" } };
+    },
     async repairTarget(targetId) {
       return { ok: true, value: { operationId: targetId } };
     },

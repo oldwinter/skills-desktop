@@ -132,6 +132,9 @@ function bridge(overrides: Partial<WorkspaceBridge> = {}): WorkspaceBridge {
     async handoffSkillsSh(recordId) {
       return { ok: true, value: { operationId: recordId } };
     },
+    async updatePreferences() {
+      return { ok: true, value: { operationId: "preferences" } };
+    },
     async createTarget() {
       return { ok: true, value: { operationId: "created-target" } };
     },

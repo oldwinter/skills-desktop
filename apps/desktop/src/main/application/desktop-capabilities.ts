@@ -51,6 +51,7 @@ import {
 } from "../targets/workspace-path.js";
 import type { HostTrustChallenge } from "../ssh/openssh-target.js";
 import { compareTargetInventories } from "./comparison.js";
+import type { PreferenceAuthority } from "./preferences.js";
 import {
   buildSkillsShUrl,
   deriveSkillsShHandoffRecords,
@@ -115,6 +116,8 @@ export interface DesktopCapabilitiesOptions {
   readonly officialCollectionCatalog?: unknown;
   readonly platform?: NodeJS.Platform;
   readonly onReviewRequested?: (reviewId: string) => void;
+  /** ADR 0023 locale/appearance authority. Absent means defaults only. */
+  readonly preferences?: PreferenceAuthority;
   readonly recoveryRecords: RecoveryRecords;
   readonly scheduleEventDelivery?: (deliver: () => void) => void;
   readonly shutdownTimeoutMs?: number;
@@ -670,11 +673,14 @@ export function createDesktopCapabilities(
         })
       : [];
 
+  const currentPreferences = () => options.preferences?.current();
+
   const snapshotFor = (
     endpoint: EndpointState,
     eventSequence = endpoint.sequence,
   ): WorkspaceSnapshot => ({
     blockedTargets: structuredClone([...blockedTargetDefinitions]),
+    preferences: currentPreferences(),
     recovery: structuredClone(recoveryState),
     skillsShHandoffs: structuredClone([...skillsShHandoffsFor(endpoint)]),
     comparison: structuredClone(currentComparison()),
@@ -990,6 +996,12 @@ export function createDesktopCapabilities(
   };
 
   const reviewSnapshotFor = (endpoint: EndpointState): ReviewSnapshot => {
+    const preferences = currentPreferences();
+    const body = reviewSnapshotBodyFor(endpoint);
+    return preferences === undefined ? body : { ...body, preferences };
+  };
+
+  const reviewSnapshotBodyFor = (endpoint: EndpointState): ReviewSnapshot => {
     const hostTrustReview =
       endpoint.reviewId === undefined
         ? undefined
@@ -2205,6 +2217,26 @@ export function createDesktopCapabilities(
                 false,
               ),
             );
+          }
+
+          if (parsed.data.type === "preferences.update") {
+            if (options.preferences === undefined) {
+              return requestFailure(
+                publicError(
+                  "invalid_request",
+                  "Preferences are not available in this session.",
+                  "validate",
+                  false,
+                ),
+              );
+            }
+            const updated = await options.preferences.update(
+              parsed.data.patch,
+            );
+            if (!updated.ok) return requestFailure(updated.error);
+            // Locale and appearance apply to every workspace window at once.
+            publish({ ...inventoryState });
+            return { ok: true, value: { operationId: options.id() } };
           }
 
           if (parsed.data.type === "target.repair") {
@@ -3824,6 +3856,7 @@ export function createDesktopCapabilities(
         options.officialCollectionCatalog ?? EMPTY_OFFICIAL_COLLECTION_CATALOG,
       );
       initialized = true;
+      await options.preferences?.initialize();
       const restored = await options.recoveryRecords.restore();
       blockedTargetDefinitions = restored.blockedTargetDefinitions ?? [];
       const restoredAcknowledgements = [

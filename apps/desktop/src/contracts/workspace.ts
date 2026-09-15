@@ -8,6 +8,12 @@ import {
   SKILLS_DIALECT_ID,
 } from "@skills-desktop/skills-runtime";
 
+import {
+  preferencesPatchSchema,
+  publicPreferencesSchema,
+  type PreferencesPatch,
+} from "./preferences.js";
+
 export const WORKSPACE_PROTOCOL_VERSION = 2 as const;
 
 export const rendererErrorCodeSchema = z.enum([
@@ -685,6 +691,7 @@ export type PublicSkillsShHandoffRecord = z.infer<
 export const workspaceSnapshotSchema = z
   .object({
     blockedTargets: z.array(blockedTargetDefinitionSchema).max(1_000).optional(),
+    preferences: publicPreferencesSchema.optional(),
     recovery: publicRecoveryStateSchema.optional(),
     skillsShHandoffs: z
       .array(publicSkillsShHandoffRecordSchema)
@@ -851,6 +858,19 @@ export const skillsShHandoffRequestSchema = z
   })
   .strict();
 
+/**
+ * ADR 0023: locale and appearance are main-owned durable preferences. The
+ * renderer sends a typed partial update; main persists, resolves the
+ * effective locale, and republishes the projection to every endpoint.
+ */
+export const updatePreferencesRequestSchema = z
+  .object({
+    patch: preferencesPatchSchema,
+    type: z.literal("preferences.update"),
+    version: z.literal(WORKSPACE_PROTOCOL_VERSION),
+  })
+  .strict();
+
 export const openComparisonRequestSchema = z
   .object({
     leftTargetId: targetIdSchema,
@@ -955,6 +975,7 @@ export const workspaceRequestSchema = z.discriminatedUnion("type", [
   deleteTargetRequestSchema,
   repairTargetRequestSchema,
   skillsShHandoffRequestSchema,
+  updatePreferencesRequestSchema,
   openComparisonRequestSchema,
   prepareComparisonRequestSchema,
   prepareCollectionRequestSchema,
@@ -1057,6 +1078,7 @@ export interface WorkspaceBridge {
   ): Promise<WorkspaceRequestResult>;
   requestReview(preparedMutationId: string): Promise<WorkspaceRequestResult>;
   subscribe(listener: (event: DesktopEvent) => void): () => void;
+  updatePreferences(patch: PreferencesPatch): Promise<WorkspaceRequestResult>;
   updateTarget(
     targetId: string,
     definition: TargetDraft,

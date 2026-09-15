@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { publicPreferencesSchema } from "./preferences.js";
 import {
   commandPlanSchema,
   publicCollectionPlanSchema,
@@ -42,15 +43,22 @@ export const collectionReviewProjectionSchema = z
   })
   .strict();
 
+/**
+ * The Trusted Review window renders in the same locale and appearance as the
+ * workspace. Main projects the preferences alongside every review state so
+ * the isolated review renderer never has to ask a second authority.
+ */
 export const reviewSnapshotSchema = z.discriminatedUnion("status", [
   z
     .object({
+      preferences: publicPreferencesSchema.optional(),
       schemaVersion: z.literal(REVIEW_PROTOCOL_VERSION),
       status: z.literal("unavailable"),
     })
     .strict(),
   z
     .object({
+      preferences: publicPreferencesSchema.optional(),
       projection: z.union([
         reviewProjectionSchema,
         hostTrustReviewProjectionSchema,
@@ -63,6 +71,7 @@ export const reviewSnapshotSchema = z.discriminatedUnion("status", [
   z
     .object({
       decision: z.enum(["approve", "reject"]),
+      preferences: publicPreferencesSchema.optional(),
       schemaVersion: z.literal(REVIEW_PROTOCOL_VERSION),
       status: z.literal("settled"),
     })

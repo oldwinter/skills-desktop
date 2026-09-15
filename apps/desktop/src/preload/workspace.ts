@@ -11,6 +11,7 @@ import {
   type DesktopBridge,
   type ReviewWindowClosedEvent,
 } from "../contracts/desktop.js";
+import type { PreferencesPatch } from "../contracts/preferences.js";
 import {
   desktopEventSchema,
   workspaceRequestResultSchema,
@@ -114,6 +115,11 @@ const bridge: DesktopBridge = Object.freeze({
   async handoffSkillsSh(recordId: string) {
     return workspaceRequestResultSchema.parse(
       await invoke("workspace:handoff:skills-sh", recordId),
+    );
+  },
+  async updatePreferences(patch: PreferencesPatch) {
+    return workspaceRequestResultSchema.parse(
+      await invoke("workspace:preferences:update", patch),
     );
   },
   async prepareMutation(targetId: string, intent: MutationIntent) {

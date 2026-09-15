@@ -47,6 +47,7 @@ const CHANNELS = {
   collectionReview: "workspace:collection:review-request",
   event: "workspace:event",
   handoffSkillsSh: "workspace:handoff:skills-sh",
+  updatePreferences: "workspace:preferences:update",
   reviewWindowClosed: "workspace:review-window:closed",
   hostTrustReview: "workspace:host-trust:review",
   refresh: "workspace:inventory:refresh",
@@ -644,6 +645,24 @@ export function registerDesktopIpc(input: {
     },
   );
   input.ipcMain.handle(
+    CHANNELS.updatePreferences,
+    async (event, attachmentEpoch: unknown, patch: unknown) => {
+      const endpoint = authorized(event, "workspace", attachmentEpoch);
+      if (endpoint === undefined) return authorizationFailure();
+      try {
+        return workspaceRequestResultSchema.parse(
+          await endpoint.session.request({
+            patch,
+            type: "preferences.update",
+            version: WORKSPACE_PROTOCOL_VERSION,
+          }),
+        );
+      } catch {
+        return internalFailure();
+      }
+    },
+  );
+  input.ipcMain.handle(
     CHANNELS.hostTrustReview,
     async (event, attachmentEpoch: unknown, targetId: unknown) => {
       const endpoint = authorized(event, "workspace", attachmentEpoch);
@@ -847,6 +866,7 @@ export function registerDesktopIpc(input: {
       input.ipcMain.removeHandler(CHANNELS.targetDelete);
       input.ipcMain.removeHandler(CHANNELS.targetRepair);
       input.ipcMain.removeHandler(CHANNELS.handoffSkillsSh);
+      input.ipcMain.removeHandler(CHANNELS.updatePreferences);
       input.ipcMain.removeHandler(CHANNELS.targetUpdate);
       input.ipcMain.removeHandler(CHANNELS.reviewSnapshot);
       input.ipcMain.removeHandler(CHANNELS.mutationPrepare);

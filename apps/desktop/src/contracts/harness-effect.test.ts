@@ -90,4 +90,25 @@ describe("Command Plan harness effect", () => {
       kind: "cli-unscoped",
     });
   });
+
+  it("localizes the prose but never the harness identifiers", () => {
+    const chinese = describeHarnessEffect(
+      {
+        ...basePlan,
+        harnessEffect: {
+          kind: "cli-unscoped",
+          targetHarnessIds: ["amp", "codex"],
+        },
+        operation: "update",
+      },
+      "zh-CN",
+    );
+    expect(chinese.title).toBe("影响所有由 CLI 管理的 Harness");
+    expect(chinese.summary).toContain("amp, codex");
+    expect(chinese.summary).toContain("项目范围");
+    expect(chinese.summary).not.toMatch(/pinned Skills CLI/);
+    expect(describeHarnessEffect(basePlan, "zh-CN").summary).toContain(
+      "codex",
+    );
+  });
 });

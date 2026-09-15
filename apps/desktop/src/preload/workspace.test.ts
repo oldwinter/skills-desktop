@@ -108,6 +108,7 @@ async function loadBridge() {
       destinationTargetId: string,
     ): Promise<unknown>;
     handoffSkillsSh(recordId: string): Promise<unknown>;
+    updatePreferences(patch: Record<string, unknown>): Promise<unknown>;
     reconcileMutation(targetId: string): Promise<unknown>;
     repairTarget(targetId: string, harnessId: string): Promise<unknown>;
     refreshInventory(targetId: string): Promise<unknown>;
@@ -211,6 +212,7 @@ describe("workspace preload authority", () => {
       secondTargetId,
     );
     await bridge.handoffSkillsSh("a".repeat(64));
+    await bridge.updatePreferences({ localePreference: "zh-CN" });
     await bridge.reconcileMutation(targetId);
     await bridge.repairTarget(targetId, "claude-code");
     await bridge.refreshInventory(targetId);
@@ -251,6 +253,11 @@ describe("workspace preload authority", () => {
         secondTargetId,
       ],
       ["workspace:handoff:skills-sh", "attachment-epoch", "a".repeat(64)],
+      [
+        "workspace:preferences:update",
+        "attachment-epoch",
+        { localePreference: "zh-CN" },
+      ],
       ["workspace:mutation:reconcile", "attachment-epoch", targetId],
       ["workspace:target:repair", "attachment-epoch", targetId, "claude-code"],
       ["workspace:inventory:refresh", "attachment-epoch", targetId],
