@@ -548,6 +548,22 @@ export async function runPackagedUiQa({
         `${appearance} nav secondary settled`,
         10_000,
       );
+      await page.waitFor(
+        `(() => {
+          const root = getComputedStyle(document.documentElement);
+          const expected = root.getPropertyValue("--text").trim();
+          const label = document.querySelector(".nav-item--active > span");
+          if (label === null || expected.length === 0) return true;
+          const probe = document.createElement("span");
+          probe.style.color = expected;
+          document.body.append(probe);
+          const want = getComputedStyle(probe).color;
+          probe.remove();
+          return getComputedStyle(label).color === want;
+        })()`,
+        `${appearance} active nav text settled`,
+        10_000,
+      );
       const palette = await page.evaluate(`(() => {
         const root = getComputedStyle(document.documentElement);
         const body = getComputedStyle(document.body);
