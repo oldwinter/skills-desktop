@@ -253,6 +253,104 @@ function isCompatible(input: {
   );
 }
 
+export type RecipeAssessment =
+  PublicCollectionsState["releases"][number]["assessments"][number];
+
+/**
+ * Dimensioned recipe assessment shared by Official releases and Imported
+ * Packages (ADR 0017): Target, scope, harness set, declared source, revision,
+ * and Inventory freshness decide what is selectable. A recipe without a pinned
+ * revision can never prove `unchanged`, only `present-content-unknown`.
+ */
+export function assessRecipe(input: {
+  readonly compatible: boolean;
+  readonly inventory: PublicInventoryState;
+  readonly priorSkills?: readonly string[];
+  readonly scope: "global" | "project";
+  readonly skills: readonly string[];
+  readonly source: {
+    readonly repository: string;
+    readonly revision: string | null;
+    readonly sourceType: "github";
+  };
+  readonly target: TargetDefinition;
+}): RecipeAssessment {
+  const observe = (name: string) =>
+    input.inventory.entries.find(
+      (entry) =>
+        entry.name === name &&
+        entry.scope === input.scope &&
+        input.target.harnessIds.every((harnessId) =>
+          isInventoryEntryAvailableToHarness(entry, harnessId),
+        ),
+    );
+  const entries: RecipeAssessment["entries"] = input.skills.map((name) => {
+    const observed = observe(name);
+    let status:
+      | "incompatible"
+      | "missing"
+      | "present-content-unknown"
+      | "source-conflict"
+      | "unchanged";
+    if (!input.compatible) status = "incompatible";
+    else if (observed === undefined) status = "missing";
+    else if (
+      observed.declaredSource.sourceType === null &&
+      observed.declaredSource.source === null
+    ) {
+      status = "present-content-unknown";
+    } else if (
+      observed.declaredSource.sourceType !== input.source.sourceType ||
+      observed.declaredSource.source !== input.source.repository
+    ) {
+      status = "source-conflict";
+    } else if (
+      input.source.revision !== null &&
+      observed.revision.status === "known" &&
+      observed.revision.kind === "git-commit" &&
+      observed.revision.value === input.source.revision
+    ) {
+      status = "unchanged";
+    } else status = "present-content-unknown";
+    return {
+      inRelease: true,
+      name,
+      selectable:
+        status === "missing" ||
+        status === "present-content-unknown" ||
+        status === "unchanged",
+      selectionModes:
+        status === "missing"
+          ? (["add"] as const)
+          : status === "present-content-unknown" || status === "unchanged"
+            ? (["reapply"] as const)
+            : [],
+      status,
+    };
+  });
+  if (input.compatible && input.priorSkills !== undefined) {
+    for (const name of input.priorSkills) {
+      if (input.skills.includes(name)) continue;
+      if (observe(name) === undefined) continue;
+      entries.push({
+        inRelease: false,
+        name,
+        selectable: false,
+        selectionModes: [],
+        status: "removal-candidate",
+      });
+    }
+  }
+  return {
+    compatibility: input.compatible ? "compatible" : "incompatible",
+    entries,
+    inventoryFreshness: input.inventory.freshness,
+    scope: input.scope,
+    targetGeneration: input.target.generation,
+    targetId: input.target.id,
+  };
+}
+
 export function projectOfficialCollections(input: {
   readonly acknowledgements?: PublicCollectionsState["acknowledgements"];
   readonly catalog: OfficialCollectionCatalog;
@@ -274,92 +372,21 @@ export function projectOfficialCollections(input: {
           ? undefined
           : byDigest.get(release.manifest.supersedesDigest);
       return {
-        assessments: (["project", "global"] as const).map((scope) => {
-          const entries: PublicCollectionsState["releases"][number]["assessments"][number]["entries"] =
-            release.manifest.skills.map((name) => {
-              const observed = input.inventory.entries.find(
-                (entry) =>
-                  entry.name === name &&
-                  entry.scope === scope &&
-                  input.target.harnessIds.every((harnessId) =>
-                    isInventoryEntryAvailableToHarness(entry, harnessId),
-                  ),
-              );
-              let status:
-                | "incompatible"
-                | "missing"
-                | "present-content-unknown"
-                | "source-conflict"
-                | "unchanged";
-              if (!compatible) status = "incompatible";
-              else if (observed === undefined) status = "missing";
-              else if (
-                observed.declaredSource.sourceType === null &&
-                observed.declaredSource.source === null
-              ) {
-                status = "present-content-unknown";
-              } else if (
-                observed.declaredSource.sourceType !==
-                  release.manifest.source.sourceType ||
-                observed.declaredSource.source !==
-                  release.manifest.source.repository
-              ) {
-                status = "source-conflict";
-              } else if (
-                observed.revision.status === "known" &&
-                observed.revision.kind === "git-commit" &&
-                observed.revision.value ===
-                  release.manifest.source.reviewedRevision
-              ) {
-                status = "unchanged";
-              } else status = "present-content-unknown";
-              return {
-                inRelease: true,
-                name,
-                selectable:
-                  status === "missing" ||
-                  status === "present-content-unknown" ||
-                  status === "unchanged",
-                selectionModes:
-                  status === "missing"
-                    ? (["add"] as const)
-                    : status === "present-content-unknown" ||
-                        status === "unchanged"
-                      ? (["reapply"] as const)
-                      : [],
-                status,
-              };
-            });
-          if (compatible && prior !== undefined) {
-            for (const name of prior.manifest.skills) {
-              if (release.manifest.skills.includes(name)) continue;
-              const observed = input.inventory.entries.find(
-                (entry) =>
-                  entry.name === name &&
-                  entry.scope === scope &&
-                  input.target.harnessIds.every((harnessId) =>
-                    isInventoryEntryAvailableToHarness(entry, harnessId),
-                  ),
-              );
-              if (observed === undefined) continue;
-              entries.push({
-                inRelease: false,
-                name,
-                selectable: false,
-                selectionModes: [],
-                status: "removal-candidate",
-              });
-            }
-          }
-          return {
-            compatibility: compatible ? "compatible" : "incompatible",
-            entries,
-            inventoryFreshness: input.inventory.freshness,
+        assessments: (["project", "global"] as const).map((scope) =>
+          assessRecipe({
+            compatible,
+            inventory: input.inventory,
+            priorSkills: prior?.manifest.skills,
             scope,
-            targetGeneration: input.target.generation,
-            targetId: input.target.id,
-          };
-        }),
+            skills: release.manifest.skills,
+            source: {
+              repository: release.manifest.source.repository,
+              revision: release.manifest.source.reviewedRevision,
+              sourceType: "github",
+            },
+            target: input.target,
+          }),
+        ),
         blockers: [
           ...(release.manifest.status === "active"
             ? []

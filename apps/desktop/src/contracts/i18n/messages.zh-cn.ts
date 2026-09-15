@@ -61,9 +61,12 @@ export const zhCN: Readonly<Record<keyof typeof en, string>> = {
   "error.reconciliation_wait": "正在等待 reconciliation。请稍后再试。",
   "error.remote_protocol_mismatch": "远程协议不匹配。请检查远端运行时版本。",
   "error.remote_protocol_violation": "远程协议异常。请检查远端连接后重试。",
-  "error.remote_runtime_unavailable": "远程运行时不可用。请检查远端环境后重试。",
+  "error.remote_runtime_unavailable":
+    "远程运行时不可用。请检查远端环境后重试。",
   "error.review_expired": "复核已过期。请重新打开复核。",
   "error.review_invalid": "复核无效。请重新打开复核。",
+  "error.package_import_unavailable": "当前会话无法导入 .skillpack。",
+  "error.skillpack_invalid": "该文件不是有效的 .skillpack，未导入任何内容。",
   "error.source_inspection_incompatible":
     "固定版本的 Skills CLI 输出的来源列表格式无法被本应用读取。请检查应用更新。",
   "error.source_inspection_stale":
@@ -126,7 +129,8 @@ export const zhCN: Readonly<Record<keyof typeof en, string>> = {
   "menu.front": "前置全部窗口",
   "menu.checkForUpdates": "检查更新…",
   "menu.aboutPanel.channel": "发布渠道：{channel}",
-  "menu.aboutPanel.copyright": "仅本地 V1。Skill 通过固定版本的 skills CLI 管理。",
+  "menu.aboutPanel.copyright":
+    "仅本地 V1。Skill 通过固定版本的 skills CLI 管理。",
 
   "preferences.heading": "语言与外观",
   "preferences.description":
@@ -171,7 +175,8 @@ export const zhCN: Readonly<Record<keyof typeof en, string>> = {
   "inventory.blocked.refresh": "需要先刷新 inventory 证据",
   "inventory.blocked.reconcile": "需要先完成 reconciliation",
   "inventory.blocked.running": "变更进行中，请等待",
-  "inventory.hostTrust.banner": "主机身份复核 · 未在 V1 开放。当前版本不能启动该复核。",
+  "inventory.hostTrust.banner":
+    "主机身份复核 · 未在 V1 开放。当前版本不能启动该复核。",
   "inventory.reconciliationRequired": "该 Target 需要 reconciliation。",
   "inventory.applyingMutation": "正在应用已确认的变更",
   "inventory.reviewCancellation": "复核取消",
@@ -196,7 +201,8 @@ export const zhCN: Readonly<Record<keyof typeof en, string>> = {
   "inventory.missing.unavailableBody":
     "该 Target 没有可用的完整库存证据。请刷新该 Target 重试。",
   "inventory.missing.none": "暂无库存证据",
-  "inventory.missing.noneBody": "尚无完整库存证据。请刷新该 Target 以建立证据。",
+  "inventory.missing.noneBody":
+    "尚无完整库存证据。请刷新该 Target 以建立证据。",
   "inventory.table.caption": "在所选 Local Target 上观测到的 Skill",
   "inventory.table.declaredSource": "声明来源",
   "inventory.table.evidence": "证据",
@@ -205,7 +211,8 @@ export const zhCN: Readonly<Record<keyof typeof en, string>> = {
   "inventory.provenanceUnavailable": "来源不可用",
   "inventory.inspector.label": "所选 Skill 的证据",
   "inventory.inspector.noSkills": "没有可查看的 Skill",
-  "inventory.inspector.noSkillsBody": "请刷新该 Target，或通过 npx skills 安装一个 Skill。",
+  "inventory.inspector.noSkillsBody":
+    "请刷新该 Target，或通过 npx skills 安装一个 Skill。",
   "inventory.inspector.noneSelected": "未选择 Skill",
   "inventory.inspector.noneInFilter": "当前筛选下没有 Skill。",
   "inventory.inspector.selectHint": "在表格中选择一个 Skill 以查看证据。",
@@ -294,7 +301,8 @@ export const zhCN: Readonly<Record<keyof typeof en, string>> = {
   "about.status.available.heading": "有可用更新",
   "about.status.available.message": "正在下载更新",
   "about.status.downloaded.heading": "更新将在下次启动时应用",
-  "about.status.downloaded.message": "已下载的更新将在之后的一次正常启动中应用。",
+  "about.status.downloaded.message":
+    "已下载的更新将在之后的一次正常启动中应用。",
   "about.status.error.heading": "更新检查失败",
   "about.candidateReady": "版本 {version} 已就绪",
   "about.restartGuards": "重启阻止原因",
@@ -335,7 +343,8 @@ export const zhCN: Readonly<Record<keyof typeof en, string>> = {
   "targets.editor.new": "新建 Definition",
   "targets.editor.edit": "编辑 Definition",
   "targets.editor.untitled": "未命名 Target",
-  "targets.editor.sshBanner": "SSH · 未在 V1 开放，不能作为可保存的 Target Definition。",
+  "targets.editor.sshBanner":
+    "SSH · 未在 V1 开放，不能作为可保存的 Target Definition。",
   "targets.editor.kind": "Target 类型",
   "targets.editor.kindSsh": "类型：SSH · 未在 V1 开放",
   "targets.editor.displayLabel": "显示名称",
@@ -359,7 +368,8 @@ export const zhCN: Readonly<Record<keyof typeof en, string>> = {
   "recovery.nothing": "没有需要恢复的项目",
   "recovery.count.one": "{count} 项需要类型化操作",
   "recovery.count.other": "{count} 项需要类型化操作",
-  "recovery.reconcileStarted": "Reconciliation 已开始。该 Target 会重新观测其库存。",
+  "recovery.reconcileStarted":
+    "Reconciliation 已开始。该 Target 会重新观测其库存。",
   "recovery.chooseHarness": "修复该 Target 前请先选择一个注册表中的 Harness。",
   "recovery.repaired": "已以 Harness {harnessId} 保存 {label}。",
   "recovery.restart.heading": "需要重启",
@@ -404,16 +414,20 @@ export const zhCN: Readonly<Record<keyof typeof en, string>> = {
   "comparison.disabled.needsTwo": "对比需要两个 Local Target",
   "comparison.disabled.sameSides": "左右两侧必须是不同的 Target",
   "comparison.disabled.busy": "对比正在进行",
-  "comparison.next.addTarget": "请在 Targets 中添加另一个 Local Target，然后回到此处对比库存。",
+  "comparison.next.addTarget":
+    "请在 Targets 中添加另一个 Local Target，然后回到此处对比库存。",
   "comparison.next.chooseDifferent":
     "请为左右两侧选择不同的 Target，然后点击“对比”以生成对齐的 Skill 表。",
   "comparison.next.clickCompare": "点击“对比”以生成对齐的 Skill 表。",
   "comparison.prepare.ssh": "SSH · 未在 V1 开放，无法准备变更",
   "comparison.prepare.freshness": "规划前两个 Target 都需要新鲜证据。",
-  "comparison.prepare.reconciliation": "该 Target 需要先完成 reconciliation 才能接收对比变更。",
+  "comparison.prepare.reconciliation":
+    "该 Target 需要先完成 reconciliation 才能接收对比变更。",
   "comparison.prepare.selectRow": "准备前请先选择一行 Skill",
-  "comparison.prepare.missingHasSkill": "仅当{side}缺少该 Skill 时才能为“缺失”准备变更",
-  "comparison.prepare.missingRequires": "为“缺失”准备变更要求{side}缺少该 Skill",
+  "comparison.prepare.missingHasSkill":
+    "仅当{side}缺少该 Skill 时才能为“缺失”准备变更",
+  "comparison.prepare.missingRequires":
+    "为“缺失”准备变更要求{side}缺少该 Skill",
   "comparison.prepare.drift": "准备变更适用于{side}的修订或内容漂移",
   "comparison.prepare.unqualified":
     "准备变更仅适用于“缺失”或“修订或内容漂移”行（当前：{summary}）",
@@ -425,8 +439,10 @@ export const zhCN: Readonly<Record<keyof typeof en, string>> = {
   "comparison.differencesOnly": "仅显示差异",
   "comparison.differenceCount.beforeSearch":
     "搜索前，{total} 个对齐的 Skill 键中有 {count} 个存在差异或证据未知。",
-  "comparison.differenceCount.remain": "{total} 个对齐的 Skill 键中保留 {count} 个。",
-  "comparison.differenceCount.wouldRemain": "{total} 个对齐的 Skill 键中将保留 {count} 个。",
+  "comparison.differenceCount.remain":
+    "{total} 个对齐的 Skill 键中保留 {count} 个。",
+  "comparison.differenceCount.wouldRemain":
+    "{total} 个对齐的 Skill 键中将保留 {count} 个。",
   "comparison.pairedTargets": "成对 Target",
   "comparison.leftTarget": "左侧 Target",
   "comparison.rightTarget": "右侧 Target",
@@ -440,7 +456,8 @@ export const zhCN: Readonly<Record<keyof typeof en, string>> = {
   "comparison.empty.none": "未选择对比",
   "comparison.empty.noEvidence": "两个 Target 上都没有 Skill 证据",
   "comparison.empty.noSearchMatch": "没有匹配搜索的 Skill",
-  "comparison.empty.tryAnotherOrToggle": "换一个 Skill 名称，或关闭“仅显示差异”。",
+  "comparison.empty.tryAnotherOrToggle":
+    "换一个 Skill 名称，或关闭“仅显示差异”。",
   "comparison.empty.tryAnotherOrClear": "换一个 Skill 名称，或清除搜索。",
   "comparison.empty.noDifferences": "未发现差异",
   "comparison.empty.allMatch.one": "全部 {count} 个对齐的 Skill 键一致。",
@@ -485,7 +502,8 @@ export const zhCN: Readonly<Record<keyof typeof en, string>> = {
   "collections.run.reconcile": "Reconcile {label}",
   "collections.run.refresh": "刷新 {label}",
   "collections.include": "包含 {label}",
-  "collections.sshExcluded": "SSH · 未在 V1 开放，不在 V1 Local Collections 范围内",
+  "collections.sshExcluded":
+    "SSH · 未在 V1 开放，不在 V1 Local Collections 范围内",
   "collections.inventory.fresh": "库存新鲜",
   "collections.inventory.stale": "库存过期",
   "collections.inventory.none": "暂无库存证据",
@@ -513,6 +531,44 @@ export const zhCN: Readonly<Record<keyof typeof en, string>> = {
   "collections.inspector.targetsSelected": "已选择的 Target",
   "collections.plan.heading": "合集计划",
   "collections.plan.semantics": "顺序执行，非事务性",
+  "collections.origin.official": "官方合集",
+  "collections.origin.imported": "导入的包",
+  "collections.originGroup.official": "官方合集",
+  "collections.originGroup.imported": "导入的包",
+  "collections.import": "导入 .skillpack",
+  "collections.importing": "正在导入…",
+  "collections.import.hint":
+    "离线导入 .skillpack 文件。导入的包永远不会被当作官方合集展示，导入本身也不会安装任何内容。",
+  "collections.import.status.imported":
+    "已导入 {packageId} 的 release {release}。",
+  "collections.import.status.identical":
+    "{packageId} 的 release {release} 已以相同摘要导入过，没有任何变化。",
+  "collections.import.status.conflict":
+    "{packageId} 的 release {release} 已存在但摘要不同。传入文件已作为冲突保留，未替换现有记录。",
+  "collections.import.status.upgrade":
+    "已将 {packageId} 从 release {relatedRelease} 升级到 release {release}。",
+  "collections.import.status.downgrade":
+    "已将 {packageId} 从 release {relatedRelease} 降级到 release {release}。",
+  "collections.import.status.cancelled": "已取消导入。",
+  "collections.imported.one": "{count} 个导入的包",
+  "collections.imported.other": "{count} 个导入的包",
+  "collections.inspector.importedLabel": "导入的包详情",
+  "collections.inspector.origin": "来源类型",
+  "collections.inspector.documentDigest": "文档摘要",
+  "collections.inspector.importedAt": "导入时间",
+  "collections.inspector.source": "来源",
+  "collections.inspector.unpinned": "未固定",
+  "collections.inspector.noOfficialReview": "无 —— 不是官方合集",
+  "collections.inspector.delta": "Release 增量",
+  "collections.inspector.delta.upgrade":
+    "从 release {fromRelease} 升级到 {toRelease}",
+  "collections.inspector.delta.downgrade":
+    "从 release {fromRelease} 降级到 {toRelease}",
+  "collections.inspector.delta.none": "未记录 release 变化",
+  "collections.inspector.conflicts": "保留的摘要冲突",
+  "collections.inspector.conflicts.none": "无",
+  "collections.inspector.conflict": "release {release}，摘要 {digest}",
+  "collections.blocker.noRecipe": "此 Target 没有可执行的配方。",
 
   "review.brand": "可信复核",
   "review.loading": "正在加载复核",
@@ -563,6 +619,12 @@ export const zhCN: Readonly<Record<keyof typeof en, string>> = {
   "review.collection.preparedChild": "已准备的子计划",
   "review.collection.childPlan": "子 Command Plan",
   "review.collection.approve": "批准官方合集计划",
+  "review.collection.importedTitle": "复核导入的包",
+  "review.collection.approveImported": "批准导入的包计划",
+  "review.collection.unpinnedSource": "来源（未固定）",
+  "review.collection.origin": "来源类型",
+  "review.collection.noOfficialReview": "无 —— 导入的包，不是官方合集",
+  "review.collection.importedAt": "导入时间",
   "review.collection.targetGeneration": "{label} / generation {generation}",
   "review.mutation.title.cancellation": "复核取消",
   "review.mutation.title.removal": "复核移除",

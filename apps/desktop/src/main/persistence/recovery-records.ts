@@ -26,12 +26,19 @@ import {
   type DurableTargetDefinition,
 } from "../../contracts/workspace.js";
 import { hostPublicKeySchema } from "../ssh/host-public-key.js";
+import {
+  IMPORTED_PACKAGE_SCHEMA_VERSION,
+  importedPackageRecordsSchema,
+  type ImportedPackageRecord,
+} from "./imported-package-records.js";
 
 const STORE_NAME = "inventorySnapshots" as const;
 const GUARD_STORE_NAME = "mutationGuards" as const;
 const TARGET_STORE_NAME = "targetDefinitions" as const;
 const HOST_TRUST_STORE_NAME = "hostTrustRecords" as const;
 const COLLECTION_STORE_NAME = "collectionAcknowledgements" as const;
+const PACKAGE_STORE_NAME = "importedPackages" as const;
+const PACKAGE_DOCUMENT_NAME = "imported-packages.json";
 const DOCUMENT_NAME = "inventory-snapshots.json";
 const GUARD_DOCUMENT_NAME = "mutation-guards.json";
 const GUARD_FAILURE_MARKER_NAME = "mutation-guards.failure.json";
@@ -147,7 +154,11 @@ const legacyCurrentDocumentSchema = z
   })
   .strict()
   .superRefine((document, context) => {
-    rejectDuplicateIdentities(document.snapshots, ({ targetId }) => targetId, context);
+    rejectDuplicateIdentities(
+      document.snapshots,
+      ({ targetId }) => targetId,
+      context,
+    );
   });
 
 const legacyEntrySchema = z
@@ -180,7 +191,11 @@ const legacyDocumentSchema = z
   })
   .strict()
   .superRefine((document, context) => {
-    rejectDuplicateIdentities(document.records, ({ target }) => target, context);
+    rejectDuplicateIdentities(
+      document.records,
+      ({ target }) => target,
+      context,
+    );
   });
 
 const mutationGuardSchema = z
@@ -241,7 +256,11 @@ const legacyGuardDocumentSchema = z
   })
   .strict()
   .superRefine((document, context) => {
-    rejectDuplicateIdentities(document.guards, ({ targetId }) => targetId, context);
+    rejectDuplicateIdentities(
+      document.guards,
+      ({ targetId }) => targetId,
+      context,
+    );
     rejectDuplicateIdentities(
       document.guards,
       ({ operationId }) => operationId,
@@ -408,6 +427,15 @@ const collectionDocumentSchema = z
   })
   .strict();
 
+/** Package store v1 (ADR 0017): isolated from every other store. */
+const packageDocumentSchema = z
+  .object({
+    kind: z.literal("imported-packages"),
+    packages: importedPackageRecordsSchema,
+    schemaVersion: z.literal(IMPORTED_PACKAGE_SCHEMA_VERSION),
+  })
+  .strict();
+
 export type PersistedInventoryEntry = z.infer<typeof persistedEntrySchema>;
 
 export interface InventorySnapshot {
@@ -424,6 +452,7 @@ export interface RecoveryFailure {
     | typeof GUARD_STORE_NAME
     | typeof HOST_TRUST_STORE_NAME
     | typeof COLLECTION_STORE_NAME
+    | typeof PACKAGE_STORE_NAME
     | typeof STORE_NAME
     | typeof TARGET_STORE_NAME;
   readonly targetIds?: readonly string[];
@@ -457,12 +486,7 @@ export interface MutationGuard {
 
 export type MutationGuardInput = Pick<
   MutationGuard,
-  | "deadline"
-  | "effects"
-  | "generation"
-  | "operationId"
-  | "phase"
-  | "targetId"
+  "deadline" | "effects" | "generation" | "operationId" | "phase" | "targetId"
 >;
 
 export interface RestoredRecoveryRecords {
@@ -470,6 +494,7 @@ export interface RestoredRecoveryRecords {
   readonly collectionAcknowledgements?: readonly CollectionAcknowledgement[];
   readonly failures: readonly RecoveryFailure[];
   readonly hostTrustRecords: readonly HostTrustRecord[];
+  readonly importedPackages?: readonly ImportedPackageRecord[];
   readonly inventorySnapshots: readonly InventorySnapshot[];
   readonly mutationGuards: readonly MutationGuard[];
   readonly targetDefinitions: readonly DurableTargetDefinition[];
@@ -479,6 +504,10 @@ export type DurableChange =
   | {
       readonly acknowledgements: readonly CollectionAcknowledgement[];
       readonly type: "collections.acknowledgements.replace";
+    }
+  | {
+      readonly packages: readonly ImportedPackageRecord[];
+      readonly type: "packages.replace";
     }
   | {
       readonly generation: number;
@@ -617,6 +646,7 @@ type GuardFailureMarker = z.infer<typeof guardFailureMarkerSchema>;
 type TargetDocument = z.infer<typeof targetDocumentSchema>;
 type TargetFailureMarker = z.infer<typeof targetFailureMarkerSchema>;
 type CollectionDocument = z.infer<typeof collectionDocumentSchema>;
+type PackageDocument = z.infer<typeof packageDocumentSchema>;
 
 function allowlistSnapshot(
   change: Extract<DurableChange, { readonly type: "inventory.replace" }>,
@@ -678,10 +708,7 @@ function isLegacyTargetId(targetId: string) {
   );
 }
 
-function isValidTargetRemap(
-  fromTargetId: string,
-  toTargetId: string,
-) {
+function isValidTargetRemap(fromTargetId: string, toTargetId: string) {
   return (
     isLegacyTargetId(fromTargetId) &&
     targetIdSchema.safeParse(toTargetId).success
@@ -720,8 +747,7 @@ function remapMutationGuardTargetId(
 
   return [
     ...values.filter(
-      ({ targetId }) =>
-        targetId !== fromTargetId && targetId !== toTargetId,
+      ({ targetId }) => targetId !== fromTargetId && targetId !== toTargetId,
     ),
     {
       ...destination,
@@ -750,13 +776,16 @@ export function createMemoryRecoveryRecords(
   initialTargets: readonly MemoryTargetDefinitionInput[] = [],
   initialHostTrust: readonly HostTrustRecord[] = [],
   initialCollectionAcknowledgements: readonly CollectionAcknowledgement[] = [],
+  initialImportedPackages: readonly ImportedPackageRecord[] = [],
 ): RecoveryRecords {
   let snapshots = [...initialSnapshots];
   let targetDefinitions = initialTargets.map((target) => {
     const current = durableTargetDefinitionSchema.safeParse(target);
     if (current.success) return current.data;
-    const { workspaceLabel: _workspaceLabel, ...durableTarget } = target as
-      MemoryTargetDefinitionInput & { readonly workspaceLabel?: string };
+    const { workspaceLabel: _workspaceLabel, ...durableTarget } =
+      target as MemoryTargetDefinitionInput & {
+        readonly workspaceLabel?: string;
+      };
     const harnessIds =
       "harnessIds" in target
         ? target.harnessIds
@@ -787,6 +816,7 @@ export function createMemoryRecoveryRecords(
   let collectionAcknowledgements = structuredClone(
     initialCollectionAcknowledgements,
   );
+  let importedPackages = structuredClone(initialImportedPackages);
   return {
     async commit(change) {
       if (change.type === "collections.acknowledgements.replace") {
@@ -801,10 +831,17 @@ export function createMemoryRecoveryRecords(
           );
         }
         collectionAcknowledgements = structuredClone(parsed.data);
+      } else if (change.type === "packages.replace") {
+        const parsed = importedPackageRecordsSchema.safeParse(change.packages);
+        if (!parsed.success) {
+          return commitFailure(
+            "persist_failed",
+            "Imported Package data did not pass durable validation.",
+          );
+        }
+        importedPackages = structuredClone(parsed.data);
       } else if (change.type === "target.remap") {
-        if (
-          !isValidTargetRemap(change.fromTargetId, change.toTargetId)
-        ) {
+        if (!isValidTargetRemap(change.fromTargetId, change.toTargetId)) {
           return commitFailure(
             "persist_failed",
             "Target identity migration did not pass durable validation.",
@@ -904,6 +941,7 @@ export function createMemoryRecoveryRecords(
         collectionAcknowledgements: structuredClone(collectionAcknowledgements),
         failures: [],
         hostTrustRecords: structuredClone(hostTrustRecords),
+        importedPackages: structuredClone(importedPackages),
         inventorySnapshots: structuredClone(snapshots),
         mutationGuards: structuredClone(mutationGuards),
         targetDefinitions: structuredClone(targetDefinitions),
@@ -1074,10 +1112,7 @@ function migrateLegacyGuards(
       return [bindUnresolvedLegacyGuard(guard)];
     }
     return [
-      bindMutationGuard(
-        { ...guard, phase: "reconciliation-required" },
-        target,
-      ),
+      bindMutationGuard({ ...guard, phase: "reconciliation-required" }, target),
     ];
   });
   if (migrated.some((guard) => guard === undefined)) return undefined;
@@ -1113,6 +1148,7 @@ export function createJsonRecoveryRecords(
     options.directory,
     COLLECTION_DOCUMENT_NAME,
   );
+  const packageDocumentPath = join(options.directory, PACKAGE_DOCUMENT_NAME);
   const fileSystem = options.fileSystem ?? createNodeRecoveryFileSystem();
   const platform = options.platform ?? process.platform;
   let document: CurrentDocument = {
@@ -1133,8 +1169,7 @@ export function createJsonRecoveryRecords(
   };
   let pendingLegacyGuards: MutationGuard[] | undefined;
   let pendingLegacyGuardInputs:
-    | z.infer<typeof legacyMutationGuardSchema>[]
-    | undefined;
+    z.infer<typeof legacyMutationGuardSchema>[] | undefined;
   let pendingLegacyGuardRaw: string | undefined;
   let pendingLegacyGuardVersion: 1 | 2 | undefined;
   let guardFailures: RecoveryFailure[] = [];
@@ -1174,6 +1209,15 @@ export function createJsonRecoveryRecords(
   let collectionsLoaded = false;
   let collectionUnsupportedSchema = false;
   let collectionWriteBlocked = false;
+  let packageDocument: PackageDocument = {
+    kind: "imported-packages",
+    packages: [],
+    schemaVersion: IMPORTED_PACKAGE_SCHEMA_VERSION,
+  };
+  let packageFailures: RecoveryFailure[] = [];
+  let packagesLoaded = false;
+  let packageUnsupportedSchema = false;
+  let packageWriteBlocked = false;
   let loaded = false;
   let unsupportedSchema = false;
   let writeBlocked = false;
@@ -1220,7 +1264,9 @@ export function createJsonRecoveryRecords(
     }
     const backupContents = await fileSystem.readFile(backupPath, "utf8");
     if (backupContents !== expectedContents) {
-      throw new Error("Pre-existing recovery backup does not match its source.");
+      throw new Error(
+        "Pre-existing recovery backup does not match its source.",
+      );
     }
     await syncPath(backupPath, platform === "win32" ? "r+" : "r");
     await syncParentDirectory();
@@ -1267,6 +1313,7 @@ export function createJsonRecoveryRecords(
       | TargetDocument
       | TargetFailureMarker
       | CollectionDocument
+      | PackageDocument
       | z.infer<typeof hostTrustFailureMarkerSchema>,
     name = DOCUMENT_NAME,
     destinationPath = documentPath,
@@ -1294,6 +1341,14 @@ export function createJsonRecoveryRecords(
       `collection-acknowledgements.quarantine-${options.id()}.json`,
     );
     await fileSystem.rename(collectionDocumentPath, quarantinePath);
+  };
+
+  const quarantinePackages = async () => {
+    const quarantinePath = join(
+      options.directory,
+      `imported-packages.quarantine-${options.id()}.json`,
+    );
+    await fileSystem.rename(packageDocumentPath, quarantinePath);
   };
 
   const load = async () => {
@@ -1491,11 +1546,9 @@ export function createJsonRecoveryRecords(
       guardFailures = [{ code: "corrupt_store", store: GUARD_STORE_NAME }];
       return;
     }
-    pendingLegacyGuardInputs = (
-      legacyV2.success
-        ? [...legacyV2.data.guards, ...legacyV2.data.legacyGuards]
-        : legacyV1.data!.guards
-    );
+    pendingLegacyGuardInputs = legacyV2.success
+      ? [...legacyV2.data.guards, ...legacyV2.data.legacyGuards]
+      : legacyV1.data!.guards;
     pendingLegacyGuardRaw = raw;
     pendingLegacyGuardVersion = legacyV2.success ? 2 : 1;
   };
@@ -1670,11 +1723,7 @@ export function createJsonRecoveryRecords(
         `${targetDocumentPath}.v${legacyVersion}.backup`,
         raw,
       );
-      await writeDocument(
-        migrated,
-        TARGET_DOCUMENT_NAME,
-        targetDocumentPath,
-      );
+      await writeDocument(migrated, TARGET_DOCUMENT_NAME, targetDocumentPath);
       targetDocument = migrated;
       targetMigrationCommitted = true;
     } catch {
@@ -1689,17 +1738,12 @@ export function createJsonRecoveryRecords(
 
   const completePendingGuardMigration = async () => {
     if (pendingLegacyGuardInputs === undefined) return;
-    if (
-      pendingLegacyTargetRaw !== undefined &&
-      !targetMigrationCommitted
-    ) {
+    if (pendingLegacyTargetRaw !== undefined && !targetMigrationCommitted) {
       pendingLegacyGuards = pendingLegacyGuardInputs.map(
         bindUnresolvedLegacyGuard,
       );
       guardWriteBlocked = true;
-      guardFailures = [
-        { code: "migration_failed", store: GUARD_STORE_NAME },
-      ];
+      guardFailures = [{ code: "migration_failed", store: GUARD_STORE_NAME }];
       return;
     }
     const migrated = migrateLegacyGuards(
@@ -1720,11 +1764,7 @@ export function createJsonRecoveryRecords(
         `${guardDocumentPath}.v${pendingLegacyGuardVersion ?? 2}.backup`,
         pendingLegacyGuardRaw,
       );
-      await writeDocument(
-        migrated,
-        GUARD_DOCUMENT_NAME,
-        guardDocumentPath,
-      );
+      await writeDocument(migrated, GUARD_DOCUMENT_NAME, guardDocumentPath);
       guardDocument = migrated;
       pendingLegacyGuardInputs = undefined;
       pendingLegacyGuards = undefined;
@@ -1777,9 +1817,7 @@ export function createJsonRecoveryRecords(
   const failWhenCurrentGuardsOutliveTargetStore = () => {
     if (!targetStoreMissing || guardDocument.guards.length === 0) return;
     targetWriteBlocked = true;
-    if (
-      !targetFailures.some(({ store }) => store === TARGET_STORE_NAME)
-    ) {
+    if (!targetFailures.some(({ store }) => store === TARGET_STORE_NAME)) {
       targetFailures = [
         ...targetFailures,
         { code: "corrupt_store", store: TARGET_STORE_NAME },
@@ -1918,9 +1956,102 @@ export function createJsonRecoveryRecords(
     collectionDocument = parsed.data;
   };
 
+  const loadPackages = async () => {
+    if (packagesLoaded) return;
+    packagesLoaded = true;
+    packageFailures = [];
+    let raw: string;
+    try {
+      raw = await fileSystem.readFile(packageDocumentPath, "utf8");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+      packageWriteBlocked = true;
+      packageFailures = [{ code: "corrupt_store", store: PACKAGE_STORE_NAME }];
+      return;
+    }
+    const failClosed = async () => {
+      const quarantined = await quarantinePackages().then(
+        () => true,
+        () => false,
+      );
+      packageWriteBlocked = !quarantined;
+      packageFailures = [{ code: "corrupt_store", store: PACKAGE_STORE_NAME }];
+    };
+    let decoded: unknown;
+    try {
+      decoded = JSON.parse(raw);
+    } catch {
+      await failClosed();
+      return;
+    }
+    if (
+      typeof decoded === "object" &&
+      decoded !== null &&
+      "schemaVersion" in decoded &&
+      typeof decoded.schemaVersion === "number" &&
+      decoded.schemaVersion > IMPORTED_PACKAGE_SCHEMA_VERSION
+    ) {
+      packageUnsupportedSchema = true;
+      packageFailures = [
+        { code: "unsupported_schema", store: PACKAGE_STORE_NAME },
+      ];
+      return;
+    }
+    const parsed = packageDocumentSchema.safeParse(decoded);
+    if (!parsed.success) {
+      await failClosed();
+      return;
+    }
+    packageDocument = parsed.data;
+  };
+
   return {
     commit(change) {
       return underApplicationLock(async () => {
+        if (change.type === "packages.replace") {
+          await loadPackages();
+          if (packageUnsupportedSchema) {
+            return commitFailure(
+              "unsupported_schema",
+              "Imported Package data was written by a newer unsupported application version.",
+            );
+          }
+          if (packageWriteBlocked) {
+            return commitFailure(
+              "persist_failed",
+              "Imported Package data could not be read safely and will not be overwritten.",
+            );
+          }
+          const parsed = importedPackageRecordsSchema.safeParse(
+            change.packages,
+          );
+          if (!parsed.success) {
+            return commitFailure(
+              "persist_failed",
+              "Imported Package data did not pass durable validation.",
+            );
+          }
+          const nextDocument: PackageDocument = {
+            kind: "imported-packages",
+            packages: parsed.data,
+            schemaVersion: IMPORTED_PACKAGE_SCHEMA_VERSION,
+          };
+          try {
+            await writeDocument(
+              nextDocument,
+              PACKAGE_DOCUMENT_NAME,
+              packageDocumentPath,
+            );
+            packageDocument = nextDocument;
+            packageFailures = [];
+            return { ok: true, value: undefined };
+          } catch {
+            return commitFailure(
+              "persist_failed",
+              "Imported Packages could not be saved.",
+            );
+          }
+        }
         if (change.type === "collections.acknowledgements.replace") {
           await loadCollections();
           if (collectionUnsupportedSchema) {
@@ -2464,6 +2595,7 @@ export function createJsonRecoveryRecords(
         failWhenCurrentGuardsOutliveTargetStore();
         await loadHostTrust();
         await loadCollections();
+        await loadPackages();
         return {
           blockedTargetDefinitions: structuredClone(blockedTargetDefinitions),
           collectionAcknowledgements: structuredClone(
@@ -2475,8 +2607,10 @@ export function createJsonRecoveryRecords(
             ...targetFailures,
             ...hostTrustFailures,
             ...collectionFailures,
+            ...packageFailures,
           ]),
           hostTrustRecords: structuredClone(hostTrustRecords),
+          importedPackages: structuredClone(packageDocument.packages),
           inventorySnapshots: structuredClone(
             pendingLegacySnapshots ?? [
               ...document.snapshots,

@@ -72,8 +72,7 @@ export const en = {
     "Saving failed. Try again; if it keeps failing, check disk permissions.",
   "error.process_failed": "The local process failed. Refresh, then try again.",
   "error.reconciliation_required": "Reconciliation must finish first.",
-  "error.reconciliation_wait":
-    "Waiting for reconciliation. Try again shortly.",
+  "error.reconciliation_wait": "Waiting for reconciliation. Try again shortly.",
   "error.remote_protocol_mismatch":
     "The remote protocol does not match. Check the remote runtime version.",
   "error.remote_protocol_violation":
@@ -82,6 +81,10 @@ export const en = {
     "The remote runtime is unavailable. Check the remote environment, then try again.",
   "error.review_expired": "The review expired. Open the review again.",
   "error.review_invalid": "The review is invalid. Open the review again.",
+  "error.package_import_unavailable":
+    "Importing a .skillpack is unavailable in this session.",
+  "error.skillpack_invalid":
+    "This file is not a valid .skillpack. Nothing was imported.",
   "error.source_inspection_incompatible":
     "The pinned Skills CLI listed this source in a form this app cannot read. Check for an app update.",
   "error.source_inspection_stale":
@@ -150,7 +153,8 @@ export const en = {
   "menu.front": "Bring All to Front",
   "menu.checkForUpdates": "Check for Updates…",
   "menu.aboutPanel.channel": "Release channel: {channel}",
-  "menu.aboutPanel.copyright": "Local-only V1. Skills are managed through the pinned skills CLI.",
+  "menu.aboutPanel.copyright":
+    "Local-only V1. Skills are managed through the pinned skills CLI.",
 
   "preferences.heading": "Language & appearance",
   "preferences.description":
@@ -194,7 +198,8 @@ export const en = {
     "Showing stale evidence restored from the last complete observation",
   "inventory.ssh.banner":
     "SSH · Not available in V1. Remote Targets keep a read-only trace and cannot be a mutation workspace.",
-  "inventory.blocked.ssh": "SSH · Not available in V1; changes cannot be prepared",
+  "inventory.blocked.ssh":
+    "SSH · Not available in V1; changes cannot be prepared",
   "inventory.blocked.refresh": "Refresh the inventory evidence first",
   "inventory.blocked.reconcile": "Complete reconciliation first",
   "inventory.blocked.running": "A change is in progress; please wait",
@@ -445,8 +450,10 @@ export const en = {
     "Add another Local Target under Targets, then return here to compare inventories.",
   "comparison.next.chooseDifferent":
     "Choose different Left and Right Targets, then click Compare to build the aligned skill table.",
-  "comparison.next.clickCompare": "Click Compare to build the aligned skill table.",
-  "comparison.prepare.ssh": "SSH · Not available in V1; changes cannot be prepared",
+  "comparison.next.clickCompare":
+    "Click Compare to build the aligned skill table.",
+  "comparison.prepare.ssh":
+    "SSH · Not available in V1; changes cannot be prepared",
   "comparison.prepare.freshness":
     "Fresh evidence is required on both Targets before planning.",
   "comparison.prepare.reconciliation":
@@ -523,8 +530,10 @@ export const en = {
   "collections.release": "Release",
   "collections.releaseOption": "{title} / release {release}",
   "collections.preparePlan": "Prepare plan",
-  "collections.blocker.noRelease": "No executable reviewed release for this Target.",
-  "collections.blocker.incompatible": "Release is incompatible with this Target.",
+  "collections.blocker.noRelease":
+    "No executable reviewed release for this Target.",
+  "collections.blocker.incompatible":
+    "Release is incompatible with this Target.",
   "collections.blocker.freshness": "Fresh inventory evidence is required.",
   "collections.blocker.reconciliation": "Mutation reconciliation is required.",
   "collections.run.running": "Collection run in progress",
@@ -563,6 +572,44 @@ export const en = {
   "collections.inspector.targetsSelected": "Targets selected",
   "collections.plan.heading": "Collection Plan",
   "collections.plan.semantics": "Sequential, non-transactional",
+  "collections.origin.official": "Official Collection",
+  "collections.origin.imported": "Imported Package",
+  "collections.originGroup.official": "Official Collections",
+  "collections.originGroup.imported": "Imported Packages",
+  "collections.import": "Import .skillpack",
+  "collections.importing": "Importing…",
+  "collections.import.hint":
+    "Import a .skillpack file offline. Imported Packages are never presented as Official, and importing never installs anything.",
+  "collections.import.status.imported":
+    "Imported {packageId} release {release}.",
+  "collections.import.status.identical":
+    "{packageId} release {release} was already imported with the same digest; nothing changed.",
+  "collections.import.status.conflict":
+    "{packageId} release {release} is already imported with a different digest. The incoming file was retained as a conflict and did not replace it.",
+  "collections.import.status.upgrade":
+    "Upgraded {packageId} from release {relatedRelease} to release {release}.",
+  "collections.import.status.downgrade":
+    "Downgraded {packageId} from release {relatedRelease} to release {release}.",
+  "collections.import.status.cancelled": "Import cancelled.",
+  "collections.imported.one": "{count} imported package",
+  "collections.imported.other": "{count} imported packages",
+  "collections.inspector.importedLabel": "Imported Package details",
+  "collections.inspector.origin": "Origin",
+  "collections.inspector.documentDigest": "Document digest",
+  "collections.inspector.importedAt": "Imported at",
+  "collections.inspector.source": "Source",
+  "collections.inspector.unpinned": "unpinned",
+  "collections.inspector.noOfficialReview": "None — not an Official Collection",
+  "collections.inspector.delta": "Release delta",
+  "collections.inspector.delta.upgrade":
+    "Upgraded from release {fromRelease} to {toRelease}",
+  "collections.inspector.delta.downgrade":
+    "Downgraded from release {fromRelease} to {toRelease}",
+  "collections.inspector.delta.none": "No release change recorded",
+  "collections.inspector.conflicts": "Retained digest conflicts",
+  "collections.inspector.conflicts.none": "None",
+  "collections.inspector.conflict": "Release {release} with digest {digest}",
+  "collections.blocker.noRecipe": "No executable recipe for this Target.",
 
   "review.brand": "Trusted Review",
   "review.loading": "Loading review",
@@ -613,6 +660,13 @@ export const en = {
   "review.collection.preparedChild": "Prepared child",
   "review.collection.childPlan": "Child Command Plan",
   "review.collection.approve": "Approve Official Collection plan",
+  "review.collection.importedTitle": "Review Imported Package",
+  "review.collection.approveImported": "Approve Imported Package plan",
+  "review.collection.unpinnedSource": "Source (unpinned)",
+  "review.collection.origin": "Origin",
+  "review.collection.noOfficialReview":
+    "None — Imported Package, not an Official Collection",
+  "review.collection.importedAt": "Imported at",
   "review.collection.targetGeneration": "{label} / generation {generation}",
   "review.mutation.title.cancellation": "Review cancellation",
   "review.mutation.title.removal": "Review removal",

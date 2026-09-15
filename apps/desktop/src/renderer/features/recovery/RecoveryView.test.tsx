@@ -2,7 +2,13 @@
 
 import "@testing-library/jest-dom/vitest";
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
@@ -90,6 +96,7 @@ function bridge(overrides: Partial<WorkspaceBridge> = {}): WorkspaceBridge {
     createTarget: ok,
     deleteTarget: ok,
     handoffSkillsSh: ok,
+    importPackage: ok,
     inspectSource: ok,
     updatePreferences: ok,
     async getSnapshot() {
@@ -113,7 +120,12 @@ function bridge(overrides: Partial<WorkspaceBridge> = {}): WorkspaceBridge {
 }
 
 const targetStates = [
-  { deletionBlocked: false, inventory, mutation: idleMutation, target: localTarget },
+  {
+    deletionBlocked: false,
+    inventory,
+    mutation: idleMutation,
+    target: localTarget,
+  },
   {
     deletionBlocked: true,
     inventory,
@@ -157,7 +169,9 @@ describe("RecoveryView", () => {
         targets={[targetStates[0]!]}
       />,
     );
-    expect(screen.getByRole("heading", { name: "Recovery" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Recovery" }),
+    ).toBeInTheDocument();
     expect(screen.getByText("Nothing needs recovery")).toBeInTheDocument();
     expect(screen.getByText("No recovery work")).toBeInTheDocument();
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
@@ -170,13 +184,17 @@ describe("RecoveryView", () => {
         error: {
           code: "reconciliation_wait",
           effects: "possible",
-          message: "Reconciliation must wait for the original operation deadline.",
+          message:
+            "Reconciliation must wait for the original operation deadline.",
           phase: "reconcile",
           retryable: true,
         },
         ok: false,
       })
-      .mockResolvedValueOnce({ ok: true, value: { operationId: "reconcile-1" } });
+      .mockResolvedValueOnce({
+        ok: true,
+        value: { operationId: "reconcile-1" },
+      });
     const onSelectTarget = vi.fn();
     render(
       <RecoveryView
@@ -194,7 +212,9 @@ describe("RecoveryView", () => {
     expect(screen.getByText(/^Deadline /)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Reconcile Laptop" }));
-    await waitFor(() => expect(reconcileMutation).toHaveBeenCalledWith(guardedId));
+    await waitFor(() =>
+      expect(reconcileMutation).toHaveBeenCalledWith(guardedId),
+    );
     expect(await screen.findByRole("alert")).toBeInTheDocument();
     expect(onSelectTarget).not.toHaveBeenCalled();
 
@@ -234,14 +254,18 @@ describe("RecoveryView", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("Future Harness")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Repair Needs repair" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Repair Needs repair" }),
+    );
     expect(await screen.findByRole("alert")).toBeInTheDocument();
     expect(repairTarget).not.toHaveBeenCalled();
 
     const select = screen.getByLabelText("Replacement harness");
     expect(select.querySelectorAll("option")).toHaveLength(78);
     fireEvent.change(select, { target: { value: "claude-code" } });
-    fireEvent.click(screen.getByRole("button", { name: "Repair Needs repair" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Repair Needs repair" }),
+    );
     await waitFor(() =>
       expect(repairTarget).toHaveBeenCalledWith(blockedId, "claude-code"),
     );
@@ -257,7 +281,11 @@ describe("RecoveryView", () => {
           blockedTargets: [],
           recovery: {
             repairedTargets: [
-              { harnessId: "claude-code", id: blockedId, label: "Needs repair" },
+              {
+                harnessId: "claude-code",
+                id: blockedId,
+                label: "Needs repair",
+              },
             ],
             restartRequired: true,
           },

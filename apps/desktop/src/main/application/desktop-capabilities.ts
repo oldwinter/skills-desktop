@@ -3,6 +3,7 @@ import { posix } from "node:path";
 import {
   describeSource,
   normalizeHarnessIds,
+  parseSkillpack,
   type Result,
   type SourceDescriptorV1,
 } from "@skills-desktop/skills-runtime";
@@ -15,11 +16,13 @@ import {
   WORKSPACE_PROTOCOL_VERSION,
   workspaceRequestSchema,
   type DesktopEvent,
+  type PackageOrigin,
   type PublicInventoryEntry,
   type PublicInventoryState,
   type PublicCollectionPlan,
   type PublicCollectionExecution,
   type PublicMultiTargetCollectionPlan,
+  type PublicPackageImportOutcome,
   type PublicSingleTargetCollectionPlan,
   type PublicMutationState,
   type PublicRecoveryState,
@@ -40,6 +43,7 @@ import type {
   PreparedMutation,
   SourceInspection,
 } from "../adapters/skills-process.js";
+import type { ImportedPackageRecord } from "../persistence/imported-package-records.js";
 import type {
   CollectionAcknowledgement,
   InventorySnapshot,
@@ -64,10 +68,18 @@ import {
   type ExternalBrowser,
 } from "./skills-sh-handoff.js";
 import {
+  createNodeSkillpackCodec,
+  importedPackageSource,
+  importSkillpack,
+  projectImportedPackages,
+  type SkillpackPicker,
+} from "./imported-packages.js";
+import {
   EMPTY_OFFICIAL_COLLECTION_CATALOG,
   digestCanonicalJson,
   projectOfficialCollections,
   type OfficialCollectionCatalog,
+  type RecipeAssessment,
   validateOfficialCollectionCatalog,
 } from "./official-collections.js";
 
@@ -127,6 +139,8 @@ export interface DesktopCapabilitiesOptions {
   readonly recoveryRecords: RecoveryRecords;
   readonly scheduleEventDelivery?: (deliver: () => void) => void;
   readonly shutdownTimeoutMs?: number;
+  /** ADR 0017 offline `.skillpack` picker. Absent means import is unavailable. */
+  readonly skillpackPicker?: SkillpackPicker;
   readonly skillsTargets: SkillsTargets;
   readonly v1LocalOnlyTargets?: boolean;
 }
@@ -483,6 +497,10 @@ export function createDesktopCapabilities(
   let collectionAcknowledgements: CollectionAcknowledgement[] = [];
   let collectionExecution: PublicCollectionExecution | undefined;
   let currentCollectionPlan: CollectionPlan | undefined;
+  let importedPackages: readonly ImportedPackageRecord[] = [];
+  let lastPackageImport: PublicPackageImportOutcome | null = null;
+  let packageImportInFlight = false;
+  const skillpackCodec = createNodeSkillpackCodec();
   const inventoryStates = new Map<string, PublicInventoryState>();
   const mutationStates = new Map<string, PublicMutationState>();
   const freshTargetSessions = new Map<string, FreshTargetSession>();
@@ -566,8 +584,7 @@ export function createDesktopCapabilities(
       mutationStates.get(definition.id) ?? emptyMutationState(),
     );
     sourceInspectionState = structuredClone(
-      sourceInspectionStates.get(definition.id) ??
-        emptySourceInspectionState(),
+      sourceInspectionStates.get(definition.id) ?? emptySourceInspectionState(),
     );
     freshTargetSession = freshTargetSessions.get(definition.id);
   };
@@ -747,8 +764,8 @@ export function createDesktopCapabilities(
   const collectionsForTarget = (
     definition: TargetDefinition,
     inventory: PublicInventoryState,
-  ) =>
-    projectOfficialCollections({
+  ) => ({
+    ...projectOfficialCollections({
       acknowledgements: collectionAcknowledgements,
       catalog: officialCollectionCatalog,
       inventory,
@@ -763,7 +780,160 @@ export function createDesktopCapabilities(
           ? currentCollectionPlan.projection
           : null,
       target: projectTarget(definition),
-    });
+    }),
+    lastImport: structuredClone(lastPackageImport),
+    packages: projectImportedPackages({
+      inventory,
+      records: importedPackages,
+      target: projectTarget(definition),
+    }),
+  });
+
+  interface PlannableRecipe {
+    readonly assessmentFor: (
+      inventory: PublicInventoryState,
+      definition: TargetDefinition,
+      scope: "global" | "project",
+    ) => {
+      readonly assessment: RecipeAssessment | undefined;
+      readonly executable: boolean;
+    };
+    readonly evidence: PublicCollectionPlan["releaseEvidence"];
+    readonly origin: PackageOrigin;
+    readonly source: {
+      readonly repository: string;
+      readonly revision: string | null;
+    };
+  }
+
+  const originOfPlan = (plan: PublicCollectionPlan): PackageOrigin =>
+    "origin" in plan.releaseEvidence ? "imported" : "official";
+
+  /**
+   * ADR 0017: Official releases and Imported Packages are distinct authorities
+   * that share one guarded Collection Plan path. The resolver is the only
+   * place either origin is looked up, so a package can never be mistaken for
+   * an Official release: its evidence carries no receipt and its origin is
+   * fixed by the store record, never by matching IDs or digests.
+   */
+  const resolveRecipe = (reference: {
+    readonly collectionId: string;
+    readonly manifestDigest: string;
+    readonly origin?: PackageOrigin | undefined;
+    readonly releaseNumber: number;
+  }): PlannableRecipe | undefined => {
+    if (reference.origin === "imported") {
+      const record = importedPackages.find(
+        ({ document }) =>
+          document.package.id === reference.collectionId &&
+          document.package.release === reference.releaseNumber &&
+          document.documentDigest === reference.manifestDigest,
+      );
+      if (record === undefined) return undefined;
+      const source = importedPackageSource(record.document);
+      return {
+        assessmentFor: (inventory, definition, scope) => {
+          const projected = projectImportedPackages({
+            inventory,
+            records: [record],
+            target: projectTarget(definition),
+          })[0];
+          return {
+            assessment: projected?.assessments.find(
+              (assessment) => assessment.scope === scope,
+            ),
+            executable: projected?.executable === true,
+          };
+        },
+        evidence: {
+          compatibility: structuredClone(record.document.package.compatibility),
+          documentDigest: record.document.documentDigest,
+          importedAt: record.importedAt,
+          origin: "imported",
+        },
+        origin: "imported",
+        source: { repository: source.repository, revision: source.revision },
+      };
+    }
+    const release = officialCollectionCatalog.releases.find(
+      (candidate) =>
+        candidate.manifest.collectionId === reference.collectionId &&
+        candidate.manifest.releaseNumber === reference.releaseNumber &&
+        candidate.manifestDigest === reference.manifestDigest,
+    );
+    if (
+      release === undefined ||
+      release.manifest.status !== "active" ||
+      release.receipt.status !== "approved"
+    ) {
+      return undefined;
+    }
+    return {
+      assessmentFor: (inventory, definition, scope) => {
+        const projected = projectOfficialCollections({
+          catalog: officialCollectionCatalog,
+          inventory,
+          platform,
+          target: projectTarget(definition),
+        }).releases.find(
+          (candidate) =>
+            candidate.collectionId === reference.collectionId &&
+            candidate.releaseNumber === reference.releaseNumber &&
+            candidate.manifestDigest === reference.manifestDigest,
+        );
+        return {
+          assessment: projected?.assessments.find(
+            (assessment) => assessment.scope === scope,
+          ),
+          executable: projected?.executable === true,
+        };
+      },
+      evidence: {
+        compatibility: structuredClone(release.manifest.compatibility),
+        receipt: structuredClone(release.receipt),
+        status: release.manifest.status,
+      },
+      origin: "official",
+      source: {
+        repository: release.manifest.source.repository,
+        revision: release.manifest.source.reviewedRevision,
+      },
+    };
+  };
+
+  const recipeUnavailable = (origin: PackageOrigin | undefined) =>
+    requestFailure(
+      publicError(
+        "mutation_ineligible",
+        origin === "imported"
+          ? "The selected Imported Package is unavailable."
+          : "The selected Official Collection release is unavailable.",
+        "collection",
+        false,
+      ),
+    );
+
+  /** Display-only file name: base name, no control characters, bounded. */
+  const displayFileName = (fileName: string): string | null => {
+    const base = fileName.split(/[\\/]/).pop() ?? "";
+    const cleaned = [...base]
+      .filter((character) => {
+        const code = character.codePointAt(0) ?? 0;
+        return code >= 0x20 && code !== 0x7f;
+      })
+      .join("")
+      .slice(0, 256);
+    return cleaned.length === 0 ? null : cleaned;
+  };
+
+  const recipeAddSource = (recipe: PlannableRecipe) =>
+    ({
+      ...(recipe.source.revision === null
+        ? {}
+        : { revision: recipe.source.revision }),
+      source: recipe.source.repository,
+      sourceType: "github",
+    }) as const;
 
   const skillsShHandoffsFor = (endpoint: EndpointState) =>
     inventoryState.freshness === "fresh"
@@ -1421,14 +1591,10 @@ export function createDesktopCapabilities(
       );
     }
     const projection = plan.projection;
-    const release = officialCollectionCatalog.releases.find(
-      (candidate) =>
-        candidate.manifest.collectionId === projection.collectionId &&
-        candidate.manifest.releaseNumber === projection.releaseNumber &&
-        candidate.manifestDigest === projection.manifestDigest &&
-        candidate.manifest.status === "active" &&
-        candidate.receipt.status === "approved",
-    );
+    const recipe = resolveRecipe({
+      ...projection,
+      origin: originOfPlan(projection),
+    });
     const {
       id: _planId,
       reviewDigest: _reviewDigest,
@@ -1455,19 +1621,8 @@ export function createDesktopCapabilities(
       const assessment =
         definition === undefined
           ? undefined
-          : projectOfficialCollections({
-              catalog: officialCollectionCatalog,
-              inventory,
-              platform,
-              target: projectTarget(definition),
-            })
-              .releases.find(
-                (candidate) =>
-                  candidate.collectionId === projection.collectionId &&
-                  candidate.releaseNumber === projection.releaseNumber &&
-                  candidate.manifestDigest === projection.manifestDigest,
-              )
-              ?.assessments.find(({ scope }) => scope === child.scope);
+          : recipe?.assessmentFor(inventory, definition, child.scope)
+              .assessment;
       return {
         assessment,
         child,
@@ -1479,16 +1634,12 @@ export function createDesktopCapabilities(
       };
     });
     const invalid =
-      release === undefined ||
+      recipe === undefined ||
       clock().getTime() >= Date.parse(projection.expiresAt) ||
       plan.preparedIds.length !== projection.children.length ||
       digestCanonicalJson(reviewEvidence) !== projection.reviewDigest ||
       digestCanonicalJson(projection.releaseEvidence) !==
-        digestCanonicalJson({
-          compatibility: release?.manifest.compatibility,
-          receipt: release?.receipt,
-          status: release?.manifest.status,
-        }) ||
+        digestCanonicalJson(recipe.evidence) ||
       children.some(
         ({
           assessment,
@@ -1535,30 +1686,32 @@ export function createDesktopCapabilities(
 
     for (const { child } of children) reservedTargetIds.add(child.target.id);
     try {
-      const acknowledgement: CollectionAcknowledgement = {
-        acknowledgedAt: clock().toISOString(),
-        collectionId: projection.collectionId,
-        kind: "release",
-        manifestDigest: projection.manifestDigest,
-        releaseNumber: projection.releaseNumber,
-      };
-      const nextAcknowledgements = [
-        ...collectionAcknowledgements.filter(
-          ({ collectionId }) => collectionId !== acknowledgement.collectionId,
-        ),
-        acknowledgement,
-      ].sort((left, right) =>
-        left.collectionId.localeCompare(right.collectionId),
-      );
-      const acknowledged = await options.recoveryRecords.commit({
-        acknowledgements: nextAcknowledgements,
-        type: "collections.acknowledgements.replace",
-      });
-      if (!acknowledged.ok) {
-        discardCollectionPlan(plan);
-        return requestFailure(acknowledged.error);
+      if (recipe.origin === "official") {
+        const acknowledgement: CollectionAcknowledgement = {
+          acknowledgedAt: clock().toISOString(),
+          collectionId: projection.collectionId,
+          kind: "release",
+          manifestDigest: projection.manifestDigest,
+          releaseNumber: projection.releaseNumber,
+        };
+        const nextAcknowledgements = [
+          ...collectionAcknowledgements.filter(
+            ({ collectionId }) => collectionId !== acknowledgement.collectionId,
+          ),
+          acknowledgement,
+        ].sort((left, right) =>
+          left.collectionId.localeCompare(right.collectionId),
+        );
+        const acknowledged = await options.recoveryRecords.commit({
+          acknowledgements: nextAcknowledgements,
+          type: "collections.acknowledgements.replace",
+        });
+        if (!acknowledged.ok) {
+          discardCollectionPlan(plan);
+          return requestFailure(acknowledged.error);
+        }
+        collectionAcknowledgements = nextAcknowledgements;
       }
-      collectionAcknowledgements = nextAcknowledgements;
 
       const confirmedChildren = children.map(
         ({ child, prepared, session }) => ({
@@ -1657,22 +1810,11 @@ export function createDesktopCapabilities(
             : null);
         const postflightAssessment =
           childOutcome !== null && inventoryState.freshness === "fresh"
-            ? projectOfficialCollections({
-                catalog: officialCollectionCatalog,
-                inventory: inventoryState,
-                platform,
-                target: projectTarget(definition),
-              })
-                .releases.find(
-                  (candidate) =>
-                    candidate.collectionId === projection.collectionId &&
-                    candidate.releaseNumber === projection.releaseNumber &&
-                    candidate.manifestDigest === projection.manifestDigest,
-                )
-                ?.assessments.find(
-                  (assessment) =>
-                    assessment.scope === confirmedChild.child.scope,
-                )
+            ? recipe.assessmentFor(
+                inventoryState,
+                definition,
+                confirmedChild.child.scope,
+              ).assessment
             : undefined;
         execution = {
           ...execution,
@@ -1849,8 +1991,7 @@ export function createDesktopCapabilities(
           return [
             {
               deadline:
-                remainingState.reconciliationDeadline ??
-                clock().toISOString(),
+                remainingState.reconciliationDeadline ?? clock().toISOString(),
               effects: "possible" as const,
               generation: definition.generation,
               operationId: options.id(),
@@ -2261,27 +2402,18 @@ export function createDesktopCapabilities(
               const collectionPlan = reviewedCollectionPlan;
               const projection =
                 collectionPlan.projection as PublicSingleTargetCollectionPlan;
-              const release = officialCollectionCatalog.releases.find(
-                (candidate) =>
-                  candidate.manifest.collectionId === projection.collectionId &&
-                  candidate.manifest.releaseNumber ===
-                    projection.releaseNumber &&
-                  candidate.manifestDigest === projection.manifestDigest &&
-                  candidate.manifest.status === "active" &&
-                  candidate.receipt.status === "approved",
-              );
+              const recipe = resolveRecipe({
+                ...projection,
+                origin: originOfPlan(projection),
+              });
               if (
-                release === undefined ||
+                recipe === undefined ||
                 currentCollectionPlan !== collectionPlan ||
                 collectionPlans.get(projection.id) !== collectionPlan ||
                 collectionPlan.preparedIds[0] !== prepared.id ||
                 projection.childPreparedDigest !== prepared.digest ||
                 digestCanonicalJson(projection.releaseEvidence) !==
-                  digestCanonicalJson({
-                    compatibility: release?.manifest.compatibility,
-                    receipt: release?.receipt,
-                    status: release?.manifest.status,
-                  }) ||
+                  digestCanonicalJson(recipe.evidence) ||
                 projection.targetGeneration !== session.binding.generation ||
                 projection.inventoryDigest !==
                   digestCanonicalJson({
@@ -2305,36 +2437,38 @@ export function createDesktopCapabilities(
                 });
                 return requestFailure(error);
               }
-              const acknowledgement: CollectionAcknowledgement = {
-                acknowledgedAt: clock().toISOString(),
-                collectionId: projection.collectionId,
-                kind: "release",
-                manifestDigest: projection.manifestDigest,
-                releaseNumber: projection.releaseNumber,
-              };
-              const nextAcknowledgements = [
-                ...collectionAcknowledgements.filter(
-                  ({ collectionId }) =>
-                    collectionId !== acknowledgement.collectionId,
-                ),
-                acknowledgement,
-              ].sort((left, right) =>
-                left.collectionId.localeCompare(right.collectionId),
-              );
-              const acknowledged = await options.recoveryRecords.commit({
-                acknowledgements: nextAcknowledgements,
-                type: "collections.acknowledgements.replace",
-              });
-              if (!acknowledged.ok) {
-                publishMutation({
-                  ...mutationState,
-                  activeOperationId: null,
-                  lastError: acknowledged.error,
-                  phase: "failed",
+              if (recipe.origin === "official") {
+                const acknowledgement: CollectionAcknowledgement = {
+                  acknowledgedAt: clock().toISOString(),
+                  collectionId: projection.collectionId,
+                  kind: "release",
+                  manifestDigest: projection.manifestDigest,
+                  releaseNumber: projection.releaseNumber,
+                };
+                const nextAcknowledgements = [
+                  ...collectionAcknowledgements.filter(
+                    ({ collectionId }) =>
+                      collectionId !== acknowledgement.collectionId,
+                  ),
+                  acknowledgement,
+                ].sort((left, right) =>
+                  left.collectionId.localeCompare(right.collectionId),
+                );
+                const acknowledged = await options.recoveryRecords.commit({
+                  acknowledgements: nextAcknowledgements,
+                  type: "collections.acknowledgements.replace",
                 });
-                return requestFailure(acknowledged.error);
+                if (!acknowledged.ok) {
+                  publishMutation({
+                    ...mutationState,
+                    activeOperationId: null,
+                    lastError: acknowledged.error,
+                    phase: "failed",
+                  });
+                  return requestFailure(acknowledged.error);
+                }
+                collectionAcknowledgements = nextAcknowledgements;
               }
-              collectionAcknowledgements = nextAcknowledgements;
               discardCollectionPlan(collectionPlan);
             }
 
@@ -2383,9 +2517,7 @@ export function createDesktopCapabilities(
                 ),
               );
             }
-            const updated = await options.preferences.update(
-              parsed.data.patch,
-            );
+            const updated = await options.preferences.update(parsed.data.patch);
             if (!updated.ok) return requestFailure(updated.error);
             // Locale and appearance apply to every workspace window at once.
             publish({ ...inventoryState });
@@ -2520,7 +2652,7 @@ export function createDesktopCapabilities(
               return requestFailure(
                 publicError(
                   "invalid_request",
-                  'SSH Targets are next-scope and outside the V1 Local commitment.',
+                  "SSH Targets are next-scope and outside the V1 Local commitment.",
                   "target",
                   false,
                 ),
@@ -2873,26 +3005,9 @@ export function createDesktopCapabilities(
                 ),
               );
             }
-            const release = officialCollectionCatalog.releases.find(
-              (candidate) =>
-                candidate.manifest.collectionId === request.collectionId &&
-                candidate.manifest.releaseNumber === request.releaseNumber &&
-                candidate.manifestDigest === request.manifestDigest,
-            );
-            if (
-              requestedTarget === undefined ||
-              release === undefined ||
-              release.manifest.status !== "active" ||
-              release.receipt.status !== "approved"
-            ) {
-              return requestFailure(
-                publicError(
-                  "mutation_ineligible",
-                  "The selected Official Collection release is unavailable.",
-                  "collection",
-                  false,
-                ),
-              );
+            const recipe = resolveRecipe(request);
+            if (requestedTarget === undefined || recipe === undefined) {
+              return recipeUnavailable(request.origin);
             }
             if (
               activeMutation !== undefined ||
@@ -2928,23 +3043,13 @@ export function createDesktopCapabilities(
                 ),
               );
             }
-            const projected = projectOfficialCollections({
-              catalog: officialCollectionCatalog,
-              inventory: inventoryState,
-              platform,
-              target: projectTarget(target),
-            });
-            const publicRelease = projected.releases.find(
-              (candidate) =>
-                candidate.collectionId === request.collectionId &&
-                candidate.releaseNumber === request.releaseNumber &&
-                candidate.manifestDigest === request.manifestDigest,
-            );
-            const assessment = publicRelease?.assessments.find(
-              ({ scope }) => scope === request.scope,
+            const { assessment, executable } = recipe.assessmentFor(
+              inventoryState,
+              target,
+              request.scope,
             );
             const eligible =
-              publicRelease?.executable === true &&
+              executable &&
               assessment?.compatibility === "compatible" &&
               assessment.inventoryFreshness === "fresh" &&
               request.selections.every((selection) => {
@@ -2973,11 +3078,7 @@ export function createDesktopCapabilities(
               {
                 names: request.selections.map(({ name }) => name),
                 scope: request.scope,
-                source: {
-                  revision: release.manifest.source.reviewedRevision,
-                  source: release.manifest.source.repository,
-                  sourceType: "github",
-                },
+                source: recipeAddSource(recipe),
                 type: "add",
               },
             );
@@ -3017,18 +3118,14 @@ export function createDesktopCapabilities(
                   targetId: request.targetId,
                 },
               ],
-              releaseEvidence: {
-                compatibility: structuredClone(release.manifest.compatibility),
-                receipt: structuredClone(release.receipt),
-                status: release.manifest.status,
-              },
+              releaseEvidence: recipe.evidence,
               releaseNumber: request.releaseNumber,
               schemaVersion: 1 as const,
               scope: request.scope,
               selections: request.selections,
               source: {
-                repository: release.manifest.source.repository,
-                reviewedRevision: release.manifest.source.reviewedRevision,
+                repository: recipe.source.repository,
+                reviewedRevision: recipe.source.revision,
               },
               targetGeneration: requestedTarget.generation,
               targetId: requestedTarget.id,
@@ -3077,25 +3174,9 @@ export function createDesktopCapabilities(
                 );
               }
             }
-            const release = officialCollectionCatalog.releases.find(
-              (candidate) =>
-                candidate.manifest.collectionId === request.collectionId &&
-                candidate.manifest.releaseNumber === request.releaseNumber &&
-                candidate.manifestDigest === request.manifestDigest,
-            );
-            if (
-              release === undefined ||
-              release.manifest.status !== "active" ||
-              release.receipt.status !== "approved"
-            ) {
-              return requestFailure(
-                publicError(
-                  "mutation_ineligible",
-                  "The selected Official Collection release is unavailable.",
-                  "collection",
-                  false,
-                ),
-              );
+            const recipe = resolveRecipe(request);
+            if (recipe === undefined) {
+              return recipeUnavailable(request.origin);
             }
             if (
               activeMutation !== undefined ||
@@ -3114,9 +3195,7 @@ export function createDesktopCapabilities(
             }
 
             const plannedChildren: Array<{
-              readonly assessment: ReturnType<
-                typeof projectOfficialCollections
-              >["releases"][number]["assessments"][number];
+              readonly assessment: RecipeAssessment;
               readonly request: (typeof request.targets)[number];
               readonly session: FreshTargetSession;
               readonly target: TargetDefinition;
@@ -3156,23 +3235,13 @@ export function createDesktopCapabilities(
                   ),
                 );
               }
-              const projected = projectOfficialCollections({
-                catalog: officialCollectionCatalog,
-                inventory: selectedInventory,
-                platform,
-                target: projectTarget(selectedTarget),
-              });
-              const publicRelease = projected.releases.find(
-                (candidate) =>
-                  candidate.collectionId === request.collectionId &&
-                  candidate.releaseNumber === request.releaseNumber &&
-                  candidate.manifestDigest === request.manifestDigest,
-              );
-              const assessment = publicRelease?.assessments.find(
-                ({ scope }) => scope === requestedChild.scope,
+              const { assessment, executable } = recipe.assessmentFor(
+                selectedInventory,
+                selectedTarget,
+                requestedChild.scope,
               );
               const eligible =
-                publicRelease?.executable === true &&
+                executable &&
                 assessment?.compatibility === "compatible" &&
                 assessment.inventoryFreshness === "fresh" &&
                 requestedChild.selections.every((selection) => {
@@ -3235,11 +3304,7 @@ export function createDesktopCapabilities(
                     intent: {
                       names: child.request.selections.map(({ name }) => name),
                       scope: child.request.scope,
-                      source: {
-                        revision: release.manifest.source.reviewedRevision,
-                        source: release.manifest.source.repository,
-                        sourceType: "github",
-                      },
+                      source: recipeAddSource(recipe),
                       type: "add",
                     },
                     inventory: child.session.inventory,
@@ -3313,18 +3378,12 @@ export function createDesktopCapabilities(
                       targetId: childTarget.id,
                     }),
                   ),
-                  releaseEvidence: {
-                    compatibility: structuredClone(
-                      release.manifest.compatibility,
-                    ),
-                    receipt: structuredClone(release.receipt),
-                    status: release.manifest.status,
-                  },
+                  releaseEvidence: recipe.evidence,
                   releaseNumber: request.releaseNumber,
                   schemaVersion: 2,
                   source: {
-                    repository: release.manifest.source.repository,
-                    reviewedRevision: release.manifest.source.reviewedRevision,
+                    repository: recipe.source.repository,
+                    reviewedRevision: recipe.source.revision,
                   },
                 };
                 const plan: CollectionPlan = {
@@ -3454,6 +3513,82 @@ export function createDesktopCapabilities(
             }
             options.onReviewRequested?.(reviewId);
             return { ok: true, value: { operationId: reviewId } };
+          }
+
+          if (parsed.data.type === "package.import") {
+            const picker = options.skillpackPicker;
+            if (picker === undefined) {
+              return requestFailure(
+                publicError(
+                  "package_import_unavailable",
+                  "Importing a .skillpack is unavailable in this session.",
+                  "import",
+                  false,
+                ),
+              );
+            }
+            if (packageImportInFlight) {
+              return requestFailure(
+                publicError(
+                  "mutation_conflict",
+                  "Another import is already in progress.",
+                  "import",
+                  true,
+                ),
+              );
+            }
+            packageImportInFlight = true;
+            try {
+              const pick = await picker.pick();
+              const recordedAt = clock().toISOString();
+              const operationId = options.id();
+              if (pick.status === "cancelled") {
+                lastPackageImport = {
+                  documentDigest: null,
+                  fileName: null,
+                  packageId: null,
+                  recordedAt,
+                  release: null,
+                  relatedRelease: null,
+                  status: "cancelled",
+                };
+                publish({ ...inventoryState });
+                return { ok: true, value: { operationId } };
+              }
+              const document = parseSkillpack(pick.bytes, skillpackCodec);
+              if (!document.ok) {
+                return requestFailure(
+                  publicError(
+                    "skillpack_invalid",
+                    document.error.message,
+                    "import",
+                    false,
+                  ),
+                );
+              }
+              const result = importSkillpack({
+                document: document.value,
+                now: recordedAt,
+                records: importedPackages,
+              });
+              if (result.records !== importedPackages) {
+                const committed = await options.recoveryRecords.commit({
+                  packages: result.records,
+                  type: "packages.replace",
+                });
+                if (!committed.ok) return requestFailure(committed.error);
+                importedPackages = result.records;
+              }
+              lastPackageImport = {
+                ...result.outcome,
+                fileName: displayFileName(pick.fileName),
+                recordedAt,
+              };
+              publish({ ...inventoryState });
+              return { ok: true, value: { operationId } };
+            } finally {
+              packageImportInFlight = false;
+            }
           }
 
           if (parsed.data.type === "comparison.open") {
@@ -3870,7 +4005,10 @@ export function createDesktopCapabilities(
               );
             }
             const { intent } = parsed.data;
-            if (intent.type === "add" && intent.source.sourceType === "inspected") {
+            if (
+              intent.type === "add" &&
+              intent.source.sourceType === "inspected"
+            ) {
               const inspection = boundSourceInspection(
                 target.id,
                 freshTargetSession.binding.generation,
@@ -3878,7 +4016,10 @@ export function createDesktopCapabilities(
               );
               if (
                 inspection === undefined ||
-                !sameDescriptor(inspection.descriptor, intent.source.descriptor) ||
+                !sameDescriptor(
+                  inspection.descriptor,
+                  intent.source.descriptor,
+                ) ||
                 intent.names.some(
                   (name) =>
                     !inspection.candidates.some(
@@ -4174,6 +4315,7 @@ export function createDesktopCapabilities(
       await options.preferences?.initialize();
       const restored = await options.recoveryRecords.restore();
       blockedTargetDefinitions = restored.blockedTargetDefinitions ?? [];
+      importedPackages = restored.importedPackages ?? [];
       const restoredAcknowledgements = [
         ...(restored.collectionAcknowledgements ?? []),
       ];
@@ -4240,9 +4382,7 @@ export function createDesktopCapabilities(
           }
         }
         if (!targetAuthorityUnavailable) {
-          options.skillsTargets.replaceDefinitions(
-            repairedTargets.definitions,
-          );
+          options.skillsTargets.replaceDefinitions(repairedTargets.definitions);
           target =
             targetDefinitions().find(({ id }) => id === target.id) ??
             targetDefinitions()[0]!;

@@ -229,7 +229,8 @@ function clientFor(
       subscribeMenuCommand(listener) {
         if (menuHarness !== undefined) menuHarness.listener = listener;
         return () => {
-          if (menuHarness?.listener === listener) menuHarness.listener = undefined;
+          if (menuHarness?.listener === listener)
+            menuHarness.listener = undefined;
         };
       },
     },
@@ -247,6 +248,9 @@ function clientFor(
     },
     async handoffSkillsSh(recordId) {
       return { ok: true, value: { operationId: recordId } };
+    },
+    async importPackage() {
+      return { ok: true, value: { operationId: "import-1" } };
     },
     async inspectSource() {
       return { ok: true, value: { operationId: "inspection-1" } };
@@ -535,22 +539,28 @@ describe("Local Target Inventory shell", () => {
     expect(
       screen.getByText("Change the current search or scope filter."),
     ).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "No skill selected" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "No skill selected" }),
+    ).toBeInTheDocument();
     expect(
       screen.getAllByRole("button", { name: "Clear inventory search" }),
     ).toHaveLength(1);
-    expect(search.closest(".search-control")?.querySelectorAll("button")).toHaveLength(
-      1,
-    );
+    expect(
+      search.closest(".search-control")?.querySelectorAll("button"),
+    ).toHaveLength(1);
 
-    fireEvent.click(screen.getByRole("button", { name: "Clear inventory search" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Clear inventory search" }),
+    );
 
     expect(await screen.findByText("2 shown")).toBeInTheDocument();
     expect(search).toHaveValue("");
     expect(
       screen.queryByRole("button", { name: "Clear inventory search" }),
     ).not.toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Case-Sensitive-Skill" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Case-Sensitive-Skill" }),
+    ).toBeInTheDocument();
   });
 
   it("shows a bounded opening error returned by the IPC boundary", async () => {
@@ -573,7 +583,9 @@ describe("Local Target Inventory shell", () => {
     render(<InventoryApp client={client} />);
 
     const openingAlert = await screen.findByRole("alert");
-    expect(openingAlert).toHaveTextContent("You are not allowed to perform this operation.");
+    expect(openingAlert).toHaveTextContent(
+      "You are not allowed to perform this operation.",
+    );
     expect(
       openingAlert.querySelector(".user-facing-error-details code"),
     ).toHaveTextContent("This window cannot make that request.");
@@ -658,7 +670,9 @@ describe("Local Target Inventory shell", () => {
 
     const alert = await screen.findByRole("alert");
     const primary = alert.querySelector(".user-facing-error > span");
-    expect(primary).toHaveTextContent("The local process failed. Refresh, then try again.");
+    expect(primary).toHaveTextContent(
+      "The local process failed. Refresh, then try again.",
+    );
     expect(primary).not.toHaveTextContent("ENOENT");
     expect(
       alert.querySelector(".user-facing-error-details code"),
@@ -981,20 +995,22 @@ describe("Local Target Inventory shell", () => {
       ...snapshot,
       inventory: {
         ...snapshot.inventory,
-        entries: [{ ...snapshot.inventory.entries[0]!, agents: ["amp", "codex"] }],
+        entries: [
+          { ...snapshot.inventory.entries[0]!, agents: ["amp", "codex"] },
+        ],
       },
       target: { ...snapshot.target, harnessIds: ["amp", "codex"] },
     };
     render(
-      <InventoryApp
-        client={{ ...clientFor(multiHarness), prepareMutation }}
-      />,
+      <InventoryApp client={{ ...clientFor(multiHarness), prepareMutation }} />,
     );
 
     const subset = await screen.findByRole("group", {
       name: "Bind add and removal to",
     });
-    fireEvent.click(within(subset).getByRole("checkbox", { name: "Amp (amp)" }));
+    fireEvent.click(
+      within(subset).getByRole("checkbox", { name: "Amp (amp)" }),
+    );
 
     fireEvent.click(screen.getByRole("button", { name: "Prepare removal" }));
     await waitFor(() =>
@@ -1018,9 +1034,12 @@ describe("Local Target Inventory shell", () => {
     fireEvent.change(screen.getByRole("textbox", { name: "Source" }), {
       target: { value: "example/skills" },
     });
-    fireEvent.change(screen.getByRole("textbox", { name: "Exact skill name" }), {
-      target: { value: "find-skills" },
-    });
+    fireEvent.change(
+      screen.getByRole("textbox", { name: "Exact skill name" }),
+      {
+        target: { value: "find-skills" },
+      },
+    );
     fireEvent.click(screen.getByRole("button", { name: "Prepare add" }));
     await waitFor(() =>
       expect(prepareMutation).toHaveBeenLastCalledWith(multiHarness.target.id, {
@@ -1033,7 +1052,9 @@ describe("Local Target Inventory shell", () => {
     );
 
     // Re-checking restores the whole set, which is sent as the legacy shape.
-    fireEvent.click(within(subset).getByRole("checkbox", { name: "Amp (amp)" }));
+    fireEvent.click(
+      within(subset).getByRole("checkbox", { name: "Amp (amp)" }),
+    );
     fireEvent.click(screen.getByRole("button", { name: "Prepare removal" }));
     await waitFor(() =>
       expect(prepareMutation).toHaveBeenLastCalledWith(multiHarness.target.id, {
@@ -1067,9 +1088,13 @@ describe("Local Target Inventory shell", () => {
       <InventoryApp client={{ ...clientFor(withHandoff), handoffSkillsSh }} />,
     );
 
-    const open = await screen.findByRole("button", { name: "Open on skills.sh" });
+    const open = await screen.findByRole("button", {
+      name: "Open on skills.sh",
+    });
     expect(
-      screen.getByText(/Opens skills\.sh\/example\/skills\/Case-Sensitive-Skill/),
+      screen.getByText(
+        /Opens skills\.sh\/example\/skills\/Case-Sensitive-Skill/,
+      ),
     ).toBeInTheDocument();
     fireEvent.click(open);
     await waitFor(() => expect(handoffSkillsSh).toHaveBeenCalledWith(recordId));
@@ -1077,7 +1102,9 @@ describe("Local Target Inventory shell", () => {
     expect(status).toHaveTextContent("Opened in your browser");
     expect(status).not.toHaveTextContent(/published/i);
     // The bridge received a record id, not a URL.
-    expect(JSON.stringify(handoffSkillsSh.mock.calls)).not.toContain("https://");
+    expect(JSON.stringify(handoffSkillsSh.mock.calls)).not.toContain(
+      "https://",
+    );
   });
 
   it("hides Open on skills.sh when the Snapshot carries no handoff record for the skill", async () => {
@@ -1125,12 +1152,9 @@ describe("Local Target Inventory shell", () => {
       />,
     );
 
-    fireEvent.change(
-      await screen.findByRole("textbox", { name: "Source" }),
-      {
-        target: { value: "not-a-repo" },
-      },
-    );
+    fireEvent.change(await screen.findByRole("textbox", { name: "Source" }), {
+      target: { value: "not-a-repo" },
+    });
     fireEvent.change(
       screen.getByRole("textbox", { name: "Exact skill name" }),
       {
@@ -1151,9 +1175,10 @@ describe("Local Target Inventory shell", () => {
     expect(
       screen.queryByText("The request is not supported."),
     ).not.toBeInTheDocument();
-    expect(
-      screen.getByRole("textbox", { name: "Source" }),
-    ).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByRole("textbox", { name: "Source" })).toHaveAttribute(
+      "aria-invalid",
+      "true",
+    );
     expect(prepareMutation).not.toHaveBeenCalled();
   });
 
@@ -1289,8 +1314,12 @@ describe("Local Target Inventory shell", () => {
     );
     expect(prepareMutation).not.toHaveBeenCalled();
 
-    fireEvent.click(within(listing).getByRole("checkbox", { name: /code-review/ }));
-    fireEvent.click(within(listing).getByRole("checkbox", { name: /find-skills/ }));
+    fireEvent.click(
+      within(listing).getByRole("checkbox", { name: /code-review/ }),
+    );
+    fireEvent.click(
+      within(listing).getByRole("checkbox", { name: /find-skills/ }),
+    );
     fireEvent.click(prepare);
     await waitFor(() =>
       expect(prepareMutation).toHaveBeenCalledWith(snapshot.target.id, {
@@ -1319,7 +1348,8 @@ describe("Local Target Inventory shell", () => {
       error: {
         code: "source_unavailable" as const,
         effects: "none" as const,
-        message: "The pinned Skills CLI could not list Skills from this source.",
+        message:
+          "The pinned Skills CLI could not list Skills from this source.",
         phase: "inspect",
         retryable: true,
       },
@@ -1619,7 +1649,9 @@ describe("Local Target Inventory shell", () => {
 
     const chooser = await screen.findByRole("combobox", { name: "Target" });
     expect(
-      within(chooser).getByRole("option", { name: "Build host · Not available" }),
+      within(chooser).getByRole("option", {
+        name: "Build host · Not available",
+      }),
     ).toBeInTheDocument();
 
     fireEvent.change(chooser, { target: { value: sshTarget.id } });
@@ -1718,6 +1750,7 @@ describe("Local Target Inventory shell", () => {
       expect(prepareCollectionAcrossTargets).toHaveBeenCalledWith({
         collectionId: "skills-desktop-starter",
         manifestDigest: `sha256:${"a".repeat(64)}`,
+        origin: "official",
         releaseNumber: 1,
         targets: [
           {
@@ -1809,6 +1842,7 @@ describe("Local Target Inventory shell", () => {
       expect(prepareCollectionAcrossTargets).toHaveBeenCalledWith({
         collectionId: "skills-desktop-starter",
         manifestDigest: `sha256:${"a".repeat(64)}`,
+        origin: "official",
         releaseNumber: 1,
         targets: [
           {
@@ -3269,9 +3303,9 @@ describe("Local Target Inventory shell", () => {
     expect(
       screen.getByRole("heading", { name: "No differences found" }),
     ).toBeInTheDocument();
-    expect(screen.getAllByText("All 1 aligned skill key matches.")).toHaveLength(
-      2,
-    );
+    expect(
+      screen.getAllByText("All 1 aligned skill key matches."),
+    ).toHaveLength(2);
   });
 
   it("shows next-step copy on Inspector and Comparison empty states (#78)", async () => {
@@ -3508,8 +3542,12 @@ describe("Local Target Inventory shell", () => {
     expect(
       await screen.findByText(/Host identity review · Not available in V1/),
     ).toBeInTheDocument();
-    expect(screen.queryByText(/open host identity review/i)).not.toBeInTheDocument();
-    expect(screen.getByText(/host identity review is not available in V1/)).toBeInTheDocument();
+    expect(
+      screen.queryByText(/open host identity review/i),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByText(/host identity review is not available in V1/),
+    ).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Review host identity" }),
     ).not.toBeInTheDocument();
@@ -3729,10 +3767,18 @@ describe("Local Target Inventory shell", () => {
   it("places the skip link before the shell and targets the workspace main", async () => {
     render(<InventoryApp client={clientFor(snapshot)} />);
 
-    const skipLink = await screen.findByRole("link", { name: "Skip to workspace" });
+    const skipLink = await screen.findByRole("link", {
+      name: "Skip to workspace",
+    });
     expect(skipLink).toHaveAttribute("href", "#workspace-main");
-    expect(skipLink.compareDocumentPosition(document.querySelector(".app-header")!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(document.getElementById("workspace-main")).toHaveAttribute("tabindex", "-1");
+    expect(
+      skipLink.compareDocumentPosition(document.querySelector(".app-header")!) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(document.getElementById("workspace-main")).toHaveAttribute(
+      "tabindex",
+      "-1",
+    );
   });
 
   it("presents SSH transport loss as an accessible offline state", async () => {
@@ -3789,11 +3835,15 @@ describe("Local Target Inventory shell", () => {
     ).toBeInTheDocument();
     expect(document.documentElement.lang).toBe("zh-CN");
     expect(document.documentElement.dataset["appearance"]).toBe("dark");
-    expect(screen.getByRole("link", { name: "跳到工作区" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: "跳到工作区" }),
+    ).toBeInTheDocument();
     // Identifiers and evidence stay untranslated.
     expect(screen.getAllByText("Case-Sensitive-Skill")).not.toHaveLength(0);
     expect(screen.getAllByText("example/skills")).not.toHaveLength(0);
-    expect(screen.getByRole("button", { name: "刷新库存" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "刷新库存" }),
+    ).toBeInTheDocument();
   });
 
   it("falls back to English and the system appearance when the Snapshot carries no preferences", async () => {
@@ -3837,7 +3887,9 @@ describe("Local Target Inventory shell", () => {
     );
     expect(await screen.findByText("Preferences saved")).toBeInTheDocument();
     // The renderer waits for the main-owned Snapshot; the heading stays English.
-    expect(screen.getByRole("heading", { level: 1, name: "About" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { level: 1, name: "About" }),
+    ).toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText("Appearance"), {
       target: { value: "high-contrast" },
@@ -3890,7 +3942,10 @@ describe("Local Target Inventory shell", () => {
     expect(menuHarness.listener).toBeDefined();
 
     act(() => {
-      menuHarness.listener?.({ command: "inventory.refresh", schemaVersion: 1 });
+      menuHarness.listener?.({
+        command: "inventory.refresh",
+        schemaVersion: 1,
+      });
     });
     expect(refreshInventory).toHaveBeenCalledWith(snapshot.target.id);
 
@@ -3937,7 +3992,10 @@ describe("Local Target Inventory shell", () => {
     await screen.findByRole("heading", { level: 1, name: "Inventory" });
     await waitFor(() => expect(menuHarness.listener).toBeDefined());
     act(() => {
-      menuHarness.listener?.({ command: "inventory.refresh", schemaVersion: 1 });
+      menuHarness.listener?.({
+        command: "inventory.refresh",
+        schemaVersion: 1,
+      });
     });
     expect(refreshInventory).not.toHaveBeenCalled();
     // Without a menu projection no control claims a shortcut it cannot prove.
