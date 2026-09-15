@@ -137,6 +137,11 @@ const bridge: DesktopBridge = Object.freeze({
       await invoke("workspace:handoff:skills-sh", recordId),
     );
   },
+  async inspectSource(targetId: string, source: string) {
+    return workspaceRequestResultSchema.parse(
+      await invoke("workspace:source:inspect", targetId, source),
+    );
+  },
   menu,
   async updatePreferences(patch: PreferencesPatch) {
     return workspaceRequestResultSchema.parse(

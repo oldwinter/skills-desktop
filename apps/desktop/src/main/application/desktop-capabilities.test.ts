@@ -69,10 +69,26 @@ const freshInventory: Inventory = {
   schemaVersion: 1,
 };
 
+const inspectionNotExercised: Pick<SkillsProcess, "inspectSource"> = {
+  async inspectSource() {
+    return {
+      error: {
+        code: "source_unsupported",
+        effects: "none",
+        message: "Source inspection is not exercised by this contract.",
+        phase: "inspect",
+        retryable: false,
+      },
+      ok: false,
+    };
+  },
+};
+
 const mutationNotExercised: Pick<
   SkillsProcess,
-  "executeConfirmed" | "prepareMutation"
+  "executeConfirmed" | "inspectSource" | "prepareMutation"
 > = {
+  ...inspectionNotExercised,
   async executeConfirmed() {
     return {
       error: {
@@ -3737,6 +3753,7 @@ describe("DesktopCapabilities mutation role-session contract", () => {
       markStarted = resolve;
     });
     const process: SkillsProcess = {
+      ...inspectionNotExercised,
       async executeConfirmed({ signal }) {
         mutationSignal = signal;
         markStarted();
@@ -3895,6 +3912,7 @@ describe("DesktopCapabilities mutation role-session contract", () => {
       id: () => "00000000-0000-4000-8000-000000000025",
       initialTarget: target,
       processFor: () => ({
+        ...inspectionNotExercised,
         async executeConfirmed(input) {
           executions += 1;
           return mutationNotExercised.executeConfirmed(input);
@@ -4236,6 +4254,7 @@ describe("DesktopCapabilities mutation role-session contract", () => {
       observedAt: "2026-08-21T10:01:00.000Z",
     };
     const process: SkillsProcess = {
+      ...inspectionNotExercised,
       async executeConfirmed({ confirmation }) {
         lifecycle.push("executeConfirmed");
         expect((await records.restore()).mutationGuards).toMatchObject([
@@ -4428,6 +4447,7 @@ describe("DesktopCapabilities mutation role-session contract", () => {
     let preparations = 0;
     let executions = 0;
     const process: SkillsProcess = {
+      ...inspectionNotExercised,
       async executeConfirmed() {
         executions += 1;
         throw new Error("execution must remain unreachable");
@@ -4676,6 +4696,7 @@ describe("DesktopCapabilities mutation role-session contract", () => {
     const records = createMemoryRecoveryRecords();
     let executions = 0;
     const process: SkillsProcess = {
+      ...inspectionNotExercised,
       async executeConfirmed() {
         executions += 1;
         throw new Error("execution must remain unreachable");
@@ -4799,6 +4820,7 @@ describe("DesktopCapabilities mutation role-session contract", () => {
       [target, otherTarget],
     );
     const process: SkillsProcess = {
+      ...inspectionNotExercised,
       async executeConfirmed() {
         return {
           ok: true,
@@ -4978,6 +5000,7 @@ describe("DesktopCapabilities mutation role-session contract", () => {
     });
     let cancellationObserved = false;
     const process: SkillsProcess = {
+      ...inspectionNotExercised,
       async executeConfirmed({ signal }) {
         markStarted();
         await new Promise<void>((resolve) => {
@@ -5170,6 +5193,7 @@ describe("DesktopCapabilities mutation role-session contract", () => {
     });
     let mutationSignal: AbortSignal | undefined;
     const process: SkillsProcess = {
+      ...inspectionNotExercised,
       async executeConfirmed({ signal }) {
         mutationSignal = signal;
         markStarted();
@@ -5692,6 +5716,7 @@ describe("DesktopCapabilities Official Collection contract", () => {
       initialTarget: target,
       processFor(binding) {
         return {
+          ...inspectionNotExercised,
           async executeConfirmed() {
             return {
               error: {
@@ -5889,6 +5914,7 @@ describe("DesktopCapabilities Official Collection contract", () => {
     const lifecycle: string[] = [];
     const capturedIntents: unknown[] = [];
     const process: SkillsProcess = {
+      ...inspectionNotExercised,
       async executeConfirmed({ confirmation }) {
         lifecycle.push("executeConfirmed");
         expect(confirmation).toEqual({
@@ -6165,6 +6191,7 @@ describe("DesktopCapabilities Official Collection contract", () => {
       ],
     };
     const processFor = (definition: TargetDefinition): SkillsProcess => ({
+      ...inspectionNotExercised,
       async executeConfirmed({ confirmation }) {
         executedTargets.push(definition.id);
         expect(confirmation).toEqual({
@@ -6204,7 +6231,11 @@ describe("DesktopCapabilities Official Collection contract", () => {
               preview: `review-only ${definition.kind} plan`,
               schemaVersion: 1 as const,
               scope: input.intent.scope,
-              source: input.intent.type === "add" ? input.intent.source : null,
+              source:
+                input.intent.type === "add" &&
+                input.intent.source.sourceType === "github"
+                  ? input.intent.source
+                  : null,
               targetId: definition.id,
               timeoutMs: 600_000,
             },
@@ -6521,6 +6552,7 @@ describe("DesktopCapabilities Official Collection contract", () => {
       initialTarget: target,
       processFor(binding) {
         return {
+          ...inspectionNotExercised,
           async executeConfirmed({ signal }) {
             executedTargets.push(binding.targetId);
             if (binding.targetId === target.id) {
@@ -6592,7 +6624,10 @@ describe("DesktopCapabilities Official Collection contract", () => {
                   schemaVersion: 1 as const,
                   scope: input.intent.scope,
                   source:
-                    input.intent.type === "add" ? input.intent.source : null,
+                    input.intent.type === "add" &&
+                    input.intent.source.sourceType === "github"
+                      ? input.intent.source
+                      : null,
                   targetId: binding.targetId,
                   timeoutMs: 600_000,
                 },

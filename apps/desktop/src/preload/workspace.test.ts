@@ -108,6 +108,7 @@ async function loadBridge() {
       destinationTargetId: string,
     ): Promise<unknown>;
     handoffSkillsSh(recordId: string): Promise<unknown>;
+    inspectSource(targetId: string, source: string): Promise<unknown>;
     readonly menu: {
       getMenu(): Promise<unknown>;
       subscribeMenuCommand(listener: (event: unknown) => void): () => void;
@@ -216,6 +217,7 @@ describe("workspace preload authority", () => {
       secondTargetId,
     );
     await bridge.handoffSkillsSh("a".repeat(64));
+    await bridge.inspectSource(targetId, "vercel-labs/skills");
     await bridge.updatePreferences({ localePreference: "zh-CN" });
     await bridge.reconcileMutation(targetId);
     await bridge.repairTarget(targetId, "claude-code");
@@ -257,6 +259,12 @@ describe("workspace preload authority", () => {
         secondTargetId,
       ],
       ["workspace:handoff:skills-sh", "attachment-epoch", "a".repeat(64)],
+      [
+        "workspace:source:inspect",
+        "attachment-epoch",
+        targetId,
+        "vercel-labs/skills",
+      ],
       [
         "workspace:preferences:update",
         "attachment-epoch",

@@ -61,6 +61,7 @@ const CHANNELS = {
   refresh: "workspace:inventory:refresh",
   mutationPrepare: "workspace:mutation:prepare",
   mutationReconcile: "workspace:mutation:reconcile",
+  sourceInspect: "workspace:source:inspect",
   requestReview: "workspace:review:request",
   requestCancellationReview: "workspace:review:cancel-request",
   reviewApprove: "review:decision:approve",
@@ -636,6 +637,30 @@ export function registerDesktopIpc(input: {
     },
   );
   input.ipcMain.handle(
+    CHANNELS.sourceInspect,
+    async (
+      event,
+      attachmentEpoch: unknown,
+      targetId: unknown,
+      source: unknown,
+    ) => {
+      const endpoint = authorized(event, "workspace", attachmentEpoch);
+      if (endpoint === undefined) return authorizationFailure();
+      try {
+        return workspaceRequestResultSchema.parse(
+          await endpoint.session.request({
+            source,
+            targetId,
+            type: "source.inspect",
+            version: WORKSPACE_PROTOCOL_VERSION,
+          }),
+        );
+      } catch {
+        return internalFailure();
+      }
+    },
+  );
+  input.ipcMain.handle(
     CHANNELS.mutationReconcile,
     async (event, attachmentEpoch: unknown, targetId: unknown) => {
       const endpoint = authorized(event, "workspace", attachmentEpoch);
@@ -953,6 +978,7 @@ export function registerDesktopIpc(input: {
       input.ipcMain.removeHandler(CHANNELS.reviewSnapshot);
       input.ipcMain.removeHandler(CHANNELS.mutationPrepare);
       input.ipcMain.removeHandler(CHANNELS.mutationReconcile);
+      input.ipcMain.removeHandler(CHANNELS.sourceInspect);
       input.ipcMain.removeHandler(CHANNELS.requestReview);
       input.ipcMain.removeHandler(CHANNELS.requestCancellationReview);
       input.ipcMain.removeHandler(CHANNELS.reviewApprove);

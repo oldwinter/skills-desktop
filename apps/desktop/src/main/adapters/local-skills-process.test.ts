@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import {
   chmod,
   copyFile,
@@ -11,12 +12,14 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { describe, expect, it, vi } from "vitest";
 
 import {
   CLI_PACKAGE,
   CLI_VERSION,
+  describeSource,
   type Inventory,
   type MutationIntent,
 } from "@skills-desktop/skills-runtime";
@@ -1654,4 +1657,229 @@ describe("Local SkillsProcess mutation contract", () => {
       );
     },
   );
+});
+
+describe("Local SkillsProcess source inspection contract", () => {
+  const fixture = (name: string) =>
+    readFileSync(
+      fileURLToPath(
+        new URL(
+          `../../../../../packages/skills-runtime/fixtures/${name}`,
+          import.meta.url,
+        ),
+      ),
+      "utf8",
+    );
+  const binding = {
+    generation: 3,
+    harness: "Codex",
+    targetId: "00000000-0000-4000-8000-000000000001",
+  };
+
+  function inspectionRunner(
+    listing: (source: string) => { exitCode: number; stdout: string },
+  ): ProcessRunner & { invocations: ProcessInvocation[] } {
+    const invocations: ProcessInvocation[] = [];
+    return {
+      invocations,
+      async run(invocation) {
+        invocations.push(invocation);
+        const packageIndex = invocation.args.indexOf(CLI_PACKAGE);
+        const operation = invocation.args.slice(packageIndex + 1);
+        if (operation.join(" ") === "--version") {
+          return { exitCode: 0, stderr: "", stdout: "1.5.23\n" };
+        }
+        if (operation[0] === "add" && operation.at(-1) === "--list") {
+          return { stderr: "", ...listing(operation[1]!) };
+        }
+        throw new Error("Unexpected scripted invocation");
+      },
+    };
+  }
+
+  it("lists a source read-only through an exact argument array and binds a stable digest", async () => {
+    const runner = inspectionRunner(() => ({
+      exitCode: 0,
+      stdout: fixture("skills-1.5.23-add-list-single.v1.txt"),
+    }));
+    const skillsProcess = createLocalSkillsProcess({
+      binding,
+      clock: () => new Date("2026-08-21T10:00:00.000Z"),
+      id: () => "inspection-1",
+      platform: "linux",
+      posixNpxCommand: scriptedPosixNpxCommand,
+      runner,
+      workspace: "/workspace",
+    });
+    const descriptor = describeSource("vercel-labs/skills");
+    if (!descriptor.ok) throw new Error("fixture descriptor failed");
+
+    const inspected = await skillsProcess.inspectSource({
+      descriptor: descriptor.value,
+      signal: new AbortController().signal,
+    });
+
+    expect(inspected).toMatchObject({
+      ok: true,
+      value: {
+        candidates: [{ name: "find-skills" }],
+        cliVersion: CLI_VERSION,
+        descriptor: { family: "github", source: "vercel-labs/skills" },
+        id: "inspection-1",
+        inspectedAt: "2026-08-21T10:00:00.000Z",
+        targetGeneration: 3,
+        targetId: binding.targetId,
+      },
+    });
+    if (!inspected.ok) throw new Error("fixture inspection failed");
+    expect(inspected.value.digest).toMatch(/^[a-f0-9]{64}$/);
+    const listInvocation = runner.invocations.find(({ args }) =>
+      args.includes("--list"),
+    );
+    expect(listInvocation).toMatchObject({
+      args: ["--yes", CLI_PACKAGE, "add", "vercel-labs/skills", "--list"],
+      shell: false,
+      timeoutMs: 60_000,
+    });
+    expect(
+      runner.invocations.some(({ args }) =>
+        args.some((arg) => arg === "--skill" || arg === "--agent"),
+      ),
+    ).toBe(false);
+
+    const again = await skillsProcess.inspectSource({
+      descriptor: descriptor.value,
+      signal: new AbortController().signal,
+    });
+    expect(again.ok && again.value.digest).toBe(inspected.value.digest);
+  });
+
+  it("reports an unavailable source instead of parsing a failed clone transcript", async () => {
+    const runner = inspectionRunner(() => ({
+      exitCode: 1,
+      stdout: fixture("skills-1.5.23-add-list-clone-failed.v1.txt"),
+    }));
+    const skillsProcess = createLocalSkillsProcess({
+      binding,
+      clock: () => new Date("2026-08-21T10:00:00.000Z"),
+      platform: "linux",
+      posixNpxCommand: scriptedPosixNpxCommand,
+      runner,
+      workspace: "/workspace",
+    });
+    const descriptor = describeSource("vercel-labs/does-not-exist");
+    if (!descriptor.ok) throw new Error("fixture descriptor failed");
+
+    expect(
+      await skillsProcess.inspectSource({
+        descriptor: descriptor.value,
+        signal: new AbortController().signal,
+      }),
+    ).toMatchObject({
+      error: { code: "source_unavailable", effects: "none", retryable: true },
+      ok: false,
+    });
+  });
+
+  it("rejects a malformed descriptor and an unbound process before spawning", async () => {
+    const runner = inspectionRunner(() => {
+      throw new Error("must not spawn");
+    });
+    const bound = createLocalSkillsProcess({
+      binding,
+      clock: () => new Date("2026-08-21T10:00:00.000Z"),
+      platform: "linux",
+      posixNpxCommand: scriptedPosixNpxCommand,
+      runner,
+      workspace: "/workspace",
+    });
+    const unbound = createLocalSkillsProcess({
+      clock: () => new Date("2026-08-21T10:00:00.000Z"),
+      platform: "linux",
+      posixNpxCommand: scriptedPosixNpxCommand,
+      runner,
+      workspace: "/workspace",
+    });
+    const descriptor = describeSource("vercel-labs/skills");
+    if (!descriptor.ok) throw new Error("fixture descriptor failed");
+
+    expect(
+      await bound.inspectSource({
+        descriptor: {
+          ...descriptor.value,
+          source: "vercel-labs/skills --skill x",
+        },
+        signal: new AbortController().signal,
+      }),
+    ).toMatchObject({ error: { code: "source_unsupported" }, ok: false });
+    expect(
+      await unbound.inspectSource({
+        descriptor: descriptor.value,
+        signal: new AbortController().signal,
+      }),
+    ).toMatchObject({ error: { code: "mutation_ineligible" }, ok: false });
+    expect(runner.invocations).toHaveLength(0);
+  });
+
+  it("fails a concurrent inspection instead of queueing it and returns cancellation without a listing", async () => {
+    let releaseListing!: () => void;
+    let markStarted!: () => void;
+    const listingStarted = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    const listingReleased = new Promise<void>((resolve) => {
+      releaseListing = resolve;
+    });
+    const runner = inspectionRunner(() => ({
+      exitCode: 0,
+      stdout: fixture("skills-1.5.23-add-list-single.v1.txt"),
+    }));
+    const gated: ProcessRunner = {
+      async run(invocation) {
+        if (invocation.args.at(-1) === "--list") {
+          markStarted();
+          await listingReleased;
+        }
+        return runner.run(invocation);
+      },
+    };
+    const skillsProcess = createLocalSkillsProcess({
+      binding,
+      clock: () => new Date("2026-08-21T10:00:00.000Z"),
+      platform: "linux",
+      posixNpxCommand: scriptedPosixNpxCommand,
+      runner: gated,
+      workspace: "/workspace",
+    });
+    const descriptor = describeSource("vercel-labs/skills");
+    if (!descriptor.ok) throw new Error("fixture descriptor failed");
+
+    const controller = new AbortController();
+    const pending = skillsProcess.inspectSource({
+      descriptor: descriptor.value,
+      signal: controller.signal,
+    });
+    await listingStarted;
+    expect(
+      await skillsProcess.inspectSource({
+        descriptor: descriptor.value,
+        signal: new AbortController().signal,
+      }),
+    ).toMatchObject({ error: { code: "mutation_conflict" }, ok: false });
+    expect(
+      await skillsProcess.observeInventory({
+        signal: new AbortController().signal,
+      }),
+    ).toMatchObject({ error: { code: "mutation_conflict" }, ok: false });
+
+    controller.abort();
+    releaseListing();
+    expect(await pending).toMatchObject({
+      error: { code: "cancelled", effects: "none" },
+      ok: false,
+    });
+    expect(
+      runner.invocations.filter(({ args }) => args.at(-1) === "--list"),
+    ).toHaveLength(1);
+  });
 });

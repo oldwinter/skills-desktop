@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 
 import {
   CLI_VERSION,
+  canonicalSourceInspectionJson,
   mutationIntentSchema,
   normalizeHarnessIds,
   resolveLegacyHarnessAlias,
@@ -12,12 +13,16 @@ import {
   type MutationIntent,
   type PublicError,
   type Result,
+  type SourceCandidate,
+  type SourceDescriptorV1,
+  type SourceListing,
 } from "@skills-desktop/skills-runtime";
 import { isInventoryEntryAvailableToHarness } from "../../contracts/inventory-availability.js";
 
 const PREPARED_MUTATION_TTL_MS = 10 * 60_000;
 const REMOVE_TIMEOUT_MS = 2 * 60_000;
 const WRITE_TIMEOUT_MS = 10 * 60_000;
+export const SOURCE_INSPECTION_TIMEOUT_MS = 60_000;
 
 export type ObservationError =
   | InventoryParseError
@@ -44,6 +49,28 @@ export type CommandPlanHarnessEffect =
   | { readonly harnessIds: string[]; readonly kind: "bound" }
   | { readonly kind: "cli-unscoped"; readonly targetHarnessIds: string[] };
 
+/**
+ * ADR 0015: the reviewed add source. Legacy GitHub sources keep their shape;
+ * inspected sources carry the exact descriptor plus the inspection digest the
+ * preparation was bound to, so review can disclose mutability and Guard
+ * creation can revalidate the binding.
+ */
+export type CommandPlanSource =
+  | {
+      readonly revision?: string;
+      readonly source: string;
+      readonly sourceType: "github";
+    }
+  | {
+      readonly family: SourceDescriptorV1["family"];
+      readonly inspectionDigest: string;
+      readonly inspectionId: string;
+      readonly mutability: SourceDescriptorV1["mutability"];
+      readonly ref: string | null;
+      readonly source: string;
+      readonly sourceType: "inspected";
+    };
+
 export interface CommandPlan {
   readonly harness: string;
   readonly harnessEffect?: CommandPlanHarnessEffect;
@@ -53,13 +80,42 @@ export interface CommandPlan {
   readonly preview: string;
   readonly schemaVersion: 1;
   readonly scope: "global" | "project";
-  readonly source: {
-    readonly revision?: string;
-    readonly source: string;
-    readonly sourceType: "github";
-  } | null;
+  readonly source: CommandPlanSource | null;
   readonly targetId: string;
   readonly timeoutMs: number;
+}
+
+/**
+ * Session evidence from one read-only `add <source> --list`. It is bound to
+ * the Target binding and the exact descriptor, grants no mutation authority,
+ * and is never persisted.
+ */
+export interface SourceInspection {
+  readonly candidates: readonly SourceCandidate[];
+  readonly cliVersion: typeof CLI_VERSION;
+  readonly descriptor: SourceDescriptorV1;
+  readonly dialectVersion: SourceListing["dialectVersion"];
+  readonly digest: string;
+  readonly id: string;
+  readonly inspectedAt: string;
+  readonly targetGeneration: number;
+  readonly targetId: string;
+}
+
+export type SourceInspectionError = PublicError<
+  | "cancelled"
+  | "cli_incompatible"
+  | "mutation_conflict"
+  | "mutation_ineligible"
+  | "process_failed"
+  | "source_inspection_incompatible"
+  | "source_unavailable"
+  | "source_unsupported"
+>;
+
+export interface InspectSourceInput {
+  readonly descriptor: SourceDescriptorV1;
+  readonly signal: AbortSignal;
 }
 
 export interface PreparedMutation {
@@ -111,12 +167,43 @@ export interface SkillsProcess {
     readonly confirmation: ConfirmedMutation;
     readonly signal: AbortSignal;
   }): Promise<Result<MutationOutcome, MutationExecutionError>>;
+  /** Read-only `add <source> --list` through the pinned CLI (ADR 0015). */
+  inspectSource(
+    input: InspectSourceInput,
+  ): Promise<Result<SourceInspection, SourceInspectionError>>;
   observeInventory(input: {
     readonly signal: AbortSignal;
   }): Promise<Result<Inventory, ObservationError>>;
   prepareMutation(
     input: PrepareMutationInput,
   ): Promise<Result<PreparedMutation, MutationPreparationError>>;
+}
+
+export function sourceInspectionFailure(
+  code: SourceInspectionError["code"],
+  message: string,
+  retryable = false,
+): Result<never, SourceInspectionError> {
+  return {
+    error: { code, effects: "none", message, phase: "inspect", retryable },
+    ok: false,
+  };
+}
+
+export function sourceInspectionDigest(input: {
+  readonly descriptor: SourceDescriptorV1;
+  readonly listing: SourceListing;
+}): string {
+  return createHash("sha256")
+    .update(canonicalSourceInspectionJson(input))
+    .digest("hex");
+}
+
+/** The exact read-only argument array for one Source Inspection. */
+export function sourceInspectionArguments(
+  descriptor: SourceDescriptorV1,
+): readonly string[] {
+  return ["add", descriptor.source, "--list"];
 }
 
 export type NormalizedMutation = Exclude<
@@ -164,6 +251,21 @@ export function mutationExecutionFailure(
   };
 }
 
+function commandPlanSource(
+  source: Extract<NormalizedMutation, { type: "add" }>["source"],
+): CommandPlanSource {
+  if (source.sourceType === "github") return { ...source };
+  return {
+    family: source.descriptor.family,
+    inspectionDigest: source.inspection.digest,
+    inspectionId: source.inspection.id,
+    mutability: source.descriptor.mutability,
+    ref: source.descriptor.ref,
+    source: source.descriptor.source,
+    sourceType: "inspected",
+  };
+}
+
 function mutationArguments(
   intent: NormalizedMutation,
   harnessIds: readonly HarnessId[],
@@ -176,9 +278,11 @@ function mutationArguments(
         : [];
   if (intent.type === "add") {
     const source =
-      intent.source.revision === undefined
-        ? intent.source.source
-        : `https://github.com/${intent.source.source}/archive/${intent.source.revision}.tar.gz`;
+      intent.source.sourceType === "inspected"
+        ? intent.source.descriptor.source
+        : intent.source.revision === undefined
+          ? intent.source.source
+          : `https://github.com/${intent.source.source}/archive/${intent.source.revision}.tar.gz`;
     return [
       "add",
       source,
@@ -332,7 +436,7 @@ export function prepareMutationPlan(options: {
     preview: [`npx skills@${CLI_VERSION}`, ...args].join(" "),
     schemaVersion: 1,
     scope: mutation.scope,
-    source: mutation.type === "add" ? { ...mutation.source } : null,
+    source: mutation.type === "add" ? commandPlanSource(mutation.source) : null,
     targetId: options.binding.targetId,
     timeoutMs:
       mutation.type === "remove" ? REMOVE_TIMEOUT_MS : WRITE_TIMEOUT_MS,
@@ -437,6 +541,21 @@ export function observedMutationEffects(
     };
   }
   if (mutation.type === "add") {
+    const { source } = mutation;
+    // Only a plain GitHub owner/repository add can be matched against the
+    // CLI's declared source. Pinned archives and inspected descriptors are
+    // recorded by the CLI in forms this dialect does not reproduce, so their
+    // presence is observed but their content stays unverified.
+    const exactGithub =
+      source.sourceType === "github" && source.revision === undefined
+        ? source.source
+        : source.sourceType === "inspected" &&
+            source.descriptor.family === "github" &&
+            source.descriptor.ref === null &&
+            !source.descriptor.source.includes(":") &&
+            !source.descriptor.source.includes("#")
+          ? source.descriptor.source
+          : undefined;
     const observed = mutation.names.every((name) => {
       const entry = matches(name);
       const availableToHarnesses =
@@ -446,20 +565,26 @@ export function observedMutationEffects(
           isInventoryEntryAvailableToHarness(entry, harnessId),
         );
       if (!availableToHarnesses || entry === undefined) return false;
-      const declaredSourceMatches =
-        entry.declaredSource.sourceType === mutation.source.sourceType &&
-        entry.declaredSource.source === mutation.source.source;
-      const declaredSourceIsAbsent =
-        entry.declaredSource.sourceType === null &&
-        entry.declaredSource.source === null;
-      return (
-        declaredSourceMatches ||
-        (mutation.source.revision !== undefined && declaredSourceIsAbsent)
-      );
+      if (exactGithub !== undefined) {
+        return (
+          entry.declaredSource.sourceType === "github" &&
+          entry.declaredSource.source === exactGithub
+        );
+      }
+      if (source.sourceType === "github") {
+        const declaredSourceMatches =
+          entry.declaredSource.sourceType === "github" &&
+          entry.declaredSource.source === source.source;
+        const declaredSourceIsAbsent =
+          entry.declaredSource.sourceType === null &&
+          entry.declaredSource.source === null;
+        return declaredSourceMatches || declaredSourceIsAbsent;
+      }
+      return true;
     });
     return {
       status: observed
-        ? mutation.source.revision === undefined
+        ? exactGithub !== undefined
           ? "verified"
           : "content-unverified"
         : "not-observed",
