@@ -31,10 +31,11 @@ describe("unsigned candidate workflow contract", () => {
       { encoding: "utf8" },
     );
 
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain(
-      "Unknown release integrity command: undefined",
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain(
+      "Usage: node scripts/release/release-integrity-cli.mjs <command>",
     );
+    expect(result.stdout).toContain("\n  verify-release\n");
     expect(result.stderr).not.toContain("SyntaxError");
   });
 

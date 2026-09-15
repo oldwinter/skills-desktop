@@ -99,7 +99,7 @@ npm run verify
 
 ![Inventory Target 选择器中的 SSH · 未开放](images/user-guide/inventory-ssh-unavailable.png)
 
-页眉会显示当前 Target 标签与工作区路径。侧栏 **Targets** 区可切换当前观察对象。
+页眉会显示当前 Target 标签与工作区路径。侧栏 **Active Target** 区可切换当前观察对象（这是会话级切换器；编辑 Target Definition 请进入主导航的 **Targets** 页）。侧栏底部显示实际观察到的 `skills` CLI 版本，尚未观察时显示 unobserved。
 
 ### 本机前提
 
@@ -121,7 +121,7 @@ Inventory 是对当前 Target 一次只读 `npx skills list --json` 的归一化
 | Stale evidence | 上次完整结果被保留（刷新失败、Target 变更、或新会话恢复） | 可查看/对比，**不能**授权变更 |
 | No evidence | 尚无完整观察 | 先 Refresh |
 
-点标题旁的刷新按钮重新观察；进行中可取消。空清单时提示：Refresh this Target，或通过 `npx skills` 安装技能。
+点标题旁的刷新按钮重新观察；进行中可取消。未筛选的空清单会直接给出 **Add Skill** 按钮，聚焦到同页下方的 Add Skill 表单；`npx skills` 仅作为说明（安装最终仍由固定版本的 CLI 执行）。
 
 ![Inventory：Fresh evidence 与清单表](images/user-guide/inventory-fresh-evidence.png)
 
@@ -193,6 +193,8 @@ skills.sh 交接：
 
 只有一个 Target 时：副标题为 **Needs a second Local Target**，Compare 禁用，并提示先到 Targets 再添加一个。
 
+两侧 Inventory 都为空时：Compare 后会看到 **No skill evidence on either Target**，附带说明与 **Open Inventory** 按钮，先回 Inventory 为其中一个 Target 添加 Skill，再重新对比。
+
 两侧证据最好都是 fresh；一侧 stale 时仍可查看，但向该侧准备变更会受限。选中一行可查看左右证据详情，并在条件满足时准备跨 Target 的更新/同步类操作（仍需 Trusted Review）。
 
 常见维度标签：Source mismatch、Unknown evidence、Revision or content drift 等。
@@ -230,7 +232,7 @@ skills.sh 交接：
 
 ### 空态与 SSH
 
-- 若当前构建 **没有** 捆绑任何 reviewed release：会看到空态说明（有合集包之后，才对 Local Target 可用）。
+- 若当前构建 **没有** 捆绑任何 reviewed release：会看到空态说明（有合集包之后，才对 Local Target 可用），并提供 **Open Inventory** 按钮回到 Inventory 逐个添加 Skill。
 - SSH Target 仍可能出现在列表，但标 **SSH · 未在 V1 开放**，Include 不可用（V1 Local Collections 范围外）。
 
 ---

@@ -88,15 +88,18 @@
 :root[data-appearance="high-contrast"] :focus-visible { outline-width: 3px; }
 @media (forced-colors: active) {
   :root { color-scheme: light dark; }
-  .review-mark, .review-button, .review-effect { forced-color-adjust: none; color: ButtonText; background: ButtonFace; border: 1px solid ButtonText; }
+  .skip-link, .review-mark, .review-button, .review-effect { forced-color-adjust: none; color: ButtonText; background: ButtonFace; border: 1px solid ButtonText; }
   .review-button--primary { color: HighlightText; background: Highlight; border-color: Highlight; }
-  button:focus-visible { outline: 3px solid Highlight; }
+  button:focus-visible, a:focus-visible { outline: 3px solid Highlight; }
 }
 * { box-sizing: border-box; }
 html, body, #root { width: 100%; min-width: 320px; height: 100%; margin: 0; }
 body { overflow: auto; }
 button { color: inherit; font: inherit; letter-spacing: 0; }
-button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+button:focus-visible, a:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.skip-link { position: fixed; z-index: 10; top: 8px; left: 8px; transform: translateY(-180%); padding: 8px 12px; color: var(--surface); background: var(--accent-ink); border-radius: 6px; font-size: 13px; font-weight: 600; text-decoration: none; transition: transform 140ms ease; }
+.skip-link:focus-visible { transform: translateY(0); }
+.review-surface:focus-visible { outline: none; }
 h1, h2, p, dl, dd { margin: 0; }
 .review-surface { display: grid; width: min(100%, 680px); min-height: 100%; margin: 0 auto; padding: 22px; align-content: start; gap: 18px; background: var(--surface); }
 .review-heading { display: flex; align-items: center; gap: 11px; padding-bottom: 16px; border-bottom: 1px solid var(--line); }

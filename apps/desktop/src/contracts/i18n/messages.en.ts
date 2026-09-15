@@ -6,9 +6,11 @@
 export const en = {
   "app.name": "Skills Desktop",
   "app.skipToWorkspace": "Skip to workspace",
+  "app.skipToReview": "Skip to review",
   "app.trustedReviewTitle": "Skills Desktop Trusted Review",
 
   "common.details": "Details",
+  "common.openInventory": "Open Inventory",
   "common.unknown": "Unknown",
   "common.local": "Local",
   "common.close": "Close",
@@ -150,7 +152,9 @@ export const en = {
   "nav.about": "About",
   "nav.pending.one": "{label}, {count} item pending",
   "nav.pending.other": "{label}, {count} items pending",
+  "nav.activeTarget": "Active Target",
   "nav.cliVersion": "skills {version}",
+  "nav.cliVersionUnobserved": "skills version unobserved",
 
   "menu.file": "File",
   "menu.edit": "Edit",
@@ -251,7 +255,10 @@ export const en = {
   "inventory.empty.noSkills": "No skills found",
   "inventory.empty.changeFilter": "Change the current search or scope filter.",
   "inventory.empty.installHint":
-    "Project and global inventory are empty. Refresh this Target, or install a skill via npx skills.",
+    "Project and global inventory are empty. Add a Skill from a source below, or refresh this Target.",
+  "inventory.empty.addSkill": "Add Skill",
+  "inventory.empty.cliHint":
+    "Skills Desktop delegates installs to the pinned npx skills CLI; every change is reviewed before it runs.",
   "inventory.empty.clearFilters": "Clear filters",
   "inventory.missing.waiting": "Waiting for inventory",
   "inventory.missing.waitingBody":
@@ -271,7 +278,7 @@ export const en = {
   "inventory.inspector.label": "Selected skill evidence",
   "inventory.inspector.noSkills": "No skills to inspect",
   "inventory.inspector.noSkillsBody":
-    "Refresh this Target, or install a skill via npx skills.",
+    "Use Add Skill below the table, or refresh this Target.",
   "inventory.inspector.noneSelected": "No skill selected",
   "inventory.inspector.noneInFilter": "No skills in the current filter.",
   "inventory.inspector.selectHint":
@@ -522,6 +529,8 @@ export const en = {
   "comparison.refreshTarget": "Refresh {label}",
   "comparison.empty.none": "No comparison selected",
   "comparison.empty.noEvidence": "No skill evidence on either Target",
+  "comparison.empty.noEvidenceBody":
+    "Both Inventories are empty, so there is nothing to compare yet. Add a Skill to one Target from Inventory, then compare again.",
   "comparison.empty.noSearchMatch": "No skills match your search",
   "comparison.empty.tryAnotherOrToggle":
     "Try another skill name or turn off Differences only.",
@@ -556,6 +565,8 @@ export const en = {
   "collections.empty.heading": "No Official Collections",
   "collections.empty.body":
     "This build has no bundled reviewed releases. V1 Collections only apply to Local Targets once a release is packaged with the app.",
+  "collections.empty.nextStep":
+    "Until then, add Skills one at a time from Inventory.",
   "collections.bundled.one": "{count} bundled release",
   "collections.bundled.other": "{count} bundled releases",
   "collections.release": "Release",

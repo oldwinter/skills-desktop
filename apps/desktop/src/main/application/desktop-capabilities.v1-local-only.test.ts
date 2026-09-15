@@ -323,7 +323,7 @@ describe("V1 Local-only Target authority", () => {
       error: {
         code: "invalid_request",
         effects: "none",
-        message: "主机身份复核未在 V1 开放。",
+        message: "Host identity review is out of scope in V1.",
         phase: "target",
         retryable: false,
       },

@@ -21,6 +21,7 @@ import {
   parseReleaseIntegrityOptions,
   readReleaseJson,
   releaseContext,
+  releaseIntegrityUsage,
   runReleaseIntegrityCommand,
 } from "../scripts/release/release-integrity-cli.mjs";
 import coverageConfig from "../vitest.config.js";
@@ -513,7 +514,39 @@ describe("release integrity executable entrypoint", () => {
       runReleaseIntegrityCommand(["unknown"], {
         commandHandlers: new Map(),
       }),
-    ).rejects.toThrow("Unknown release integrity command: unknown");
+    ).rejects.toThrow(
+      "Unknown release integrity command: unknown (try: node scripts/release/release-integrity-cli.mjs --help)",
+    );
+  });
+
+  it("prints usage with the command list when no command or --help is given", async () => {
+    const handlers = new Map([
+      ["zeta", async () => ({})],
+      ["alpha", async () => ({})],
+    ]);
+    for (const argv of [[], ["--help"], ["-h"], ["help"]]) {
+      const output: string[] = [];
+      await expect(
+        runReleaseIntegrityCommand(argv, {
+          commandHandlers: handlers,
+          writeOutput: (value: string) => output.push(value),
+        }),
+      ).resolves.toBeUndefined();
+      expect(output).toHaveLength(1);
+      expect(output[0]).toContain(
+        "Usage: node scripts/release/release-integrity-cli.mjs <command>",
+      );
+      expect(output[0]).toMatch(/Commands:\n {2}alpha\n {2}zeta\n/);
+    }
+    expect(releaseIntegrityUsage()).toContain("\n  verify-release\n");
+  });
+
+  it("lists the allowed names when an argument is unknown", () => {
+    expect(() =>
+      parseReleaseIntegrityOptions(["--nope", "x"], ["--alpha", "--beta"]),
+    ).toThrow(
+      "Unknown release integrity argument: --nope (allowed: --alpha, --beta)",
+    );
   });
 
   it("writes preview notes and structured workflow outputs through the real command", async () => {

@@ -184,9 +184,11 @@ function InventoryStatus({
 
 function EmptyInventory({
   filtered,
+  onAddSkill,
   onClearFilters,
 }: {
   readonly filtered: boolean;
+  readonly onAddSkill: () => void;
   readonly onClearFilters: () => void;
 }) {
   const { t } = useTranslator();
@@ -210,7 +212,19 @@ function EmptyInventory({
           <RotateCcw aria-hidden="true" size={15} />
           {t("inventory.empty.clearFilters")}
         </button>
-      ) : null}
+      ) : (
+        <>
+          <button
+            className="text-button text-button--primary"
+            onClick={onAddSkill}
+            type="button"
+          >
+            <PackagePlus aria-hidden="true" size={15} />
+            {t("inventory.empty.addSkill")}
+          </button>
+          <p className="empty-state__hint">{t("inventory.empty.cliHint")}</p>
+        </>
+      )}
     </div>
   );
 }
@@ -301,6 +315,7 @@ function InventoryWorkspace({
   const [applicationMenu, setApplicationMenu] = useState<ApplicationMenu>();
   const menuFocusPendingRef = useRef(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const addSourceInputRef = useRef<HTMLInputElement>(null);
   const mutationOutcomeRef = useRef<HTMLParagraphElement>(null);
   const reviewReturnFocusRef = useRef<HTMLButtonElement | null>(null);
   const targetStates =
@@ -637,6 +652,12 @@ function InventoryWorkspace({
     setQuery("");
     setScope("all");
     searchInputRef.current?.focus();
+  };
+  const focusAddSkillSource = () => {
+    const input = addSourceInputRef.current;
+    if (input === null) return;
+    input.scrollIntoView?.({ block: "center" });
+    input.focus();
   };
 
   const selected = useMemo(() => {
@@ -1227,6 +1248,7 @@ function InventoryWorkspace({
                   ) : (
                     <EmptyInventory
                       filtered={isFiltered}
+                      onAddSkill={focusAddSkillSource}
                       onClearFilters={clearInventoryFilters}
                     />
                   )
@@ -1495,6 +1517,7 @@ function InventoryWorkspace({
                       setAddSourceError(undefined);
                     }}
                     placeholder={t("inventory.add.sourcePlaceholder")}
+                    ref={addSourceInputRef}
                     required
                     value={addSource}
                   />
@@ -1770,6 +1793,7 @@ function InventoryWorkspace({
         ) : view === "comparison" ? (
           <ComparisonView
             client={client}
+            onOpenInventory={() => setView("inventory")}
             onPrepared={(preparedId, destinationTargetId) => {
               const destination = targetStates.find(
                 ({ target }) => target.id === destinationTargetId,
@@ -1787,7 +1811,11 @@ function InventoryWorkspace({
             targets={targetStates}
           />
         ) : view === "collections" ? (
-          <CollectionsView client={client} snapshot={snapshot} />
+          <CollectionsView
+            client={client}
+            onOpenInventory={() => setView("inventory")}
+            snapshot={snapshot}
+          />
         ) : view === "publish" ? (
           <PublishView client={client} publication={snapshot.publication} />
         ) : view === "studio" ? (

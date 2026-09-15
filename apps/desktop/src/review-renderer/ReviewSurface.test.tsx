@@ -445,6 +445,61 @@ describe("Trusted Review surface", () => {
     expect(closeWindow).toHaveBeenCalledOnce();
   });
 
+  it("offers a skip-link into the review body ahead of Approve / Reject (#193)", async () => {
+    const client: ReviewBridge = {
+      async approve() {
+        return { ok: true, value: { operationId: "mutation-1" } };
+      },
+      async getReview() {
+        return {
+          ok: true,
+          value: {
+            projection: {
+              commandPlan: {
+                harness: "Codex",
+                names: ["tdd"],
+                operation: "remove",
+                preview: "npx skills@1.5.23 remove tdd --agent codex --yes",
+                schemaVersion: 1,
+                scope: "project",
+                source: null,
+                targetId: "00000000-0000-4000-8000-000000000001",
+                timeoutMs: 120_000,
+              },
+              expiresAt: "2026-08-21T10:10:00.000Z",
+              purpose: "execute",
+              reviewId: "review-1",
+              target: {
+                ...targetV4Metadata,
+                generation: 1,
+                id: "00000000-0000-4000-8000-000000000001",
+                kind: "local",
+                label: "This device",
+                workspace: "/work/skills-desktop",
+                workspaceLabel: "skills-desktop",
+              },
+            },
+            schemaVersion: 2,
+            status: "pending",
+          },
+        };
+      },
+      async reject() {
+        return { ok: true, value: { operationId: "review-1" } };
+      },
+    };
+    const { container } = render(<ReviewSurface client={client} />);
+
+    const main = await screen.findByRole("main");
+    const skipLink = screen.getByRole("link", { name: "Skip to review" });
+    expect(container.querySelector("a, button")).toBe(skipLink);
+    expect(skipLink).toHaveAttribute("href", "#review-main");
+    expect(main).toHaveAttribute("id", "review-main");
+    expect(main).toHaveAttribute("tabindex", "-1");
+    main.focus();
+    expect(main).toHaveFocus();
+  });
+
   it("discloses that update touches every CLI-managed harness in scope", async () => {
     const client: ReviewBridge = {
       async approve() {

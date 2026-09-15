@@ -8,9 +8,11 @@ import type { en } from "./messages.en.js";
 export const zhCN: Readonly<Record<keyof typeof en, string>> = {
   "app.name": "Skills Desktop",
   "app.skipToWorkspace": "跳到工作区",
+  "app.skipToReview": "跳到审阅内容",
   "app.trustedReviewTitle": "Skills Desktop 可信复核",
 
   "common.details": "详情",
+  "common.openInventory": "打开 Inventory",
   "common.unknown": "未知",
   "common.local": "本机",
   "common.close": "关闭",
@@ -119,7 +121,9 @@ export const zhCN: Readonly<Record<keyof typeof en, string>> = {
   "nav.about": "关于",
   "nav.pending.one": "{label}，{count} 项待处理",
   "nav.pending.other": "{label}，{count} 项待处理",
+  "nav.activeTarget": "当前 Target",
   "nav.cliVersion": "skills {version}",
+  "nav.cliVersionUnobserved": "skills 版本尚未观察",
 
   "menu.file": "文件",
   "menu.edit": "编辑",
@@ -216,7 +220,10 @@ export const zhCN: Readonly<Record<keyof typeof en, string>> = {
   "inventory.empty.noSkills": "未找到 Skill",
   "inventory.empty.changeFilter": "请更改当前搜索或范围筛选。",
   "inventory.empty.installHint":
-    "项目与全局库存均为空。请刷新该 Target，或通过 npx skills 安装一个 Skill。",
+    "项目与全局库存均为空。可在下方通过来源添加 Skill，或刷新该 Target。",
+  "inventory.empty.addSkill": "添加 Skill",
+  "inventory.empty.cliHint":
+    "Skills Desktop 将安装委托给固定版本的 npx skills CLI；每次变更都会先经复核再执行。",
   "inventory.empty.clearFilters": "清除筛选",
   "inventory.missing.waiting": "正在等待库存",
   "inventory.missing.waitingBody":
@@ -236,7 +243,7 @@ export const zhCN: Readonly<Record<keyof typeof en, string>> = {
   "inventory.inspector.label": "所选 Skill 的证据",
   "inventory.inspector.noSkills": "没有可查看的 Skill",
   "inventory.inspector.noSkillsBody":
-    "请刷新该 Target，或通过 npx skills 安装一个 Skill。",
+    "请使用表格下方的「添加 Skill」，或刷新该 Target。",
   "inventory.inspector.noneSelected": "未选择 Skill",
   "inventory.inspector.noneInFilter": "当前筛选下没有 Skill。",
   "inventory.inspector.selectHint": "在表格中选择一个 Skill 以查看证据。",
@@ -479,6 +486,8 @@ export const zhCN: Readonly<Record<keyof typeof en, string>> = {
   "comparison.refreshTarget": "刷新 {label}",
   "comparison.empty.none": "未选择对比",
   "comparison.empty.noEvidence": "两个 Target 上都没有 Skill 证据",
+  "comparison.empty.noEvidenceBody":
+    "两侧 Inventory 均为空，暂无可对比内容。请先在 Inventory 中为其中一个 Target 添加 Skill，再重新对比。",
   "comparison.empty.noSearchMatch": "没有匹配搜索的 Skill",
   "comparison.empty.tryAnotherOrToggle":
     "换一个 Skill 名称，或关闭“仅显示差异”。",
@@ -510,6 +519,7 @@ export const zhCN: Readonly<Record<keyof typeof en, string>> = {
   "collections.empty.heading": "没有官方合集",
   "collections.empty.body":
     "此构建未内置已复核的发布。V1 的合集只在发布随应用打包后应用于 Local Target。",
+  "collections.empty.nextStep": "在此之前，可在 Inventory 中逐个添加 Skill。",
   "collections.bundled.one": "{count} 个内置发布",
   "collections.bundled.other": "{count} 个内置发布",
   "collections.release": "发布",

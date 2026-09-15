@@ -94,4 +94,5 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm run check:imports
+      - run: npm run check:context
       - run: npm test

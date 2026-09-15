@@ -3,6 +3,7 @@ import {
   AlertCircle,
   ArrowLeftRight,
   CircleHelp,
+  ListFilter,
   PackagePlus,
   RefreshCw,
   Search,
@@ -133,11 +134,13 @@ function prepareDisabledReason(
 
 export function ComparisonView({
   client,
+  onOpenInventory,
   onPrepared,
   snapshot,
   targets,
 }: {
   readonly client: WorkspaceBridge;
+  readonly onOpenInventory?: () => void;
   readonly onPrepared: (
     preparedId: string,
     destinationTargetId: string,
@@ -592,6 +595,17 @@ export function ComparisonView({
             <div className="empty-state" role="status">
               <CircleHelp aria-hidden="true" size={22} />
               <h2>{t("comparison.empty.noEvidence")}</h2>
+              <p>{t("comparison.empty.noEvidenceBody")}</p>
+              {onOpenInventory !== undefined ? (
+                <button
+                  className="text-button text-button--primary"
+                  onClick={onOpenInventory}
+                  type="button"
+                >
+                  <ListFilter aria-hidden="true" size={15} />
+                  {t("common.openInventory")}
+                </button>
+              ) : null}
             </div>
           ) : visibleRows.length === 0 && normalizedQuery !== "" ? (
             <div className="empty-state" role="status">

@@ -4024,7 +4024,7 @@ export function createDesktopCapabilities(
               return requestFailure(
                 publicError(
                   "invalid_request",
-                  "主机身份复核未在 V1 开放。",
+                  "Host identity review is out of scope in V1.",
                   "target",
                   false,
                 ),

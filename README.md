@@ -6,9 +6,11 @@ plus POSIX Remote SSH, delivered through gated milestones. The current shipped
 product remains Local-only.
 
 
-## 用户手册
+## User guide
 
-面向最终用户的操作说明见 [docs/user-guide.md](docs/user-guide.md)（当前仍为 Local-only）。
+End-user instructions live in [docs/user-guide.md](docs/user-guide.md). The
+guide is written in Simplified Chinese and covers the current Local-only
+scope.
 
 ## Status
 

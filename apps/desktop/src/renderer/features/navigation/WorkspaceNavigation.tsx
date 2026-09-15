@@ -115,7 +115,7 @@ export function WorkspaceNavigation({
       </nav>
 
       <section className="target-section" aria-labelledby="target-heading">
-        <h2 id="target-heading">{t("common.targets")}</h2>
+        <h2 id="target-heading">{t("nav.activeTarget")}</h2>
         {targetStates.map((state) => (
           <button
             className={`target-row${state.target.id === target.id ? " target-row--active" : ""}`}
@@ -161,7 +161,9 @@ export function WorkspaceNavigation({
       <div className="rail-version">
         <Terminal aria-hidden="true" size={14} />
         <span>
-          {t("nav.cliVersion", { version: inventory.cliVersion ?? "1.5.23" })}
+          {inventory.cliVersion === null
+            ? t("nav.cliVersionUnobserved")
+            : t("nav.cliVersion", { version: inventory.cliVersion })}
         </span>
       </div>
     </aside>

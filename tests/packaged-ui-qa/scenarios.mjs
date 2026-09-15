@@ -641,6 +641,28 @@ export async function runPackagedUiQa({
     if (reviewAfterTab !== "Approve mutation") {
       throw new Error(`Review tab order failed at ${reviewAfterTab}`);
     }
+    // #193: the skip-link is the first focusable control, so the tab cycle
+    // wraps through it before returning to Reject.
+    await reviewPage.dispatchKey("Tab");
+    const reviewSkipLink = await reviewPage.evaluate(`(() => {
+      const active = document.activeElement;
+      return {
+        href: active?.getAttribute("href") ?? "",
+        name: active?.textContent?.trim() ?? "",
+        target: document.querySelector("main.review-surface")?.id ?? "",
+        visible: active?.matches(":focus-visible") ?? false,
+      };
+    })()`);
+    if (
+      reviewSkipLink.name !== "Skip to review" ||
+      reviewSkipLink.href !== "#review-main" ||
+      reviewSkipLink.target !== "review-main" ||
+      reviewSkipLink.visible !== true
+    ) {
+      throw new Error(
+        `Review skip-link failed: ${JSON.stringify(reviewSkipLink)}`,
+      );
+    }
     await reviewPage.dispatchKey("Tab");
     const reviewAfterWrap = await reviewPage.evaluate(
       `document.activeElement?.getAttribute("aria-label") ?? document.activeElement?.textContent?.trim() ?? ""`,
@@ -648,6 +670,7 @@ export async function runPackagedUiQa({
     if (reviewAfterWrap !== "Reject") {
       throw new Error(`Review focus did not wrap at ${reviewAfterWrap}`);
     }
+    await reviewPage.dispatchKey("Tab", "Tab", { modifiers: 8 });
     await reviewPage.dispatchKey("Tab", "Tab", { modifiers: 8 });
     const reviewAfterReverseWrap = await reviewPage.evaluate(
       `document.activeElement?.getAttribute("aria-label") ?? document.activeElement?.textContent?.trim() ?? ""`,
