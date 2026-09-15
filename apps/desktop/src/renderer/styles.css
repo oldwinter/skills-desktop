@@ -51,8 +51,9 @@
   --surface-selected: #1c3552;
   --text: #e8eaed;
   --text-secondary: #b3b7bd;
-  --text-tertiary: #9aa0a6;
-  --text-on-accent: #ffffff;
+  --text-tertiary: #bdc1c6;
+  /* Dark ink on accent/accent-ink — white on #8ab4f8 is ~2.1:1 and fails axe AA. */
+  --text-on-accent: #161719;
   --line: rgb(232 234 237 / 14%);
   --line-strong: rgb(232 234 237 / 28%);
   --shadow: rgb(0 0 0 / 40%);
@@ -79,8 +80,8 @@
     --surface-selected: #1c3552;
     --text: #e8eaed;
     --text-secondary: #b3b7bd;
-    --text-tertiary: #9aa0a6;
-    --text-on-accent: #ffffff;
+    --text-tertiary: #bdc1c6;
+    --text-on-accent: #161719;
     --line: rgb(232 234 237 / 14%);
     --line-strong: rgb(232 234 237 / 28%);
     --shadow: rgb(0 0 0 / 40%);
@@ -96,16 +97,6 @@
     --danger: #f28b82;
     --danger-soft: #41211f;
   }
-}
-:root[data-appearance="dark"] .text-button--primary,
-:root[data-appearance="dark"] .skip-link,
-:root[data-appearance="dark"] .brand-mark,
-:root[data-appearance="dark"] .about-product-mark { --text-on-accent: #161719; }
-@media (prefers-color-scheme: dark) {
-  :root[data-appearance="system"] .text-button--primary,
-  :root[data-appearance="system"] .skip-link,
-  :root[data-appearance="system"] .brand-mark,
-  :root[data-appearance="system"] .about-product-mark { --text-on-accent: #161719; }
 }
 :root[data-appearance="high-contrast"] {
   color-scheme: light;
