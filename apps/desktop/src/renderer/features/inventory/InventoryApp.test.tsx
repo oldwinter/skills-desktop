@@ -270,6 +270,30 @@ function clientFor(
     async reconcilePublication() {
       return { ok: true, value: { operationId: "publication-1" } };
     },
+    async openStudioFolder() {
+      return { ok: true, value: { operationId: "studio-1" } };
+    },
+    async releaseStudioGrant() {
+      return { ok: true, value: { operationId: "studio-1" } };
+    },
+    async validateStudioGrant() {
+      return { ok: true, value: { operationId: "studio-1" } };
+    },
+    async createStudioDraft() {
+      return { ok: true, value: { operationId: "studio-1" } };
+    },
+    async saveStudioDraft() {
+      return { ok: true, value: { operationId: "studio-1" } };
+    },
+    async deleteStudioDraft() {
+      return { ok: true, value: { operationId: "studio-1" } };
+    },
+    async previewStudioDraft() {
+      return { ok: true, value: { operationId: "studio-1" } };
+    },
+    async exportStudioDraft() {
+      return { ok: true, value: { operationId: "studio-1" } };
+    },
     async inspectSource() {
       return { ok: true, value: { operationId: "inspection-1" } };
     },

@@ -89,6 +89,12 @@ import {
   type PublicationCoordinator,
   type PublicationHost,
 } from "./publication.js";
+import {
+  createStudioCoordinator,
+  type StudioCoordinator,
+  type StudioHost,
+} from "./studio.js";
+import type { StudioDraftRecords } from "../persistence/studio-draft-records.js";
 
 const MAX_RETAINED_REVIEWS = 128;
 
@@ -158,6 +164,15 @@ export interface DesktopCapabilitiesOptions {
   /** ADR 0017 offline `.skillpack` picker. Absent means import is unavailable. */
   readonly skillpackPicker?: SkillpackPicker;
   readonly skillsTargets: SkillsTargets;
+  /**
+   * ADR 0018 Studio edges. Absent means the Studio surface is unavailable;
+   * absent `host` keeps Drafts available while folder grants and export are
+   * refused.
+   */
+  readonly studio?: {
+    readonly drafts: StudioDraftRecords;
+    readonly host?: StudioHost;
+  };
   readonly v1LocalOnlyTargets?: boolean;
 }
 
@@ -518,6 +533,7 @@ export function createDesktopCapabilities(
   const hostTrustReviews = new Map<string, HostTrustReview>();
   const publicationReviews = new Map<string, PublicationReview>();
   let publication: PublicationCoordinator | undefined;
+  let studio: StudioCoordinator | undefined;
   let inventoryState: PublicInventoryState = emptyInventoryState();
   let mutationState: PublicMutationState = emptyMutationState();
   let collectionAcknowledgements: CollectionAcknowledgement[] = [];
@@ -979,6 +995,7 @@ export function createDesktopCapabilities(
     blockedTargets: structuredClone([...blockedTargetDefinitions]),
     preferences: currentPreferences(),
     ...(publication === undefined ? {} : { publication: publication.state() }),
+    ...(studio === undefined ? {} : { studio: studio.state() }),
     recovery: structuredClone(recoveryState),
     skillsShHandoffs: structuredClone([...skillsShHandoffsFor(endpoint)]),
     comparison: structuredClone(currentComparison()),
@@ -1100,6 +1117,25 @@ export function createDesktopCapabilities(
       "publication_unavailable",
       "Publication is unavailable in this session.",
       "publication",
+      false,
+    );
+
+  if (options.studio !== undefined) {
+    const { drafts, host } = options.studio;
+    studio = createStudioCoordinator({
+      clock,
+      drafts,
+      ...(host === undefined ? {} : { host }),
+      id: options.id,
+      onChange: () => publish({ ...inventoryState }),
+    });
+  }
+
+  const studioUnavailable = () =>
+    publicError(
+      "studio_unavailable",
+      "Studio is unavailable in this session.",
+      "studio",
       false,
     );
 
@@ -3704,6 +3740,41 @@ export function createDesktopCapabilities(
             }
           }
 
+          if (parsed.data.type.startsWith("studio.")) {
+            if (studio === undefined) {
+              return requestFailure(studioUnavailable());
+            }
+            const request = parsed.data;
+            const owner = endpointState.endpointId;
+            switch (request.type) {
+              case "studio.open":
+                return studio.open(owner);
+              case "studio.release":
+                return studio.release(owner, request.grantId);
+              case "studio.validate":
+                return studio.validate(owner, request.grantId);
+              case "studio.draft.create":
+                return studio.createDraft(owner, request.grantId);
+              case "studio.draft.save":
+                return studio.saveDraft(
+                  request.draftId,
+                  request.expectedRevision,
+                  request.skillMd,
+                );
+              case "studio.draft.delete":
+                return studio.deleteDraft(
+                  request.draftId,
+                  request.expectedRevision,
+                );
+              case "studio.preview":
+                return studio.preview(request.draftId);
+              case "studio.export":
+                return studio.exportDraft(request.draftId);
+              default:
+                return requestFailure(studioUnavailable());
+            }
+          }
+
           if (parsed.data.type === "publication.choose-source") {
             if (publication === undefined) {
               return requestFailure(publicationUnavailable());
@@ -4491,6 +4562,8 @@ export function createDesktopCapabilities(
             if (review !== undefined) rejectTrustedReview(review);
           }
           if (endpointState.role === "workspace") {
+            // ADR 0018: a Filesystem Grant dies with the document that opened it.
+            studio?.releaseGrantsFor(endpointState.endpointId);
             for (const review of publicationReviews.values()) {
               if (
                 review.ownerEndpointId === endpointState.endpointId &&
@@ -4529,6 +4602,7 @@ export function createDesktopCapabilities(
       // ADR 0020: a Guard that survived restart is adopted verbatim; the user
       // reconciles by readback only, never by an automatic second push.
       publication?.restoreGuard(restored.publicationGuard ?? null);
+      await studio?.initialize();
       const restoredAcknowledgements = [
         ...(restored.collectionAcknowledgements ?? []),
       ];
@@ -4807,7 +4881,7 @@ export function createDesktopCapabilities(
       ) {
         guardReasons.push("trusted-review-active");
       }
-      if (publication?.busy() === true) {
+      if (publication?.busy() === true || studio?.busy() === true) {
         guardReasons.push("protected-process-active");
       }
       if (
@@ -4861,6 +4935,7 @@ export function createDesktopCapabilities(
         // Removes only the proven application-owned temporary root; a
         // durable Guard stays in its store for reconciliation after restart.
         await publication?.shutdown();
+        await studio?.shutdown();
         for (const endpoint of endpoints.values())
           endpoint.pendingEvent = undefined;
       })();

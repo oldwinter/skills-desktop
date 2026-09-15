@@ -69,7 +69,9 @@ describe("Harness subset for add and remove", () => {
         targetHarnessIds={["amp", "codex"]}
       />,
     );
-    expect(screen.getByRole("checkbox", { name: "Amp (amp)" })).not.toBeChecked();
+    expect(
+      screen.getByRole("checkbox", { name: "Amp (amp)" }),
+    ).not.toBeChecked();
     const lastBound = screen.getByRole("checkbox", { name: "Codex (codex)" });
     expect(lastBound).toBeChecked();
     expect(lastBound).toBeDisabled();

@@ -60,6 +60,14 @@ const CHANNELS = {
   publicationReview: "workspace:publication:review-request",
   publicationDiscard: "workspace:publication:discard",
   publicationReconcile: "workspace:publication:reconcile",
+  studioOpen: "workspace:studio:open",
+  studioRelease: "workspace:studio:release",
+  studioValidate: "workspace:studio:validate",
+  studioDraftCreate: "workspace:studio:draft-create",
+  studioDraftSave: "workspace:studio:draft-save",
+  studioDraftDelete: "workspace:studio:draft-delete",
+  studioPreview: "workspace:studio:preview",
+  studioExport: "workspace:studio:export",
   event: "workspace:event",
   handoffSkillsSh: "workspace:handoff:skills-sh",
   updatePreferences: "workspace:preferences:update",
@@ -777,6 +785,52 @@ export function registerDesktopIpc(input: {
     CHANNELS.publicationReconcile,
     publicationHandler(() => ({ type: "publication.reconcile" })),
   );
+  // ADR 0018: every Studio argument is an opaque id, a revision, or Draft
+  // text; main validates them against the closed request union.
+  input.ipcMain.handle(
+    CHANNELS.studioOpen,
+    publicationHandler(() => ({ type: "studio.open" })),
+  );
+  input.ipcMain.handle(
+    CHANNELS.studioRelease,
+    publicationHandler((grantId) => ({ grantId, type: "studio.release" })),
+  );
+  input.ipcMain.handle(
+    CHANNELS.studioValidate,
+    publicationHandler((grantId) => ({ grantId, type: "studio.validate" })),
+  );
+  input.ipcMain.handle(
+    CHANNELS.studioDraftCreate,
+    publicationHandler((grantId) => ({
+      ...(grantId === undefined ? {} : { grantId }),
+      type: "studio.draft.create",
+    })),
+  );
+  input.ipcMain.handle(
+    CHANNELS.studioDraftSave,
+    publicationHandler((draftId, expectedRevision, skillMd) => ({
+      draftId,
+      expectedRevision,
+      skillMd,
+      type: "studio.draft.save",
+    })),
+  );
+  input.ipcMain.handle(
+    CHANNELS.studioDraftDelete,
+    publicationHandler((draftId, expectedRevision) => ({
+      draftId,
+      expectedRevision,
+      type: "studio.draft.delete",
+    })),
+  );
+  input.ipcMain.handle(
+    CHANNELS.studioPreview,
+    publicationHandler((draftId) => ({ draftId, type: "studio.preview" })),
+  );
+  input.ipcMain.handle(
+    CHANNELS.studioExport,
+    publicationHandler((draftId) => ({ draftId, type: "studio.export" })),
+  );
   input.ipcMain.handle(
     CHANNELS.handoffSkillsSh,
     async (event, attachmentEpoch: unknown, recordId: unknown) => {
@@ -1051,6 +1105,14 @@ export function registerDesktopIpc(input: {
       input.ipcMain.removeHandler(CHANNELS.publicationReview);
       input.ipcMain.removeHandler(CHANNELS.publicationDiscard);
       input.ipcMain.removeHandler(CHANNELS.publicationReconcile);
+      input.ipcMain.removeHandler(CHANNELS.studioOpen);
+      input.ipcMain.removeHandler(CHANNELS.studioRelease);
+      input.ipcMain.removeHandler(CHANNELS.studioValidate);
+      input.ipcMain.removeHandler(CHANNELS.studioDraftCreate);
+      input.ipcMain.removeHandler(CHANNELS.studioDraftSave);
+      input.ipcMain.removeHandler(CHANNELS.studioDraftDelete);
+      input.ipcMain.removeHandler(CHANNELS.studioPreview);
+      input.ipcMain.removeHandler(CHANNELS.studioExport);
       input.ipcMain.removeHandler(CHANNELS.targetCreate);
       input.ipcMain.removeHandler(CHANNELS.targetDelete);
       input.ipcMain.removeHandler(CHANNELS.targetRepair);
