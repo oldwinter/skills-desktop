@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { publicationPlanV1Schema } from "@skills-desktop/skills-runtime";
+
 import { publicPreferencesSchema } from "./preferences.js";
 import {
   commandPlanSchema,
@@ -44,6 +46,21 @@ export const collectionReviewProjectionSchema = z
   .strict();
 
 /**
+ * ADR 0020 `publication-push`: the sealed plan is the whole projection. The
+ * review window shows remote, exact branch, base or unborn state, candidate
+ * commit, every managed path and digest, tree digest, expiry, and plan
+ * digest; approval revalidates all of it in main before any Git transport.
+ */
+export const publicationReviewProjectionSchema = z
+  .object({
+    expiresAt: z.string().datetime({ offset: true }),
+    plan: publicationPlanV1Schema,
+    purpose: z.literal("publication-push"),
+    reviewId: z.string().min(1).max(256),
+  })
+  .strict();
+
+/**
  * The Trusted Review window renders in the same locale and appearance as the
  * workspace. Main projects the preferences alongside every review state so
  * the isolated review renderer never has to ask a second authority.
@@ -63,6 +80,7 @@ export const reviewSnapshotSchema = z.discriminatedUnion("status", [
         reviewProjectionSchema,
         hostTrustReviewProjectionSchema,
         collectionReviewProjectionSchema,
+        publicationReviewProjectionSchema,
       ]),
       schemaVersion: z.literal(REVIEW_PROTOCOL_VERSION),
       status: z.literal("pending"),

@@ -127,6 +127,24 @@ function bridge(overrides: Partial<WorkspaceBridge> = {}): WorkspaceBridge {
     async importPackage() {
       return { ok: true, value: { operationId: "import-1" } };
     },
+    async choosePublicationSource() {
+      return { ok: true, value: { operationId: "publication-1" } };
+    },
+    async exportPublication() {
+      return { ok: true, value: { operationId: "publication-1" } };
+    },
+    async preparePublication() {
+      return { ok: true, value: { operationId: "publication-1" } };
+    },
+    async requestPublicationReview() {
+      return { ok: true, value: { operationId: "publication-1" } };
+    },
+    async discardPublication() {
+      return { ok: true, value: { operationId: "publication-1" } };
+    },
+    async reconcilePublication() {
+      return { ok: true, value: { operationId: "publication-1" } };
+    },
     async inspectSource() {
       return { ok: true, value: { operationId: "inspection-1" } };
     },

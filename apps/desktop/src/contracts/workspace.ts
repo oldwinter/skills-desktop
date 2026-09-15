@@ -6,6 +6,10 @@ import {
   MAX_SOURCE_CANDIDATES,
   mutationIntentSchema,
   normalizeHarnessIds,
+  PUBLICATION_MAX_BRANCH_LENGTH,
+  PUBLICATION_MAX_REMOTE_LENGTH,
+  publicationPlanV1Schema,
+  publicationRemoteSchema,
   SKILLS_DIALECT_ID,
   SOURCE_FAMILIES,
   sourceDescriptorV1Schema,
@@ -20,10 +24,13 @@ import {
 export const WORKSPACE_PROTOCOL_VERSION = 2 as const;
 
 export const rendererErrorCodeSchema = z.enum([
+  "branch_unsupported",
   "cancelled",
   "cli_incompatible",
   "conflicting_inventory_entry",
   "duplicate_inventory_entry",
+  "export_invalid",
+  "git_unavailable",
   "host_key_changed",
   "host_trust_invalid",
   "host_trust_required",
@@ -38,9 +45,15 @@ export const rendererErrorCodeSchema = z.enum([
   "mutation_ineligible",
   "persist_failed",
   "process_failed",
+  "publication_drift",
+  "publication_guarded",
+  "publication_invalid",
+  "publication_unavailable",
   "remote_protocol_mismatch",
   "remote_protocol_violation",
   "remote_runtime_unavailable",
+  "remote_unreachable",
+  "remote_unsupported",
   "package_import_unavailable",
   "reconciliation_required",
   "reconciliation_wait",
@@ -871,6 +884,135 @@ export type PublicSkillsShHandoffRecord = z.infer<
   typeof publicSkillsShHandoffRecordSchema
 >;
 
+/**
+ * Git publication (ADR 0019 / ADR 0020). The renderer never sees a path: the
+ * export source is a main-owned folder grant (opaque id plus label), export
+ * writes through a main-owned destination dialog, and the only Git facts the
+ * renderer may supply are the remote text and the branch name.
+ */
+export const publicPublicationSourceSchema = z
+  .object({
+    chosenAt: z.string().datetime({ offset: true }),
+    exporterVersion: z.literal(1),
+    fileCount: z.number().int().positive(),
+    grantId: z.string().min(1).max(256),
+    label: z.string().min(1).max(256),
+    skills: z.array(z.string().min(1).max(64)).min(1).max(128),
+    treeDigest: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+  })
+  .strict();
+
+export const publicPublicationExportSchema = z
+  .object({
+    destinationLabel: z.string().min(1).max(256),
+    fileCount: z.number().int().positive(),
+    treeDigest: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+    writtenAt: z.string().datetime({ offset: true }),
+  })
+  .strict();
+
+export const publicationOutcomeStatusSchema = z.enum([
+  "diverged",
+  "not-published",
+  "published",
+  "uncertain",
+]);
+
+export const publicPublicationOutcomeSchema = z
+  .object({
+    branch: z.string().min(1).max(PUBLICATION_MAX_BRANCH_LENGTH),
+    candidateCommit: z.string().regex(/^[a-f0-9]{40}$/),
+    /** Remote ref after readback; `null` when absent, omitted when unreadable. */
+    observedCommit: z
+      .string()
+      .regex(/^[a-f0-9]{40}$/)
+      .nullable()
+      .optional(),
+    planId: z.string().min(1).max(256),
+    recordedAt: z.string().datetime({ offset: true }),
+    remote: publicationRemoteSchema,
+    status: publicationOutcomeStatusSchema,
+  })
+  .strict();
+
+export const publicPublicationGuardSchema = z
+  .object({
+    committedAt: z.string().datetime({ offset: true }),
+    lastReadback: publicationOutcomeStatusSchema.nullable(),
+    lastReadbackAt: z.string().datetime({ offset: true }).nullable(),
+    phase: z.enum(["pushing", "uncertain"]),
+    plan: publicationPlanV1Schema,
+  })
+  .strict();
+
+export const publicPublicationStateSchema = z
+  .object({
+    activeOperationId: z.string().min(1).max(256).nullable(),
+    available: z.boolean(),
+    export: publicPublicationExportSchema.nullable(),
+    guard: publicPublicationGuardSchema.nullable(),
+    lastError: rendererErrorSchema.nullable(),
+    lastOutcome: publicPublicationOutcomeSchema.nullable(),
+    phase: z.enum([
+      "choosing",
+      "exporting",
+      "idle",
+      "planned",
+      "preparing",
+      "pushing",
+      "reconciling",
+    ]),
+    plan: publicationPlanV1Schema.nullable(),
+    source: publicPublicationSourceSchema.nullable(),
+  })
+  .strict();
+
+export const choosePublicationSourceRequestSchema = z
+  .object({
+    type: z.literal("publication.choose-source"),
+    version: z.literal(WORKSPACE_PROTOCOL_VERSION),
+  })
+  .strict();
+
+export const exportPublicationRequestSchema = z
+  .object({
+    type: z.literal("publication.export"),
+    version: z.literal(WORKSPACE_PROTOCOL_VERSION),
+  })
+  .strict();
+
+export const preparePublicationRequestSchema = z
+  .object({
+    branch: z.string().min(1).max(PUBLICATION_MAX_BRANCH_LENGTH),
+    remote: z.string().min(1).max(PUBLICATION_MAX_REMOTE_LENGTH),
+    type: z.literal("publication.prepare"),
+    version: z.literal(WORKSPACE_PROTOCOL_VERSION),
+  })
+  .strict();
+
+export const requestPublicationReviewSchema = z
+  .object({
+    planId: z.string().min(1).max(256),
+    type: z.literal("publication.review.request"),
+    version: z.literal(WORKSPACE_PROTOCOL_VERSION),
+  })
+  .strict();
+
+export const discardPublicationRequestSchema = z
+  .object({
+    planId: z.string().min(1).max(256),
+    type: z.literal("publication.discard"),
+    version: z.literal(WORKSPACE_PROTOCOL_VERSION),
+  })
+  .strict();
+
+export const reconcilePublicationRequestSchema = z
+  .object({
+    type: z.literal("publication.reconcile"),
+    version: z.literal(WORKSPACE_PROTOCOL_VERSION),
+  })
+  .strict();
+
 export const workspaceSnapshotSchema = z
   .object({
     blockedTargets: z
@@ -878,6 +1020,7 @@ export const workspaceSnapshotSchema = z
       .max(1_000)
       .optional(),
     preferences: publicPreferencesSchema.optional(),
+    publication: publicPublicationStateSchema.optional(),
     recovery: publicRecoveryStateSchema.optional(),
     skillsShHandoffs: z
       .array(publicSkillsShHandoffRecordSchema)
@@ -1203,6 +1346,12 @@ export const workspaceRequestSchema = z.discriminatedUnion("type", [
   prepareCollectionAcrossTargetsRequestSchema,
   requestCollectionReviewSchema,
   importPackageRequestSchema,
+  choosePublicationSourceRequestSchema,
+  exportPublicationRequestSchema,
+  preparePublicationRequestSchema,
+  requestPublicationReviewSchema,
+  discardPublicationRequestSchema,
+  reconcilePublicationRequestSchema,
 ]);
 
 export const workspaceRequestResultSchema = z.discriminatedUnion("ok", [
@@ -1239,6 +1388,18 @@ export type PublicPackageImportOutcome = z.infer<
   typeof publicPackageImportOutcomeSchema
 >;
 export type PackageOrigin = z.infer<typeof packageOriginSchema>;
+export type PublicPublicationState = z.infer<
+  typeof publicPublicationStateSchema
+>;
+export type PublicPublicationSource = z.infer<
+  typeof publicPublicationSourceSchema
+>;
+export type PublicPublicationOutcome = z.infer<
+  typeof publicPublicationOutcomeSchema
+>;
+export type PublicPublicationGuard = z.infer<
+  typeof publicPublicationGuardSchema
+>;
 export type PrepareCollectionRequest = z.infer<
   typeof prepareCollectionRequestSchema
 >;
@@ -1287,6 +1448,15 @@ export interface WorkspaceBridge {
   getSnapshot(): Promise<WorkspaceSnapshotResult>;
   handoffSkillsSh(recordId: string): Promise<WorkspaceRequestResult>;
   importPackage(): Promise<WorkspaceRequestResult>;
+  choosePublicationSource(): Promise<WorkspaceRequestResult>;
+  exportPublication(): Promise<WorkspaceRequestResult>;
+  preparePublication(
+    remote: string,
+    branch: string,
+  ): Promise<WorkspaceRequestResult>;
+  requestPublicationReview(planId: string): Promise<WorkspaceRequestResult>;
+  discardPublication(planId: string): Promise<WorkspaceRequestResult>;
+  reconcilePublication(): Promise<WorkspaceRequestResult>;
   inspectSource(
     targetId: string,
     source: string,

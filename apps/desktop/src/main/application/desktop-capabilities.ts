@@ -6,6 +6,7 @@ import {
   parseSkillpack,
   type Result,
   type SourceDescriptorV1,
+  type WellKnownCodec,
 } from "@skills-desktop/skills-runtime";
 
 import type { RestartGuardReason } from "../../contracts/about.js";
@@ -43,6 +44,7 @@ import type {
   PreparedMutation,
   SourceInspection,
 } from "../adapters/skills-process.js";
+import type { GitPublisher } from "../git/git-publisher.js";
 import type { ImportedPackageRecord } from "../persistence/imported-package-records.js";
 import type {
   CollectionAcknowledgement,
@@ -82,6 +84,11 @@ import {
   type RecipeAssessment,
   validateOfficialCollectionCatalog,
 } from "./official-collections.js";
+import {
+  createPublicationCoordinator,
+  type PublicationCoordinator,
+  type PublicationHost,
+} from "./publication.js";
 
 const MAX_RETAINED_REVIEWS = 128;
 
@@ -136,6 +143,15 @@ export interface DesktopCapabilitiesOptions {
   readonly onReviewRequested?: (reviewId: string) => void;
   /** ADR 0023 locale/appearance authority. Absent means defaults only. */
   readonly preferences?: PreferenceAuthority;
+  /**
+   * ADR 0019 / ADR 0020 publication edges. Absent `host` means the Publish
+   * surface is unavailable; absent `publisher` means export-only (no Git).
+   */
+  readonly publication?: {
+    readonly codec: WellKnownCodec;
+    readonly host?: PublicationHost;
+    readonly publisher?: GitPublisher;
+  };
   readonly recoveryRecords: RecoveryRecords;
   readonly scheduleEventDelivery?: (deliver: () => void) => void;
   readonly shutdownTimeoutMs?: number;
@@ -186,6 +202,14 @@ interface HostTrustReview {
   readonly id: string;
   readonly ownerEndpointId: string;
   readonly targetId: string;
+}
+
+/** ADR 0020 `publication-push` review; the plan itself lives in the coordinator. */
+interface PublicationReview {
+  decision: "approve" | "reject" | undefined;
+  readonly id: string;
+  readonly ownerEndpointId: string;
+  readonly planId: string;
 }
 
 interface ActiveMutation {
@@ -492,6 +516,8 @@ export function createDesktopCapabilities(
   const reviews = new Map<string, TrustedReview>();
   const collectionPlans = new Map<string, CollectionPlan>();
   const hostTrustReviews = new Map<string, HostTrustReview>();
+  const publicationReviews = new Map<string, PublicationReview>();
+  let publication: PublicationCoordinator | undefined;
   let inventoryState: PublicInventoryState = emptyInventoryState();
   let mutationState: PublicMutationState = emptyMutationState();
   let collectionAcknowledgements: CollectionAcknowledgement[] = [];
@@ -952,6 +978,7 @@ export function createDesktopCapabilities(
   ): WorkspaceSnapshot => ({
     blockedTargets: structuredClone([...blockedTargetDefinitions]),
     preferences: currentPreferences(),
+    ...(publication === undefined ? {} : { publication: publication.state() }),
     recovery: structuredClone(recoveryState),
     skillsShHandoffs: structuredClone([...skillsShHandoffsFor(endpoint)]),
     comparison: structuredClone(currentComparison()),
@@ -1050,6 +1077,31 @@ export function createDesktopCapabilities(
       });
     }
   };
+
+  if (options.publication !== undefined) {
+    const { codec, host, publisher } = options.publication;
+    publication = createPublicationCoordinator({
+      clock,
+      codec,
+      commitGuard: (guard) =>
+        options.recoveryRecords.commit({
+          guard,
+          type: "publication.guard.replace",
+        }),
+      ...(host === undefined ? {} : { host }),
+      id: options.id,
+      onChange: () => publish({ ...inventoryState }),
+      ...(publisher === undefined ? {} : { publisher }),
+    });
+  }
+
+  const publicationUnavailable = () =>
+    publicError(
+      "publication_unavailable",
+      "Publication is unavailable in this session.",
+      "publication",
+      false,
+    );
 
   const publishSourceInspection = (next: PublicSourceInspectionState) => {
     sourceInspectionState = next;
@@ -1292,6 +1344,36 @@ export function createDesktopCapabilities(
   };
 
   const reviewSnapshotBodyFor = (endpoint: EndpointState): ReviewSnapshot => {
+    const publicationReview =
+      endpoint.reviewId === undefined
+        ? undefined
+        : publicationReviews.get(endpoint.reviewId);
+    if (publicationReview !== undefined) {
+      if (publicationReview.decision !== undefined) {
+        return {
+          decision: publicationReview.decision,
+          schemaVersion: REVIEW_PROTOCOL_VERSION,
+          status: "settled",
+        };
+      }
+      const plan = publication?.planForReview(publicationReview.planId);
+      if (plan === undefined) {
+        return {
+          schemaVersion: REVIEW_PROTOCOL_VERSION,
+          status: "unavailable",
+        };
+      }
+      return {
+        projection: {
+          expiresAt: plan.expiresAt,
+          plan: structuredClone(plan),
+          purpose: "publication-push",
+          reviewId: publicationReview.id,
+        },
+        schemaVersion: REVIEW_PROTOCOL_VERSION,
+        status: "pending",
+      };
+    }
     const hostTrustReview =
       endpoint.reviewId === undefined
         ? undefined
@@ -2081,6 +2163,37 @@ export function createDesktopCapabilities(
 
           if (endpointState.role === "review") {
             const parsedDecision = reviewDecisionRequestSchema.safeParse(input);
+            const publicationReview =
+              endpointState.reviewId === undefined
+                ? undefined
+                : publicationReviews.get(endpointState.reviewId);
+            if (publicationReview !== undefined) {
+              if (
+                !parsedDecision.success ||
+                publicationReview.decision !== undefined ||
+                publication === undefined
+              ) {
+                return requestFailure(
+                  publicError(
+                    "unauthorized",
+                    "This review window cannot make that request.",
+                    "authorize",
+                    false,
+                  ),
+                );
+              }
+              publicationReview.decision = parsedDecision.data.decision;
+              if (parsedDecision.data.decision === "reject") {
+                await publication.discard(publicationReview.planId);
+                return {
+                  ok: true,
+                  value: { operationId: publicationReview.id },
+                };
+              }
+              // ADR 0020: approval revalidates every byte and fetches the exact
+              // branch again inside the coordinator; drift causes no push.
+              return publication.approve(publicationReview.planId);
+            }
             const hostTrustReview =
               endpointState.reviewId === undefined
                 ? undefined
@@ -3591,6 +3704,86 @@ export function createDesktopCapabilities(
             }
           }
 
+          if (parsed.data.type === "publication.choose-source") {
+            if (publication === undefined) {
+              return requestFailure(publicationUnavailable());
+            }
+            return publication.chooseSource();
+          }
+
+          if (parsed.data.type === "publication.export") {
+            if (publication === undefined) {
+              return requestFailure(publicationUnavailable());
+            }
+            return publication.export();
+          }
+
+          if (parsed.data.type === "publication.prepare") {
+            if (publication === undefined) {
+              return requestFailure(publicationUnavailable());
+            }
+            // The renderer supplies remote text and a branch name only; the
+            // coordinator sanitizes both before system Git sees anything.
+            return publication.prepare(parsed.data.remote, parsed.data.branch);
+          }
+
+          if (parsed.data.type === "publication.review.request") {
+            if (publication === undefined) {
+              return requestFailure(publicationUnavailable());
+            }
+            const plan = publication.planForReview(parsed.data.planId);
+            if (plan === undefined) {
+              return requestFailure(
+                publicError(
+                  "review_invalid",
+                  "The publication plan is unavailable for review.",
+                  "review",
+                  false,
+                ),
+              );
+            }
+            for (const review of publicationReviews.values()) {
+              if (review.decision === undefined) review.decision = "reject";
+            }
+            while (publicationReviews.size >= MAX_RETAINED_REVIEWS) {
+              const oldest = publicationReviews.keys().next().value as
+                string | undefined;
+              if (oldest === undefined) break;
+              publicationReviews.delete(oldest);
+            }
+            const reviewId = options.id();
+            publicationReviews.set(reviewId, {
+              decision: undefined,
+              id: reviewId,
+              ownerEndpointId: endpointState.endpointId,
+              planId: plan.id,
+            });
+            options.onReviewRequested?.(reviewId);
+            return { ok: true, value: { operationId: reviewId } };
+          }
+
+          if (parsed.data.type === "publication.discard") {
+            if (publication === undefined) {
+              return requestFailure(publicationUnavailable());
+            }
+            for (const review of publicationReviews.values()) {
+              if (
+                review.planId === parsed.data.planId &&
+                review.decision === undefined
+              ) {
+                review.decision = "reject";
+              }
+            }
+            return publication.discard(parsed.data.planId);
+          }
+
+          if (parsed.data.type === "publication.reconcile") {
+            if (publication === undefined) {
+              return requestFailure(publicationUnavailable());
+            }
+            return publication.reconcile();
+          }
+
           if (parsed.data.type === "comparison.open") {
             const leftTargetId = parsed.data.leftTargetId;
             const rightTargetId = parsed.data.rightTargetId;
@@ -4285,10 +4478,27 @@ export function createDesktopCapabilities(
             ) {
               hostTrustReview.decision = "reject";
             }
+            const publicationReview = publicationReviews.get(
+              endpointState.reviewId,
+            );
+            if (
+              publicationReview !== undefined &&
+              publicationReview.decision === undefined
+            ) {
+              publicationReview.decision = "reject";
+            }
             const review = reviews.get(endpointState.reviewId);
             if (review !== undefined) rejectTrustedReview(review);
           }
           if (endpointState.role === "workspace") {
+            for (const review of publicationReviews.values()) {
+              if (
+                review.ownerEndpointId === endpointState.endpointId &&
+                review.decision === undefined
+              ) {
+                review.decision = "reject";
+              }
+            }
             for (const review of reviews.values()) {
               if (review.ownerEndpointId === endpointState.endpointId) {
                 rejectTrustedReview(review);
@@ -4316,6 +4526,9 @@ export function createDesktopCapabilities(
       const restored = await options.recoveryRecords.restore();
       blockedTargetDefinitions = restored.blockedTargetDefinitions ?? [];
       importedPackages = restored.importedPackages ?? [];
+      // ADR 0020: a Guard that survived restart is adopted verbatim; the user
+      // reconciles by readback only, never by an automatic second push.
+      publication?.restoreGuard(restored.publicationGuard ?? null);
       const restoredAcknowledgements = [
         ...(restored.collectionAcknowledgements ?? []),
       ];
@@ -4587,9 +4800,15 @@ export function createDesktopCapabilities(
         [...reviews.values()].some(({ decision }) => decision === undefined) ||
         [...hostTrustReviews.values()].some(
           ({ decision }) => decision === undefined,
+        ) ||
+        [...publicationReviews.values()].some(
+          ({ decision }) => decision === undefined,
         )
       ) {
         guardReasons.push("trusted-review-active");
+      }
+      if (publication?.busy() === true) {
+        guardReasons.push("protected-process-active");
       }
       if (
         guardedTargetIds.size > 0 ||
@@ -4639,6 +4858,9 @@ export function createDesktopCapabilities(
           ]);
           if (timeout !== undefined) clearTimeout(timeout);
         }
+        // Removes only the proven application-owned temporary root; a
+        // durable Guard stays in its store for reconciliation after restart.
+        await publication?.shutdown();
         for (const endpoint of endpoints.values())
           endpoint.pendingEvent = undefined;
       })();
