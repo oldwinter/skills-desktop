@@ -6,6 +6,7 @@
 export const en = {
   "app.name": "Skills Desktop",
   "app.skipToWorkspace": "Skip to workspace",
+  "app.skipToReview": "Skip to review",
   "app.trustedReviewTitle": "Skills Desktop Trusted Review",
 
   "common.details": "Details",

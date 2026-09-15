@@ -8,6 +8,7 @@ import type { en } from "./messages.en.js";
 export const zhCN: Readonly<Record<keyof typeof en, string>> = {
   "app.name": "Skills Desktop",
   "app.skipToWorkspace": "跳到工作区",
+  "app.skipToReview": "跳到审阅内容",
   "app.trustedReviewTitle": "Skills Desktop 可信复核",
 
   "common.details": "详情",

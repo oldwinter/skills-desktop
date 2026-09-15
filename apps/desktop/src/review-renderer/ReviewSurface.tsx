@@ -257,6 +257,7 @@ export function ReviewSurface({ client }: { readonly client: ReviewBridge }) {
 
   return (
     <LocaleProvider locale={snapshot?.preferences?.locale}>
+      <ReviewSkipLink />
       <ReviewContent
         client={client}
         error={error}
@@ -265,6 +266,15 @@ export function ReviewSurface({ client }: { readonly client: ReviewBridge }) {
         snapshot={snapshot}
       />
     </LocaleProvider>
+  );
+}
+
+function ReviewSkipLink() {
+  const { t } = useTranslator();
+  return (
+    <a className="skip-link" href="#review-main">
+      {t("app.skipToReview")}
+    </a>
   );
 }
 
@@ -319,7 +329,7 @@ function ReviewContent({
 
   if (error !== undefined) {
     return (
-      <main className="review-surface">
+      <main className="review-surface" id="review-main" tabIndex={-1}>
         <div className="review-alert" role="alert">
           <AlertCircle aria-hidden="true" size={18} />
           <span className="user-facing-error">
@@ -335,7 +345,7 @@ function ReviewContent({
   }
   if (snapshot === undefined) {
     return (
-      <main className="review-surface" aria-busy="true">
+      <main className="review-surface" id="review-main" tabIndex={-1} aria-busy="true">
         <div className="review-loading" role="status">
           <Clock3 aria-hidden="true" size={18} />
           {t("review.loading")}
@@ -345,7 +355,7 @@ function ReviewContent({
   }
   if (snapshot.status === "unavailable") {
     return (
-      <main className="review-surface">
+      <main className="review-surface" id="review-main" tabIndex={-1}>
         <div className="review-alert" role="alert">
           <AlertCircle aria-hidden="true" size={18} />
           {t("review.unavailable")}
@@ -355,7 +365,7 @@ function ReviewContent({
   }
   if (snapshot.status === "settled") {
     return (
-      <main className="review-surface">
+      <main className="review-surface" id="review-main" tabIndex={-1}>
         <div className="review-settled">
           <span className="review-settled__message" role="status">
             <Check aria-hidden="true" size={20} />
@@ -410,7 +420,7 @@ function ReviewContent({
     const { algorithm, fingerprint, identity, target, trustAction } =
       snapshot.projection;
     return (
-      <main className="review-surface">
+      <main className="review-surface" id="review-main" tabIndex={-1}>
         <ReviewHeading
           title={t(
             trustAction === "rotation"
@@ -464,7 +474,7 @@ function ReviewContent({
     );
     if (collectionPlan.schemaVersion === 2) {
       return (
-        <main className="review-surface">
+        <main className="review-surface" id="review-main" tabIndex={-1}>
           <ReviewHeading title={collectionTitle} />
           <dl className="review-facts">
             <div>
@@ -563,7 +573,7 @@ function ReviewContent({
       );
     }
     return (
-      <main className="review-surface">
+      <main className="review-surface" id="review-main" tabIndex={-1}>
         <ReviewHeading title={collectionTitle} />
         <dl className="review-facts">
           <div>
@@ -650,7 +660,7 @@ function ReviewContent({
     // will bind to is shown; approval revalidates all of it in main first.
     const { plan } = snapshot.projection;
     return (
-      <main className="review-surface">
+      <main className="review-surface" id="review-main" tabIndex={-1}>
         <ReviewHeading title={t("review.publication.title")} />
         <dl className="review-facts">
           <div className="review-facts__wide">
@@ -738,7 +748,7 @@ function ReviewContent({
           ? "review.mutation.title.add"
           : "review.mutation.title.update";
   return (
-    <main className="review-surface">
+    <main className="review-surface" id="review-main" tabIndex={-1}>
       <ReviewHeading title={t(titleKey)} />
 
       <dl className="review-facts">
