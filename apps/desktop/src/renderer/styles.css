@@ -435,6 +435,12 @@ code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; fo
 .recovery-item > div { display: grid; gap: 4px; min-width: 0; }
 .recovery-item strong { font-size: var(--font-size-ui); font-weight: 600; overflow-wrap: anywhere; }
 .recovery-item small { color: var(--text-tertiary); font-size: var(--font-size-meta); overflow-wrap: anywhere; }
+.recovery-section .target-facts { margin: 0 0 12px; max-width: 72ch; }
+.recovery-section .target-facts dd { overflow-wrap: anywhere; text-align: right; }
+.recovery-section .text-button { display: inline-flex; align-items: center; }
+.recovery-section .target-form { max-width: 72ch; padding-top: 4px; }
+.recovery-section .target-form small { color: var(--text-tertiary); font-size: var(--font-size-meta); }
+.publish-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
 .recovery-repair-choice { display: grid; gap: 5px; margin-top: 6px; color: var(--text-tertiary); font-size: var(--font-size-meta); }
 .recovery-repair-choice select { min-width: 0; max-width: 360px; height: 40px; padding: 0 9px; color: var(--text); background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--radius-control); }
 .recovery-empty { display: grid; justify-items: start; gap: 8px; max-width: 60ch; margin: 8px 20px 20px; padding: 20px; color: var(--text-secondary); background: var(--surface); border: 1px dashed var(--line-strong); border-radius: var(--radius-panel); }

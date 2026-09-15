@@ -601,6 +601,7 @@ try {
       "navigate.collections",
       "navigate.comparison",
       "navigate.inventory",
+      "navigate.publish",
       "navigate.recovery",
       "navigate.targets",
       "update.check",
@@ -626,7 +627,7 @@ try {
     !applicationMenu.viewLabels.includes("Refresh Inventory") ||
     !applicationMenu.viewLabels.includes("Go to Inventory") ||
     applicationMenu.refreshShortcut !== "Control+R" ||
-    applicationMenu.aboutShortcut !== "Control+6"
+    applicationMenu.aboutShortcut !== "Control+7"
   ) {
     throw new Error(
       `Packaged application menu failed: ${JSON.stringify(applicationMenu)}`,

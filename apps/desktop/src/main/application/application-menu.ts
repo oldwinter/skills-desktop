@@ -50,8 +50,9 @@ const NAVIGATION: readonly {
   { command: "navigate.comparison", digit: "2", label: "nav.comparison" },
   { command: "navigate.collections", digit: "3", label: "nav.collections" },
   { command: "navigate.targets", digit: "4", label: "nav.targets" },
-  { command: "navigate.recovery", digit: "5", label: "nav.recovery" },
-  { command: "navigate.about", digit: "6", label: "nav.about" },
+  { command: "navigate.publish", digit: "5", label: "nav.publish" },
+  { command: "navigate.recovery", digit: "6", label: "nav.recovery" },
+  { command: "navigate.about", digit: "7", label: "nav.about" },
 ];
 
 /** Convert an Electron accelerator into WAI-ARIA `aria-keyshortcuts` text. */

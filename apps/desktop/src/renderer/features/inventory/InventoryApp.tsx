@@ -50,6 +50,7 @@ import { AboutView } from "../about/AboutView.js";
 import { PreferencesPanel } from "../preferences/PreferencesPanel.js";
 import { ComparisonView } from "../comparison/ComparisonView.js";
 import { CollectionsView } from "../collections/CollectionsView.js";
+import { PublishView } from "../publish/PublishView.js";
 import { TargetsView } from "../targets/TargetsView.js";
 import {
   HarnessSubsetControl,
@@ -192,7 +193,9 @@ function EmptyInventory({
     <div className="empty-state" role="status">
       <CircleHelp aria-hidden="true" size={22} />
       <h2>
-        {t(filtered ? "inventory.empty.noMatching" : "inventory.empty.noSkills")}
+        {t(
+          filtered ? "inventory.empty.noMatching" : "inventory.empty.noSkills",
+        )}
       </h2>
       <p>
         {t(
@@ -202,11 +205,7 @@ function EmptyInventory({
         )}
       </p>
       {filtered ? (
-        <button
-          className="text-button"
-          onClick={onClearFilters}
-          type="button"
-        >
+        <button className="text-button" onClick={onClearFilters} type="button">
           <RotateCcw aria-hidden="true" size={15} />
           {t("inventory.empty.clearFilters")}
         </button>
@@ -559,6 +558,7 @@ function InventoryWorkspace({
       "navigate.collections": () => navigate("collections"),
       "navigate.comparison": () => navigate("comparison"),
       "navigate.inventory": () => navigate("inventory"),
+      "navigate.publish": () => navigate("publish"),
       "navigate.recovery": () => navigate("recovery"),
       "navigate.targets": () => navigate("targets"),
       "update.check": () => {
@@ -651,7 +651,12 @@ function InventoryWorkspace({
   if (snapshot === undefined) {
     if (bootstrapError !== undefined) {
       return (
-        <main className="boot-state boot-state--error" id="workspace-main" role="alert" tabIndex={-1}>
+        <main
+          className="boot-state boot-state--error"
+          id="workspace-main"
+          role="alert"
+          tabIndex={-1}
+        >
           <AlertCircle aria-hidden="true" size={24} />
           <UserFacingErrorCopy error={bootstrapError} />
           <button
@@ -667,7 +672,12 @@ function InventoryWorkspace({
       );
     }
     return (
-      <main className="boot-state" aria-busy="true" id="workspace-main" tabIndex={-1}>
+      <main
+        className="boot-state"
+        aria-busy="true"
+        id="workspace-main"
+        tabIndex={-1}
+      >
         <Boxes aria-hidden="true" size={24} />
         <span>{t("inventory.boot.opening")}</span>
       </main>
@@ -801,7 +811,8 @@ function InventoryWorkspace({
       snapshot.target.id,
       trimmedAddSource,
     );
-    if (!result.ok) setAddSourceError(userFacingErrorMessage(result.error, locale));
+    if (!result.ok)
+      setAddSourceError(userFacingErrorMessage(result.error, locale));
   };
   const prepareAdd = async () => {
     if (sshUnavailable) return;
@@ -862,7 +873,9 @@ function InventoryWorkspace({
       reviewId: undefined,
     };
     reviewFocusIntentRef.current = intent;
-    const result = await client.requestReview(preparedMutationContext.operationId);
+    const result = await client.requestReview(
+      preparedMutationContext.operationId,
+    );
     if (reviewFocusIntentRef.current !== intent) return;
     if (result.ok) setActionError(undefined);
     else {
@@ -964,7 +977,7 @@ function InventoryWorkspace({
                     <label className="inventory-target-chooser">
                       {t("common.target")}
                       <select
-                      onChange={(event) => {
+                        onChange={(event) => {
                           selectTarget(event.currentTarget.value);
                         }}
                         value={snapshot.target.id}
@@ -1269,7 +1282,9 @@ function InventoryWorkspace({
                                 ? snapshot.target.harnessIds.join(", ")
                                 : t("inventory.table.notLinked")}
                             </td>
-                            <td data-label={t("inventory.table.declaredSource")}>
+                            <td
+                              data-label={t("inventory.table.declaredSource")}
+                            >
                               <code className="wrapping-value">
                                 {sourceLabel(t, entry)}
                               </code>
@@ -1660,7 +1675,9 @@ function InventoryWorkspace({
                 >
                   <header>
                     <ShieldCheck aria-hidden="true" size={17} />
-                    <h2 id="command-plan-heading">{t("inventory.plan.heading")}</h2>
+                    <h2 id="command-plan-heading">
+                      {t("inventory.plan.heading")}
+                    </h2>
                   </header>
                   <dl>
                     <div>
@@ -1669,7 +1686,9 @@ function InventoryWorkspace({
                     </div>
                     <div>
                       <dt>{t("common.scope")}</dt>
-                      <dd>{scopeLabel(t, snapshot.mutation.commandPlan.scope)}</dd>
+                      <dd>
+                        {scopeLabel(t, snapshot.mutation.commandPlan.scope)}
+                      </dd>
                     </div>
                     <div>
                       <dt>{t("common.skills")}</dt>
@@ -1767,6 +1786,8 @@ function InventoryWorkspace({
           />
         ) : view === "collections" ? (
           <CollectionsView client={client} snapshot={snapshot} />
+        ) : view === "publish" ? (
+          <PublishView client={client} publication={snapshot.publication} />
         ) : view === "about" ? (
           <AboutView client={client.about}>
             <PreferencesPanel

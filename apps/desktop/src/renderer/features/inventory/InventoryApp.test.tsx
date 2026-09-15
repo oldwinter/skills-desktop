@@ -3951,7 +3951,7 @@ describe("Local Target Inventory shell", () => {
     );
     expect(screen.getByRole("button", { name: "About" })).toHaveAttribute(
       "aria-keyshortcuts",
-      "Control+6",
+      "Control+7",
     );
     expect(screen.getByRole("button", { name: "Inventory" })).toHaveAttribute(
       "aria-keyshortcuts",

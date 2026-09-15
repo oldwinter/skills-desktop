@@ -301,7 +301,9 @@ function ReviewContent({
       setSettledMessage(
         snapshot?.status === "pending" && "fingerprint" in snapshot.projection
           ? "review.hostTrustConfirmed"
-          : "review.mutationStarted",
+          : snapshot?.status === "pending" && "plan" in snapshot.projection
+            ? "review.publication.settled"
+            : "review.mutationStarted",
       );
     } else setSettledMessage("review.rejected");
     onSnapshot((current) => ({
@@ -638,6 +640,89 @@ function ReviewContent({
         <div className="review-actions">
           {rejectButton}
           {approveButton(approveLabel, "review.applying")}
+        </div>
+      </main>
+    );
+  }
+
+  if ("plan" in snapshot.projection) {
+    // ADR 0020: the sealed plan is the whole projection. Every fact the push
+    // will bind to is shown; approval revalidates all of it in main first.
+    const { plan } = snapshot.projection;
+    return (
+      <main className="review-surface">
+        <ReviewHeading title={t("review.publication.title")} />
+        <dl className="review-facts">
+          <div className="review-facts__wide">
+            <dt>{t("review.publication.remote")}</dt>
+            <dd>{plan.remote.url}</dd>
+          </div>
+          <div>
+            <dt>{t("review.publication.remoteKind")}</dt>
+            <dd>{plan.remote.kind}</dd>
+          </div>
+          <div>
+            <dt>{t("review.publication.branch")}</dt>
+            <dd>{plan.ref}</dd>
+          </div>
+          <div className="review-facts__wide">
+            <dt>{t("review.publication.base")}</dt>
+            <dd>
+              {plan.base.kind === "unborn"
+                ? t("review.publication.base.unborn")
+                : plan.base.commit}
+            </dd>
+          </div>
+          <div className="review-facts__wide">
+            <dt>{t("review.publication.candidateCommit")}</dt>
+            <dd>{plan.candidateCommit}</dd>
+          </div>
+          <div className="review-facts__wide">
+            <dt>{t("common.skills")}</dt>
+            <dd>{plan.skills.join(", ")}</dd>
+          </div>
+          <div>
+            <dt>{t("review.collection.expires")}</dt>
+            <dd>
+              <ReviewInstant value={plan.expiresAt} />
+            </dd>
+          </div>
+        </dl>
+        <DigestDetails>
+          <dl className="review-facts">
+            <div className="review-facts__wide">
+              <dt>{t("review.publication.treeDigest")}</dt>
+              <dd>{plan.treeDigest}</dd>
+            </div>
+            <div className="review-facts__wide">
+              <dt>{t("review.publication.planDigest")}</dt>
+              <dd>{plan.planDigest}</dd>
+            </div>
+          </dl>
+        </DigestDetails>
+        <section
+          className="review-plan"
+          aria-labelledby="review-publication-files-heading"
+        >
+          <h2 id="review-publication-files-heading">
+            {t("review.publication.managedFiles")}
+          </h2>
+          <ul className="review-file-list">
+            {plan.files.map((file) => (
+              <li key={file.path}>
+                <code>{file.path}</code>
+                <small>{file.digest}</small>
+              </li>
+            ))}
+          </ul>
+          <p>{t("review.publication.fastForwardOnly")}</p>
+        </section>
+        <div className="review-actions">
+          {rejectButton}
+          {approveButton(
+            t("review.publication.approve"),
+            "review.publication.pushing",
+          )}
         </div>
       </main>
     );

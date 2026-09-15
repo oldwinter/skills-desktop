@@ -47,6 +47,7 @@ describe("buildApplicationMenu", () => {
         "navigate.comparison",
         "navigate.collections",
         "navigate.targets",
+        "navigate.publish",
         "navigate.recovery",
         "navigate.about",
         "update.check",
@@ -80,8 +81,8 @@ describe("buildApplicationMenu", () => {
       ariaKeyShortcuts: "Control+R",
     });
     expect(menuCommandItem(linux, "navigate.about")).toMatchObject({
-      accelerator: "CmdOrCtrl+6",
-      ariaKeyShortcuts: "Control+6",
+      accelerator: "CmdOrCtrl+7",
+      ariaKeyShortcuts: "Control+7",
     });
     expect(menuCommandItem(linux, "update.check")?.accelerator).toBeUndefined();
     const accelerators = linux.menus
