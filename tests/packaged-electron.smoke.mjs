@@ -1233,6 +1233,7 @@ try {
         "Comparison",
         "Collections",
         "Targets",
+        "Publish",
         "Recovery",
         "About",
       ]) ||

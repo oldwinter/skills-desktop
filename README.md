@@ -52,6 +52,7 @@ npm install
 npm run verify
 npm run smoke:cli
 npm run smoke:well-known
+npm run smoke:git-publish
 npm run smoke:packaged
 ```
 
@@ -63,6 +64,11 @@ Skills CLI can run through `npx`.
 ephemeral 127.0.0.1 HTTP server on an OS-selected port and has the same pinned
 CLI list it back read-only; it is Linux/localhost evidence only and proves
 nothing about live hosting.
+`npm run smoke:git-publish` publishes the same export onto a fixture-owned
+bare Git repository served over loopback smart HTTP with the real system Git,
+covering fast-forward, unborn branch, drift refusal, raced non-fast-forward
+(`diverged`), and an interrupted push reconciled by readback (`uncertain`);
+it proves nothing about live remotes.
 The packaged smoke uses a fake pinned CLI boundary in temporary state so it can
 exercise fresh observation, redaction, restart, and stale recovery without
 reading or changing developer inventory.

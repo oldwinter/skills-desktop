@@ -64,7 +64,11 @@ describe("verify workflow contract", () => {
     expect(packagedSmokeSource).not.toContain("startDisposableSshd");
     expect(packagedSmokeSource).not.toContain("/usr/sbin/sshd");
     // ADR 0024 mission tracers that need the network run on push only.
-    for (const script of ["npm run smoke:cli", "npm run smoke:well-known"]) {
+    for (const script of [
+      "npm run smoke:cli",
+      "npm run smoke:well-known",
+      "npm run smoke:git-publish",
+    ]) {
       const step = linuxJob.steps.find(
         (candidate: { run?: string }) => candidate.run === script,
       );

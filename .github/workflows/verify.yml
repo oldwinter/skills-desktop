@@ -73,6 +73,8 @@ jobs:
         run: npm run smoke:cli
       - if: github.event_name == 'push'
         run: npm run smoke:well-known
+      - if: github.event_name == 'push'
+        run: npm run smoke:git-publish
 
   platform-contracts:
     runs-on: ${{ matrix.os }}
