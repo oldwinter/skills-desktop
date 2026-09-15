@@ -71,6 +71,8 @@ jobs:
           CI=true xvfb-run -a node tests/packaged-electron.smoke.mjs
       - if: github.event_name == 'push'
         run: npm run smoke:cli
+      - if: github.event_name == 'push'
+        run: npm run smoke:well-known
 
   platform-contracts:
     runs-on: ${{ matrix.os }}

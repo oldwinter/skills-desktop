@@ -31,6 +31,7 @@
     "verify": "npm run typecheck && npm run lint && npm run check:imports && npm run test:coverage && npm run build",
     "smoke:cli": "vitest run --config vitest.smoke.config.ts tests/real-cli.smoke.test.ts",
     "smoke:ssh": "vitest run --config vitest.ssh-smoke.config.ts",
+    "smoke:well-known": "vitest run --config vitest.well-known-smoke.config.ts",
     "package:linux": "npm run build && npm exec --workspace @skills-desktop/desktop electron-forge package -- --platform=linux --arch=x64",
     "smoke:packaged": "npm run package:linux && xvfb-run -a node tests/packaged-electron.smoke.mjs",
     "qa:packaged-ui": "node tests/packaged-ui-qa/run.mjs",
