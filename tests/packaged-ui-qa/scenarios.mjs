@@ -150,6 +150,14 @@ async function scanWithAxe(page, axeSource, label) {
           id: violation.id,
           impact: violation.impact,
           nodes: violation.nodes.length,
+          samples: violation.nodes.slice(0, 6).map((node) => ({
+            target: node.target,
+            html: typeof node.html === "string" ? node.html.slice(0, 180) : "",
+            failureSummary:
+              typeof node.failureSummary === "string"
+                ? node.failureSummary.slice(0, 320)
+                : "",
+          })),
         })),
       };
     })()`);
