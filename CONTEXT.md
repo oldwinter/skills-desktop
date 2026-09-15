@@ -43,16 +43,17 @@ remote host's identity.
 
 **Effective Target Binding**: The resolved execution facts for one Target
 Generation, including effective OpenSSH endpoint and host-key lookup identity,
-Effective OpenSSH endpoint and host-key lookup identity, workspace, Harness
-set, host trust, Skills Dialect, Harness Compatibility Registry, Wire Protocol,
-and Remote Bootstrap. It is frozen while a Skills Process is used and
-re-resolved for a later operation rather than silently drifting.
-**Skills Process**: The shared `observeInventory`, `prepareMutation`, and
+workspace, Harness set, host trust, Skills Dialect, Harness Compatibility
+Registry, Wire Protocol, and Remote Bootstrap. It is frozen while a Skills
+Process is used and re-resolved for a later operation rather than silently
+drifting.
+
 **Skills Process**: The shared `observeInventory`, `inspectSource`,
 `prepareMutation`, and `executeConfirmed` interface returned after opening a
 Target. Opening freezes an Effective Target Binding; it does not establish or
 retain an SSH connection. Local and SSH implementations are substitutable at
 this interface.
+
 **Target Session**: The current application-session association of one Target
 Generation, its frozen Effective Target Binding, its Skills Process, and its
 latest Fresh Inventory. It carries no persistent or retained SSH connection and
