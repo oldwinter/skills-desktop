@@ -104,7 +104,16 @@ const mocks = vi.hoisted(() => {
     }),
     quit: vi.fn(),
     requestSingleInstanceLock: vi.fn(() => true),
+    setAboutPanelOptions: vi.fn(),
+    showAboutPanel: vi.fn(),
     whenReady: vi.fn(async () => undefined),
+  };
+  const installedMenus: unknown[] = [];
+  const Menu = {
+    buildFromTemplate: vi.fn((template: unknown) => ({ template })),
+    setApplicationMenu: vi.fn((menu: unknown) => {
+      installedMenus.push(menu);
+    }),
   };
   const autoUpdater = {
     on: vi.fn((event: string, listener: Listener) => {
@@ -123,7 +132,21 @@ const mocks = vi.hoisted(() => {
   };
   const updates = {
     dispose: vi.fn(),
+    getSnapshot: vi.fn(() => ({
+      application: { architecture: "x64", platform: "linux", version: "0.1.0" },
+    })),
     prepareNormalQuit: vi.fn(() => true),
+  };
+  let preferenceListener: (() => void) | undefined;
+  let locale = "en";
+  const preferences = {
+    current: vi.fn(() => ({ locale })),
+    subscribe: vi.fn((listener: () => void) => {
+      preferenceListener = listener;
+      return () => {
+        if (preferenceListener === listener) preferenceListener = undefined;
+      };
+    }),
   };
   const desktopIpc = {
     attach: vi.fn((webContents: { readonly id: number }) => ({
@@ -132,6 +155,7 @@ const mocks = vi.hoisted(() => {
     })),
     detach: vi.fn(),
     dispose: vi.fn(),
+    notifyMenuCommand: vi.fn(() => true),
     notifyReviewWindowClosed: vi.fn(),
   };
 
@@ -150,10 +174,16 @@ const mocks = vi.hoisted(() => {
       )("closed", () => handleClosed(window.webContents.id));
     },
   );
+  const compositionRoot = () => ({
+    capabilities,
+    preferences,
+    releaseChannel: "unsigned-preview",
+    updates,
+  });
   const createCompositionRoot = vi.fn(
     async (options: { onReviewRequested(reviewId: string): void }) => {
       reviewRequested = options.onReviewRequested;
-      return { capabilities, updates };
+      return compositionRoot();
     },
   );
 
@@ -177,6 +207,17 @@ const mocks = vi.hoisted(() => {
     app.isPackaged = false;
     app.on.mockClear();
     app.quit.mockClear();
+    app.setAboutPanelOptions.mockClear();
+    app.showAboutPanel.mockClear();
+    installedMenus.length = 0;
+    Menu.buildFromTemplate.mockClear();
+    Menu.setApplicationMenu.mockClear();
+    locale = "en";
+    preferenceListener = undefined;
+    preferences.current.mockClear();
+    preferences.subscribe.mockClear();
+    updates.getSnapshot.mockClear();
+    desktopIpc.notifyMenuCommand.mockClear();
     app.requestSingleInstanceLock.mockReset();
     app.requestSingleInstanceLock.mockReturnValue(true);
     app.whenReady.mockReset();
@@ -204,7 +245,7 @@ const mocks = vi.hoisted(() => {
     createCompositionRoot.mockImplementation(
       async (options: { onReviewRequested(reviewId: string): void }) => {
         reviewRequested = options.onReviewRequested;
-        return { capabilities, updates };
+        return compositionRoot();
       },
     );
   };
@@ -214,8 +255,18 @@ const mocks = vi.hoisted(() => {
     autoUpdater,
     BrowserWindow,
     capabilities,
+    compositionRoot,
     createCompositionRoot,
     desktopIpc,
+    installedMenus,
+    Menu,
+    preferences,
+    setLocale(next: string) {
+      locale = next;
+    },
+    emitPreferenceChange() {
+      preferenceListener?.();
+    },
     emitApp,
     emitUpdater,
     onWindowClosed,
@@ -237,6 +288,7 @@ vi.mock("electron", () => ({
   autoUpdater: mocks.autoUpdater,
   BrowserWindow: mocks.BrowserWindow,
   ipcMain: {},
+  Menu: mocks.Menu,
   protocol: mocks.protocol,
 }));
 vi.mock("./adapters/electron-security.js", () => ({
@@ -306,7 +358,7 @@ describe("desktop main entrypoint", () => {
     mocks.createCompositionRoot.mockImplementationOnce(
       async (options: { onReviewRequested(reviewId: string): void }) => {
         options.onReviewRequested("too-early");
-        return { capabilities: mocks.capabilities, updates: mocks.updates };
+        return mocks.compositionRoot();
       },
     );
 
@@ -474,6 +526,105 @@ describe("desktop main entrypoint", () => {
     platform.mockReturnValue("linux");
     mocks.emitApp("window-all-closed");
     expect(mocks.app.quit).toHaveBeenCalledTimes(1);
+    platform.mockRestore();
+  });
+
+  it("installs the localized menu with the native About identity and relays commands to the live workspace only (#211)", async () => {
+    const platform = vi.spyOn(process, "platform", "get");
+    platform.mockReturnValue("linux");
+    await loadEntrypoint();
+    await waitForStartup();
+
+    expect(mocks.registerDesktopIpc).toHaveBeenCalledWith(
+      expect.objectContaining({ menu: expect.anything() }),
+    );
+    const ipcInput = (
+      mocks.registerDesktopIpc.mock.calls[0] as unknown as [
+        { menu: { current(): { locale: string; menus: { id: string }[] } } },
+      ]
+    )[0];
+    expect(mocks.installedMenus).toHaveLength(1);
+    expect(ipcInput.menu.current().menus.map(({ id }) => id)).toEqual([
+      "file",
+      "edit",
+      "view",
+      "window",
+      "help",
+    ]);
+    expect(mocks.app.setAboutPanelOptions).toHaveBeenCalledWith({
+      applicationName: "Skills Desktop",
+      applicationVersion: "0.1.0",
+      copyright:
+        "Local-only V1. Skills are managed through the pinned skills CLI.",
+      credits: "Release channel: unsigned-preview",
+      version: "linux-x64",
+    });
+
+    const template = (
+      mocks.installedMenus[0] as {
+        template: {
+          id: string;
+          submenu: { id: string; click?: () => void }[];
+        }[];
+      }
+    ).template;
+    const click = (id: string) => {
+      const item = template
+        .flatMap(({ submenu }) => submenu)
+        .find((candidate) => candidate.id === id);
+      if (item?.click === undefined) throw new Error(`No clickable ${id}`);
+      item.click();
+    };
+
+    // Before the workspace document attaches, a renderer command only
+    // focuses the window; nothing is relayed.
+    const workspace = mocks.windows[0];
+    click("view.refresh-inventory");
+    expect(workspace?.focus).toHaveBeenCalledTimes(1);
+    expect(mocks.desktopIpc.notifyMenuCommand).not.toHaveBeenCalled();
+
+    workspace?.webContents.emit("dom-ready");
+    click("view.refresh-inventory");
+    click("view.navigate-about");
+    expect(mocks.desktopIpc.notifyMenuCommand).toHaveBeenCalledTimes(2);
+    expect(mocks.desktopIpc.notifyMenuCommand).toHaveBeenNthCalledWith(
+      1,
+      "inventory.refresh",
+      { attachmentEpoch: "attachment-1", webContentsId: 1 },
+    );
+    expect(mocks.desktopIpc.notifyMenuCommand).toHaveBeenNthCalledWith(
+      2,
+      "navigate.about",
+      { attachmentEpoch: "attachment-1", webContentsId: 1 },
+    );
+
+    click("help.about");
+    expect(mocks.app.showAboutPanel).toHaveBeenCalledTimes(1);
+    click("window.show-workspace");
+    expect(workspace?.focus).toHaveBeenCalledTimes(4);
+    expect(mocks.desktopIpc.notifyMenuCommand).toHaveBeenCalledTimes(2);
+
+    // A locale change reinstalls the menu from the same catalogs.
+    mocks.setLocale("zh-CN");
+    mocks.emitPreferenceChange();
+    expect(mocks.installedMenus).toHaveLength(2);
+    expect(ipcInput.menu.current().locale).toBe("zh-CN");
+    expect(mocks.app.setAboutPanelOptions).toHaveBeenLastCalledWith(
+      expect.objectContaining({ credits: "发布渠道：unsigned-preview" }),
+    );
+
+    // With no workspace window, a command recreates it instead of relaying.
+    (workspace?.close as unknown as (() => void) | undefined)?.();
+    mocks.desktopIpc.notifyMenuCommand.mockClear();
+    click("view.navigate-inventory");
+    expect(mocks.BrowserWindow).toHaveBeenCalledTimes(2);
+    expect(mocks.desktopIpc.notifyMenuCommand).not.toHaveBeenCalled();
+
+    mocks.emitApp("before-quit", { preventDefault: vi.fn() });
+    await vi.waitFor(() => expect(mocks.desktopIpc.dispose).toHaveBeenCalled());
+    mocks.setLocale("en");
+    mocks.emitPreferenceChange();
+    expect(mocks.installedMenus).toHaveLength(2);
     platform.mockRestore();
   });
 

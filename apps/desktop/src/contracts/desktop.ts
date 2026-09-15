@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import type { AboutBridge } from "./about.js";
+import type { MenuBridge } from "./menu.js";
 import type { WorkspaceBridge } from "./workspace.js";
 
 export const reviewWindowClosedEventSchema = z
@@ -16,6 +17,7 @@ export type ReviewWindowClosedEvent = z.infer<
 
 export interface DesktopBridge extends WorkspaceBridge {
   readonly about: AboutBridge;
+  readonly menu: MenuBridge;
   subscribeReviewWindowClosed(
     listener: (event: ReviewWindowClosedEvent) => void,
   ): () => void;

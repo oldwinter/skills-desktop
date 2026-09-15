@@ -21,6 +21,11 @@ import {
 } from "lucide-react";
 
 import type { DesktopBridge } from "../../../contracts/desktop.js";
+import {
+  menuCommandItem,
+  type ApplicationMenu,
+  type RendererMenuCommand,
+} from "../../../contracts/menu.js";
 import { describeHarnessEffect } from "../../../contracts/harness-effect.js";
 import type { Translator } from "../../../contracts/i18n/translate.js";
 import { isInventoryEntryAvailableToHarness } from "../../../contracts/inventory-availability.js";
@@ -287,6 +292,8 @@ function InventoryWorkspace({
   }>();
   const [view, setView] = useState<WorkspaceView>("inventory");
   const [selectedTargetId, setSelectedTargetId] = useState<string>();
+  const [applicationMenu, setApplicationMenu] = useState<ApplicationMenu>();
+  const menuFocusPendingRef = useRef(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const mutationOutcomeRef = useRef<HTMLParagraphElement>(null);
   const reviewReturnFocusRef = useRef<HTMLButtonElement | null>(null);
@@ -513,6 +520,58 @@ function InventoryWorkspace({
     });
     return unsubscribe;
   }, [client]);
+
+  useEffect(() => {
+    let active = true;
+    void client.menu.getMenu().then((result) => {
+      if (active && result.ok) setApplicationMenu(result.value);
+    });
+    return () => {
+      active = false;
+    };
+  }, [client]);
+
+  // ADR 0023: menu activations arrive as closed commands. The renderer
+  // resolves workspace state (active Target, current route) and issues the
+  // same request its own control would; main never fabricates one.
+  const snapshotRef = useRef(snapshot);
+  snapshotRef.current = snapshot;
+  useEffect(() => {
+    const navigate = (next: WorkspaceView) => {
+      menuFocusPendingRef.current = true;
+      setView(next);
+    };
+    const handlers: Record<RendererMenuCommand, () => void> = {
+      "inventory.refresh": () => {
+        const current = snapshotRef.current;
+        if (current === undefined || current.inventory.phase === "loading") {
+          return;
+        }
+        void client.refreshInventory(current.target.id);
+      },
+      "navigate.about": () => navigate("about"),
+      "navigate.collections": () => navigate("collections"),
+      "navigate.comparison": () => navigate("comparison"),
+      "navigate.inventory": () => navigate("inventory"),
+      "navigate.recovery": () => navigate("recovery"),
+      "navigate.targets": () => navigate("targets"),
+      "update.check": () => {
+        navigate("about");
+        void client.about.requestCheck();
+      },
+    };
+    return client.menu.subscribeMenuCommand(({ command }) => {
+      handlers[command]();
+    });
+  }, [client]);
+
+  useEffect(() => {
+    if (!menuFocusPendingRef.current) return;
+    menuFocusPendingRef.current = false;
+    document
+      .querySelector<HTMLElement>("#workspace-main")
+      ?.focus({ preventScroll: true });
+  }, [view]);
 
   useEffect(() => {
     if (view !== "inventory") return;
@@ -816,6 +875,7 @@ function InventoryWorkspace({
 
       <div className="workspace-layout">
         <WorkspaceNavigation
+          applicationMenu={applicationMenu}
           inventory={snapshot.inventory}
           onSelectTarget={selectTarget}
           onViewChange={setView}
@@ -887,6 +947,10 @@ function InventoryWorkspace({
                   </button>
                 ) : (
                   <button
+                    aria-keyshortcuts={
+                      menuCommandItem(applicationMenu, "inventory.refresh")
+                        ?.ariaKeyShortcuts
+                    }
                     aria-label={t("inventory.refreshInventory")}
                     className="icon-button"
                     onClick={() =>

@@ -129,4 +129,37 @@ describe("createPreferenceAuthority", () => {
     await authority.update({ appearance: "light" });
     expect(authority.warning()).toBeUndefined();
   });
+
+  it("notifies subscribers after a durable change and never after a failed write", async () => {
+    let fail = false;
+    const authority = createPreferenceAuthority({
+      records: {
+        async load() {
+          return { status: "absent" };
+        },
+        async save() {
+          if (fail) throw new Error("disk full");
+        },
+      },
+      systemLocaleTag: () => "en-US",
+    });
+    await authority.initialize();
+    const seen: string[] = [];
+    const unsubscribe = authority.subscribe((preferences) => {
+      seen.push(`${preferences.locale}/${preferences.appearance}`);
+    });
+    authority.subscribe(() => {
+      throw new Error("observer bug");
+    });
+
+    await authority.update({ localePreference: "zh-CN" });
+    fail = true;
+    await authority.update({ appearance: "dark" });
+    fail = false;
+    unsubscribe();
+    await authority.update({ appearance: "light" });
+
+    expect(seen).toEqual(["zh-CN/system"]);
+    expect(authority.current().appearance).toBe("light");
+  });
 });

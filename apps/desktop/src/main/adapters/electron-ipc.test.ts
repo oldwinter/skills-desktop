@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { buildApplicationMenu } from "../application/application-menu.js";
 import { isAuthorizedSender, registerDesktopIpc } from "./electron-ipc.js";
 
 describe("Electron IPC sender authorization", () => {
@@ -964,5 +965,128 @@ describe("Electron IPC sender authorization", () => {
       "about:update:snapshot-changed",
       expect.anything(),
     );
+  });
+
+  it("reads the main-owned menu for the workspace only and relays commands to the exact owner", async () => {
+    const handlers = new Map<
+      string,
+      (event: never, ...args: unknown[]) => unknown
+    >();
+    const ipcMain = {
+      handle(
+        channel: string,
+        handler: (event: never, ...args: unknown[]) => unknown,
+      ) {
+        handlers.set(channel, handler);
+      },
+      removeHandler: vi.fn(),
+    };
+    const session = {
+      request: vi.fn(),
+      snapshot: vi.fn(),
+      teardown: vi.fn(),
+    };
+    const menu = buildApplicationMenu({ locale: "zh-CN", platform: "linux" });
+    let nextEpoch = 1;
+    const registration = registerDesktopIpc({
+      capabilities: { attach: vi.fn(() => session) } as never,
+      ipcMain: ipcMain as never,
+      menu: { current: () => menu },
+      newEpoch: () => `epoch-${nextEpoch++}`,
+      updates: {
+        exportDiagnostics: vi.fn(async () => "saved" as const),
+        getSnapshot: vi.fn(),
+        requestCheck: vi.fn(async () => undefined),
+        requestRestart: vi.fn(async () => "blocked" as const),
+        subscribe: vi.fn(() => () => undefined),
+      },
+    });
+    const mainFrame = { url: "skills-desktop://workspace/index.html" };
+    const workspaceContents = {
+      id: 17,
+      isDestroyed: vi.fn(() => false),
+      mainFrame,
+      send: vi.fn(),
+    };
+    const attachment = registration.attach(
+      workspaceContents as never,
+      "workspace",
+      mainFrame.url,
+    );
+    const workspaceEvent = { sender: workspaceContents, senderFrame: mainFrame };
+
+    expect(
+      [...handlers.keys()].filter((channel) => channel.startsWith("menu:")),
+    ).toEqual(["menu:application:get"]);
+    await expect(
+      handlers.get("menu:application:get")!(workspaceEvent as never, "epoch-1"),
+    ).resolves.toEqual({ ok: true, value: menu });
+    await expect(
+      handlers.get("menu:application:get")!(
+        workspaceEvent as never,
+        "epoch-1",
+        "extra",
+      ),
+    ).resolves.toMatchObject({ error: { code: "invalid_request" }, ok: false });
+    await expect(
+      handlers.get("menu:application:get")!(
+        { sender: workspaceContents, senderFrame: { url: mainFrame.url } } as never,
+        "epoch-1",
+      ),
+    ).resolves.toMatchObject({ error: { code: "unauthorized" }, ok: false });
+
+    const reviewFrame = { url: "skills-desktop://review/index.html" };
+    const reviewContents = {
+      id: 18,
+      isDestroyed: () => false,
+      mainFrame: reviewFrame,
+      send: vi.fn(),
+    };
+    const reviewAttachment = registration.attach(
+      reviewContents as never,
+      "review",
+      reviewFrame.url,
+      "review-1",
+    );
+    await expect(
+      handlers.get("menu:application:get")!(
+        { sender: reviewContents, senderFrame: reviewFrame } as never,
+        "epoch-3",
+      ),
+    ).resolves.toMatchObject({ error: { code: "unauthorized" }, ok: false });
+
+    workspaceContents.send.mockClear();
+    expect(registration.notifyMenuCommand("inventory.refresh", attachment!)).toBe(
+      true,
+    );
+    expect(workspaceContents.send).toHaveBeenCalledWith("menu:command", {
+      command: "inventory.refresh",
+      schemaVersion: 1,
+    });
+    expect(
+      registration.notifyMenuCommand("navigate.about", reviewAttachment!),
+    ).toBe(false);
+    expect(reviewContents.send).not.toHaveBeenCalledWith(
+      "menu:command",
+      expect.anything(),
+    );
+    expect(
+      registration.notifyMenuCommand("workspace.show" as never, attachment!),
+    ).toBe(false);
+    workspaceContents.send.mockClear();
+    expect(
+      registration.notifyMenuCommand("navigate.about", {
+        attachmentEpoch: "stale",
+        webContentsId: 17,
+      }),
+    ).toBe(false);
+    workspaceContents.isDestroyed.mockReturnValue(true);
+    expect(registration.notifyMenuCommand("navigate.about", attachment!)).toBe(
+      false,
+    );
+    expect(workspaceContents.send).not.toHaveBeenCalled();
+
+    registration.dispose();
+    expect(ipcMain.removeHandler).toHaveBeenCalledWith("menu:application:get");
   });
 });

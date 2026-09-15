@@ -22,9 +22,14 @@ import type {
   ReviewWindowClosedEvent,
 } from "../../../contracts/desktop.js";
 import type {
+  ApplicationMenu,
+  MenuCommandEvent,
+} from "../../../contracts/menu.js";
+import type {
   DesktopEvent,
   WorkspaceSnapshot,
 } from "../../../contracts/workspace.js";
+import { buildApplicationMenu } from "../../../main/application/application-menu.js";
 import { InventoryApp } from "./InventoryApp.js";
 
 const targetV4Metadata = {
@@ -196,12 +201,38 @@ interface ReviewCloseHarness {
   listener: ((event: ReviewWindowClosedEvent) => void) | undefined;
 }
 
+interface MenuHarness {
+  listener: ((event: MenuCommandEvent) => void) | undefined;
+  menu?: ApplicationMenu;
+}
+
 function clientFor(
   value: WorkspaceSnapshot,
   reviewCloseHarness?: ReviewCloseHarness,
+  menuHarness?: MenuHarness,
 ): DesktopBridge {
   return {
     about: aboutClient,
+    menu: {
+      async getMenu() {
+        return menuHarness?.menu === undefined
+          ? {
+              error: {
+                code: "internal_error",
+                message: "The menu could not be read.",
+                retryable: true,
+              },
+              ok: false,
+            }
+          : { ok: true, value: menuHarness.menu };
+      },
+      subscribeMenuCommand(listener) {
+        if (menuHarness !== undefined) menuHarness.listener = listener;
+        return () => {
+          if (menuHarness?.listener === listener) menuHarness.listener = undefined;
+        };
+      },
+    },
     async cancelInventory(operationId) {
       return { ok: true, value: { operationId } };
     },
@@ -3578,6 +3609,103 @@ describe("Local Target Inventory shell", () => {
       expect(updatePreferences).toHaveBeenLastCalledWith({
         appearance: "high-contrast",
       }),
+    );
+  });
+
+  it("mirrors main-owned menu accelerators as aria-keyshortcuts and runs relayed menu commands through the same closed requests (#211)", async () => {
+    const refreshInventory = vi.fn(async () => ({
+      ok: true as const,
+      value: { operationId: "refresh-menu" },
+    }));
+    const requestCheck = vi.fn(async () => ({
+      error: {
+        code: "invalid_request" as const,
+        message: "The update request is not supported.",
+        retryable: false,
+      },
+      ok: false as const,
+    }));
+    const menuHarness: MenuHarness = {
+      listener: undefined,
+      menu: buildApplicationMenu({ locale: "en", platform: "linux" }),
+    };
+    const client: DesktopBridge = {
+      ...clientFor(snapshot, undefined, menuHarness),
+      about: { ...aboutClient, requestCheck },
+      refreshInventory,
+    };
+    render(<InventoryApp client={client} />);
+    await screen.findByRole("heading", { level: 1, name: "Inventory" });
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Refresh inventory" }),
+      ).toHaveAttribute("aria-keyshortcuts", "Control+R"),
+    );
+    expect(screen.getByRole("button", { name: "About" })).toHaveAttribute(
+      "aria-keyshortcuts",
+      "Control+6",
+    );
+    expect(screen.getByRole("button", { name: "Inventory" })).toHaveAttribute(
+      "aria-keyshortcuts",
+      "Control+1",
+    );
+    expect(menuHarness.listener).toBeDefined();
+
+    act(() => {
+      menuHarness.listener?.({ command: "inventory.refresh", schemaVersion: 1 });
+    });
+    expect(refreshInventory).toHaveBeenCalledWith(snapshot.target.id);
+
+    act(() => {
+      menuHarness.listener?.({ command: "navigate.targets", schemaVersion: 1 });
+    });
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Targets" }),
+    ).toBeInTheDocument();
+    expect(document.activeElement?.id).toBe("workspace-main");
+
+    act(() => {
+      menuHarness.listener?.({ command: "update.check", schemaVersion: 1 });
+    });
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "About" }),
+    ).toBeInTheDocument();
+    expect(requestCheck).toHaveBeenCalledTimes(1);
+    expect(refreshInventory).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not request a refresh from the menu while an observation is already running (#211)", async () => {
+    const refreshInventory = vi.fn(async () => ({
+      ok: true as const,
+      value: { operationId: "refresh-menu" },
+    }));
+    const menuHarness: MenuHarness = { listener: undefined };
+    const client: DesktopBridge = {
+      ...clientFor(
+        {
+          ...snapshot,
+          inventory: {
+            ...snapshot.inventory,
+            activeOperationId: "operation-1",
+            phase: "loading",
+          },
+        },
+        undefined,
+        menuHarness,
+      ),
+      refreshInventory,
+    };
+    render(<InventoryApp client={client} />);
+    await screen.findByRole("heading", { level: 1, name: "Inventory" });
+    await waitFor(() => expect(menuHarness.listener).toBeDefined());
+    act(() => {
+      menuHarness.listener?.({ command: "inventory.refresh", schemaVersion: 1 });
+    });
+    expect(refreshInventory).not.toHaveBeenCalled();
+    // Without a menu projection no control claims a shortcut it cannot prove.
+    expect(screen.getByRole("button", { name: "About" })).not.toHaveAttribute(
+      "aria-keyshortcuts",
     );
   });
 });

@@ -12,6 +12,10 @@ import {
 } from "lucide-react";
 
 import type { MessageKey } from "../../../contracts/i18n/translate.js";
+import {
+  menuCommandItem,
+  type ApplicationMenu,
+} from "../../../contracts/menu.js";
 import type {
   PublicInventoryState,
   WorkspaceSnapshot,
@@ -42,6 +46,7 @@ const navigationItems: readonly {
 ];
 
 export function WorkspaceNavigation({
+  applicationMenu,
   inventory,
   onSelectTarget,
   onViewChange,
@@ -50,6 +55,8 @@ export function WorkspaceNavigation({
   targetStates,
   view,
 }: {
+  /** Main-owned menu; its accelerators are mirrored as `aria-keyshortcuts`. */
+  readonly applicationMenu?: ApplicationMenu;
   readonly inventory: PublicInventoryState;
   readonly onSelectTarget: (targetId: string) => void;
   readonly onViewChange: (view: WorkspaceView) => void;
@@ -75,6 +82,10 @@ export function WorkspaceNavigation({
           return (
             <button
               aria-current={view === itemView ? "page" : undefined}
+              aria-keyshortcuts={
+                menuCommandItem(applicationMenu, `navigate.${itemView}`)
+                  ?.ariaKeyShortcuts
+              }
               aria-label={accessibleLabel}
               className={`nav-item${view === itemView ? " nav-item--active" : ""}`}
               data-nav-view={itemView}
