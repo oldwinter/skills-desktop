@@ -31,7 +31,7 @@ const localTarget: TargetDefinition = {
   workspaceLabel: "skills-desktop",
 };
 
-const failure = (code: "confirmation_invalid" | "mutation_ineligible") => ({
+const failure = <Code extends string>(code: Code) => ({
   error: {
     code,
     effects: "none" as const,
@@ -44,7 +44,7 @@ const failure = (code: "confirmation_invalid" | "mutation_ineligible") => ({
 
 const idleProcess = {
   async executeConfirmed() {
-    return failure("confirmation_invalid");
+    return failure("confirmation_invalid" as const);
   },
   async observeInventory() {
     return {
@@ -58,7 +58,7 @@ const idleProcess = {
     };
   },
   async prepareMutation() {
-    return failure("mutation_ineligible");
+    return failure("mutation_ineligible" as const);
   },
 } satisfies SkillsProcess;
 

@@ -558,7 +558,7 @@ describe("ComparisonView", () => {
     expect(
       screen.getByText(/Comparison needs two Local Targets/),
     ).toBeInTheDocument();
-    expect(screen.getByText(/SSH · 未在 V1 开放/)).toBeInTheDocument();
+    expect(screen.getByText(/SSH · Not available in V1/)).toBeInTheDocument();
     const compare = screen.getByRole("button", { name: "Compare" });
     expect(compare).toBeDisabled();
     expect(compare).toHaveAttribute(
@@ -907,7 +907,7 @@ describe("ComparisonView", () => {
       screen.getByRole("button", { name: "Refresh Left device" }),
     ).toBeDisabled();
     const sshOption = screen.getAllByRole("option", {
-      name: /SSH device · 未开放/,
+      name: /SSH device · Not available/,
     })[0];
     expect(sshOption).toBeDisabled();
   });

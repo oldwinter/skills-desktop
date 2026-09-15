@@ -1,4 +1,5 @@
 import { describeHarnessOption } from "../../../contracts/harness-options.js";
+import { useTranslator } from "../../i18n/LocaleProvider.js";
 
 /**
  * Harnesses an add or remove mutation binds to, derived from the Target's
@@ -40,14 +41,14 @@ export function HarnessSubsetControl({
   readonly onChange: (excludedHarnessIds: readonly string[]) => void;
   readonly targetHarnessIds: readonly string[];
 }) {
+  const { t } = useTranslator();
   if (targetHarnessIds.length < 2) return null;
   const bound = boundHarnessSubset(targetHarnessIds, excludedHarnessIds);
   return (
     <fieldset className="harness-subset" disabled={disabled}>
-      <legend>Bind add and removal to</legend>
+      <legend>{t("harnessSubset.legend")}</legend>
       <p className="harness-subset__hint" id="harness-subset-hint">
-        Add and removal only touch the checked harnesses. Update always runs
-        without a harness limit.
+        {t("harnessSubset.hint")}
       </p>
       <ul aria-describedby="harness-subset-hint" className="harness-subset__list">
         {targetHarnessIds.map((harnessId) => {
@@ -65,9 +66,7 @@ export function HarnessSubsetControl({
                       : [...excludedHarnessIds, harnessId];
                     onChange(next);
                   }}
-                  title={
-                    last ? "At least one harness must stay bound." : undefined
-                  }
+                  title={last ? t("harnessSubset.lastBound") : undefined}
                   type="checkbox"
                 />
                 <span>{describeHarnessOption(harnessId)}</span>

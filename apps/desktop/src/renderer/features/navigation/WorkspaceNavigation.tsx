@@ -11,10 +11,12 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
+import type { MessageKey } from "../../../contracts/i18n/translate.js";
 import type {
   PublicInventoryState,
   WorkspaceSnapshot,
 } from "../../../contracts/workspace.js";
+import { useTranslator } from "../../i18n/LocaleProvider.js";
 
 export type WorkspaceView =
   | "about"
@@ -28,15 +30,15 @@ type TargetState = NonNullable<WorkspaceSnapshot["targets"]>[number];
 
 const navigationItems: readonly {
   readonly view: WorkspaceView;
-  readonly label: string;
+  readonly label: MessageKey;
   readonly icon: LucideIcon;
 }[] = [
-  { view: "inventory", label: "Inventory", icon: ListFilter },
-  { view: "comparison", label: "Comparison", icon: MonitorCog },
-  { view: "collections", label: "Collections", icon: LibraryBig },
-  { view: "targets", label: "Targets", icon: Settings2 },
-  { view: "recovery", label: "Recovery", icon: LifeBuoy },
-  { view: "about", label: "About", icon: Info },
+  { view: "inventory", label: "nav.inventory", icon: ListFilter },
+  { view: "comparison", label: "nav.comparison", icon: MonitorCog },
+  { view: "collections", label: "nav.collections", icon: LibraryBig },
+  { view: "targets", label: "nav.targets", icon: Settings2 },
+  { view: "recovery", label: "nav.recovery", icon: LifeBuoy },
+  { view: "about", label: "nav.about", icon: Info },
 ];
 
 export function WorkspaceNavigation({
@@ -56,25 +58,26 @@ export function WorkspaceNavigation({
   readonly targetStates: readonly TargetState[];
   readonly view: WorkspaceView;
 }) {
+  const { t, tc } = useTranslator();
   const projectCount = inventory.entries.filter(
     ({ scope }) => scope === "project",
   ).length;
   const globalCount = inventory.entries.length - projectCount;
 
   return (
-    <aside className="scope-rail" aria-label="Workspace navigation">
-      <nav className="primary-nav" aria-label="Primary">
-        {navigationItems.map(({ icon: Icon, label, view: itemView }) => {
+    <aside className="scope-rail" aria-label={t("nav.workspaceNavigation")}>
+      <nav className="primary-nav" aria-label={t("nav.primary")}>
+        {navigationItems.map(({ icon: Icon, label: labelKey, view: itemView }) => {
+          const label = t(labelKey);
           const pending = itemView === "recovery" ? recoveryCount : 0;
           const accessibleLabel =
-            pending > 0
-              ? `${label}, ${pending} item${pending === 1 ? "" : "s"} pending`
-              : label;
+            pending > 0 ? tc("nav.pending", pending, { label }) : label;
           return (
             <button
               aria-current={view === itemView ? "page" : undefined}
               aria-label={accessibleLabel}
               className={`nav-item${view === itemView ? " nav-item--active" : ""}`}
+              data-nav-view={itemView}
               key={itemView}
               onClick={() => onViewChange(itemView)}
               title={accessibleLabel}
@@ -93,7 +96,7 @@ export function WorkspaceNavigation({
       </nav>
 
       <section className="target-section" aria-labelledby="target-heading">
-        <h2 id="target-heading">Targets</h2>
+        <h2 id="target-heading">{t("common.targets")}</h2>
         {targetStates.map((state) => (
           <button
             className={`target-row${state.target.id === target.id ? " target-row--active" : ""}`}
@@ -112,33 +115,35 @@ export function WorkspaceNavigation({
             </span>
             {state.target.kind === "ssh" ? (
               <span
-                aria-label="SSH 未开放"
+                aria-label={t("common.ssh.badgeLabel")}
                 className="scope-badge"
-                title="SSH · 未在 V1 开放"
+                title={t("common.ssh.notInV1")}
               >
-                未开放
+                {t("common.ssh.badge")}
               </span>
             ) : null}
           </button>
         ))}
         <dl className="target-facts">
           <div>
-            <dt>Harness</dt>
+            <dt>{t("common.harness")}</dt>
             <dd>{target.harnessIds.join(", ")}</dd>
           </div>
           <div>
-            <dt>Project</dt>
+            <dt>{t("common.scope.project")}</dt>
             <dd>{projectCount}</dd>
           </div>
           <div>
-            <dt>Global</dt>
+            <dt>{t("common.scope.global")}</dt>
             <dd>{globalCount}</dd>
           </div>
         </dl>
       </section>
       <div className="rail-version">
         <Terminal aria-hidden="true" size={14} />
-        <span>skills {inventory.cliVersion ?? "1.5.23"}</span>
+        <span>
+          {t("nav.cliVersion", { version: inventory.cliVersion ?? "1.5.23" })}
+        </span>
       </div>
     </aside>
   );

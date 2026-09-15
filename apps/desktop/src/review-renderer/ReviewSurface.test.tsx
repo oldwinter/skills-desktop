@@ -176,7 +176,7 @@ describe("Trusted Review surface", () => {
     ).toBeInTheDocument();
     expect(screen.getByText(`sha256:${"a".repeat(64)}`)).toBeInTheDocument();
     expect(screen.getByText(`sha256:${"e".repeat(64)}`)).toBeInTheDocument();
-    expect(screen.getByText("详情")).toBeInTheDocument();
+    expect(screen.getAllByText("Details")[0]).toBeInTheDocument();
     expect(screen.queryByText("2026-08-22T05:00:00.000Z")).not.toBeInTheDocument();
     expect(screen.getByText("Collection author")).toBeInTheDocument();
     expect(screen.getByText("Reviewer B")).toBeInTheDocument();
@@ -504,6 +504,78 @@ describe("Trusted Review surface", () => {
     );
     expect(effect).toHaveTextContent("This Target binds amp, codex.");
     expect(effect).toHaveClass("review-effect--cli-unscoped");
+  });
+
+  it("renders in the locale and appearance carried by the Review Snapshot without translating identifiers (#210)", async () => {
+    const client: ReviewBridge = {
+      async approve() {
+        return { ok: true, value: { operationId: "mutation-3" } };
+      },
+      async getReview() {
+        return {
+          ok: true,
+          value: {
+            preferences: {
+              appearance: "high-contrast",
+              locale: "zh-CN",
+              localePreference: "zh-CN",
+              systemLocale: "en",
+            },
+            projection: {
+              commandPlan: {
+                harness: "amp codex",
+                harnessEffect: {
+                  kind: "cli-unscoped",
+                  targetHarnessIds: ["amp", "codex"],
+                },
+                harnessIds: ["amp", "codex"],
+                names: ["tdd"],
+                operation: "update",
+                preview: "npx skills@1.5.23 update tdd --project --yes",
+                schemaVersion: 1,
+                scope: "project",
+                source: null,
+                targetId: "00000000-0000-4000-8000-000000000001",
+                timeoutMs: 600_000,
+              },
+              expiresAt: "2026-08-21T10:10:00.000Z",
+              purpose: "execute",
+              reviewId: "review-3",
+              target: {
+                ...targetV4Metadata,
+                generation: 1,
+                harnessIds: ["amp", "codex"],
+                id: "00000000-0000-4000-8000-000000000001",
+                kind: "local",
+                label: "This device",
+                workspace: "/work/skills-desktop",
+                workspaceLabel: "skills-desktop",
+              },
+            },
+            schemaVersion: 2,
+            status: "pending",
+          },
+        };
+      },
+      async reject() {
+        return { ok: true, value: { operationId: "review-3" } };
+      },
+    };
+    render(<ReviewSurface client={client} />);
+
+    expect(
+      await screen.findByRole("heading", { name: "复核更新" }),
+    ).toBeInTheDocument();
+    expect(document.documentElement.lang).toBe("zh-CN");
+    expect(document.documentElement.dataset["appearance"]).toBe("high-contrast");
+    const effect = screen.getByTestId("review-harness-effect");
+    expect(effect).toHaveTextContent("影响所有由 CLI 管理的 Harness");
+    expect(effect).toHaveTextContent("该 Target 绑定 amp, codex。");
+    expect(screen.getByText("amp codex")).toBeInTheDocument();
+    expect(
+      screen.getByText("npx skills@1.5.23 update tdd --project --yes"),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "批准变更" })).toBeInTheDocument();
   });
 
   it("closes the dedicated window after a successful rejection", async () => {

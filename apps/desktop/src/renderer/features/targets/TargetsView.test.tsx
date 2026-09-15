@@ -262,10 +262,10 @@ describe("TargetsView", () => {
       />,
     );
 
-    expect(screen.getByText("SSH · 未在 V1 开放")).toBeInTheDocument();
-    expect(screen.getByText("未开放")).toBeInTheDocument();
+    expect(screen.getByText("SSH · Not available in V1")).toBeInTheDocument();
+    expect(screen.getByText("Not available")).toBeInTheDocument();
     expect(screen.getByText("Loading")).toBeInTheDocument();
-    expect(screen.getByText("请求无效。请检查输入后重试。")).toBeInTheDocument();
+    expect(screen.getByText("The request is invalid. Check the input, then try again.")).toBeInTheDocument();
 
     fireEvent.click(
       screen.getByRole("button", { name: `Edit ${localTarget.label}` }),
@@ -289,7 +289,7 @@ describe("TargetsView", () => {
     fireEvent.click(
       screen.getByRole("button", { name: `Edit ${sshTarget.label}` }),
     );
-    expect(screen.getByText(/SSH · 未在 V1 开放，不能作为可保存/)).toBeInTheDocument();
+    expect(screen.getByText(/SSH · Not available in V1; it cannot be saved/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save Target" })).toBeDisabled();
     expect(screen.getByLabelText("OpenSSH connection reference")).toHaveValue(
       "build-host",
@@ -304,7 +304,7 @@ describe("TargetsView", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Save Target" }));
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "请求无效。请检查输入后重试。",
+      "The request is invalid. Check the input, then try again.",
     );
 
     await act(async () => {
@@ -356,7 +356,7 @@ describe("TargetsView", () => {
       screen.getByRole("button", { name: `Delete ${secondTarget.label}` }),
     );
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "请求无效。请检查输入后重试。",
+      "The request is invalid. Check the input, then try again.",
     );
   });
 

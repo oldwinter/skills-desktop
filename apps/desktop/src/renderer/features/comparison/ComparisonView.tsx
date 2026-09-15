@@ -10,142 +10,125 @@ import {
 } from "lucide-react";
 
 import type {
+  MessageKey,
+  Translator,
+} from "../../../contracts/i18n/translate.js";
+import type {
   PublicComparison,
   RendererError,
   WorkspaceBridge,
   WorkspaceSnapshot,
 } from "../../../contracts/workspace.js";
+import { useTranslator } from "../../i18n/LocaleProvider.js";
 import { UserFacingErrorCopy } from "../../UserFacingErrorCopy.js";
 
 type TargetState = NonNullable<WorkspaceSnapshot["targets"]>[number];
+type RowSummary = PublicComparison["rows"][number]["summary"];
+type T = Translator["t"];
 
-const summaryLabel: Record<
-  PublicComparison["rows"][number]["summary"],
-  string
-> = {
-  matched: "Matched",
-  missing: "Missing",
-  "source-mismatch": "Source mismatch",
-  "unknown-evidence": "Unknown evidence",
-  "version-drift": "Revision or content drift",
-};
+const summaryKey = (summary: RowSummary): MessageKey =>
+  `comparison.summary.${summary}`;
 
 function sourceSummary(
+  t: T,
   row: PublicComparison["rows"][number],
   side: "left" | "right",
 ) {
   const entries = row[side].entries;
-  if (entries.length === 0) return "Absent";
+  if (entries.length === 0) return t("comparison.absent");
   return entries
     .map(
       (entry) =>
-        `${entry.scope}: ${entry.declaredSource.sourceType ?? "Unknown type"} / ${entry.declaredSource.source ?? "Unknown source"}`,
+        `${entry.scope}: ${entry.declaredSource.sourceType ?? t("comparison.unknownType")} / ${entry.declaredSource.source ?? t("comparison.unknownSource")}`,
     )
     .join(" / ");
 }
 
 function evidenceSummary(
+  t: T,
   entry: PublicComparison["rows"][number]["left"]["entries"][number],
   field: "contentFingerprint" | "revision",
 ) {
   const evidence = entry[field];
   return evidence.status === "unknown"
-    ? "Unknown"
+    ? t("common.unknown")
     : `${evidence.authority} / ${evidence.kind} / ${evidence.value}`;
 }
 
-function freshnessLabel(
-  freshness: TargetState["inventory"]["freshness"],
-) {
-  if (freshness === "fresh") return "Fresh evidence";
-  if (freshness === "stale") return "Stale evidence";
-  return "No evidence";
-}
-
-function inventoryStatus(state: TargetState) {
+function inventoryStatus(t: T, state: TargetState) {
   if (state.mutation.phase === "reconciliation-required") {
-    return "Blocked: reconciliation required";
+    return t("comparison.status.blocked");
   }
-  if (state.inventory.phase === "loading") return "Loading Inventory";
-  return freshnessLabel(state.inventory.freshness);
+  if (state.inventory.phase === "loading") return t("comparison.status.loading");
+  return t(`common.freshness.${state.inventory.freshness}`);
 }
 
-
-function compareDisabledReason(input: {
-  readonly busy: boolean;
-  readonly leftTargetId: string;
-  readonly plannableCount: number;
-  readonly rightTargetId: string;
-  readonly sshSideSelected: boolean;
-}): string | undefined {
-  if (input.sshSideSelected) {
-    return "SSH · 未在 V1 开放，不能作为可规划对比侧";
-  }
-  if (input.plannableCount < 2) {
-    return "Comparison needs two Local Targets";
-  }
+function compareDisabledReason(
+  t: T,
+  input: {
+    readonly busy: boolean;
+    readonly leftTargetId: string;
+    readonly plannableCount: number;
+    readonly rightTargetId: string;
+    readonly sshSideSelected: boolean;
+  },
+): string | undefined {
+  if (input.sshSideSelected) return t("comparison.disabled.ssh");
+  if (input.plannableCount < 2) return t("comparison.disabled.needsTwo");
   if (input.leftTargetId === input.rightTargetId) {
-    return "Left and Right must be different Targets";
+    return t("comparison.disabled.sameSides");
   }
-  if (input.busy) {
-    return "Comparison is busy";
-  }
+  if (input.busy) return t("comparison.disabled.busy");
   return undefined;
 }
 
-function comparisonEmptyNextStep(input: {
-  readonly plannableCount: number;
-  readonly sameSides: boolean;
-}): string {
-  if (input.plannableCount < 2) {
-    return "Add another Local Target under Targets, then return here to compare inventories.";
-  }
-  if (input.sameSides) {
-    return "Choose different Left and Right Targets, then click Compare to build the aligned skill table.";
-  }
-  return "Click Compare to build the aligned skill table.";
+function comparisonEmptyNextStep(
+  t: T,
+  input: {
+    readonly plannableCount: number;
+    readonly sameSides: boolean;
+  },
+): string {
+  if (input.plannableCount < 2) return t("comparison.next.addTarget");
+  if (input.sameSides) return t("comparison.next.chooseDifferent");
+  return t("comparison.next.clickCompare");
 }
 
-function prepareDisabledReason(input: {
-  readonly busy: boolean;
-  readonly comparisonFresh: boolean;
-  readonly eligible: boolean;
-  readonly mutationEligible: boolean;
-  readonly row:
-    | {
-        readonly sideEntryCount: number;
-        readonly summary: PublicComparison["rows"][number]["summary"];
-      }
-    | undefined;
-  readonly side: "left" | "right";
-  readonly ssh: boolean;
-}): string | undefined {
+function prepareDisabledReason(
+  t: T,
+  input: {
+    readonly busy: boolean;
+    readonly comparisonFresh: boolean;
+    readonly eligible: boolean;
+    readonly mutationEligible: boolean;
+    readonly row:
+      | {
+          readonly sideEntryCount: number;
+          readonly summary: RowSummary;
+        }
+      | undefined;
+    readonly side: "left" | "right";
+    readonly ssh: boolean;
+  },
+): string | undefined {
   if (!input.busy && input.eligible) return undefined;
-  if (input.ssh) {
-    return "SSH · 未在 V1 开放，无法准备变更";
-  }
-  if (!input.comparisonFresh) {
-    return "Fresh evidence is required on both Targets before planning.";
-  }
-  if (!input.mutationEligible) {
-    return "Reconciliation is required before this Target can receive a comparison mutation.";
-  }
-  if (input.busy) {
-    return "Comparison is busy";
-  }
-  if (input.row === undefined) {
-    return "Select a skill row before Prepare";
-  }
-  const sideLabel = input.side === "left" ? "Left" : "Right";
+  if (input.ssh) return t("comparison.prepare.ssh");
+  if (!input.comparisonFresh) return t("comparison.prepare.freshness");
+  if (!input.mutationEligible) return t("comparison.prepare.reconciliation");
+  if (input.busy) return t("comparison.disabled.busy");
+  if (input.row === undefined) return t("comparison.prepare.selectRow");
+  const side = t(input.side === "left" ? "comparison.left" : "comparison.right");
   if (input.row.summary === "missing") {
     return input.row.sideEntryCount > 0
-      ? `Prepare for Missing only when ${sideLabel} lacks the skill`
-      : `Prepare for Missing requires ${sideLabel} to lack the skill`;
+      ? t("comparison.prepare.missingHasSkill", { side })
+      : t("comparison.prepare.missingRequires", { side });
   }
   if (input.row.summary === "version-drift") {
-    return `Prepare applies to Revision or content drift on ${sideLabel}`;
+    return t("comparison.prepare.drift", { side });
   }
-  return `Prepare only applies to Missing or Revision or content drift rows (current: ${summaryLabel[input.row.summary]})`;
+  return t("comparison.prepare.unqualified", {
+    summary: t(summaryKey(input.row.summary)),
+  });
 }
 
 export function ComparisonView({
@@ -162,6 +145,7 @@ export function ComparisonView({
   readonly snapshot: WorkspaceSnapshot;
   readonly targets: readonly TargetState[];
 }) {
+  const { t, tc } = useTranslator();
   const plannableTargets = useMemo(
     () => targets.filter(({ target }) => target.kind !== "ssh"),
     [targets],
@@ -301,14 +285,14 @@ export function ComparisonView({
       selectedRow.summary === "version-drift");
   const sshSideSelected =
     leftTarget?.target.kind === "ssh" || rightTarget?.target.kind === "ssh";
-  const compareReason = compareDisabledReason({
+  const compareReason = compareDisabledReason(t, {
     busy,
     leftTargetId,
     plannableCount: plannableTargets.length,
     rightTargetId,
     sshSideSelected,
   });
-  const emptyNextStep = comparisonEmptyNextStep({
+  const emptyNextStep = comparisonEmptyNextStep(t, {
     plannableCount: plannableTargets.length,
     sameSides: leftTargetId === rightTargetId,
   });
@@ -322,7 +306,7 @@ export function ComparisonView({
           : leftTargetId === rightTargetId
             ? "comparison-same-sides-reason"
             : "comparison-busy-reason";
-  const leftPrepareReason = prepareDisabledReason({
+  const leftPrepareReason = prepareDisabledReason(t, {
     busy,
     comparisonFresh,
     eligible: leftEligible,
@@ -337,7 +321,7 @@ export function ComparisonView({
     side: "left",
     ssh: leftTarget?.target.kind === "ssh",
   });
-  const rightPrepareReason = prepareDisabledReason({
+  const rightPrepareReason = prepareDisabledReason(t, {
     busy,
     comparisonFresh,
     eligible: rightEligible,
@@ -357,7 +341,8 @@ export function ComparisonView({
     side: "left" | "right",
   ) => {
     if (reason === undefined) return undefined;
-    if (reason.startsWith("SSH")) return undefined;
+    const sideState = side === "left" ? leftTarget : rightTarget;
+    if (sideState?.target.kind === "ssh") return undefined;
     if (!comparisonFresh) return "comparison-freshness-reason";
     if (
       (side === "left" && !leftMutationEligible) ||
@@ -376,13 +361,16 @@ export function ComparisonView({
       <main className="comparison-workspace" id="workspace-main" tabIndex={-1}>
         <section className="page-heading">
           <div>
-            <h1>Comparison</h1>
+            <h1>{t("comparison.title")}</h1>
             <p>
               {plannableTargets.length < 2
-                ? "Needs a second Local Target"
+                ? t("comparison.needsSecond")
                 : (differencesOnly || normalizedQuery !== "") && comparison !== null
-                  ? `${visibleRows.length} of ${comparison.rows.length} aligned skill keys`
-                  : `${comparison?.rows.length ?? 0} aligned skill keys`}
+                  ? t("comparison.alignedKeysOf", {
+                      shown: visibleRows.length,
+                      total: comparison.rows.length,
+                    })
+                  : tc("comparison.alignedKeys", comparison?.rows.length ?? 0)}
             </p>
           </div>
           {comparison !== null && comparison.rows.length > 0 ? (
@@ -390,7 +378,7 @@ export function ComparisonView({
               <div className="search-control">
                 <Search aria-hidden="true" size={16} />
                 <input
-                  aria-label="Search comparison skills"
+                  aria-label={t("comparison.search")}
                   onChange={(event) => setSearchQuery(event.currentTarget.value)}
                   onKeyDown={(event) => {
                     if (event.key === "Escape" && !event.nativeEvent.isComposing) {
@@ -398,14 +386,14 @@ export function ComparisonView({
                       clearSearch();
                     }
                   }}
-                  placeholder="Search skills by name"
+                  placeholder={t("comparison.searchPlaceholder")}
                   ref={searchRef}
                   type="search"
                   value={searchQuery}
                 />
                 {searchQuery !== "" ? (
                   <button
-                    aria-label="Clear search"
+                    aria-label={t("comparison.clearSearch")}
                     className="search-clear"
                     onClick={clearSearch}
                     type="button"
@@ -417,7 +405,7 @@ export function ComparisonView({
               <label className="comparison-filter-toggle">
                 <input
                   aria-describedby="comparison-difference-count"
-                  aria-label="Differences only"
+                  aria-label={t("comparison.differencesOnly")}
                   checked={differencesOnly}
                   onChange={(event) => {
                     setDifferencesOnly(event.currentTarget.checked);
@@ -425,22 +413,29 @@ export function ComparisonView({
                   }}
                   type="checkbox"
                 />
-                <span>Differences only</span>
+                <span>{t("comparison.differencesOnly")}</span>
                 <strong aria-hidden="true">{differenceCount}</strong>
                 <span className="sr-only" id="comparison-difference-count">
-                  {differenceCount} of {comparison.rows.length} aligned skill keys
-                  {normalizedQuery !== ""
-                    ? " have differences or unknown evidence before search."
-                    : differencesOnly ? " remain." : " would remain."}
+                  {t(
+                    normalizedQuery !== ""
+                      ? "comparison.differenceCount.beforeSearch"
+                      : differencesOnly
+                        ? "comparison.differenceCount.remain"
+                        : "comparison.differenceCount.wouldRemain",
+                    { count: differenceCount, total: comparison.rows.length },
+                  )}
                 </span>
               </label>
             </div>
           ) : null}
         </section>
 
-        <div className="comparison-controls" aria-label="Paired Targets">
+        <div
+          className="comparison-controls"
+          aria-label={t("comparison.pairedTargets")}
+        >
           <label>
-            <span>Left Target</span>
+            <span>{t("comparison.leftTarget")}</span>
             <select
               onChange={(event) => setLeftTargetId(event.currentTarget.value)}
               value={leftTargetId}
@@ -454,14 +449,14 @@ export function ComparisonView({
                   value={target.id}
                 >
                   {target.kind === "ssh"
-                    ? `${target.label} · 未开放`
+                    ? t("common.ssh.targetOption", { label: target.label })
                     : target.label}
                 </option>
               ))}
             </select>
           </label>
           <button
-            aria-label="Swap comparison Targets"
+            aria-label={t("comparison.swap")}
             className="icon-button"
             disabled={leftTargetId === rightTargetId}
             onClick={() => {
@@ -469,13 +464,13 @@ export function ComparisonView({
               setRightTargetId(leftTargetId);
               setSelectedKey(undefined);
             }}
-            title="Swap comparison Targets"
+            title={t("comparison.swap")}
             type="button"
           >
             <ArrowLeftRight aria-hidden="true" size={17} />
           </button>
           <label>
-            <span>Right Target</span>
+            <span>{t("comparison.rightTarget")}</span>
             <select
               onChange={(event) => setRightTargetId(event.currentTarget.value)}
               value={rightTargetId}
@@ -489,7 +484,7 @@ export function ComparisonView({
                   value={target.id}
                 >
                   {target.kind === "ssh"
-                    ? `${target.label} · 未开放`
+                    ? t("common.ssh.targetOption", { label: target.label })
                     : target.label}
                 </option>
               ))}
@@ -509,7 +504,7 @@ export function ComparisonView({
             type="button"
           >
             <ArrowLeftRight aria-hidden="true" size={15} />
-            Compare
+            {t("comparison.compare")}
           </button>
         </div>
 
@@ -521,9 +516,11 @@ export function ComparisonView({
           >
             <CircleHelp aria-hidden="true" size={16} />
             <span>
-              {targets.some(({ target }) => target.kind === "ssh")
-                ? "Comparison needs two Local Targets. SSH · 未在 V1 开放，不能作为可规划对比侧。Add another Local Target under Targets, then return here to compare inventories."
-                : "Comparison needs two Local Targets. Add another Local Target under Targets, then return here to compare inventories."}
+              {t(
+                targets.some(({ target }) => target.kind === "ssh")
+                  ? "comparison.needsTwo.sshBody"
+                  : "comparison.needsTwo.body",
+              )}
             </span>
           </div>
         ) : null}
@@ -534,12 +531,12 @@ export function ComparisonView({
             role="status"
           >
             <CircleHelp aria-hidden="true" size={16} />
-            <span>Left and Right must be different Targets</span>
+            <span>{t("comparison.disabled.sameSides")}</span>
           </div>
         ) : null}
         {busy ? (
           <p className="sr-only" id="comparison-busy-reason">
-            Comparison is busy
+            {t("comparison.disabled.busy")}
           </p>
         ) : null}
 
@@ -554,21 +551,27 @@ export function ComparisonView({
           {[leftTarget, rightTarget].map((state, index) =>
             state === undefined ? null : (
               <div key={`${index}:${state.target.id}`}>
-                <span>{index === 0 ? "Left" : "Right"}</span>
+                <span>
+                  {t(index === 0 ? "comparison.left" : "comparison.right")}
+                </span>
                 <strong>{state.target.label}</strong>
                 <code>{state.target.workspaceLabel}</code>
-                <span>{inventoryStatus(state)}</span>
+                <span>{inventoryStatus(t, state)}</span>
                 {state.inventory.lastError !== null ? (
                   <span className="paired-status-error" role="status">
                     <UserFacingErrorCopy error={state.inventory.lastError} />
                   </span>
                 ) : null}
                 <button
-                  aria-label={`Refresh ${state.target.label}`}
+                  aria-label={t("comparison.refreshTarget", {
+                    label: state.target.label,
+                  })}
                   className="icon-button"
                   disabled={busy || state.inventory.phase === "loading"}
                   onClick={() => void client.refreshInventory(state.target.id)}
-                  title={`Refresh ${state.target.label}`}
+                  title={t("comparison.refreshTarget", {
+                    label: state.target.label,
+                  })}
                   type="button"
                 >
                   <RefreshCw aria-hidden="true" size={15} />
@@ -582,48 +585,47 @@ export function ComparisonView({
           {comparison === null ? (
             <div className="empty-state" role="status">
               <CircleHelp aria-hidden="true" size={22} />
-              <h2>No comparison selected</h2>
+              <h2>{t("comparison.empty.none")}</h2>
               <p>{emptyNextStep}</p>
             </div>
           ) : comparison.rows.length === 0 ? (
             <div className="empty-state" role="status">
               <CircleHelp aria-hidden="true" size={22} />
-              <h2>No skill evidence on either Target</h2>
+              <h2>{t("comparison.empty.noEvidence")}</h2>
             </div>
           ) : visibleRows.length === 0 && normalizedQuery !== "" ? (
             <div className="empty-state" role="status">
               <Search aria-hidden="true" size={22} />
-              <h2>No skills match your search</h2>
+              <h2>{t("comparison.empty.noSearchMatch")}</h2>
               <p>
-                {differencesOnly
-                  ? "Try another skill name or turn off Differences only."
-                  : "Try another skill name or clear the search."}
+                {t(
+                  differencesOnly
+                    ? "comparison.empty.tryAnotherOrToggle"
+                    : "comparison.empty.tryAnotherOrClear",
+                )}
               </p>
               <button className="text-button" onClick={clearSearch} type="button">
-                Clear search
+                {t("comparison.clearSearch")}
               </button>
             </div>
           ) : visibleRows.length === 0 ? (
             <div className="empty-state" role="status">
               <CircleHelp aria-hidden="true" size={22} />
-              <h2>No differences found</h2>
-              <p>
-                All {comparison.rows.length} aligned skill
-                {comparison.rows.length === 1 ? " key matches." : " keys match."}
-              </p>
+              <h2>{t("comparison.empty.noDifferences")}</h2>
+              <p>{tc("comparison.empty.allMatch", comparison.rows.length)}</p>
             </div>
           ) : (
             <table className="comparison-table" ref={tableRef}>
               <caption className="sr-only">
-                Dimensioned Target comparison
+                {t("comparison.table.caption")}
               </caption>
               <thead>
                 <tr>
-                  <th>Skill</th>
-                  <th>{leftTarget?.target.label ?? "Left"}</th>
-                  <th>Dimensions</th>
-                  <th>{rightTarget?.target.label ?? "Right"}</th>
-                  <th>Summary</th>
+                  <th>{t("common.skill")}</th>
+                  <th>{leftTarget?.target.label ?? t("comparison.left")}</th>
+                  <th>{t("comparison.table.dimensions")}</th>
+                  <th>{rightTarget?.target.label ?? t("comparison.right")}</th>
+                  <th>{t("comparison.table.summary")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -634,7 +636,7 @@ export function ComparisonView({
                     }
                     key={row.key}
                   >
-                    <td data-label="Skill">
+                    <td data-label={t("common.skill")}>
                       <button
                         className="skill-button"
                         onClick={() => setSelectedKey(row.key)}
@@ -673,32 +675,32 @@ export function ComparisonView({
                             ".skill-button",
                           )[nextIndex]?.focus();
                         }}
-                        title="Browse skills with ↑ / ↓ · Home / End"
+                        title={t("comparison.browseHint")}
                         type="button"
                       >
                         {row.key}
                       </button>
                     </td>
-                    <td data-label="Left evidence">
+                    <td data-label={t("comparison.table.leftEvidence")}>
                       <code className="wrapping-value">
-                        {sourceSummary(row, "left")}
+                        {sourceSummary(t, row, "left")}
                       </code>
                     </td>
-                    <td data-label="Dimensions">
+                    <td data-label={t("comparison.table.dimensions")}>
                       {row.dimensions.declaredSource} /{" "}
                       {row.dimensions.revision} /{" "}
                       {row.dimensions.contentFingerprint}
                     </td>
-                    <td data-label="Right evidence">
+                    <td data-label={t("comparison.table.rightEvidence")}>
                       <code className="wrapping-value">
-                        {sourceSummary(row, "right")}
+                        {sourceSummary(t, row, "right")}
                       </code>
                     </td>
-                    <td data-label="Summary">
+                    <td data-label={t("comparison.table.summary")}>
                       <span
                         className={`comparison-status comparison-status--${row.summary}`}
                       >
-                        {summaryLabel[row.summary]}
+                        {t(summaryKey(row.summary))}
                       </span>
                     </td>
                   </tr>
@@ -711,20 +713,20 @@ export function ComparisonView({
 
       <aside
         className="inspector comparison-inspector"
-        aria-label="Selected comparison evidence"
+        aria-label={t("comparison.inspector.label")}
       >
         {selectedRow === undefined ? (
           <div className="inspector-empty">
             <CircleHelp aria-hidden="true" size={22} />
-            <h2>No difference selected</h2>
+            <h2>{t("comparison.inspector.none")}</h2>
             <p>
               {comparison === null
                 ? emptyNextStep
                 : normalizedQuery !== "" && comparison.rows.length > 0
-                  ? "Clear the search or change the filters to inspect a skill."
+                  ? t("comparison.inspector.clearToInspect")
                 : differencesOnly && comparison.rows.length > 0
-                  ? `All ${comparison.rows.length} aligned skill ${comparison.rows.length === 1 ? "key matches" : "keys match"}.`
-                : "Select a skill in the table to inspect the difference."}
+                  ? tc("comparison.empty.allMatch", comparison.rows.length)
+                : t("comparison.inspector.selectHint")}
             </p>
           </div>
         ) : (
@@ -732,33 +734,33 @@ export function ComparisonView({
             <header className="inspector-heading">
               <ArrowLeftRight aria-hidden="true" size={18} />
               <div>
-                <p>{summaryLabel[selectedRow.summary]}</p>
+                <p>{t(summaryKey(selectedRow.summary))}</p>
                 <h2>{selectedRow.key}</h2>
               </div>
             </header>
             <dl className="evidence-list">
               <div>
-                <dt>Presence</dt>
+                <dt>{t("comparison.inspector.presence")}</dt>
                 <dd>{selectedRow.dimensions.presence}</dd>
               </div>
               <div>
-                <dt>Declared source</dt>
+                <dt>{t("inventory.table.declaredSource")}</dt>
                 <dd>{selectedRow.dimensions.declaredSource}</dd>
               </div>
               <div>
-                <dt>Revision</dt>
+                <dt>{t("inventory.inspector.revision")}</dt>
                 <dd>{selectedRow.dimensions.revision}</dd>
               </div>
               <div>
-                <dt>Content fingerprint</dt>
+                <dt>{t("inventory.inspector.contentFingerprint")}</dt>
                 <dd>{selectedRow.dimensions.contentFingerprint}</dd>
               </div>
               <div>
-                <dt>Left Harness</dt>
+                <dt>{t("comparison.inspector.leftHarness")}</dt>
                 <dd>{selectedRow.left.harnessAvailability}</dd>
               </div>
               <div>
-                <dt>Right Harness</dt>
+                <dt>{t("comparison.inspector.rightHarness")}</dt>
                 <dd>{selectedRow.right.harnessAvailability}</dd>
               </div>
             </dl>
@@ -766,10 +768,14 @@ export function ComparisonView({
               {(["left", "right"] as const).map((side) => (
                 <section key={side}>
                   <h3>
-                    {side === "left" ? "Left evidence" : "Right evidence"}
+                    {t(
+                      side === "left"
+                        ? "comparison.table.leftEvidence"
+                        : "comparison.table.rightEvidence",
+                    )}
                   </h3>
                   {selectedRow[side].entries.length === 0 ? (
-                    <p>Absent</p>
+                    <p>{t("comparison.absent")}</p>
                   ) : (
                     selectedRow[side].entries.map((entry, index) => (
                       <div
@@ -777,16 +783,18 @@ export function ComparisonView({
                       >
                         <strong>{entry.scope}</strong>
                         <span>
-                          Source:{" "}
-                          {entry.declaredSource.sourceType ?? "Unknown type"} /{" "}
-                          {entry.declaredSource.source ?? "Unknown source"}
+                          {t("comparison.inspector.source")}{" "}
+                          {entry.declaredSource.sourceType ??
+                            t("comparison.unknownType")}{" "}
+                          / {entry.declaredSource.source ?? t("comparison.unknownSource")}
                         </span>
                         <code>
-                          Revision: {evidenceSummary(entry, "revision")}
+                          {t("comparison.inspector.revision")}{" "}
+                          {evidenceSummary(t, entry, "revision")}
                         </code>
                         <code>
-                          Fingerprint:{" "}
-                          {evidenceSummary(entry, "contentFingerprint")}
+                          {t("comparison.inspector.fingerprint")}{" "}
+                          {evidenceSummary(t, entry, "contentFingerprint")}
                         </code>
                       </div>
                     ))
@@ -801,9 +809,7 @@ export function ComparisonView({
                 role="status"
               >
                 <AlertCircle aria-hidden="true" size={16} />
-                <span>
-                  Fresh evidence is required on both Targets before planning.
-                </span>
+                <span>{t("comparison.prepare.freshness")}</span>
               </div>
             ) : null}
             {!leftMutationEligible || !rightMutationEligible ? (
@@ -813,10 +819,7 @@ export function ComparisonView({
                 role="alert"
               >
                 <AlertCircle aria-hidden="true" size={16} />
-                <span>
-                  Reconciliation is required before this Target can receive a
-                  comparison mutation.
-                </span>
+                <span>{t("comparison.prepare.reconciliation")}</span>
               </div>
             ) : null}
             {prepareDescribedBy(leftPrepareReason, "left") ===
@@ -841,7 +844,7 @@ export function ComparisonView({
                 type="button"
               >
                 <PackagePlus aria-hidden="true" size={15} />
-                Prepare for Left
+                {t("comparison.prepareLeft")}
               </button>
               <button
                 aria-describedby={prepareDescribedBy(
@@ -855,7 +858,7 @@ export function ComparisonView({
                 type="button"
               >
                 <PackagePlus aria-hidden="true" size={15} />
-                Prepare for Right
+                {t("comparison.prepareRight")}
               </button>
             </div>
           </>
