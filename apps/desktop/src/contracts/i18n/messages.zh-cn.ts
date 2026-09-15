@@ -217,7 +217,10 @@ export const zhCN: Readonly<Record<keyof typeof en, string>> = {
   "inventory.empty.noSkills": "未找到 Skill",
   "inventory.empty.changeFilter": "请更改当前搜索或范围筛选。",
   "inventory.empty.installHint":
-    "项目与全局库存均为空。请刷新该 Target，或通过 npx skills 安装一个 Skill。",
+    "项目与全局库存均为空。可在下方通过来源添加 Skill，或刷新该 Target。",
+  "inventory.empty.addSkill": "添加 Skill",
+  "inventory.empty.cliHint":
+    "Skills Desktop 将安装委托给固定版本的 npx skills CLI；每次变更都会先经复核再执行。",
   "inventory.empty.clearFilters": "清除筛选",
   "inventory.missing.waiting": "正在等待库存",
   "inventory.missing.waitingBody":
@@ -237,7 +240,7 @@ export const zhCN: Readonly<Record<keyof typeof en, string>> = {
   "inventory.inspector.label": "所选 Skill 的证据",
   "inventory.inspector.noSkills": "没有可查看的 Skill",
   "inventory.inspector.noSkillsBody":
-    "请刷新该 Target，或通过 npx skills 安装一个 Skill。",
+    "请使用表格下方的「添加 Skill」，或刷新该 Target。",
   "inventory.inspector.noneSelected": "未选择 Skill",
   "inventory.inspector.noneInFilter": "当前筛选下没有 Skill。",
   "inventory.inspector.selectHint": "在表格中选择一个 Skill 以查看证据。",

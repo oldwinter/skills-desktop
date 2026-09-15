@@ -3368,9 +3368,7 @@ describe("Local Target Inventory shell", () => {
       await screen.findByRole("heading", { name: "No skills to inspect" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(
-        "Refresh this Target, or install a skill via npx skills.",
-      ),
+      screen.getByText("Use Add Skill below the table, or refresh this Target."),
     ).toBeInTheDocument();
     unmount();
 
@@ -3381,6 +3379,42 @@ describe("Local Target Inventory shell", () => {
         "Add another Local Target under Targets, then return here to compare inventories.",
       ).length,
     ).toBeGreaterThanOrEqual(1);
+  });
+
+  it("points an unfiltered empty Inventory at the in-app Add Skill form (#178)", async () => {
+    render(
+      <InventoryApp
+        client={clientFor({
+          ...snapshot,
+          inventory: {
+            ...snapshot.inventory,
+            entries: [],
+            freshness: "fresh",
+          },
+        })}
+      />,
+    );
+
+    const empty = (
+      await screen.findByRole("heading", { name: "No skills found" })
+    ).closest(".empty-state");
+    expect(empty).not.toBeNull();
+    expect(empty).toHaveTextContent(
+      "Project and global inventory are empty. Add a Skill from a source below, or refresh this Target.",
+    );
+    expect(empty).toHaveTextContent("delegates installs to the pinned npx skills CLI");
+    expect(
+      within(empty as HTMLElement).queryByRole("button", { name: "Clear filters" }),
+    ).toBeNull();
+
+    const sourceInput = screen.getByLabelText("Source");
+    const scrollIntoView = vi.fn();
+    Object.assign(sourceInput, { scrollIntoView });
+    fireEvent.click(
+      within(empty as HTMLElement).getByRole("button", { name: "Add Skill" }),
+    );
+    expect(sourceInput).toHaveFocus();
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: "center" });
   });
 
   it("keeps No skill selected when inventory still has rows (#111)", async () => {

@@ -252,7 +252,10 @@ export const en = {
   "inventory.empty.noSkills": "No skills found",
   "inventory.empty.changeFilter": "Change the current search or scope filter.",
   "inventory.empty.installHint":
-    "Project and global inventory are empty. Refresh this Target, or install a skill via npx skills.",
+    "Project and global inventory are empty. Add a Skill from a source below, or refresh this Target.",
+  "inventory.empty.addSkill": "Add Skill",
+  "inventory.empty.cliHint":
+    "Skills Desktop delegates installs to the pinned npx skills CLI; every change is reviewed before it runs.",
   "inventory.empty.clearFilters": "Clear filters",
   "inventory.missing.waiting": "Waiting for inventory",
   "inventory.missing.waitingBody":
@@ -272,7 +275,7 @@ export const en = {
   "inventory.inspector.label": "Selected skill evidence",
   "inventory.inspector.noSkills": "No skills to inspect",
   "inventory.inspector.noSkillsBody":
-    "Refresh this Target, or install a skill via npx skills.",
+    "Use Add Skill below the table, or refresh this Target.",
   "inventory.inspector.noneSelected": "No skill selected",
   "inventory.inspector.noneInFilter": "No skills in the current filter.",
   "inventory.inspector.selectHint":

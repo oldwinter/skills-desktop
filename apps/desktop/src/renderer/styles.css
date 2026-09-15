@@ -258,6 +258,8 @@ code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; fo
 .empty-state, .inspector-empty { display: grid; min-height: 240px; place-content: center; justify-items: center; gap: 6px; color: var(--text-secondary); text-align: center; }
 .empty-state h2, .inspector-empty h2 { color: var(--text); font-size: var(--font-size-ui); }
 .empty-state p { font-size: var(--font-size-meta); }
+.empty-state .text-button { margin-top: 6px; }
+.empty-state__hint { color: var(--text-tertiary); }
 
 .inspector { display: flex; flex-direction: column; min-height: 0; overflow: hidden; padding: 16px; box-shadow: -1px 0 0 var(--line), 0 2px 8px var(--shadow); }
 .inspector-heading { flex: 0 0 auto; gap: 10px; padding: 2px 0 14px; border-bottom: 1px solid var(--line); }
