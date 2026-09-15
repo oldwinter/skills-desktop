@@ -41,10 +41,12 @@ export const rendererErrorCodeSchema = z.enum([
   "remote_protocol_mismatch",
   "remote_protocol_violation",
   "remote_runtime_unavailable",
+  "package_import_unavailable",
   "reconciliation_required",
   "reconciliation_wait",
   "review_expired",
   "review_invalid",
+  "skillpack_invalid",
   "source_inspection_incompatible",
   "source_inspection_stale",
   "source_unavailable",
@@ -323,7 +325,9 @@ export const publicSourceInspectionStateSchema = z
   .strict();
 
 export type PublicSourceCandidate = z.infer<typeof publicSourceCandidateSchema>;
-export type PublicSourceInspection = z.infer<typeof publicSourceInspectionSchema>;
+export type PublicSourceInspection = z.infer<
+  typeof publicSourceInspectionSchema
+>;
 export type PublicSourceInspectionState = z.infer<
   typeof publicSourceInspectionStateSchema
 >;
@@ -502,13 +506,52 @@ const collectionSelectionSchema = z
   })
   .strict();
 
-const collectionReleaseEvidenceSchema = z
+const officialReleaseEvidenceSchema = z
   .object({
     compatibility: collectionCompatibilitySchema,
     receipt: collectionReceiptSchema,
     status: z.enum(["active", "deprecated", "revoked"]),
   })
   .strict();
+
+const packageCompatibilitySchema = z
+  .object({
+    dialectId: z.literal(SKILLS_DIALECT_ID),
+    harnessIds: z.array(z.string().min(1).max(128)).min(1).max(77),
+  })
+  .strict();
+
+/**
+ * ADR 0017: an Imported Package never carries an Official receipt. Its
+ * evidence is the canonical `.skillpack` digest and when it was imported, so
+ * Trusted Review can name the origin without impersonating Official trust.
+ */
+const importedReleaseEvidenceSchema = z
+  .object({
+    compatibility: packageCompatibilitySchema,
+    documentDigest: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+    importedAt: z.string().datetime({ offset: true }),
+    origin: z.literal("imported"),
+  })
+  .strict();
+
+const collectionReleaseEvidenceSchema = z.union([
+  officialReleaseEvidenceSchema,
+  importedReleaseEvidenceSchema,
+]);
+
+/** Imported Packages may pin no revision; Official releases always do. */
+const collectionPlanSourceSchema = z
+  .object({
+    repository: z.string().min(3).max(256),
+    reviewedRevision: z
+      .string()
+      .regex(/^[a-f0-9]{40}$/)
+      .nullable(),
+  })
+  .strict();
+
+export const packageOriginSchema = z.enum(["official", "imported"]);
 
 const publicSingleTargetCollectionPlanSchema = z
   .object({
@@ -537,12 +580,7 @@ const publicSingleTargetCollectionPlanSchema = z
     schemaVersion: z.literal(1),
     scope: z.enum(["global", "project"]),
     selections: z.array(collectionSelectionSchema).min(1).max(128),
-    source: z
-      .object({
-        repository: z.string().min(3).max(256),
-        reviewedRevision: z.string().regex(/^[a-f0-9]{40}$/),
-      })
-      .strict(),
+    source: collectionPlanSourceSchema,
     targetGeneration: z.number().int().positive(),
     targetId: targetIdSchema,
   })
@@ -589,12 +627,7 @@ const publicMultiTargetCollectionPlanSchema = z
     releaseNumber: z.number().int().positive(),
     reviewDigest: z.string().regex(/^sha256:[a-f0-9]{64}$/),
     schemaVersion: z.literal(2),
-    source: z
-      .object({
-        repository: z.string().min(3).max(256),
-        reviewedRevision: z.string().regex(/^[a-f0-9]{40}$/),
-      })
-      .strict(),
+    source: collectionPlanSourceSchema,
   })
   .strict()
   .superRefine((plan, context) => {
@@ -695,10 +728,87 @@ const publicCollectionExecutionSchema = z
   })
   .strict();
 
+const packageDeltaSchema = z
+  .object({
+    fromRelease: z.number().int().positive(),
+    kind: z.enum(["downgrade", "upgrade"]),
+    recordedAt: z.string().datetime({ offset: true }),
+    toRelease: z.number().int().positive(),
+  })
+  .strict();
+
+/** A same-ID, same-release import whose digest differed; retained, never applied. */
+const packageConflictSchema = z
+  .object({
+    documentDigest: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+    recordedAt: z.string().datetime({ offset: true }),
+    release: z.number().int().positive(),
+  })
+  .strict();
+
+/**
+ * ADR 0017 Imported Package projection. Origin is immutable and separate from
+ * Official releases: no receipt, no supersedes chain, and the same dimensioned
+ * assessment as Collections so Apply can reuse the guarded Collection path.
+ */
+export const publicImportedPackageSchema = z
+  .object({
+    assessments: z.array(collectionAssessmentSchema).length(2),
+    blockers: z.array(z.string().min(1).max(512)).max(8),
+    compatibility: packageCompatibilitySchema,
+    conflicts: z.array(packageConflictSchema).max(64),
+    delta: packageDeltaSchema.nullable(),
+    description: z.string().max(2_048),
+    documentDigest: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+    executable: z.boolean(),
+    importedAt: z.string().datetime({ offset: true }),
+    origin: z.literal("imported"),
+    packageId: z.string().min(1).max(128),
+    release: z.number().int().positive(),
+    skills: z.array(z.string().min(1).max(256)).min(1).max(128),
+    source: z
+      .object({
+        repository: z.string().min(3).max(256),
+        revision: z
+          .string()
+          .regex(/^[a-f0-9]{40}$/)
+          .nullable(),
+        sourceType: z.literal("github"),
+      })
+      .strict(),
+    title: z.string().min(1).max(256),
+  })
+  .strict();
+
+/** Outcome of the most recent `package.import`; every status is offline. */
+export const publicPackageImportOutcomeSchema = z
+  .object({
+    documentDigest: z
+      .string()
+      .regex(/^sha256:[a-f0-9]{64}$/)
+      .nullable(),
+    fileName: z.string().min(1).max(256).nullable(),
+    packageId: z.string().min(1).max(128).nullable(),
+    recordedAt: z.string().datetime({ offset: true }),
+    release: z.number().int().positive().nullable(),
+    relatedRelease: z.number().int().positive().nullable(),
+    status: z.enum([
+      "cancelled",
+      "conflict",
+      "downgrade",
+      "identical",
+      "imported",
+      "upgrade",
+    ]),
+  })
+  .strict();
+
 export const publicCollectionsStateSchema = z
   .object({
     acknowledgements: z.array(collectionAcknowledgementSchema).max(1_000),
     execution: publicCollectionExecutionSchema.nullable().optional(),
+    lastImport: publicPackageImportOutcomeSchema.nullable().optional(),
+    packages: z.array(publicImportedPackageSchema).max(1_000).optional(),
     plan: publicCollectionPlanSchema.nullable(),
     releases: z.array(publicCollectionReleaseSchema).max(1_000),
   })
@@ -763,7 +873,10 @@ export type PublicSkillsShHandoffRecord = z.infer<
 
 export const workspaceSnapshotSchema = z
   .object({
-    blockedTargets: z.array(blockedTargetDefinitionSchema).max(1_000).optional(),
+    blockedTargets: z
+      .array(blockedTargetDefinitionSchema)
+      .max(1_000)
+      .optional(),
     preferences: publicPreferencesSchema.optional(),
     recovery: publicRecoveryStateSchema.optional(),
     skillsShHandoffs: z
@@ -979,10 +1092,28 @@ export const prepareComparisonRequestSchema = z
   })
   .strict();
 
+/**
+ * Offline `.skillpack` import (ADR 0017). The renderer never names a path:
+ * main opens the native file dialog, reads the bytes, and records the outcome
+ * in `collections.lastImport`.
+ */
+export const importPackageRequestSchema = z
+  .object({
+    type: z.literal("package.import"),
+    version: z.literal(WORKSPACE_PROTOCOL_VERSION),
+  })
+  .strict();
+
+/**
+ * `origin` selects the recipe authority: `official` (default, the bundled
+ * catalog) or `imported` (a Package store record). For imported recipes
+ * `collectionId` is the package ID and `manifestDigest` the document digest.
+ */
 export const prepareCollectionRequestSchema = z
   .object({
     collectionId: z.string().min(1).max(128),
     manifestDigest: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+    origin: packageOriginSchema.optional(),
     releaseNumber: z.number().int().positive(),
     scope: z.enum(["global", "project"]),
     selections: z
@@ -1011,6 +1142,7 @@ export const prepareCollectionAcrossTargetsRequestSchema = z
   .object({
     collectionId: z.string().min(1).max(128),
     manifestDigest: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+    origin: packageOriginSchema.optional(),
     releaseNumber: z.number().int().positive(),
     targets: z
       .array(
@@ -1070,6 +1202,7 @@ export const workspaceRequestSchema = z.discriminatedUnion("type", [
   prepareCollectionRequestSchema,
   prepareCollectionAcrossTargetsRequestSchema,
   requestCollectionReviewSchema,
+  importPackageRequestSchema,
 ]);
 
 export const workspaceRequestResultSchema = z.discriminatedUnion("ok", [
@@ -1101,6 +1234,11 @@ export type PublicMultiTargetCollectionPlan = z.infer<
 export type PublicCollectionExecution = z.infer<
   typeof publicCollectionExecutionSchema
 >;
+export type PublicImportedPackage = z.infer<typeof publicImportedPackageSchema>;
+export type PublicPackageImportOutcome = z.infer<
+  typeof publicPackageImportOutcomeSchema
+>;
+export type PackageOrigin = z.infer<typeof packageOriginSchema>;
 export type PrepareCollectionRequest = z.infer<
   typeof prepareCollectionRequestSchema
 >;
@@ -1148,6 +1286,7 @@ export interface WorkspaceBridge {
   ): Promise<WorkspaceRequestResult>;
   getSnapshot(): Promise<WorkspaceSnapshotResult>;
   handoffSkillsSh(recordId: string): Promise<WorkspaceRequestResult>;
+  importPackage(): Promise<WorkspaceRequestResult>;
   inspectSource(
     targetId: string,
     source: string,
