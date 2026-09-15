@@ -533,17 +533,47 @@ export async function runPackagedUiQa({
       await page.waitFor(
         `(() => {
           const root = getComputedStyle(document.documentElement);
-          const expected = root.getPropertyValue("--text-secondary").trim();
-          const item = document.querySelector(".nav-item:not(.nav-item--active)");
-          if (item === null || expected.length === 0) return true;
-          const probe = document.createElement("span");
-          probe.style.color = expected;
-          document.body.append(probe);
-          const want = getComputedStyle(probe).color;
-          probe.remove();
-          return getComputedStyle(item).color === want;
+          const probeColor = (value) => {
+            const probe = document.createElement("span");
+            probe.style.color = value;
+            document.body.append(probe);
+            const want = getComputedStyle(probe).color;
+            probe.remove();
+            return want;
+          };
+          const secondary = root.getPropertyValue("--text-secondary").trim();
+          const text = root.getPropertyValue("--text").trim();
+          const healthy = root.getPropertyValue("--healthy").trim();
+          const canvas = root.getPropertyValue("--canvas").trim();
+          const inactive = document.querySelector(".nav-item:not(.nav-item--active)");
+          const active = document.querySelector(".nav-item--active");
+          const pill = document.querySelector(".status-pill--healthy");
+          const saved = document.querySelector(".preferences-saved");
+          if (inactive !== null && secondary.length > 0) {
+            if (getComputedStyle(inactive).color !== probeColor(secondary)) return false;
+          }
+          if (active !== null && text.length > 0) {
+            const activeText = active.querySelector("span");
+            if (activeText !== null && getComputedStyle(activeText).color !== probeColor(text)) {
+              return false;
+            }
+          }
+          if (pill !== null && healthy.length > 0) {
+            if (getComputedStyle(pill).color !== probeColor(healthy)) return false;
+          }
+          if (saved !== null && healthy.length > 0 && canvas.length > 0) {
+            const cs = getComputedStyle(saved);
+            if (cs.color !== probeColor(healthy)) return false;
+            const bgProbe = document.createElement("span");
+            bgProbe.style.backgroundColor = canvas;
+            document.body.append(bgProbe);
+            const wantBg = getComputedStyle(bgProbe).backgroundColor;
+            bgProbe.remove();
+            if (cs.backgroundColor !== wantBg) return false;
+          }
+          return true;
         })()`,
-        `${appearance} nav secondary settled`,
+        `${appearance} shell contrast tokens settled`,
       );
       const palette = await page.evaluate(`(() => {
         const root = getComputedStyle(document.documentElement);
