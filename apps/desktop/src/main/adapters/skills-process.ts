@@ -33,8 +33,20 @@ export type ObservationError =
       | "transport_lost"
     >;
 
+/**
+ * Who a mutation can touch. `bound` mutations pass `--agent` and only change
+ * links for the listed harnesses. `cli-unscoped` mutations (update) run
+ * without `--agent`; the pinned CLI updates every CLI-managed link for the
+ * named Skills in the selected scope, including harnesses outside the
+ * Target. Trusted Review must disclose the latter (ADR 0014).
+ */
+export type CommandPlanHarnessEffect =
+  | { readonly harnessIds: string[]; readonly kind: "bound" }
+  | { readonly kind: "cli-unscoped"; readonly targetHarnessIds: string[] };
+
 export interface CommandPlan {
   readonly harness: string;
+  readonly harnessEffect?: CommandPlanHarnessEffect;
   readonly harnessIds?: string[];
   readonly names: readonly string[];
   readonly operation: "add" | "remove" | "update";
@@ -114,6 +126,8 @@ export type NormalizedMutation = Exclude<
 
 export interface PreparedMutationPlan {
   readonly args: readonly string[];
+  /** Harnesses whose links this plan is allowed to change or verify. */
+  readonly boundHarnessIds: readonly HarnessId[];
   readonly mutation: NormalizedMutation;
   readonly prepared: PreparedMutation;
 }
@@ -289,11 +303,29 @@ export function prepareMutationPlan(options: {
     );
   }
 
-  const args = mutationArguments(mutation, scopedHarness.value);
+  const boundHarness = resolveBoundHarnessSubset(
+    parsedIntent.data,
+    scopedHarness.value,
+  );
+  if (!boundHarness.ok) return boundHarness;
+  const boundHarnessIds = boundHarness.value;
+
+  const args = mutationArguments(mutation, boundHarnessIds);
+  const harnessEffect: CommandPlanHarnessEffect =
+    mutation.type === "update"
+      ? {
+          kind: "cli-unscoped",
+          targetHarnessIds: [...scopedHarness.value],
+        }
+      : { harnessIds: [...boundHarnessIds], kind: "bound" };
   const commandPlan: CommandPlan = {
-    harness: options.binding.harness ?? scopedHarness.value.join(" "),
-    ...(scopedHarness.value.length > 1
-      ? { harnessIds: [...scopedHarness.value] }
+    harness:
+      boundHarnessIds.length === scopedHarness.value.length
+        ? (options.binding.harness ?? scopedHarness.value.join(" "))
+        : boundHarnessIds.join(" "),
+    harnessEffect,
+    ...(boundHarnessIds.length > 1
+      ? { harnessIds: [...boundHarnessIds] }
       : {}),
     names: [...mutation.names],
     operation: mutation.type,
@@ -336,7 +368,44 @@ export function prepareMutationPlan(options: {
     targetGeneration: options.binding.generation,
     targetId: options.binding.targetId,
   };
-  return { ok: true, value: { args, mutation, prepared } };
+  return { ok: true, value: { args, boundHarnessIds, mutation, prepared } };
+}
+
+/**
+ * Resolves the add/remove harness subset against the scoped Target set.
+ * Every requested harness must already belong to the Target; an intent
+ * without a subset binds the whole scoped set. Update ignores subsets
+ * because the pinned CLI cannot scope `update` by harness.
+ */
+function resolveBoundHarnessSubset(
+  intent: MutationIntent,
+  scopedHarnessIds: readonly HarnessId[],
+): Result<readonly HarnessId[], MutationPreparationError> {
+  if (intent.type === "update" || intent.type === "update-all") {
+    return { ok: true, value: scopedHarnessIds };
+  }
+  if (intent.harnessIds === undefined) {
+    return { ok: true, value: scopedHarnessIds };
+  }
+  const resolved: HarnessId[] = [];
+  for (const requested of intent.harnessIds) {
+    const alias = resolveLegacyHarnessAlias(requested);
+    if (!alias.ok || !scopedHarnessIds.includes(alias.value)) {
+      return mutationPreparationFailure(
+        "mutation_ineligible",
+        "The requested harness subset is not part of the Target harness set in the selected scope.",
+      );
+    }
+    resolved.push(alias.value);
+  }
+  const normalized = normalizeHarnessIds(resolved);
+  if (!normalized.ok) {
+    return mutationPreparationFailure(
+      "mutation_ineligible",
+      "The requested harness subset is not supported by the pinned Skills dialect.",
+    );
+  }
+  return { ok: true, value: normalized.value };
 }
 
 export function observedMutationEffects(

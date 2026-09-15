@@ -148,6 +148,11 @@ Inventory 是对当前 Target 一次只读 `npx skills list --json` 的归一化
 3. 在 Project 或 Global 范围（不能是 All）可 **Update scope**。
 4. 出现 Command Plan 后，点 **Open Trusted Review**，在独立确认界面审阅后再执行。
 
+Harness 影响范围：
+
+- 当 Target 绑定了多个 harness 时，Inventory 右侧会出现 **Bind add and removal to**。默认勾选全部；取消勾选后，Add / Removal 只会改动仍勾选的 harness 链接（命令里的 `--agent` 随之收窄），且至少要保留一个。不属于该 Target 的 harness 不能被选入，主进程会拒绝。
+- **Update** 无法按 harness 限定：pinned 的 `skills` CLI 不接受 `--agent`，它会更新所选 scope 下这些技能的**全部** CLI 管理链接，包括这个 Target 没有绑定的 harness。Command Plan 与 Trusted Review 里的 **Harness effect** 会明确写出这一点，请在批准前确认。
+
 仅当 Inventory 为 **fresh**，且不在 reconciliation / 变更进行中时，Prepare 才可用。
 
 若出现 **Reconciliation required**：先按提示 **Reconcile**，在建立新的完整 Inventory 之前不要继续变更。

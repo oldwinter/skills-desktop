@@ -48,6 +48,13 @@ export function normalizeHarnessSelection(
   };
 }
 
+/** "Label (cli-id)" for display, or the raw id when it is not in the registry. */
+export function describeHarnessOption(harnessId: string): string {
+  const option = HARNESS_OPTIONS.find((candidate) => candidate.id === harnessId);
+  if (option === undefined || option.label === option.id) return harnessId;
+  return `${option.label} (${option.id})`;
+}
+
 export function matchesHarnessQuery(
   option: HarnessOption,
   query: string,

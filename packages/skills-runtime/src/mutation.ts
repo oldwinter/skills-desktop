@@ -30,9 +30,21 @@ const githubSourceSchema = z
   })
   .strict();
 
+// An explicit non-empty subset of the Target harness set for add/remove
+// (ADR 0014). Omitted means the whole scoped Target set, which keeps
+// pre-existing intents valid. Entries are validated against the Target
+// at preparation time, not here.
+const harnessSubsetSchema = z
+  .array(z.string().min(1).max(128))
+  .min(1)
+  .max(128)
+  .refine((ids) => new Set(ids).size === ids.length)
+  .optional();
+
 export const mutationIntentSchema = z.discriminatedUnion("type", [
   z
     .object({
+      harnessIds: harnessSubsetSchema,
       names: namesSchema,
       scope: scopeSchema,
       source: githubSourceSchema,
@@ -41,6 +53,7 @@ export const mutationIntentSchema = z.discriminatedUnion("type", [
     .strict(),
   z
     .object({
+      harnessIds: harnessSubsetSchema,
       names: namesSchema,
       scope: scopeSchema,
       type: z.literal("remove"),

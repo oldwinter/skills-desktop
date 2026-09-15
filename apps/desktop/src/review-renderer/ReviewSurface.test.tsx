@@ -426,6 +426,10 @@ describe("Trusted Review surface", () => {
     expect(
       screen.getByText("npx skills@1.5.23 remove tdd --agent codex --yes"),
     ).toBeInTheDocument();
+    // A plan without harnessEffect predates the field; remove is bound.
+    const effect = screen.getByTestId("review-harness-effect");
+    expect(effect).toHaveTextContent("Bound to selected harnesses");
+    expect(effect).toHaveTextContent("Only the Codex link");
 
     fireEvent.click(screen.getByRole("button", { name: "Approve mutation" }));
     await waitFor(() => expect(approve).toHaveBeenCalledWith());
@@ -437,6 +441,69 @@ describe("Trusted Review surface", () => {
     expect(closeButton).toHaveFocus();
     fireEvent.click(closeButton);
     expect(closeWindow).toHaveBeenCalledOnce();
+  });
+
+  it("discloses that update touches every CLI-managed harness in scope", async () => {
+    const client: ReviewBridge = {
+      async approve() {
+        return { ok: true, value: { operationId: "mutation-2" } };
+      },
+      async getReview() {
+        return {
+          ok: true,
+          value: {
+            projection: {
+              commandPlan: {
+                harness: "amp codex",
+                harnessEffect: {
+                  kind: "cli-unscoped",
+                  targetHarnessIds: ["amp", "codex"],
+                },
+                harnessIds: ["amp", "codex"],
+                names: ["tdd"],
+                operation: "update",
+                preview: "npx skills@1.5.23 update tdd --project --yes",
+                schemaVersion: 1,
+                scope: "project",
+                source: null,
+                targetId: "00000000-0000-4000-8000-000000000001",
+                timeoutMs: 600_000,
+              },
+              expiresAt: "2026-08-21T10:10:00.000Z",
+              purpose: "execute",
+              reviewId: "review-2",
+              target: {
+                ...targetV4Metadata,
+                generation: 1,
+                harnessIds: ["amp", "codex"],
+                id: "00000000-0000-4000-8000-000000000001",
+                kind: "local",
+                label: "This device",
+                workspace: "/work/skills-desktop",
+                workspaceLabel: "skills-desktop",
+              },
+            },
+            schemaVersion: 2,
+            status: "pending",
+          },
+        };
+      },
+      async reject() {
+        return { ok: true, value: { operationId: "review-2" } };
+      },
+    };
+    render(<ReviewSurface client={client} />);
+
+    expect(
+      await screen.findByRole("heading", { name: "Review update" }),
+    ).toBeInTheDocument();
+    const effect = screen.getByTestId("review-harness-effect");
+    expect(effect).toHaveTextContent("Affects every CLI-managed harness");
+    expect(effect).toHaveTextContent(
+      "updates every CLI-managed link for the listed Skills in project scope, including harnesses this Target does not bind",
+    );
+    expect(effect).toHaveTextContent("This Target binds amp, codex.");
+    expect(effect).toHaveClass("review-effect--cli-unscoped");
   });
 
   it("closes the dedicated window after a successful rejection", async () => {

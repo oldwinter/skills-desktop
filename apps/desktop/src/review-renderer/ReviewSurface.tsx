@@ -6,8 +6,9 @@ import {
   type ReviewBridge,
   type ReviewSnapshot,
 } from "../contracts/review.js";
+import { describeHarnessEffect } from "../contracts/harness-effect.js";
 import { userFacingErrorMessage } from "../contracts/user-facing-error.js";
-import type { RendererError } from "../contracts/workspace.js";
+import type { CommandPlan, RendererError } from "../contracts/workspace.js";
 
 function scopeLabel(scope: "global" | "project") {
   return scope === "project" ? "Project" : "Global";
@@ -32,6 +33,24 @@ function ReviewInstant({
 }) {
   if (value === null) return <span>Not reviewed yet</span>;
   return <time dateTime={value}>{formatReviewInstant(value)}</time>;
+}
+
+function HarnessEffectDisclosure({
+  commandPlan,
+}: {
+  readonly commandPlan: CommandPlan;
+}) {
+  const effect = describeHarnessEffect(commandPlan);
+  return (
+    <section
+      aria-labelledby="review-effect-heading"
+      className={`review-effect review-effect--${effect.kind}`}
+      data-testid="review-harness-effect"
+    >
+      <h2 id="review-effect-heading">{effect.title}</h2>
+      <p>{effect.summary}</p>
+    </section>
+  );
 }
 
 
@@ -545,6 +564,8 @@ export function ReviewSurface({ client }: { readonly client: ReviewBridge }) {
         <h2 id="review-plan-heading">Command Plan</h2>
         <code>{commandPlan.preview}</code>
       </section>
+
+      <HarnessEffectDisclosure commandPlan={commandPlan} />
 
       <div className="review-actions">
         <button

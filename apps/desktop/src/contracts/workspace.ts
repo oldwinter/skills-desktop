@@ -187,9 +187,24 @@ export const publicInventoryStateSchema = z
   })
   .strict();
 
+export const commandPlanHarnessEffectSchema = z.discriminatedUnion("kind", [
+  z.object({ harnessIds: harnessIdsSchema, kind: z.literal("bound") }).strict(),
+  z
+    .object({
+      kind: z.literal("cli-unscoped"),
+      targetHarnessIds: harnessIdsSchema,
+    })
+    .strict(),
+]);
+
+export type CommandPlanHarnessEffect = z.infer<
+  typeof commandPlanHarnessEffectSchema
+>;
+
 export const commandPlanSchema = z
   .object({
     harness: z.string().min(1).max(128),
+    harnessEffect: commandPlanHarnessEffectSchema.optional(),
     harnessIds: harnessIdsSchema.optional(),
     names: z.array(z.string().min(1).max(256)).min(1).max(128),
     operation: z.enum(["add", "remove", "update"]),
@@ -914,6 +929,7 @@ export const workspaceRequestResultSchema = z.discriminatedUnion("ok", [
   z.object({ error: rendererErrorSchema, ok: z.literal(false) }).strict(),
 ]);
 
+export type CommandPlan = z.infer<typeof commandPlanSchema>;
 export type DesktopEvent = z.infer<typeof desktopEventSchema>;
 export type MutationIntent = z.infer<typeof mutationIntentSchema>;
 export type PublicInventoryEntry = z.infer<typeof publicInventoryEntrySchema>;

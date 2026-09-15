@@ -338,6 +338,12 @@ code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; fo
 .harness-option-note { color: var(--text-tertiary); font-size: var(--font-size-micro); white-space: nowrap; }
 .harness-picker-empty { margin: 0; padding: 12px 10px; color: var(--text-secondary); font-size: var(--font-size-meta); }
 .harness-picker-notice { margin: 0; color: var(--danger); font-size: var(--font-size-meta); }
+.harness-subset { display: grid; gap: 8px; margin: 0; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius-control); }
+.harness-subset legend { padding: 0 4px; font-size: var(--font-size-meta); font-weight: 600; }
+.harness-subset__hint { margin: 0; color: var(--text-secondary); font-size: var(--font-size-meta); }
+.harness-subset__list { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.harness-subset__list label { display: flex; align-items: center; gap: 8px; font-size: var(--font-size-meta); }
+.harness-subset[disabled] { opacity: 0.6; }
 
 .spin { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }

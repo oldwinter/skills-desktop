@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 
 import type { DesktopBridge } from "../../../contracts/desktop.js";
+import { describeHarnessEffect } from "../../../contracts/harness-effect.js";
 import { isInventoryEntryAvailableToHarness } from "../../../contracts/inventory-availability.js";
 import { GITHUB_SOURCE_OWNER_REPOSITORY_COPY } from "../../../contracts/user-facing-error.js";
 import {
@@ -35,6 +36,10 @@ import { AboutView } from "../about/AboutView.js";
 import { ComparisonView } from "../comparison/ComparisonView.js";
 import { CollectionsView } from "../collections/CollectionsView.js";
 import { TargetsView } from "../targets/TargetsView.js";
+import {
+  HarnessSubsetControl,
+  harnessSubsetIntent,
+} from "./HarnessSubsetControl.js";
 import {
   RecoveryView,
   recoveryItemCount,
@@ -234,6 +239,9 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
   const [addSource, setAddSource] = useState("");
   const [addSourceError, setAddSourceError] = useState<string>();
   const [addScope, setAddScope] = useState<"global" | "project">("project");
+  const [excludedHarnessIds, setExcludedHarnessIds] = useState<
+    readonly string[]
+  >([]);
   const [view, setView] = useState<WorkspaceView>("inventory");
   const [selectedTargetId, setSelectedTargetId] = useState<string>();
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -593,6 +601,9 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
   const prepareSelected = async (type: "remove" | "update") => {
     if (sshUnavailable || selected === undefined) return;
     const result = await client.prepareMutation(snapshot.target.id, {
+      ...(type === "remove"
+        ? harnessSubsetIntent(snapshot.target.harnessIds, excludedHarnessIds)
+        : {}),
       names: [selected.name],
       scope: selected.scope,
       type,
@@ -633,6 +644,7 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
     }
     setAddSourceError(undefined);
     const result = await client.prepareMutation(snapshot.target.id, {
+      ...harnessSubsetIntent(snapshot.target.harnessIds, excludedHarnessIds),
       names: [addName],
       scope: addScope,
       source: { source, sourceType: "github" },
@@ -1211,6 +1223,13 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                 </>
               )}
 
+              <HarnessSubsetControl
+                disabled={mutationBlocked}
+                excludedHarnessIds={excludedHarnessIds}
+                onChange={setExcludedHarnessIds}
+                targetHarnessIds={snapshot.target.harnessIds}
+              />
+
               <form
                 className="add-skill-form"
                 onSubmit={(event) => {
@@ -1303,6 +1322,13 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                     <div>
                       <dt>Skills</dt>
                       <dd>{snapshot.mutation.commandPlan.names.join(", ")}</dd>
+                    </div>
+                    <div>
+                      <dt>Harness effect</dt>
+                      <dd>
+                        {describeHarnessEffect(snapshot.mutation.commandPlan)
+                          .summary}
+                      </dd>
                     </div>
                   </dl>
                   <code className="command-preview wrapping-value">
