@@ -129,6 +129,59 @@ export function createPackagedUiQaScenarioError(
   return failure;
 }
 
+const appearancePalettes = {
+  dark: {
+    canvas: "#161719",
+    healthy: "#9ad4a8",
+    textRgb: "rgb(232, 234, 237)",
+    textSecondaryRgb: "rgb(196, 199, 204)",
+  },
+  "high-contrast": {
+    canvas: "#ffffff",
+    healthy: "#004d1a",
+    textRgb: "rgb(0, 0, 0)",
+    textSecondaryRgb: "rgb(31, 31, 31)",
+  },
+  light: {
+    canvas: "#f5f6f7",
+    healthy: "#176b4b",
+    textRgb: "rgb(32, 33, 36)",
+    textSecondaryRgb: "rgb(95, 99, 104)",
+  },
+};
+
+/** Wait until CSS tokens and key computed colors match the selected appearance. */
+export function appearancePaletteReadyExpression(appearance) {
+  if (appearance === "system") {
+    return `document.documentElement.dataset.appearance === "system" &&
+      getComputedStyle(document.documentElement).getPropertyValue("--canvas").trim().length > 0`;
+  }
+  const palette = appearancePalettes[appearance];
+  if (palette === undefined) {
+    return `document.documentElement.dataset.appearance === ${JSON.stringify(appearance)}`;
+  }
+  return `document.documentElement.dataset.appearance === ${JSON.stringify(appearance)} &&
+    getComputedStyle(document.documentElement).getPropertyValue("--canvas").trim() === ${JSON.stringify(palette.canvas)} &&
+    getComputedStyle(document.documentElement).getPropertyValue("--healthy").trim() === ${JSON.stringify(palette.healthy)} &&
+    getComputedStyle(document.body).color === ${JSON.stringify(palette.textRgb)} &&
+    [...document.querySelectorAll(".nav-item")].every((item) => {
+      const color = getComputedStyle(item).color;
+      return color === ${JSON.stringify(palette.textSecondaryRgb)} ||
+        color === ${JSON.stringify(palette.textRgb)};
+    }) &&
+    (() => {
+      const pill = document.querySelector(".status-pill--healthy");
+      return pill === null ||
+        getComputedStyle(pill).color === ${JSON.stringify(
+          appearance === "dark"
+            ? "rgb(154, 212, 168)"
+            : appearance === "high-contrast"
+              ? "rgb(0, 77, 26)"
+              : "rgb(23, 107, 75)",
+        )};
+    })()`;
+}
+
 async function scanWithAxe(page, axeSource, label) {
   let installed;
   try {
@@ -527,8 +580,10 @@ export async function runPackagedUiQa({
       activeCheck = `appearance-${appearance}`;
       await selectPreference(page, "Appearance", appearance);
       await page.waitFor(
-        `document.documentElement.dataset.appearance === ${JSON.stringify(appearance)}`,
+        appearancePaletteReadyExpression(appearance),
         `${appearance} appearance applied`,
+        30_000,
+        { stableMs: 200 },
       );
       // Wait until shell paints settled tokens (not a mid light↔dark fade).
       await page.waitFor(
@@ -562,23 +617,33 @@ export async function runPackagedUiQa({
           if (pill !== null && healthy.length > 0) {
             if (getComputedStyle(pill).color !== probeColor(healthy)) return false;
           }
-          if (saved !== null && canvas.length > 0) {
-            const wantBg = probeBg(canvas);
-            let el = saved;
-            let matched = false;
-            while (el instanceof Element) {
-              const bg = getComputedStyle(el).backgroundColor;
-              if (bg === wantBg) {
-                matched = true;
-                break;
+          if (saved !== null && healthy.length > 0) {
+            if (getComputedStyle(saved).color !== probeColor(healthy)) return false;
+            const savedBg = getComputedStyle(saved).backgroundColor;
+            const soft = root.getPropertyValue("--healthy-soft").trim();
+            const wantSoft = soft.length > 0 ? probeBg(soft) : "";
+            if (wantSoft.length > 0 && savedBg === wantSoft) {
+              /* self-contained chip */
+            } else if (canvas.length > 0) {
+              const wantBg = probeBg(canvas);
+              let el = saved;
+              let matched = false;
+              while (el instanceof Element) {
+                const bg = getComputedStyle(el).backgroundColor;
+                if (bg === wantBg) {
+                  matched = true;
+                  break;
+                }
+                el = el.parentElement;
               }
-              el = el.parentElement;
+              if (!matched) return false;
             }
-            if (!matched) return false;
           }
           return true;
         })()`,
         `${appearance} shell contrast tokens settled`,
+        30_000,
+        { stableMs: 80 },
       );
       const palette = await page.evaluate(`(() => {
         const root = getComputedStyle(document.documentElement);

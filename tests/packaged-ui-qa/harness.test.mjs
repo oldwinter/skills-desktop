@@ -37,6 +37,7 @@ import {
 } from "./launch.mjs";
 import {
   PACKAGED_UI_QA_SCENARIOS,
+  appearancePaletteReadyExpression,
   createPackagedUiQaScenarioError,
   mutationOutcomeFocusDiagnostic,
   requireAxeSource,
@@ -1160,6 +1161,62 @@ describe("packaged UI QA scenario contract", () => {
       schemaVersion: 1,
       stage: "focus-order",
     });
+
+    const axeFailure = createPackagedUiQaScenarioError(
+      Object.assign(new Error("Axe violations"), {
+        qaAxeViolations: [
+          {
+            id: "color-contrast",
+            impact: "serious",
+            nodes: 1,
+            samples: [
+              {
+                bgColor: "#102418",
+                contrastRatio: 2.51,
+                failureSummary:
+                  "Fix any of the following: contrast 2.51 at https://example.test/axe /Users/alice/secret",
+                fgColor: "#176b4b",
+                html: '<span class="status-pill"> /Users/alice/secret',
+                target: [".status-pill"],
+              },
+            ],
+          },
+        ],
+      }),
+      {
+        check: "appearance-dark",
+        diagnostic: "axe-rule-color-contrast",
+        stage: "appearance-modes",
+      },
+    );
+    expect(failureReceipt(axeFailure).axe).toEqual([
+      {
+        id: "color-contrast",
+        impact: "serious",
+        nodes: 1,
+        samples: [
+          {
+            bgColor: "#102418",
+            contrastRatio: 2.51,
+            failureSummary: "Fix any of the following: contrast 2.51 at  ",
+            fgColor: "#176b4b",
+            html: '<span class="status-pill"> ',
+            target: [".status-pill"],
+          },
+        ],
+      },
+    ]);
+    expect(safeFailureSummary(axeFailure)).toBe(
+      "Packaged UI QA failed during appearance-modes/appearance-dark (PackagedUiQaScenarioError; axe-rule-color-contrast). .status-pill #176b4b/#102418 2.51.",
+    );
+    expect(safeFailureSummary(axeFailure)).not.toContain("/Users/alice");
+    expect(safeFailureSummary(axeFailure)).not.toContain("https://example.test");
+    expect(appearancePaletteReadyExpression("dark")).toContain("#161719");
+    expect(appearancePaletteReadyExpression("dark")).toContain("#9ad4a8");
+    expect(appearancePaletteReadyExpression("light")).toContain("#f5f6f7");
+    expect(appearancePaletteReadyExpression("system")).toContain(
+      'dataset.appearance === "system"',
+    );
     for (const secret of [
       "/Users/alice/skills-desktop",
       "/tmp/fixture",

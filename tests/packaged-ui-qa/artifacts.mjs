@@ -115,6 +115,14 @@ const allowedDiagnosticsByCheck = new Map([
 
 const hexColor = /^#[0-9A-Fa-f]{3,8}$/;
 
+function sanitizeAxeText(value, maxLength) {
+  if (typeof value !== "string") return "";
+  return value
+    .replace(/https?:\/\/\S+/g, "")
+    .replace(/\/(?:Users|home|tmp)\/\S+/gi, "")
+    .slice(0, maxLength);
+}
+
 function sanitizeAxeViolations(value) {
   if (!Array.isArray(value)) return undefined;
   const cleaned = [];
@@ -132,13 +140,8 @@ function sanitizeAxeViolations(value) {
             .map((part) => part.slice(0, 96))
             .slice(0, 4)
         : [];
-      const html =
-        typeof sample.html === "string"
-          ? sample.html
-              .replace(/https?:\/\/\S+/g, "")
-              .replace(/\/(?:Users|home|tmp)\/\S+/gi, "")
-              .slice(0, 160)
-          : "";
+      const html = sanitizeAxeText(sample.html, 160);
+      const failureSummary = sanitizeAxeText(sample.failureSummary, 240);
       const fgColor =
         typeof sample.fgColor === "string" && hexColor.test(sample.fgColor)
           ? sample.fgColor
@@ -155,6 +158,7 @@ function sanitizeAxeViolations(value) {
       samples.push({
         ...(bgColor !== undefined ? { bgColor } : {}),
         ...(contrastRatio !== undefined ? { contrastRatio } : {}),
+        ...(failureSummary.length > 0 ? { failureSummary } : {}),
         ...(fgColor !== undefined ? { fgColor } : {}),
         ...(html.length > 0 ? { html } : {}),
         ...(target.length > 0 ? { target } : {}),
@@ -224,7 +228,24 @@ export function failureReceipt(error, fallbackStage = "unknown") {
 
 export function safeFailureSummary(error, fallbackStage = "unknown") {
   const receipt = failureReceipt(error, fallbackStage);
-  return `Packaged UI QA failed during ${receipt.stage}/${receipt.check} (${receipt.errorClass}; ${receipt.diagnostic}).`;
+  const head = `Packaged UI QA failed during ${receipt.stage}/${receipt.check} (${receipt.errorClass}; ${receipt.diagnostic}).`;
+  const samples = (receipt.axe ?? [])
+    .flatMap((violation) =>
+      (violation.samples ?? []).map((sample) => {
+        const target = Array.isArray(sample.target)
+          ? sample.target.join(" ")
+          : "";
+        const pair = [sample.fgColor, sample.bgColor].filter(Boolean).join("/");
+        const ratio =
+          typeof sample.contrastRatio === "number"
+            ? String(sample.contrastRatio)
+            : "";
+        return [target, pair, ratio].filter((part) => part.length > 0).join(" ");
+      }),
+    )
+    .filter((part) => part.length > 0)
+    .slice(0, 6);
+  return samples.length > 0 ? `${head} ${samples.join("; ")}.` : head;
 }
 
 export async function persistFailureArtifacts(error, destination, fallbackStage) {

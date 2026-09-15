@@ -43,6 +43,8 @@
 
 :root[data-appearance="dark"] {
   color-scheme: dark;
+  color: var(--text);
+  background: var(--canvas);
   --canvas: #161719;
   --surface: #202124;
   --surface-muted: #292a2d;
@@ -72,6 +74,8 @@
 @media (prefers-color-scheme: dark) {
   :root[data-appearance="system"] {
     color-scheme: dark;
+    color: var(--text);
+    background: var(--canvas);
     --canvas: #161719;
     --surface: #202124;
     --surface-muted: #292a2d;
@@ -125,6 +129,20 @@
   --danger: #a10000;
   --danger-soft: #ffe0e0;
 }
+:root[data-appearance="light"],
+:root[data-appearance="high-contrast"] {
+  color: var(--text);
+  background: var(--canvas);
+}
+:root[data-appearance="light"] body,
+:root[data-appearance="light"] #root,
+:root[data-appearance="light"] .app-shell,
+:root[data-appearance="high-contrast"] body,
+:root[data-appearance="high-contrast"] #root,
+:root[data-appearance="high-contrast"] .app-shell {
+  color: var(--text);
+  background-color: var(--canvas);
+}
 :root[data-appearance="high-contrast"] button,
 :root[data-appearance="high-contrast"] input,
 :root[data-appearance="high-contrast"] select { border-color: var(--line-strong); }
@@ -161,11 +179,45 @@ select option {
   color: var(--text);
   background-color: var(--surface);
 }
+:root[data-appearance="dark"] body,
+:root[data-appearance="dark"] #root,
+:root[data-appearance="dark"] .app-shell {
+  color: var(--text);
+  background-color: var(--canvas);
+}
+:root[data-appearance="dark"] .nav-item { color: var(--text-secondary); }
+:root[data-appearance="dark"] .nav-item--active { color: var(--text); }
+:root[data-appearance="dark"] .nav-item > span { color: inherit; }
+:root[data-appearance="dark"] .status-pill--healthy,
+:root[data-appearance="dark"] .preferences-saved,
+:root[data-appearance="dark"] .collection-status--missing,
+:root[data-appearance="dark"] .collection-status--unchanged,
+:root[data-appearance="dark"] .comparison-status--matched {
+  color: var(--healthy);
+  background-color: var(--healthy-soft);
+}
 @media (prefers-color-scheme: dark) {
   :root[data-appearance="system"] select,
   :root[data-appearance="system"] option {
     color: var(--text);
     background-color: var(--surface);
+  }
+  :root[data-appearance="system"] body,
+  :root[data-appearance="system"] #root,
+  :root[data-appearance="system"] .app-shell {
+    color: var(--text);
+    background-color: var(--canvas);
+  }
+  :root[data-appearance="system"] .nav-item { color: var(--text-secondary); }
+  :root[data-appearance="system"] .nav-item--active { color: var(--text); }
+  :root[data-appearance="system"] .nav-item > span { color: inherit; }
+  :root[data-appearance="system"] .status-pill--healthy,
+  :root[data-appearance="system"] .preferences-saved,
+  :root[data-appearance="system"] .collection-status--missing,
+  :root[data-appearance="system"] .collection-status--unchanged,
+  :root[data-appearance="system"] .comparison-status--matched {
+    color: var(--healthy);
+    background-color: var(--healthy-soft);
   }
 }
 button { cursor: pointer; }
@@ -203,7 +255,7 @@ code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; fo
 .nav-item:not(:disabled):hover { background: var(--surface-hover); }
 .nav-item, .target-row, .text-button, .icon-button { transition: border-color 140ms ease, box-shadow 140ms ease; }
 /* Color must not transition across appearance tokens — mid-fade fails axe AA (e.g. light #5f6368 on dark #202124). */
-.nav-item > span, .nav-item > svg { color: inherit; }
+.nav-item > span, .nav-item > svg, .status-pill svg, .preferences-saved svg { color: inherit; }
 .nav-item--active,
 .nav-item--active > span {
   color: var(--text);
@@ -358,8 +410,11 @@ code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; fo
   display: flex;
   align-items: center;
   gap: 6px;
+  width: fit-content;
+  padding: 4px 8px;
   color: var(--healthy);
-  background: var(--canvas);
+  background: var(--healthy-soft);
+  border-radius: var(--radius-control);
   font-size: var(--font-size-meta);
 }
 @media (max-width: 480px) { .preferences-grid { grid-template-columns: minmax(0, 1fr); } }

@@ -25,6 +25,8 @@
 }
 :root[data-appearance="dark"] {
   color-scheme: dark;
+  color: var(--text);
+  background: var(--canvas);
   --canvas: #161719;
   --surface: #202124;
   --surface-muted: #292a2d;
@@ -46,6 +48,8 @@
 @media (prefers-color-scheme: dark) {
   :root[data-appearance="system"] {
     color-scheme: dark;
+    color: var(--text);
+    background: var(--canvas);
     --canvas: #161719;
     --surface: #202124;
     --surface-muted: #292a2d;
@@ -64,6 +68,11 @@
     --healthy: #9ad4a8;
     --danger: #f28b82;
   }
+}
+:root[data-appearance="light"],
+:root[data-appearance="high-contrast"] {
+  color: var(--text);
+  background: var(--canvas);
 }
 :root[data-appearance="high-contrast"] {
   color-scheme: light;
