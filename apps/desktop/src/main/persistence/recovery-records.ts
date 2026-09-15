@@ -31,6 +31,11 @@ import {
   importedPackageRecordsSchema,
   type ImportedPackageRecord,
 } from "./imported-package-records.js";
+import {
+  PUBLICATION_GUARD_SCHEMA_VERSION,
+  publicationGuardRecordSchema,
+  type PublicationGuardRecord,
+} from "./publication-guard-records.js";
 
 const STORE_NAME = "inventorySnapshots" as const;
 const GUARD_STORE_NAME = "mutationGuards" as const;
@@ -39,6 +44,8 @@ const HOST_TRUST_STORE_NAME = "hostTrustRecords" as const;
 const COLLECTION_STORE_NAME = "collectionAcknowledgements" as const;
 const PACKAGE_STORE_NAME = "importedPackages" as const;
 const PACKAGE_DOCUMENT_NAME = "imported-packages.json";
+const PUBLICATION_STORE_NAME = "publicationGuard" as const;
+const PUBLICATION_DOCUMENT_NAME = "publication-guard.json";
 const DOCUMENT_NAME = "inventory-snapshots.json";
 const GUARD_DOCUMENT_NAME = "mutation-guards.json";
 const GUARD_FAILURE_MARKER_NAME = "mutation-guards.failure.json";
@@ -436,6 +443,15 @@ const packageDocumentSchema = z
   })
   .strict();
 
+/** Publication Guard store v1 (ADR 0020): at most one Guard, isolated. */
+const publicationDocumentSchema = z
+  .object({
+    guard: publicationGuardRecordSchema.nullable(),
+    kind: z.literal("publication-guard"),
+    schemaVersion: z.literal(PUBLICATION_GUARD_SCHEMA_VERSION),
+  })
+  .strict();
+
 export type PersistedInventoryEntry = z.infer<typeof persistedEntrySchema>;
 
 export interface InventorySnapshot {
@@ -453,6 +469,7 @@ export interface RecoveryFailure {
     | typeof HOST_TRUST_STORE_NAME
     | typeof COLLECTION_STORE_NAME
     | typeof PACKAGE_STORE_NAME
+    | typeof PUBLICATION_STORE_NAME
     | typeof STORE_NAME
     | typeof TARGET_STORE_NAME;
   readonly targetIds?: readonly string[];
@@ -497,6 +514,7 @@ export interface RestoredRecoveryRecords {
   readonly importedPackages?: readonly ImportedPackageRecord[];
   readonly inventorySnapshots: readonly InventorySnapshot[];
   readonly mutationGuards: readonly MutationGuard[];
+  readonly publicationGuard?: PublicationGuardRecord | null;
   readonly targetDefinitions: readonly DurableTargetDefinition[];
 }
 
@@ -508,6 +526,10 @@ export type DurableChange =
   | {
       readonly packages: readonly ImportedPackageRecord[];
       readonly type: "packages.replace";
+    }
+  | {
+      readonly guard: PublicationGuardRecord | null;
+      readonly type: "publication.guard.replace";
     }
   | {
       readonly generation: number;
@@ -647,6 +669,7 @@ type TargetDocument = z.infer<typeof targetDocumentSchema>;
 type TargetFailureMarker = z.infer<typeof targetFailureMarkerSchema>;
 type CollectionDocument = z.infer<typeof collectionDocumentSchema>;
 type PackageDocument = z.infer<typeof packageDocumentSchema>;
+type PublicationDocument = z.infer<typeof publicationDocumentSchema>;
 
 function allowlistSnapshot(
   change: Extract<DurableChange, { readonly type: "inventory.replace" }>,
@@ -777,6 +800,7 @@ export function createMemoryRecoveryRecords(
   initialHostTrust: readonly HostTrustRecord[] = [],
   initialCollectionAcknowledgements: readonly CollectionAcknowledgement[] = [],
   initialImportedPackages: readonly ImportedPackageRecord[] = [],
+  initialPublicationGuard: PublicationGuardRecord | null = null,
 ): RecoveryRecords {
   let snapshots = [...initialSnapshots];
   let targetDefinitions = initialTargets.map((target) => {
@@ -817,6 +841,7 @@ export function createMemoryRecoveryRecords(
     initialCollectionAcknowledgements,
   );
   let importedPackages = structuredClone(initialImportedPackages);
+  let publicationGuard = structuredClone(initialPublicationGuard);
   return {
     async commit(change) {
       if (change.type === "collections.acknowledgements.replace") {
@@ -840,6 +865,17 @@ export function createMemoryRecoveryRecords(
           );
         }
         importedPackages = structuredClone(parsed.data);
+      } else if (change.type === "publication.guard.replace") {
+        const parsed = publicationGuardRecordSchema
+          .nullable()
+          .safeParse(change.guard);
+        if (!parsed.success) {
+          return commitFailure(
+            "persist_failed",
+            "Publication Guard data did not pass durable validation.",
+          );
+        }
+        publicationGuard = structuredClone(parsed.data);
       } else if (change.type === "target.remap") {
         if (!isValidTargetRemap(change.fromTargetId, change.toTargetId)) {
           return commitFailure(
@@ -944,6 +980,7 @@ export function createMemoryRecoveryRecords(
         importedPackages: structuredClone(importedPackages),
         inventorySnapshots: structuredClone(snapshots),
         mutationGuards: structuredClone(mutationGuards),
+        publicationGuard: structuredClone(publicationGuard),
         targetDefinitions: structuredClone(targetDefinitions),
       };
     },
@@ -1149,6 +1186,10 @@ export function createJsonRecoveryRecords(
     COLLECTION_DOCUMENT_NAME,
   );
   const packageDocumentPath = join(options.directory, PACKAGE_DOCUMENT_NAME);
+  const publicationDocumentPath = join(
+    options.directory,
+    PUBLICATION_DOCUMENT_NAME,
+  );
   const fileSystem = options.fileSystem ?? createNodeRecoveryFileSystem();
   const platform = options.platform ?? process.platform;
   let document: CurrentDocument = {
@@ -1218,6 +1259,15 @@ export function createJsonRecoveryRecords(
   let packagesLoaded = false;
   let packageUnsupportedSchema = false;
   let packageWriteBlocked = false;
+  let publicationDocument: PublicationDocument = {
+    guard: null,
+    kind: "publication-guard",
+    schemaVersion: PUBLICATION_GUARD_SCHEMA_VERSION,
+  };
+  let publicationFailures: RecoveryFailure[] = [];
+  let publicationLoaded = false;
+  let publicationUnsupportedSchema = false;
+  let publicationWriteBlocked = false;
   let loaded = false;
   let unsupportedSchema = false;
   let writeBlocked = false;
@@ -1314,6 +1364,7 @@ export function createJsonRecoveryRecords(
       | TargetFailureMarker
       | CollectionDocument
       | PackageDocument
+      | PublicationDocument
       | z.infer<typeof hostTrustFailureMarkerSchema>,
     name = DOCUMENT_NAME,
     destinationPath = documentPath,
@@ -1349,6 +1400,14 @@ export function createJsonRecoveryRecords(
       `imported-packages.quarantine-${options.id()}.json`,
     );
     await fileSystem.rename(packageDocumentPath, quarantinePath);
+  };
+
+  const quarantinePublication = async () => {
+    const quarantinePath = join(
+      options.directory,
+      `publication-guard.quarantine-${options.id()}.json`,
+    );
+    await fileSystem.rename(publicationDocumentPath, quarantinePath);
   };
 
   const load = async () => {
@@ -2005,9 +2064,106 @@ export function createJsonRecoveryRecords(
     packageDocument = parsed.data;
   };
 
+  const loadPublication = async () => {
+    if (publicationLoaded) return;
+    publicationLoaded = true;
+    publicationFailures = [];
+    let raw: string;
+    try {
+      raw = await fileSystem.readFile(publicationDocumentPath, "utf8");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+      publicationWriteBlocked = true;
+      publicationFailures = [
+        { code: "corrupt_store", store: PUBLICATION_STORE_NAME },
+      ];
+      return;
+    }
+    const failClosed = async () => {
+      const quarantined = await quarantinePublication().then(
+        () => true,
+        () => false,
+      );
+      publicationWriteBlocked = !quarantined;
+      publicationFailures = [
+        { code: "corrupt_store", store: PUBLICATION_STORE_NAME },
+      ];
+    };
+    let decoded: unknown;
+    try {
+      decoded = JSON.parse(raw);
+    } catch {
+      await failClosed();
+      return;
+    }
+    if (
+      typeof decoded === "object" &&
+      decoded !== null &&
+      "schemaVersion" in decoded &&
+      typeof decoded.schemaVersion === "number" &&
+      decoded.schemaVersion > PUBLICATION_GUARD_SCHEMA_VERSION
+    ) {
+      publicationUnsupportedSchema = true;
+      publicationFailures = [
+        { code: "unsupported_schema", store: PUBLICATION_STORE_NAME },
+      ];
+      return;
+    }
+    const parsed = publicationDocumentSchema.safeParse(decoded);
+    if (!parsed.success) {
+      await failClosed();
+      return;
+    }
+    publicationDocument = parsed.data;
+  };
+
   return {
     commit(change) {
       return underApplicationLock(async () => {
+        if (change.type === "publication.guard.replace") {
+          await loadPublication();
+          if (publicationUnsupportedSchema) {
+            return commitFailure(
+              "unsupported_schema",
+              "Publication Guard data was written by a newer unsupported application version.",
+            );
+          }
+          if (publicationWriteBlocked) {
+            return commitFailure(
+              "persist_failed",
+              "Publication Guard data could not be read safely and will not be overwritten.",
+            );
+          }
+          const parsed = publicationGuardRecordSchema
+            .nullable()
+            .safeParse(change.guard);
+          if (!parsed.success) {
+            return commitFailure(
+              "persist_failed",
+              "Publication Guard data did not pass durable validation.",
+            );
+          }
+          const nextDocument: PublicationDocument = {
+            guard: parsed.data,
+            kind: "publication-guard",
+            schemaVersion: PUBLICATION_GUARD_SCHEMA_VERSION,
+          };
+          try {
+            await writeDocument(
+              nextDocument,
+              PUBLICATION_DOCUMENT_NAME,
+              publicationDocumentPath,
+            );
+            publicationDocument = nextDocument;
+            publicationFailures = [];
+            return { ok: true, value: undefined };
+          } catch {
+            return commitFailure(
+              "persist_failed",
+              "The Publication Guard could not be saved.",
+            );
+          }
+        }
         if (change.type === "packages.replace") {
           await loadPackages();
           if (packageUnsupportedSchema) {
@@ -2596,6 +2752,7 @@ export function createJsonRecoveryRecords(
         await loadHostTrust();
         await loadCollections();
         await loadPackages();
+        await loadPublication();
         return {
           blockedTargetDefinitions: structuredClone(blockedTargetDefinitions),
           collectionAcknowledgements: structuredClone(
@@ -2608,9 +2765,11 @@ export function createJsonRecoveryRecords(
             ...hostTrustFailures,
             ...collectionFailures,
             ...packageFailures,
+            ...publicationFailures,
           ]),
           hostTrustRecords: structuredClone(hostTrustRecords),
           importedPackages: structuredClone(packageDocument.packages),
+          publicationGuard: structuredClone(publicationDocument.guard),
           inventorySnapshots: structuredClone(
             pendingLegacySnapshots ?? [
               ...document.snapshots,
