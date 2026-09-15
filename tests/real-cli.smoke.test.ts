@@ -4,6 +4,8 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import { describeSource } from "@skills-desktop/skills-runtime";
+
 import {
   createSpawnProcessRunner,
   createLocalSkillsProcess,
@@ -138,6 +140,60 @@ describe("pinned real Skills CLI smoke", () => {
     await expect(
       access(join(workspace, ".agents", "skills", "find-skills", "SKILL.md")),
     ).resolves.toBeUndefined();
+    await expect(access(join(root, ".agents"))).rejects.toThrow();
+  });
+
+  it("inspects a pinned source read-only through the production Adapter without installing (#201)", async () => {
+    const root = await mkdtemp(join(tmpdir(), "skills-desktop-inspect-cli-"));
+    temporaryDirectories.push(root);
+    const workspace = join(root, "workspace");
+    await mkdir(workspace);
+    const skillsProcess = createLocalSkillsProcess({
+      binding: {
+        generation: 1,
+        harness: "Codex",
+        targetId: "00000000-0000-4000-8000-000000000001",
+      },
+      clock: () => new Date("2026-08-22T06:00:00.000Z"),
+      environment: {
+        HOME: root,
+        NPM_CONFIG_CACHE: join(root, "npm-cache"),
+        PATH: process.env.PATH,
+        SystemRoot: process.env.SystemRoot,
+        TEMP: process.env.TEMP,
+        TMP: process.env.TMP,
+        USERPROFILE: root,
+      },
+      platform: process.platform,
+      runner: createSpawnProcessRunner({ platform: process.platform }),
+      workspace,
+    });
+    // The exact-commit archive is the pinned form the CLI fetches without a
+    // clone; `owner/repo#<sha>` would be cloned as a branch and fail.
+    const described = describeSource(
+      "https://github.com/vercel-labs/skills/archive/435076e78988e1e6ec40d00b0b1d76bdbbc5419a.tar.gz",
+    );
+    if (!described.ok) throw new Error("pinned descriptor rejected");
+
+    const inspected = await skillsProcess.inspectSource({
+      descriptor: described.value,
+      signal: new AbortController().signal,
+    });
+
+    expect(inspected).toMatchObject({
+      ok: true,
+      value: {
+        candidates: expect.arrayContaining([
+          expect.objectContaining({ name: "find-skills" }),
+        ]),
+        cliVersion: "1.5.23",
+        descriptor: { family: "http-archive", mutability: "pinned" },
+        targetGeneration: 1,
+      },
+    });
+    if (!inspected.ok) throw new Error("inspection failed");
+    expect(inspected.value.digest).toMatch(/^[a-f0-9]{64}$/);
+    await expect(access(join(workspace, ".agents"))).rejects.toThrow();
     await expect(access(join(root, ".agents"))).rejects.toThrow();
   });
 });

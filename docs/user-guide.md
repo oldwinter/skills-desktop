@@ -143,10 +143,17 @@ Inventory 是对当前 Target 一次只读 `npx skills list --json` 的归一化
 
 常见操作：
 
-1. **Add Skill**：填 GitHub 源（`owner/repository`）、精确技能名、project/global，点 **Prepare add**。
+1. **Add Skill**：在 **Source** 填来源，点 **Inspect source**。主进程会用 pinned 的 `skills` CLI 以只读方式（`add <source> --list`）列出该来源里的技能，**不会安装任何东西**；列表出来后勾选要添加的技能、选 project/global，点 **Prepare add of selected Skills**。不检视时，只能按精确名称直接添加 GitHub `owner/repository`。
 2. 选中技能后 **Prepare update** / **Prepare removal**。
 3. 在 Project 或 Global 范围（不能是 All）可 **Update scope**。
 4. 出现 Command Plan 后，点 **Open Trusted Review**，在独立确认界面审阅后再执行。
+
+来源检视（Source Inspection）：
+
+- 支持的来源形态：GitHub `owner/repository[#ref]`、GitHub / GitLab 仓库 URL、以 `.git` 结尾的 Git URL、`https://…/SKILL.md`、`.tar.gz` / `.zip` 归档 URL、`https://skills.sh/p/<pack>`，以及任意 `https://` 站点的 well-known 索引。带凭据、带空白、以 `-` 开头的文本会在启动进程之前被拒绝；本地目录 / 归档需要主进程签发的文件系统授权，本版本尚未提供。
+- 列表旁会标注 **Pinned source**（指向确切提交，例如 `https://github.com/owner/repo/archive/<sha>.tar.gz`）或 **Mutable source**（默认分支、命名 ref、HTTP 内容等，执行时会重新获取，内容可能与检视结果不同）。Command Plan 与 Trusted Review 都会重复这一标注，请在批准前确认。注意 pinned CLI 会把 `owner/repo#<sha>` 当作分支去 clone，因此要固定到某个提交，请使用归档 URL。
+- 检视结果只在当前会话、当前 Target 及其 generation 内有效。改动 Source 文本会回到直接添加路径；Target 变更或重新检视后，旧的列表即失效，主进程会以 `source_inspection_stale` 拒绝基于它的 Prepare 与批准。
+- 检视中可点 **Cancel inspection**；取消不会发布任何部分列表。SSH Target 暂不支持检视。
 
 Harness 影响范围：
 

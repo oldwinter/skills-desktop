@@ -92,3 +92,38 @@ check); `about.show` and `workspace.show` never reach a renderer. Main relays
 only to the workspace attachment that is live at activation and otherwise
 recreates or focuses the workspace window; no menu item bypasses
 `DesktopCapabilities`.
+
+Source Inspection (ADR 0015) enters through the closed `source.inspect`
+request: `{ source, targetId }`. Main classifies the text with
+`describeSource` into a `SourceDescriptorV1` (family, `portable` or
+`local-only` locality, `mutable` or `pinned` mutability, optional ref) before
+anything spawns; option-shaped, whitespace, credential-bearing, control-
+character, and out-of-dialect text is `source_unsupported`, and local
+directories and archives are refused until a main-owned filesystem grant
+exists. A Fresh Target Session is required (`stale_inventory` otherwise), and
+an inspection is one exclusive operation like an observation: it runs the
+exact read-only argument array `add <source> --list` under a 60-second cap,
+never installs, and is cancelled through `inventory.cancel` with the
+`activeOperationId` the Snapshot publishes. The Workspace Snapshot carries the
+result in the optional `sourceInspection` projection (`phase`,
+`activeOperationId`, `lastError`, and one `inspection` with the parsed
+candidates, the descriptor, an `inspectionId`, a SHA-256 `digest` of the
+canonical descriptor plus listing, and the Target id and Generation it was
+taken at). The projection is session evidence only: never persisted, replaced
+by the next inspection, and cleared when the Target or its Generation
+changes.
+
+An add intent may name either the legacy GitHub `{ source, sourceType:
+"github", revision? }` or an inspected source `{ descriptor, inspection:
+{ id, digest }, sourceType: "inspected" }`. For an inspected add, main refuses
+`mutation.prepare` with `source_inspection_stale` unless the id and digest
+name the current inspection for that Target at its current Generation, the
+descriptor matches exactly, and every name is among the listed candidates; it
+repeats the same check before creating the Mutation Guard at review approval.
+The resulting Command Plan `source` is a union of the legacy GitHub shape and
+`{ sourceType: "inspected", family, mutability, ref, source, inspectionId,
+inspectionDigest }`; `describeCommandPlanSource` in
+`apps/desktop/src/contracts/source-disclosure.ts` labels the family and
+pinned/mutable status that the Inventory Command Plan and the Trusted Review
+disclose before approval. SSH Targets reject `source.inspect` and inspected
+adds as next scope; the Wire protocol is unchanged.
