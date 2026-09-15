@@ -323,6 +323,48 @@ html[data-appearance="dark"] .status-pill.status-pill--neutral {
   background: #292a2d !important;
   background-color: #292a2d !important;
 }
+/* Reverse of the dark pin: dark→high-contrast on arm64 can keep #e8eaed
+   on already-updated --surface-muted #f2f2f2 (axe 1.07). */
+html[data-appearance="high-contrast"] .nav-item.nav-item--active,
+html[data-appearance="high-contrast"] .nav-item.nav-item--active > span {
+  color: #000000 !important;
+}
+html[data-appearance="high-contrast"] .status-pill,
+html[data-appearance="high-contrast"] .status-pill svg {
+  color: #004d1a !important;
+}
+html[data-appearance="high-contrast"] .status-pill {
+  background: #dcf5e3 !important;
+  background-color: #dcf5e3 !important;
+}
+html[data-appearance="high-contrast"] .status-pill.status-pill--warning,
+html[data-appearance="high-contrast"] .status-pill.status-pill--warning svg {
+  color: #5a3a00 !important;
+}
+html[data-appearance="high-contrast"] .status-pill.status-pill--warning {
+  background: #fff0c2 !important;
+  background-color: #fff0c2 !important;
+}
+html[data-appearance="high-contrast"] .status-pill.status-pill--danger,
+html[data-appearance="high-contrast"] .status-pill.status-pill--danger svg {
+  color: #a10000 !important;
+}
+html[data-appearance="high-contrast"] .status-pill.status-pill--danger {
+  background: #ffe0e0 !important;
+  background-color: #ffe0e0 !important;
+}
+html[data-appearance="high-contrast"] .status-pill.status-pill--neutral,
+html[data-appearance="high-contrast"] .status-pill.status-pill--neutral svg {
+  color: #1f1f1f !important;
+}
+html[data-appearance="high-contrast"] .status-pill.status-pill--neutral {
+  background: #f2f2f2 !important;
+  background-color: #f2f2f2 !important;
+}
+html[data-appearance="light"] .nav-item.nav-item--active,
+html[data-appearance="light"] .nav-item.nav-item--active > span {
+  color: #202124 !important;
+}
 .nav-count { display: inline-grid; min-width: 20px; height: 20px; margin-left: auto; padding: 0 6px; place-items: center; color: var(--warning); background: var(--warning-soft); border-radius: 10px; font-size: var(--font-size-micro); font-weight: 600; }
 .nav-item:disabled { opacity: 0.52; }
 .target-section { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--line); }

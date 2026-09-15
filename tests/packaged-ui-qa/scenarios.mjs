@@ -579,6 +579,36 @@ export async function runPackagedUiQa({
           { stableMs: 50 },
         );
       }
+      if (appearance === "high-contrast") {
+        await page.waitFor(
+          `(() => {
+            if (document.documentElement.dataset.appearance !== "high-contrast") {
+              return false;
+            }
+            document.documentElement.offsetHeight;
+            const span = document.querySelector(".nav-item--active > span");
+            const pill = document.querySelector(".status-pill");
+            if (span === null || pill === null) return false;
+            const spanOk = getComputedStyle(span).color === "rgb(0, 0, 0)";
+            const pillColor = getComputedStyle(pill).color;
+            const pillBg = getComputedStyle(pill).backgroundColor;
+            const pillFgOk =
+              pillColor === "rgb(0, 77, 26)" ||
+              pillColor === "rgb(31, 31, 31)" ||
+              pillColor === "rgb(90, 58, 0)" ||
+              pillColor === "rgb(161, 0, 0)";
+            const pillBgOk =
+              pillBg === "rgb(220, 245, 227)" ||
+              pillBg === "rgb(242, 242, 242)" ||
+              pillBg === "rgb(255, 240, 194)" ||
+              pillBg === "rgb(255, 224, 224)";
+            return spanOk && pillFgOk && pillBgOk;
+          })()`,
+          "high-contrast appearance contrast pins settled",
+          8_000,
+          { stableMs: 50 },
+        );
+      }
       const palette = await page.evaluate(`(() => {
         const root = getComputedStyle(document.documentElement);
         const body = getComputedStyle(document.body);
