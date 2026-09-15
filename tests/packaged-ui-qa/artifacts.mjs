@@ -2,6 +2,7 @@ import { chmod, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 const allowedFailureStages = new Set([
+  "appearance-modes",
   "axe-semantics",
   "console-failures",
   "empty-state",
@@ -10,11 +11,18 @@ const allowedFailureStages = new Set([
   "focus-order",
   "keyboard-workflow",
   "launch",
+  "locale-switch",
   "narrow-layout",
   "reduced-motion",
   "unknown",
 ]);
 const allowedFailureChecks = new Set([
+  "about-open",
+  "appearance-dark",
+  "appearance-forced-colors",
+  "appearance-high-contrast",
+  "appearance-light",
+  "appearance-system",
   "cli-list-invocation",
   "cli-remove-invocation",
   "empty-state-render",
@@ -23,6 +31,10 @@ const allowedFailureChecks = new Set([
   "fixture-cleanup",
   "fixture-inventory",
   "focus-visibility",
+  "locale-initial",
+  "locale-persisted",
+  "locale-switch-en",
+  "locale-switch-zh-cn",
   "mutation-postflight",
   "mutation-prepare",
   "narrow-overflow",
@@ -63,6 +75,10 @@ const axeDiagnostics = new Set([
 ]);
 const axeRuleDiagnostic = /^axe-rule-[a-z0-9-]{1,64}$/;
 const allowedDiagnosticsByCheck = new Map([
+  ["appearance-dark", axeDiagnostics],
+  ["appearance-high-contrast", axeDiagnostics],
+  ["appearance-light", axeDiagnostics],
+  ["appearance-system", axeDiagnostics],
   ["review-axe", axeDiagnostics],
   ["settled-axe", axeDiagnostics],
   ["workspace-axe", axeDiagnostics],
@@ -122,7 +138,10 @@ export function failureReceipt(error, fallbackStage = "unknown") {
       typeof proposedDiagnostic === "string" &&
       (proposedDiagnostic === "unknown" ||
         allowedDiagnosticsByCheck.get(check)?.has(proposedDiagnostic) === true ||
-        (check.endsWith("-axe") && axeRuleDiagnostic.test(proposedDiagnostic)))
+        ((check.endsWith("-axe") ||
+          (check.startsWith("appearance-") &&
+            check !== "appearance-forced-colors")) &&
+          axeRuleDiagnostic.test(proposedDiagnostic)))
         ? proposedDiagnostic
         : "unknown",
     errorClass: allowedErrorClasses.has(proposedClass) ? proposedClass : "Error",

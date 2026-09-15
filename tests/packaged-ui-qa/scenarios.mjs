@@ -779,7 +779,7 @@ export async function runPackagedUiQa({
     await fixture.setProcessMode("failure");
     await clickNamedButton(page, "Refresh inventory");
     await page.waitFor(
-      `document.body?.textContent?.includes("本地进程执行失败") === true ||
+      `document.body?.textContent?.includes("The local process failed") === true ||
         document.body?.textContent?.includes("Inventory unavailable") === true`,
       "inventory error",
     );

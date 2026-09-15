@@ -1056,6 +1056,31 @@ describe("packaged UI QA scenario contract", () => {
     expect(failureReceipt(failure).diagnostic).toBe("unknown");
   });
 
+  it("keeps axe diagnostics for each appearance mode and names the locale checks", () => {
+    const failure = createPackagedUiQaScenarioError(new Error("untrusted"), {
+      check: "appearance-high-contrast",
+      diagnostic: "axe-rule-color-contrast",
+      stage: "appearance-modes",
+    });
+    expect(failureReceipt(failure)).toMatchObject({
+      check: "appearance-high-contrast",
+      diagnostic: "axe-rule-color-contrast",
+      stage: "appearance-modes",
+    });
+    failure.qaCheck = "appearance-forced-colors";
+    expect(failureReceipt(failure).diagnostic).toBe("unknown");
+
+    const locale = createPackagedUiQaScenarioError(new Error("untrusted"), {
+      check: "locale-switch-zh-cn",
+      stage: "locale-switch",
+    });
+    expect(failureReceipt(locale)).toMatchObject({
+      check: "locale-switch-zh-cn",
+      diagnostic: "unknown",
+      stage: "locale-switch",
+    });
+  });
+
   it("documents the required Local-only scenarios and setup commands", () => {
     expect(PACKAGED_UI_QA_SCENARIOS).toEqual([
       "keyboard-workflow",

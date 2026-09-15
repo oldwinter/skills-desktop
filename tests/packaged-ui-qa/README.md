@@ -57,6 +57,8 @@ node tests/packaged-ui-qa/run.mjs --help
 - axe-semantics
 - narrow-layout
 - reduced-motion
+- locale-switch (About page: `en` → `zh-CN` → `en`, `html lang`, persisted `preferences.json`)
+- appearance-modes (light, dark, high-contrast, system with axe on each; `forced-colors: active`)
 - empty-state
 - error-state
 - console-failures
