@@ -225,7 +225,8 @@ describe("well-known export profile", () => {
     const archivePath = join(directory, "wrangler.tar.gz");
     writeFileSync(archivePath, archive.bytes);
     const listing = execFileSync("tar", ["-tzf", archivePath], { encoding: "utf8" });
-    expect(listing.trim().split("\n")).toEqual([
+    // Windows bsdtar prints CRLF line endings.
+    expect(listing.trim().split(/\r?\n/)).toEqual([
       "SKILL.md",
       "references/FORMS.md",
       "scripts/deploy.sh",
