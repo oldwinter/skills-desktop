@@ -6,6 +6,7 @@ import {
   FileDown,
   Laptop,
   LibraryBig,
+  ListFilter,
   LoaderCircle,
   Package,
   PackagePlus,
@@ -127,9 +128,11 @@ function inputFor(
 
 export function CollectionsView({
   client,
+  onOpenInventory,
   snapshot,
 }: {
   readonly client: WorkspaceBridge;
+  readonly onOpenInventory?: () => void;
   readonly snapshot: WorkspaceSnapshot;
 }) {
   const { t, tc } = useTranslator();
@@ -392,7 +395,18 @@ export function CollectionsView({
           <CircleHelp aria-hidden="true" size={22} />
           <h2>{t("collections.empty.heading")}</h2>
           <p>{t("collections.empty.body")}</p>
-          <p>{t("collections.import.hint")}</p>
+          <p>{t("collections.empty.nextStep")}</p>
+          {onOpenInventory !== undefined ? (
+            <button
+              className="text-button text-button--primary"
+              onClick={onOpenInventory}
+              type="button"
+            >
+              <ListFilter aria-hidden="true" size={15} />
+              {t("common.openInventory")}
+            </button>
+          ) : null}
+          <p className="empty-state__hint">{t("collections.import.hint")}</p>
         </div>
       </main>
     );

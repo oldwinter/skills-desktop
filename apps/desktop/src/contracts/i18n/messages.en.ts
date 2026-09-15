@@ -10,6 +10,7 @@ export const en = {
   "app.trustedReviewTitle": "Skills Desktop Trusted Review",
 
   "common.details": "Details",
+  "common.openInventory": "Open Inventory",
   "common.unknown": "Unknown",
   "common.local": "Local",
   "common.close": "Close",
@@ -526,6 +527,8 @@ export const en = {
   "comparison.refreshTarget": "Refresh {label}",
   "comparison.empty.none": "No comparison selected",
   "comparison.empty.noEvidence": "No skill evidence on either Target",
+  "comparison.empty.noEvidenceBody":
+    "Both Inventories are empty, so there is nothing to compare yet. Add a Skill to one Target from Inventory, then compare again.",
   "comparison.empty.noSearchMatch": "No skills match your search",
   "comparison.empty.tryAnotherOrToggle":
     "Try another skill name or turn off Differences only.",
@@ -560,6 +563,8 @@ export const en = {
   "collections.empty.heading": "No Official Collections",
   "collections.empty.body":
     "This build has no bundled reviewed releases. V1 Collections only apply to Local Targets once a release is packaged with the app.",
+  "collections.empty.nextStep":
+    "Until then, add Skills one at a time from Inventory.",
   "collections.bundled.one": "{count} bundled release",
   "collections.bundled.other": "{count} bundled releases",
   "collections.release": "Release",

@@ -12,6 +12,7 @@ export const zhCN: Readonly<Record<keyof typeof en, string>> = {
   "app.trustedReviewTitle": "Skills Desktop 可信复核",
 
   "common.details": "详情",
+  "common.openInventory": "打开 Inventory",
   "common.unknown": "未知",
   "common.local": "本机",
   "common.close": "关闭",
@@ -483,6 +484,8 @@ export const zhCN: Readonly<Record<keyof typeof en, string>> = {
   "comparison.refreshTarget": "刷新 {label}",
   "comparison.empty.none": "未选择对比",
   "comparison.empty.noEvidence": "两个 Target 上都没有 Skill 证据",
+  "comparison.empty.noEvidenceBody":
+    "两侧 Inventory 均为空，暂无可对比内容。请先在 Inventory 中为其中一个 Target 添加 Skill，再重新对比。",
   "comparison.empty.noSearchMatch": "没有匹配搜索的 Skill",
   "comparison.empty.tryAnotherOrToggle":
     "换一个 Skill 名称，或关闭“仅显示差异”。",
@@ -514,6 +517,7 @@ export const zhCN: Readonly<Record<keyof typeof en, string>> = {
   "collections.empty.heading": "没有官方合集",
   "collections.empty.body":
     "此构建未内置已复核的发布。V1 的合集只在发布随应用打包后应用于 Local Target。",
+  "collections.empty.nextStep": "在此之前，可在 Inventory 中逐个添加 Skill。",
   "collections.bundled.one": "{count} 个内置发布",
   "collections.bundled.other": "{count} 个内置发布",
   "collections.release": "发布",

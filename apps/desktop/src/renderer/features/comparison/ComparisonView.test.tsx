@@ -978,6 +978,7 @@ describe("ComparisonView", () => {
     );
 
     cleanup();
+    const onOpenInventory = vi.fn();
     render(
       <ComparisonView
         client={bridge({
@@ -987,6 +988,7 @@ describe("ComparisonView", () => {
           })),
           prepareComparison,
         })}
+        onOpenInventory={onOpenInventory}
         onPrepared={vi.fn()}
         snapshot={baseSnapshot({
           comparison: {
@@ -1006,6 +1008,12 @@ describe("ComparisonView", () => {
         name: "No skill evidence on either Target",
       }),
     ).toBeInTheDocument();
+    // #184: an empty result explains itself and routes back to Inventory.
+    expect(
+      screen.getByText(/Both Inventories are empty, so there is nothing to compare yet/),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Open Inventory" }));
+    expect(onOpenInventory).toHaveBeenCalledOnce();
     expect(
       screen.getByRole("heading", { name: "No difference selected" }),
     ).toBeInTheDocument();

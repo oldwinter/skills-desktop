@@ -1805,6 +1805,36 @@ describe("Local Target Inventory shell", () => {
     );
   });
 
+  it("routes an empty Official Collections page back to Inventory (#180)", async () => {
+    render(
+      <InventoryApp
+        client={clientFor({
+          ...collectionSnapshot,
+          collections: {
+            ...collectionSnapshot.collections!,
+            releases: [],
+          },
+        })}
+      />,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Collections" }));
+
+    const empty = (
+      await screen.findByRole("heading", { name: "No Official Collections" })
+    ).closest(".empty-state");
+    expect(empty).toHaveTextContent(
+      "Until then, add Skills one at a time from Inventory.",
+    );
+    fireEvent.click(
+      within(empty as HTMLElement).getByRole("button", {
+        name: "Open Inventory",
+      }),
+    );
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Inventory" }),
+    ).toBeInTheDocument();
+  });
+
   it("excludes SSH Targets from V1 Collections prepare while Local stays ordered", async () => {
     const otherTarget = {
       ...snapshot.target,

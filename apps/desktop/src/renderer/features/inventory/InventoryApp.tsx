@@ -1793,6 +1793,7 @@ function InventoryWorkspace({
         ) : view === "comparison" ? (
           <ComparisonView
             client={client}
+            onOpenInventory={() => setView("inventory")}
             onPrepared={(preparedId, destinationTargetId) => {
               const destination = targetStates.find(
                 ({ target }) => target.id === destinationTargetId,
@@ -1810,7 +1811,11 @@ function InventoryWorkspace({
             targets={targetStates}
           />
         ) : view === "collections" ? (
-          <CollectionsView client={client} snapshot={snapshot} />
+          <CollectionsView
+            client={client}
+            onOpenInventory={() => setView("inventory")}
+            snapshot={snapshot}
+          />
         ) : view === "publish" ? (
           <PublishView client={client} publication={snapshot.publication} />
         ) : view === "studio" ? (
