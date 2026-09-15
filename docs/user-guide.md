@@ -155,6 +155,11 @@ Harness 影响范围：
 
 仅当 Inventory 为 **fresh**，且不在 reconciliation / 变更进行中时，Prepare 才可用。
 
+skills.sh 交接：
+
+- 当选中技能的 declared source 是 GitHub `owner/repository`，且 Inventory 为 fresh 时，Skill evidence 下方会出现 **Open on skills.sh**。点击后由主进程构造并校验唯一允许的地址形态 `https://skills.sh/<owner>/<repository>/<skill>`，再交给系统浏览器打开。
+- 应用只会告诉你「已在浏览器打开」。它不内嵌网页、不登录、不提交、不接收回调，也不知道你在 skills.sh 上是否发布或更新了任何东西；请以浏览器里看到的为准。
+
 若出现 **Reconciliation required**：先按提示 **Reconcile**，在建立新的完整 Inventory 之前不要继续变更。
 
 ---

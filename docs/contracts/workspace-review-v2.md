@@ -46,3 +46,15 @@ intents are unchanged. The resulting Command Plan records what it can touch in
 across every CLI-managed link in the scope regardless of the Target's set.
 Trusted Review and the Inventory Command Plan render that field; a plan
 without it is read as bound unless its operation is `update`.
+
+The only browser-opening capability is the closed `handoff.skills-sh`
+request (ADR 0021). Main derives `skillsShHandoffs` records from Fresh
+Inventory entries whose declared source is a GitHub `owner/repository`; each
+record is publication data plus an opaque id bound to the session epoch and
+Target, and the Snapshot never carries a URL. The request names a record id.
+Main rebuilds `https://skills.sh/{owner}/{repository}/{skill}`, allowlists the
+exact scheme, host, path shape, and length, and only then hands it to the
+system browser; the composition root repeats the allowlist check at the
+process edge. Success means a page was opened, never that anything was
+published. A record id from another session or a renderer-supplied URL is
+`invalid_request`.

@@ -89,6 +89,7 @@ function bridge(overrides: Partial<WorkspaceBridge> = {}): WorkspaceBridge {
     compareTargets: ok,
     createTarget: ok,
     deleteTarget: ok,
+    handoffSkillsSh: ok,
     async getSnapshot() {
       return { ok: true, value: snapshotWith() };
     },

@@ -129,6 +129,9 @@ function bridge(overrides: Partial<WorkspaceBridge> = {}): WorkspaceBridge {
     async compareTargets() {
       return { ok: true, value: { operationId: "comparison-1" } };
     },
+    async handoffSkillsSh(recordId) {
+      return { ok: true, value: { operationId: recordId } };
+    },
     async createTarget() {
       return { ok: true, value: { operationId: "created-target" } };
     },

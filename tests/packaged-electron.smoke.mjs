@@ -525,6 +525,7 @@ try {
       "createTarget",
       "deleteTarget",
       "getSnapshot",
+      "handoffSkillsSh",
       "prepareCollection",
       "prepareCollectionAcrossTargets",
       "prepareComparison",

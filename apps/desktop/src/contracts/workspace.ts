@@ -657,10 +657,39 @@ export const publicRecoveryStateSchema = z
   })
   .strict();
 
+/**
+ * ADR 0021: a skills.sh handoff record is main-derived publication data
+ * (a reviewed GitHub `owner/repository` plus one skill slug) with an opaque
+ * session-bound id. The renderer names a record; it never supplies a URL.
+ */
+export const publicSkillsShHandoffRecordSchema = z
+  .object({
+    id: z.string().regex(/^[a-f0-9]{64}$/),
+    kind: z.literal("skills-sh"),
+    owner: z.string().min(1).max(39),
+    repository: z.string().min(1).max(100),
+    skill: z.string().min(1).max(256).nullable(),
+    sourceEntry: z
+      .object({
+        name: z.string().min(1).max(256),
+        scope: z.enum(["global", "project"]),
+      })
+      .strict(),
+  })
+  .strict();
+
+export type PublicSkillsShHandoffRecord = z.infer<
+  typeof publicSkillsShHandoffRecordSchema
+>;
+
 export const workspaceSnapshotSchema = z
   .object({
     blockedTargets: z.array(blockedTargetDefinitionSchema).max(1_000).optional(),
     recovery: publicRecoveryStateSchema.optional(),
+    skillsShHandoffs: z
+      .array(publicSkillsShHandoffRecordSchema)
+      .max(10_000)
+      .optional(),
     eventSequence: z.number().int().nonnegative(),
     comparison: publicComparisonSchema.nullable().optional(),
     collections: publicCollectionsStateSchema.optional(),
@@ -809,6 +838,19 @@ export const repairTargetRequestSchema = z
   })
   .strict();
 
+/**
+ * The only browser-opening capability: name an existing session handoff
+ * record. Main rebuilds and allowlists the URL before the system browser
+ * sees it, and reports only that a page was opened.
+ */
+export const skillsShHandoffRequestSchema = z
+  .object({
+    recordId: z.string().regex(/^[a-f0-9]{64}$/),
+    type: z.literal("handoff.skills-sh"),
+    version: z.literal(WORKSPACE_PROTOCOL_VERSION),
+  })
+  .strict();
+
 export const openComparisonRequestSchema = z
   .object({
     leftTargetId: targetIdSchema,
@@ -912,6 +954,7 @@ export const workspaceRequestSchema = z.discriminatedUnion("type", [
   updateTargetRequestSchema,
   deleteTargetRequestSchema,
   repairTargetRequestSchema,
+  skillsShHandoffRequestSchema,
   openComparisonRequestSchema,
   prepareComparisonRequestSchema,
   prepareCollectionRequestSchema,
@@ -994,6 +1037,7 @@ export interface WorkspaceBridge {
     request: Omit<PrepareCollectionAcrossTargetsRequest, "type" | "version">,
   ): Promise<WorkspaceRequestResult>;
   getSnapshot(): Promise<WorkspaceSnapshotResult>;
+  handoffSkillsSh(recordId: string): Promise<WorkspaceRequestResult>;
   prepareMutation(
     targetId: string,
     intent: MutationIntent,

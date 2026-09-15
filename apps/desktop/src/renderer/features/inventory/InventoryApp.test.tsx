@@ -214,6 +214,9 @@ function clientFor(
     async deleteTarget(targetId) {
       return { ok: true, value: { operationId: targetId } };
     },
+    async handoffSkillsSh(recordId) {
+      return { ok: true, value: { operationId: recordId } };
+    },
     async repairTarget(targetId) {
       return { ok: true, value: { operationId: targetId } };
     },
@@ -987,6 +990,52 @@ describe("Local Target Inventory shell", () => {
         type: "remove",
       }),
     );
+  });
+
+  it("offers Open on skills.sh only for a record main derived, and says opened rather than published (#208)", async () => {
+    const recordId = "d".repeat(64);
+    const handoffSkillsSh = vi.fn(async (id: string) => ({
+      ok: true as const,
+      value: { operationId: id },
+    }));
+    const withHandoff: WorkspaceSnapshot = {
+      ...snapshot,
+      skillsShHandoffs: [
+        {
+          id: recordId,
+          kind: "skills-sh",
+          owner: "example",
+          repository: "skills",
+          skill: "Case-Sensitive-Skill",
+          sourceEntry: { name: "Case-Sensitive-Skill", scope: "project" },
+        },
+      ],
+    };
+    render(
+      <InventoryApp client={{ ...clientFor(withHandoff), handoffSkillsSh }} />,
+    );
+
+    const open = await screen.findByRole("button", { name: "Open on skills.sh" });
+    expect(
+      screen.getByText(/Opens skills\.sh\/example\/skills\/Case-Sensitive-Skill/),
+    ).toBeInTheDocument();
+    fireEvent.click(open);
+    await waitFor(() => expect(handoffSkillsSh).toHaveBeenCalledWith(recordId));
+    const status = await screen.findByRole("status");
+    expect(status).toHaveTextContent("Opened in your browser");
+    expect(status).not.toHaveTextContent(/published/i);
+    // The bridge received a record id, not a URL.
+    expect(JSON.stringify(handoffSkillsSh.mock.calls)).not.toContain("https://");
+  });
+
+  it("hides Open on skills.sh when the Snapshot carries no handoff record for the skill", async () => {
+    render(<InventoryApp client={clientFor(snapshot)} />);
+    expect(
+      await screen.findByRole("button", { name: "Prepare removal" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Open on skills.sh" }),
+    ).not.toBeInTheDocument();
   });
 
   it("shows the harness effect of a planned update beside its Command Plan", async () => {

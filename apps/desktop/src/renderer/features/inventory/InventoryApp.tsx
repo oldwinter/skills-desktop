@@ -5,6 +5,7 @@ import {
   CheckCircle2,
   CircleHelp,
   Clock3,
+  ExternalLink,
   FolderGit2,
   HardDrive,
   PackagePlus,
@@ -242,6 +243,10 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
   const [excludedHarnessIds, setExcludedHarnessIds] = useState<
     readonly string[]
   >([]);
+  const [skillsShHandoff, setSkillsShHandoff] = useState<{
+    readonly recordId: string;
+    readonly status: "opened" | "opening";
+  }>();
   const [view, setView] = useState<WorkspaceView>("inventory");
   const [selectedTargetId, setSelectedTargetId] = useState<string>();
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -598,6 +603,26 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
     !sshUnavailable &&
     snapshot.inventory.freshness === "fresh" &&
     snapshot.mutation.phase === "reconciliation-required";
+  const selectedHandoff =
+    selected === undefined
+      ? undefined
+      : snapshot.skillsShHandoffs?.find(
+          ({ sourceEntry }) =>
+            sourceEntry.name === selected.name &&
+            sourceEntry.scope === selected.scope,
+        );
+  const openOnSkillsSh = async () => {
+    if (selectedHandoff === undefined) return;
+    setSkillsShHandoff({ recordId: selectedHandoff.id, status: "opening" });
+    const result = await client.handoffSkillsSh(selectedHandoff.id);
+    if (result.ok) {
+      setActionError(undefined);
+      setSkillsShHandoff({ recordId: selectedHandoff.id, status: "opened" });
+    } else {
+      setSkillsShHandoff(undefined);
+      setActionError(result.error);
+    }
+  };
   const prepareSelected = async (type: "remove" | "update") => {
     if (sshUnavailable || selected === undefined) return;
     const result = await client.prepareMutation(snapshot.target.id, {
@@ -1220,6 +1245,38 @@ export function InventoryApp({ client }: { readonly client: DesktopBridge }) {
                       Prepare removal
                     </button>
                   </div>
+                  {selectedHandoff !== undefined ? (
+                    <div className="skills-sh-handoff">
+                      <button
+                        className="text-button"
+                        disabled={
+                          skillsShHandoff?.recordId === selectedHandoff.id &&
+                          skillsShHandoff.status === "opening"
+                        }
+                        onClick={() => void openOnSkillsSh()}
+                        type="button"
+                      >
+                        <ExternalLink aria-hidden="true" size={15} />
+                        Open on skills.sh
+                      </button>
+                      <p className="skills-sh-handoff__hint">
+                        Opens skills.sh/{selectedHandoff.owner}/
+                        {selectedHandoff.repository}
+                        {selectedHandoff.skill !== null
+                          ? `/${selectedHandoff.skill}`
+                          : ""}{" "}
+                        in your system browser. Nothing is submitted from this
+                        app.
+                      </p>
+                      {skillsShHandoff?.recordId === selectedHandoff.id &&
+                      skillsShHandoff.status === "opened" ? (
+                        <p className="skills-sh-handoff__status" role="status">
+                          Opened in your browser. Whatever happens on skills.sh
+                          stays there; this app cannot confirm a publication.
+                        </p>
+                      ) : null}
+                    </div>
+                  ) : null}
                 </>
               )}
 
