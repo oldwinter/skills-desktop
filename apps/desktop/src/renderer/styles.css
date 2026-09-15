@@ -362,8 +362,68 @@ html[data-appearance="high-contrast"] .status-pill.status-pill--neutral {
   background-color: #f2f2f2 !important;
 }
 html[data-appearance="light"] .nav-item.nav-item--active,
-html[data-appearance="light"] .nav-item.nav-item--active > span {
+html[data-appearance="light"] .nav-item.nav-item--active > span,
+html[data-appearance="system"] .nav-item.nav-item--active,
+html[data-appearance="system"] .nav-item.nav-item--active > span {
   color: #202124 !important;
+}
+html[data-appearance="light"] .status-pill,
+html[data-appearance="light"] .status-pill svg,
+html[data-appearance="system"] .status-pill,
+html[data-appearance="system"] .status-pill svg {
+  color: #176b4b !important;
+}
+html[data-appearance="light"] .status-pill,
+html[data-appearance="system"] .status-pill {
+  background: #e8f5ef !important;
+  background-color: #e8f5ef !important;
+}
+html[data-appearance="light"] .status-pill.status-pill--warning,
+html[data-appearance="light"] .status-pill.status-pill--warning svg,
+html[data-appearance="system"] .status-pill.status-pill--warning,
+html[data-appearance="system"] .status-pill.status-pill--warning svg {
+  color: #805000 !important;
+}
+html[data-appearance="light"] .status-pill.status-pill--warning,
+html[data-appearance="system"] .status-pill.status-pill--warning {
+  background: #fff3d8 !important;
+  background-color: #fff3d8 !important;
+}
+html[data-appearance="light"] .status-pill.status-pill--danger,
+html[data-appearance="light"] .status-pill.status-pill--danger svg,
+html[data-appearance="system"] .status-pill.status-pill--danger,
+html[data-appearance="system"] .status-pill.status-pill--danger svg {
+  color: #b93832 !important;
+}
+html[data-appearance="light"] .status-pill.status-pill--danger,
+html[data-appearance="system"] .status-pill.status-pill--danger {
+  background: #fcecea !important;
+  background-color: #fcecea !important;
+}
+html[data-appearance="light"] .status-pill.status-pill--neutral,
+html[data-appearance="light"] .status-pill.status-pill--neutral svg,
+html[data-appearance="system"] .status-pill.status-pill--neutral,
+html[data-appearance="system"] .status-pill.status-pill--neutral svg {
+  color: #5f6368 !important;
+}
+html[data-appearance="light"] .status-pill.status-pill--neutral,
+html[data-appearance="system"] .status-pill.status-pill--neutral {
+  background: #f0f2f4 !important;
+  background-color: #f0f2f4 !important;
+}
+@media (prefers-color-scheme: dark) {
+  html[data-appearance="system"] .nav-item.nav-item--active,
+  html[data-appearance="system"] .nav-item.nav-item--active > span {
+    color: #e8eaed !important;
+  }
+  html[data-appearance="system"] .status-pill,
+  html[data-appearance="system"] .status-pill svg {
+    color: #9ad4a8 !important;
+  }
+  html[data-appearance="system"] .status-pill {
+    background: #102418 !important;
+    background-color: #102418 !important;
+  }
 }
 .nav-count { display: inline-grid; min-width: 20px; height: 20px; margin-left: auto; padding: 0 6px; place-items: center; color: var(--warning); background: var(--warning-soft); border-radius: 10px; font-size: var(--font-size-micro); font-weight: 600; }
 .nav-item:disabled { opacity: 0.52; }
