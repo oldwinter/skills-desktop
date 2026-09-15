@@ -1,14 +1,12 @@
-import type {
-  PublicError,
-  PublicationBase,
-  PublicationOutcomeStatus,
-  PublicationRemote,
-  Result,
-} from "@skills-desktop/skills-runtime";
 import {
   classifyPublicationReadback,
   isPublicationManagedPath,
   PUBLICATION_MANAGED_ROOT,
+  type PublicError,
+  type PublicationBase,
+  type PublicationOutcomeStatus,
+  type PublicationRemote,
+  type Result,
 } from "@skills-desktop/skills-runtime";
 
 /**
