@@ -122,6 +122,14 @@ export function createPackagedUiQaScenarioError(
   failure.qaCheck = check;
   failure.qaDiagnostic = diagnostic;
   failure.qaStage = stage;
+  if (
+    cause !== null &&
+    typeof cause === "object" &&
+    "qaAxeViolations" in cause &&
+    Array.isArray(cause.qaAxeViolations)
+  ) {
+    failure.qaAxeViolations = cause.qaAxeViolations;
+  }
   return failure;
 }
 
@@ -130,6 +138,7 @@ async function scanWithAxe(page, axeSource, label) {
   try {
     installed = await page.evaluate(
       `${axeSource}; typeof window.axe?.run === "function"`,
+      { timeoutMs: 30_000 },
     );
   } catch (cause) {
     throw Object.assign(
@@ -160,15 +169,39 @@ async function scanWithAxe(page, axeSource, label) {
           id: violation.id,
           impact: violation.impact,
           nodes: violation.nodes.length,
+          samples: violation.nodes.slice(0, 6).map((node) => {
+            const contrast = (node.any ?? []).find(
+              (check) => check?.id === "color-contrast",
+            );
+            const data =
+              contrast !== undefined &&
+              contrast.data !== null &&
+              typeof contrast.data === "object"
+                ? contrast.data
+                : {};
+            return {
+              target: node.target,
+              html: typeof node.html === "string" ? node.html.slice(0, 180) : "",
+              fgColor: typeof data.fgColor === "string" ? data.fgColor : "",
+              bgColor: typeof data.bgColor === "string" ? data.bgColor : "",
+              contrastRatio:
+                typeof data.contrastRatio === "number" ? data.contrastRatio : null,
+              failureSummary:
+                typeof node.failureSummary === "string"
+                  ? node.failureSummary.slice(0, 320)
+                  : "",
+            };
+          }),
         })),
       };
-    })()`);
+    })()`, { timeoutMs: 30_000 });
   } catch (cause) {
     const diagnostic =
       cause instanceof Error && cause.message.includes("Axe is unavailable.")
         ? "axe-run-unavailable"
         : "axe-run-evaluation-failed";
-    throw Object.assign(new Error("Axe scan evaluation failed.", { cause }), {
+    const detail = cause instanceof Error ? cause.message : String(cause);
+    throw Object.assign(new Error(`Axe scan evaluation failed: ${detail}`, { cause }), {
       qaDiagnostic: diagnostic,
     });
   }
@@ -188,7 +221,7 @@ async function scanWithAxe(page, axeSource, label) {
     }`;
     throw Object.assign(
       new Error(`Axe violations in ${label}: ${JSON.stringify(blocking)}`),
-      { qaDiagnostic: diagnostic },
+      { qaDiagnostic: diagnostic, qaAxeViolations: blocking },
     );
   }
   return result;
@@ -513,6 +546,8 @@ export async function runPackagedUiQa({
     );
 
     activeStage = "appearance-modes";
+    // Keep reduced motion through appearance axe scans so token swaps never mid-fade.
+    await page.setMediaFeature("prefers-reduced-motion", "reduce");
     for (const appearance of ["light", "dark", "high-contrast", "system"]) {
       activeCheck = `appearance-${appearance}`;
       await selectPreference(page, "Appearance", appearance);
@@ -524,6 +559,90 @@ export async function runPackagedUiQa({
           document.getAnimations().every((animation) => animation.playState !== "running")`,
         `${appearance} appearance applied`,
       );
+      // Inactive nav secondary only — token-equality waits against --healthy/--text
+      // were unsatisfiable when pins used literals.
+      await page.waitFor(
+        `(() => {
+          const root = getComputedStyle(document.documentElement);
+          const expected = root.getPropertyValue("--text-secondary").trim();
+          const item = document.querySelector(".nav-item:not(.nav-item--active)");
+          if (item === null || expected.length === 0) return true;
+          const probe = document.createElement("span");
+          probe.style.color = expected;
+          document.body.append(probe);
+          const want = getComputedStyle(probe).color;
+          probe.remove();
+          return getComputedStyle(item).color === want;
+        })()`,
+        `${appearance} nav secondary settled`,
+        10_000,
+      );
+      if (appearance === "dark") {
+        // Dark iteration only. Do not wait for these RGBs in light/high-contrast/system.
+        // Literal computed colors — token-equality waits raced on darwin arm64
+        // (stale light #5f6368/#202124 on already-dark surfaces).
+        await page.waitFor(
+          `(() => {
+            if (document.documentElement.dataset.appearance !== "dark") return false;
+            document.documentElement.offsetHeight;
+            const span = document.querySelector(".nav-item--active > span");
+            const pill = document.querySelector(".status-pill");
+            if (span === null || pill === null) return false;
+            const spanColor = getComputedStyle(span).color;
+            const pillColor = getComputedStyle(pill).color;
+            const pillBg = getComputedStyle(pill).backgroundColor;
+            const spanOk = spanColor === "rgb(232, 234, 237)";
+            const pillFgOk =
+              pillColor === "rgb(154, 212, 168)" ||
+              pillColor === "rgb(196, 199, 204)" ||
+              pillColor === "rgb(253, 214, 99)" ||
+              pillColor === "rgb(246, 161, 154)";
+            const pillBgOk =
+              pillBg === "rgb(16, 36, 24)" ||
+              pillBg === "rgb(41, 42, 45)" ||
+              pillBg === "rgb(42, 35, 15)" ||
+              pillBg === "rgb(42, 18, 16)";
+            return spanOk && pillFgOk && pillBgOk;
+          })()`,
+          "dark appearance contrast pins settled",
+          8_000,
+          { stableMs: 50 },
+        );
+      }
+      if (appearance === "high-contrast") {
+        // HC iteration only. Mirrors the dark RGB settle; does not wait for #e8eaed.
+        // #e8eaed pins are html[data-appearance=dark] or system+prefers-color-scheme:dark
+        // — neither matches after the HC attribute flip (no inline color).
+        await page.waitFor(
+          `(() => {
+            if (document.documentElement.dataset.appearance !== "high-contrast") {
+              return false;
+            }
+            document.documentElement.offsetHeight;
+            const span = document.querySelector(".nav-item--active > span");
+            const pill = document.querySelector(".status-pill");
+            if (span === null || pill === null) return false;
+            const spanColor = getComputedStyle(span).color;
+            const pillColor = getComputedStyle(pill).color;
+            const pillBg = getComputedStyle(pill).backgroundColor;
+            const spanOk = spanColor === "rgb(0, 0, 0)";
+            const pillFgOk =
+              pillColor === "rgb(0, 77, 26)" ||
+              pillColor === "rgb(31, 31, 31)" ||
+              pillColor === "rgb(90, 58, 0)" ||
+              pillColor === "rgb(161, 0, 0)";
+            const pillBgOk =
+              pillBg === "rgb(220, 245, 227)" ||
+              pillBg === "rgb(242, 242, 242)" ||
+              pillBg === "rgb(255, 240, 194)" ||
+              pillBg === "rgb(255, 224, 224)";
+            return spanOk && pillFgOk && pillBgOk;
+          })()`,
+          "high-contrast appearance contrast pins settled",
+          8_000,
+          { stableMs: 50 },
+        );
+      }
       const palette = await page.evaluate(`(() => {
         const root = getComputedStyle(document.documentElement);
         const body = getComputedStyle(document.body);
@@ -870,10 +989,21 @@ export async function runPackagedUiQa({
     scenarioFailure = error;
     failureCheck = activeCheck;
     if (failureDiagnostic === "unknown") {
-      failureDiagnostic =
-        error !== null && typeof error === "object" && "qaDiagnostic" in error
-          ? error.qaDiagnostic
-          : "unknown";
+      const message =
+        error !== null && typeof error === "object" && typeof error.message === "string"
+          ? error.message
+          : "";
+      if (message.startsWith("Timed out waiting for ")) {
+        failureDiagnostic = "wait-timeout";
+      } else if (
+        error !== null &&
+        typeof error === "object" &&
+        "qaDiagnostic" in error
+      ) {
+        failureDiagnostic = error.qaDiagnostic;
+      } else {
+        failureDiagnostic = "unknown";
+      }
     }
     failureStage = activeStage;
   } finally {

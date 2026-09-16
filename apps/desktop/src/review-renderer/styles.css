@@ -25,6 +25,8 @@
 }
 :root[data-appearance="dark"] {
   color-scheme: dark;
+  color: var(--text);
+  background: var(--canvas);
   --canvas: #161719;
   --surface: #202124;
   --surface-muted: #292a2d;
@@ -37,15 +39,17 @@
   --focus: #8ab4f8;
   --accent: #8ab4f8;
   --accent-ink: #e8eaed;
-  --info-soft: #1f2d40;
+  --info-soft: #152233;
   --warning: #fdd663;
-  --warning-soft: #3a3116;
-  --healthy: #81c995;
+  --warning-soft: #2a230f;
+  --healthy: #9ad4a8;
   --danger: #f28b82;
 }
 @media (prefers-color-scheme: dark) {
   :root[data-appearance="system"] {
     color-scheme: dark;
+    color: var(--text);
+    background: var(--canvas);
     --canvas: #161719;
     --surface: #202124;
     --surface-muted: #292a2d;
@@ -58,12 +62,17 @@
     --focus: #8ab4f8;
     --accent: #8ab4f8;
     --accent-ink: #e8eaed;
-    --info-soft: #1f2d40;
+    --info-soft: #152233;
     --warning: #fdd663;
-    --warning-soft: #3a3116;
-    --healthy: #81c995;
+    --warning-soft: #2a230f;
+    --healthy: #9ad4a8;
     --danger: #f28b82;
   }
+}
+:root[data-appearance="light"],
+:root[data-appearance="high-contrast"] {
+  color: var(--text);
+  background: var(--canvas);
 }
 :root[data-appearance="high-contrast"] {
   color-scheme: light;
@@ -93,7 +102,7 @@
   button:focus-visible, a:focus-visible { outline: 3px solid Highlight; }
 }
 * { box-sizing: border-box; }
-html, body, #root { width: 100%; min-width: 320px; height: 100%; margin: 0; }
+html, body, #root { width: 100%; min-width: 320px; height: 100%; margin: 0; background: var(--canvas); }
 body { overflow: auto; }
 button { color: inherit; font: inherit; letter-spacing: 0; }
 button:focus-visible, a:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
