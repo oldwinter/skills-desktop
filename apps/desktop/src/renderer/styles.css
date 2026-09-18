@@ -43,6 +43,8 @@
 
 :root[data-appearance="dark"] {
   color-scheme: dark;
+  color: var(--text);
+  background: var(--canvas);
   --canvas: #161719;
   --surface: #202124;
   --surface-muted: #292a2d;
@@ -50,9 +52,10 @@
   --surface-hover: #303136;
   --surface-selected: #1c3552;
   --text: #e8eaed;
-  --text-secondary: #b3b7bd;
-  --text-tertiary: #9aa0a6;
-  --text-on-accent: #ffffff;
+  --text-secondary: #c4c7cc;
+  --text-tertiary: #cfd3d8;
+  /* Dark ink on accent/accent-ink — white on #8ab4f8 is ~2.1:1 and fails axe AA. */
+  --text-on-accent: #161719;
   --line: rgb(232 234 237 / 14%);
   --line-strong: rgb(232 234 237 / 28%);
   --shadow: rgb(0 0 0 / 40%);
@@ -60,17 +63,19 @@
   --accent: #8ab4f8;
   --accent-ink: #e8eaed;
   --info: #a8c7fa;
-  --info-soft: #1f2d40;
-  --healthy: #81c995;
-  --healthy-soft: #1d3327;
+  --info-soft: #152233;
+  --healthy: #9ad4a8;
+  --healthy-soft: #102418;
   --warning: #fdd663;
-  --warning-soft: #3a3116;
-  --danger: #f28b82;
-  --danger-soft: #41211f;
+  --warning-soft: #2a230f;
+  --danger: #f6a19a;
+  --danger-soft: #2a1210;
 }
 @media (prefers-color-scheme: dark) {
   :root[data-appearance="system"] {
     color-scheme: dark;
+    color: var(--text);
+    background: var(--canvas);
     --canvas: #161719;
     --surface: #202124;
     --surface-muted: #292a2d;
@@ -78,9 +83,9 @@
     --surface-hover: #303136;
     --surface-selected: #1c3552;
     --text: #e8eaed;
-    --text-secondary: #b3b7bd;
-    --text-tertiary: #9aa0a6;
-    --text-on-accent: #ffffff;
+    --text-secondary: #c4c7cc;
+    --text-tertiary: #cfd3d8;
+    --text-on-accent: #161719;
     --line: rgb(232 234 237 / 14%);
     --line-strong: rgb(232 234 237 / 28%);
     --shadow: rgb(0 0 0 / 40%);
@@ -88,24 +93,14 @@
     --accent: #8ab4f8;
     --accent-ink: #e8eaed;
     --info: #a8c7fa;
-    --info-soft: #1f2d40;
-    --healthy: #81c995;
-    --healthy-soft: #1d3327;
+    --info-soft: #152233;
+    --healthy: #9ad4a8;
+    --healthy-soft: #102418;
     --warning: #fdd663;
-    --warning-soft: #3a3116;
-    --danger: #f28b82;
-    --danger-soft: #41211f;
+    --warning-soft: #2a230f;
+    --danger: #f6a19a;
+    --danger-soft: #2a1210;
   }
-}
-:root[data-appearance="dark"] .text-button--primary,
-:root[data-appearance="dark"] .skip-link,
-:root[data-appearance="dark"] .brand-mark,
-:root[data-appearance="dark"] .about-product-mark { --text-on-accent: #161719; }
-@media (prefers-color-scheme: dark) {
-  :root[data-appearance="system"] .text-button--primary,
-  :root[data-appearance="system"] .skip-link,
-  :root[data-appearance="system"] .brand-mark,
-  :root[data-appearance="system"] .about-product-mark { --text-on-accent: #161719; }
 }
 :root[data-appearance="high-contrast"] {
   color-scheme: light;
@@ -134,6 +129,37 @@
   --danger: #a10000;
   --danger-soft: #ffe0e0;
 }
+:root[data-appearance="light"],
+:root[data-appearance="high-contrast"] {
+  color: var(--text);
+  background: var(--canvas);
+}
+:root[data-appearance="light"] body,
+:root[data-appearance="light"] #root,
+:root[data-appearance="light"] .app-shell,
+:root[data-appearance="high-contrast"] body,
+:root[data-appearance="high-contrast"] #root,
+:root[data-appearance="high-contrast"] .app-shell {
+  color: var(--text);
+  background-color: var(--canvas);
+}
+:root[data-appearance="light"] .nav-item,
+:root[data-appearance="high-contrast"] .nav-item { color: var(--text-secondary); }
+:root[data-appearance="light"] .nav-item > span,
+:root[data-appearance="high-contrast"] .nav-item > span { color: inherit; }
+:root[data-appearance="light"] .nav-item--active,
+:root[data-appearance="light"] .nav-item--active > span,
+:root[data-appearance="high-contrast"] .nav-item--active,
+:root[data-appearance="high-contrast"] .nav-item--active > span {
+  color: var(--text);
+}
+:root[data-appearance="light"] .status-pill--healthy,
+:root[data-appearance="light"] .preferences-saved,
+:root[data-appearance="high-contrast"] .status-pill--healthy,
+:root[data-appearance="high-contrast"] .preferences-saved {
+  color: var(--healthy);
+  background-color: var(--healthy-soft);
+}
 :root[data-appearance="high-contrast"] button,
 :root[data-appearance="high-contrast"] input,
 :root[data-appearance="high-contrast"] select { border-color: var(--line-strong); }
@@ -147,9 +173,76 @@
 }
 
 * { box-sizing: border-box; }
-html, body, #root { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+html, body, #root { width: 100%; height: 100%; margin: 0; overflow: hidden; background: var(--canvas); }
 body { min-width: 320px; color: var(--text); font-size: var(--font-size-ui); line-height: 1.45; }
 button, input, select { color: inherit; font: inherit; letter-spacing: 0; }
+/* Darwin Electron keeps native <select> colors under color-scheme:dark unless appearance is none. */
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  color: var(--text);
+  background-color: var(--surface);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%239aa0a6' d='M1 1l5 5 5-5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.65rem center;
+  padding-right: 1.75rem;
+}
+select option {
+  color: var(--text);
+  background-color: var(--surface);
+}
+:root[data-appearance="dark"] select,
+:root[data-appearance="dark"] option {
+  color: var(--text);
+  background-color: var(--surface);
+}
+:root[data-appearance="dark"] body,
+:root[data-appearance="dark"] #root,
+:root[data-appearance="dark"] .app-shell {
+  color: var(--text);
+  background-color: var(--canvas);
+}
+:root[data-appearance="dark"] .nav-item { color: var(--text-secondary); }
+:root[data-appearance="dark"] .nav-item > span { color: inherit; }
+:root[data-appearance="dark"] .nav-item--active,
+:root[data-appearance="dark"] .nav-item--active > span {
+  color: #e8eaed;
+}
+:root[data-appearance="dark"] .status-pill--healthy,
+:root[data-appearance="dark"] .preferences-saved,
+:root[data-appearance="dark"] .collection-status--missing,
+:root[data-appearance="dark"] .collection-status--unchanged,
+:root[data-appearance="dark"] .comparison-status--matched {
+  color: var(--healthy);
+  background-color: var(--healthy-soft);
+}
+@media (prefers-color-scheme: dark) {
+  :root[data-appearance="system"] select,
+  :root[data-appearance="system"] option {
+    color: var(--text);
+    background-color: var(--surface);
+  }
+  :root[data-appearance="system"] body,
+  :root[data-appearance="system"] #root,
+  :root[data-appearance="system"] .app-shell {
+    color: var(--text);
+    background-color: var(--canvas);
+  }
+  :root[data-appearance="system"] .nav-item { color: var(--text-secondary); }
+  :root[data-appearance="system"] .nav-item > span { color: inherit; }
+  :root[data-appearance="system"] .nav-item--active,
+  :root[data-appearance="system"] .nav-item--active > span {
+    color: #e8eaed;
+  }
+  :root[data-appearance="system"] .status-pill--healthy,
+  :root[data-appearance="system"] .preferences-saved,
+  :root[data-appearance="system"] .collection-status--missing,
+  :root[data-appearance="system"] .collection-status--unchanged,
+  :root[data-appearance="system"] .comparison-status--matched {
+    color: var(--healthy);
+    background-color: var(--healthy-soft);
+  }
+}
 button { cursor: pointer; }
 button:disabled { cursor: default; }
 button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
@@ -183,8 +276,155 @@ code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; fo
 .primary-nav { display: grid; gap: 2px; }
 .nav-item { width: 100%; min-height: 40px; gap: 10px; padding: 0 10px; color: var(--text-secondary); background: transparent; border: 0; border-radius: var(--radius-control); text-align: left; }
 .nav-item:not(:disabled):hover { background: var(--surface-hover); }
-.nav-item, .target-row, .text-button, .icon-button { transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease, box-shadow 140ms ease; }
-.nav-item--active { color: var(--text); background: var(--surface-muted); font-weight: 500; }
+.nav-item, .target-row, .text-button, .icon-button { transition: border-color 140ms ease, box-shadow 140ms ease; }
+/* Color must not transition across appearance tokens — mid-fade fails axe AA (e.g. light #5f6368 on dark #202124). */
+.nav-item > span, .nav-item > svg, .status-pill svg, .preferences-saved svg { color: inherit; }
+.nav-item--active,
+.nav-item--active > span {
+  color: var(--text);
+}
+.nav-item--active { background: var(--surface-muted); font-weight: 500; }
+/* Darwin arm64 can paint dark surfaces before attribute-selector color pins
+   flush. Literal ink/fill (not var()) so axe never samples stale light text
+   on an already-dark chip or active nav. */
+html[data-appearance="dark"] .nav-item.nav-item--active,
+html[data-appearance="dark"] .nav-item.nav-item--active > span {
+  color: #e8eaed !important;
+}
+html[data-appearance="dark"] .status-pill,
+html[data-appearance="dark"] .status-pill svg {
+  color: #9ad4a8 !important;
+}
+html[data-appearance="dark"] .status-pill {
+  background: #102418 !important;
+  background-color: #102418 !important;
+}
+html[data-appearance="dark"] .status-pill.status-pill--warning,
+html[data-appearance="dark"] .status-pill.status-pill--warning svg {
+  color: #fdd663 !important;
+}
+html[data-appearance="dark"] .status-pill.status-pill--warning {
+  background: #2a230f !important;
+  background-color: #2a230f !important;
+}
+html[data-appearance="dark"] .status-pill.status-pill--danger,
+html[data-appearance="dark"] .status-pill.status-pill--danger svg {
+  color: #f6a19a !important;
+}
+html[data-appearance="dark"] .status-pill.status-pill--danger {
+  background: #2a1210 !important;
+  background-color: #2a1210 !important;
+}
+html[data-appearance="dark"] .status-pill.status-pill--neutral,
+html[data-appearance="dark"] .status-pill.status-pill--neutral svg {
+  color: #c4c7cc !important;
+}
+html[data-appearance="dark"] .status-pill.status-pill--neutral {
+  background: #292a2d !important;
+  background-color: #292a2d !important;
+}
+/* Reverse of the dark pin: dark→high-contrast on arm64 can keep #e8eaed
+   on already-updated --surface-muted #f2f2f2 (axe 1.07). */
+html[data-appearance="high-contrast"] .nav-item.nav-item--active,
+html[data-appearance="high-contrast"] .nav-item.nav-item--active > span {
+  color: #000000 !important;
+}
+html[data-appearance="high-contrast"] .status-pill,
+html[data-appearance="high-contrast"] .status-pill svg {
+  color: #004d1a !important;
+}
+html[data-appearance="high-contrast"] .status-pill {
+  background: #dcf5e3 !important;
+  background-color: #dcf5e3 !important;
+}
+html[data-appearance="high-contrast"] .status-pill.status-pill--warning,
+html[data-appearance="high-contrast"] .status-pill.status-pill--warning svg {
+  color: #5a3a00 !important;
+}
+html[data-appearance="high-contrast"] .status-pill.status-pill--warning {
+  background: #fff0c2 !important;
+  background-color: #fff0c2 !important;
+}
+html[data-appearance="high-contrast"] .status-pill.status-pill--danger,
+html[data-appearance="high-contrast"] .status-pill.status-pill--danger svg {
+  color: #a10000 !important;
+}
+html[data-appearance="high-contrast"] .status-pill.status-pill--danger {
+  background: #ffe0e0 !important;
+  background-color: #ffe0e0 !important;
+}
+html[data-appearance="high-contrast"] .status-pill.status-pill--neutral,
+html[data-appearance="high-contrast"] .status-pill.status-pill--neutral svg {
+  color: #1f1f1f !important;
+}
+html[data-appearance="high-contrast"] .status-pill.status-pill--neutral {
+  background: #f2f2f2 !important;
+  background-color: #f2f2f2 !important;
+}
+html[data-appearance="light"] .nav-item.nav-item--active,
+html[data-appearance="light"] .nav-item.nav-item--active > span,
+html[data-appearance="system"] .nav-item.nav-item--active,
+html[data-appearance="system"] .nav-item.nav-item--active > span {
+  color: #202124 !important;
+}
+html[data-appearance="light"] .status-pill,
+html[data-appearance="light"] .status-pill svg,
+html[data-appearance="system"] .status-pill,
+html[data-appearance="system"] .status-pill svg {
+  color: #176b4b !important;
+}
+html[data-appearance="light"] .status-pill,
+html[data-appearance="system"] .status-pill {
+  background: #e8f5ef !important;
+  background-color: #e8f5ef !important;
+}
+html[data-appearance="light"] .status-pill.status-pill--warning,
+html[data-appearance="light"] .status-pill.status-pill--warning svg,
+html[data-appearance="system"] .status-pill.status-pill--warning,
+html[data-appearance="system"] .status-pill.status-pill--warning svg {
+  color: #805000 !important;
+}
+html[data-appearance="light"] .status-pill.status-pill--warning,
+html[data-appearance="system"] .status-pill.status-pill--warning {
+  background: #fff3d8 !important;
+  background-color: #fff3d8 !important;
+}
+html[data-appearance="light"] .status-pill.status-pill--danger,
+html[data-appearance="light"] .status-pill.status-pill--danger svg,
+html[data-appearance="system"] .status-pill.status-pill--danger,
+html[data-appearance="system"] .status-pill.status-pill--danger svg {
+  color: #b93832 !important;
+}
+html[data-appearance="light"] .status-pill.status-pill--danger,
+html[data-appearance="system"] .status-pill.status-pill--danger {
+  background: #fcecea !important;
+  background-color: #fcecea !important;
+}
+html[data-appearance="light"] .status-pill.status-pill--neutral,
+html[data-appearance="light"] .status-pill.status-pill--neutral svg,
+html[data-appearance="system"] .status-pill.status-pill--neutral,
+html[data-appearance="system"] .status-pill.status-pill--neutral svg {
+  color: #5f6368 !important;
+}
+html[data-appearance="light"] .status-pill.status-pill--neutral,
+html[data-appearance="system"] .status-pill.status-pill--neutral {
+  background: #f0f2f4 !important;
+  background-color: #f0f2f4 !important;
+}
+@media (prefers-color-scheme: dark) {
+  html[data-appearance="system"] .nav-item.nav-item--active,
+  html[data-appearance="system"] .nav-item.nav-item--active > span {
+    color: #e8eaed !important;
+  }
+  html[data-appearance="system"] .status-pill,
+  html[data-appearance="system"] .status-pill svg {
+    color: #9ad4a8 !important;
+  }
+  html[data-appearance="system"] .status-pill {
+    background: #102418 !important;
+    background-color: #102418 !important;
+  }
+}
 .nav-count { display: inline-grid; min-width: 20px; height: 20px; margin-left: auto; padding: 0 6px; place-items: center; color: var(--warning); background: var(--warning-soft); border-radius: 10px; font-size: var(--font-size-micro); font-weight: 600; }
 .nav-item:disabled { opacity: 0.52; }
 .target-section { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--line); }
@@ -302,7 +542,7 @@ code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; fo
 .mutation-outcome { color: var(--text-secondary); font-size: var(--font-size-meta); }
 .mutation-outcome:focus { outline: 2px solid var(--focus); outline-offset: 2px; }
 
-.about-workspace { grid-column: 2 / -1; min-width: 0; min-height: 0; overflow: auto; }
+.about-workspace { grid-column: 2 / -1; min-width: 0; min-height: 0; overflow: auto; background: var(--canvas); }
 .about-content { width: min(720px, calc(100% - 40px)); margin: 0 20px 28px; border-top: 1px solid var(--line); }
 .about-loading { display: flex; min-height: 220px; align-items: center; justify-content: center; gap: 8px; color: var(--text-secondary); }
 .about-product { display: flex; align-items: center; gap: 14px; min-width: 0; padding: 20px 0; border-bottom: 1px solid var(--line); }
@@ -325,14 +565,24 @@ code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; fo
 .about-candidate { color: var(--text-secondary); font-size: var(--font-size-meta); }
 .about-guard-reasons { display: grid; gap: 3px; margin: 0; padding: 0; color: var(--danger); font-size: var(--font-size-meta); list-style: none; text-align: right; }
 .about-actions { display: flex; justify-content: flex-end; padding: 16px 0; }
-.preferences-panel { display: grid; gap: 12px; width: min(720px, calc(100% - 40px)); margin: 0 20px 4px; padding: 16px 0; border-top: 1px solid var(--line); }
+.preferences-panel { display: grid; gap: 12px; width: min(720px, calc(100% - 40px)); margin: 0 20px 4px; padding: 16px 0; border-top: 1px solid var(--line); background: var(--canvas); }
 .preferences-panel header h2 { font-size: var(--font-size-ui); }
 .preferences-panel header p { margin-top: 3px; color: var(--text-secondary); font-size: var(--font-size-meta); }
 .preferences-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 20px; }
 .preferences-field { display: grid; gap: 6px; min-width: 0; }
 .preferences-field > span { display: flex; align-items: center; gap: 6px; color: var(--text-tertiary); font-size: var(--font-size-meta); }
-.preferences-field select { min-height: 32px; padding: 0 8px; color: var(--text); background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--radius-control); }
-.preferences-saved { display: flex; align-items: center; gap: 6px; color: var(--healthy); font-size: var(--font-size-meta); }
+.preferences-field select { min-height: 32px; padding: 0 1.75rem 0 8px; color: var(--text); background-color: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--radius-control); }
+.preferences-saved {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
+  padding: 4px 8px;
+  color: var(--healthy);
+  background: var(--healthy-soft);
+  border-radius: var(--radius-control);
+  font-size: var(--font-size-meta);
+}
 @media (max-width: 480px) { .preferences-grid { grid-template-columns: minmax(0, 1fr); } }
 
 .comparison-workspace, .targets-workspace { display: grid; grid-template-rows: auto auto auto minmax(0, 1fr); min-width: 0; min-height: 0; overflow: hidden; }
