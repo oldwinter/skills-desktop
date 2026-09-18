@@ -189,6 +189,8 @@ skills.sh 交接：
 
 在 **Search skills by name** 输入技能名称可进一步筛选，搜索忽略大小写和首尾空格，并与 **Differences only** 叠加。点击 **Clear search** 或在搜索框内按 `Escape` 可清除搜索并保留差异筛选，焦点仍在搜索框。
 
+启用任意筛选后，点击 **Clear filters / 清除筛选** 可同时清空搜索并关闭 **Differences only**，恢复全部对比结果并聚焦搜索框。此操作不会重新读取 Inventory 或执行变更。
+
 焦点在技能名称按钮上时，按 `↑` / `↓` 查看上一项或下一项，按 `Home` / `End` 跳到首项或末项。导航仅包含当前搜索与差异筛选后可见的行，到达首尾时停留在原处。`Tab` 仍按原顺序移动焦点，`Enter` 或空格仍可选中技能。
 
 只有一个 Target 时：副标题为 **Needs a second Local Target**，Compare 禁用，并提示先到 Targets 再添加一个。

@@ -19,6 +19,7 @@ import type {
   WorkspaceBridge,
   WorkspaceSnapshot,
 } from "../../../contracts/workspace.js";
+import { LocaleProvider } from "../../i18n/LocaleProvider.js";
 import { ComparisonView } from "./ComparisonView.js";
 
 afterEach(cleanup);
@@ -679,6 +680,84 @@ describe("ComparisonView", () => {
     expect(
       screen.getByRole("heading", { name: "No differences found" }),
     ).toBeInTheDocument();
+  });
+
+  it.each([
+    { locale: "en", clear: "Clear filters", search: "Search comparison skills", toggle: "Differences only" },
+    { locale: "zh-CN", clear: "清除筛选", search: "搜索对比中的 Skill", toggle: "仅显示差异" },
+  ] as const)("clears combined filters locally and restores focus in $locale", ({ locale, clear, search: searchLabel, toggle: toggleLabel }) => {
+    const compareTargets = vi.fn();
+    const refreshInventory = vi.fn();
+    const prepareComparison = vi.fn();
+    render(
+      <LocaleProvider locale={locale}>
+        <ComparisonView
+          client={bridge({ compareTargets, refreshInventory, prepareComparison })}
+          onPrepared={vi.fn()}
+          snapshot={baseSnapshot({
+            comparison: {
+              id: "clear-filters",
+              leftFreshness: "stale",
+              leftTargetId: leftId,
+              rightFreshness: "fresh",
+              rightTargetId: rightId,
+              rows: [missingRow, { ...driftRow, summary: "matched" }],
+            },
+          })}
+          targets={[targetState(leftTarget), targetState(rightTarget)]}
+        />
+      </LocaleProvider>,
+    );
+    const search = screen.getByRole("searchbox", { name: searchLabel });
+    const toggle = screen.getByRole("checkbox", { name: toggleLabel });
+    expect(screen.queryByRole("button", { name: clear })).not.toBeInTheDocument();
+    fireEvent.click(toggle);
+    fireEvent.change(search, { target: { value: "no-match" } });
+    expect(screen.queryByRole("button", { name: "find-skills" })).not.toBeInTheDocument();
+    const clearButton = screen.getByRole("button", { name: clear });
+    clearButton.focus();
+    fireEvent.click(clearButton);
+    expect(search).toHaveValue("");
+    expect(search).toHaveFocus();
+    expect(toggle).not.toBeChecked();
+    expect(screen.getByRole("button", { name: "find-skills" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "tdd" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: clear })).not.toBeInTheDocument();
+    expect(compareTargets).not.toHaveBeenCalled();
+    expect(refreshInventory).not.toHaveBeenCalled();
+    expect(prepareComparison).not.toHaveBeenCalled();
+  });
+
+  it("offers reset for either filter alone, including all-matched and whitespace results", () => {
+    render(
+      <ComparisonView
+        client={bridge()}
+        onPrepared={vi.fn()}
+        snapshot={baseSnapshot({
+          comparison: {
+            id: "clear-single-filter",
+            leftFreshness: "fresh",
+            leftTargetId: leftId,
+            rightFreshness: "fresh",
+            rightTargetId: rightId,
+            rows: [{ ...driftRow, summary: "matched" }],
+          },
+        })}
+        targets={[targetState(leftTarget), targetState(rightTarget)]}
+      />,
+    );
+    const search = screen.getByRole("searchbox", { name: "Search comparison skills" });
+    fireEvent.click(screen.getByRole("checkbox", { name: "Differences only" }));
+    expect(screen.getByRole("heading", { name: "No differences found" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+    expect(screen.getByRole("button", { name: "tdd" })).toBeInTheDocument();
+    for (const query of ["no-match", "   "]) {
+      fireEvent.change(search, { target: { value: query } });
+      fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+      expect(search).toHaveValue("");
+      expect(search).toHaveFocus();
+      expect(screen.getByRole("button", { name: "tdd" })).toBeInTheDocument();
+    }
   });
 
   it("asks for a second Local Target and explains SSH unavailability", () => {

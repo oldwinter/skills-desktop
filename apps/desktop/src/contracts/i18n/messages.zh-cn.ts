@@ -466,6 +466,7 @@ export const zhCN: Readonly<Record<keyof typeof en, string>> = {
   "comparison.right": "右侧",
   "comparison.search": "搜索对比中的 Skill",
   "comparison.searchPlaceholder": "按名称搜索 Skill",
+  "comparison.clearFilters": "清除筛选",
   "comparison.clearSearch": "清除搜索",
   "comparison.differencesOnly": "仅显示差异",
   "comparison.differenceCount.beforeSearch":
