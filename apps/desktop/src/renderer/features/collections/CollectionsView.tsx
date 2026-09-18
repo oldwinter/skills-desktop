@@ -604,6 +604,12 @@ export function CollectionsView({
             );
             const locked =
               busy || plan !== null || execution?.phase === "running";
+            const missingEntries = (assessment?.entries ?? []).filter(
+              (entry) =>
+                entry.status === "missing" &&
+                entry.selectable &&
+                entry.selectionModes.includes("add"),
+            );
             const TargetIcon =
               targetState.target.kind === "ssh" ? Server : Laptop;
             return (
@@ -680,6 +686,33 @@ export function CollectionsView({
                     ))}
                   </ul>
                 )}
+                <button
+                  className="text-button collection-select-missing"
+                  aria-label={t("collections.selectMissingOn", {
+                    label: targetState.target.label,
+                  })}
+                  disabled={
+                    locked ||
+                    !included ||
+                    targetState.target.kind === "ssh" ||
+                    blockers.length > 0 ||
+                    missingEntries.every(
+                      (entry) => input.selected[entry.name] === "add",
+                    )
+                  }
+                  onClick={() =>
+                    updateInput(targetState.target.id, (current) => {
+                      const selected = { ...current.selected };
+                      for (const entry of missingEntries) {
+                        selected[entry.name] = "add";
+                      }
+                      return { ...current, selected };
+                    })
+                  }
+                  type="button"
+                >
+                  {t("collections.selectMissing")}
+                </button>
                 <div className="collection-table-wrap">
                   <table className="collection-table">
                     <caption className="sr-only">
