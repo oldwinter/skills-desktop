@@ -595,6 +595,8 @@ export const en = {
   "collections.table.include": "Include",
   "collections.table.assessment": "Assessment",
   "collections.table.action": "Action",
+  "collections.clearSelection": "Clear selection",
+  "collections.clearSelectionOn": "Clear selection on {label}",
   "collections.selectMissing": "Select missing skills",
   "collections.selectMissingOn": "Select missing skills on {label}",
   "collections.select": "Select {name}",

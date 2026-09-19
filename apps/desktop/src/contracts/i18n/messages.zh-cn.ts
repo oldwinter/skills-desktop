@@ -546,6 +546,8 @@ export const zhCN: Readonly<Record<keyof typeof en, string>> = {
   "collections.table.include": "包含",
   "collections.table.assessment": "评估",
   "collections.table.action": "操作",
+  "collections.clearSelection": "清空选择",
+  "collections.clearSelectionOn": "清空选择（{label}）",
   "collections.selectMissing": "选择缺失技能",
   "collections.selectMissingOn": "选择缺失技能（{label}）",
   "collections.select": "选择 {name}",

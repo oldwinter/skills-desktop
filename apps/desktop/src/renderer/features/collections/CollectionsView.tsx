@@ -686,33 +686,56 @@ export function CollectionsView({
                     ))}
                   </ul>
                 )}
-                <button
-                  className="text-button collection-select-missing"
-                  aria-label={t("collections.selectMissingOn", {
-                    label: targetState.target.label,
-                  })}
-                  disabled={
-                    locked ||
-                    !included ||
-                    targetState.target.kind === "ssh" ||
-                    blockers.length > 0 ||
-                    missingEntries.every(
-                      (entry) => input.selected[entry.name] === "add",
-                    )
-                  }
-                  onClick={() =>
-                    updateInput(targetState.target.id, (current) => {
-                      const selected = { ...current.selected };
-                      for (const entry of missingEntries) {
-                        selected[entry.name] = "add";
-                      }
-                      return { ...current, selected };
-                    })
-                  }
-                  type="button"
-                >
-                  {t("collections.selectMissing")}
-                </button>
+                <div className="collection-selection-actions">
+                  <button
+                    className="text-button"
+                    aria-label={t("collections.selectMissingOn", {
+                      label: targetState.target.label,
+                    })}
+                    disabled={
+                      locked ||
+                      !included ||
+                      targetState.target.kind === "ssh" ||
+                      blockers.length > 0 ||
+                      missingEntries.every(
+                        (entry) => input.selected[entry.name] === "add",
+                      )
+                    }
+                    onClick={() =>
+                      updateInput(targetState.target.id, (current) => {
+                        const selected = { ...current.selected };
+                        for (const entry of missingEntries) {
+                          selected[entry.name] = "add";
+                        }
+                        return { ...current, selected };
+                      })
+                    }
+                    type="button"
+                  >
+                    {t("collections.selectMissing")}
+                  </button>
+                  <button
+                    className="text-button"
+                    aria-label={t("collections.clearSelectionOn", {
+                      label: targetState.target.label,
+                    })}
+                    disabled={
+                      locked ||
+                      !included ||
+                      targetState.target.kind === "ssh" ||
+                      Object.keys(input.selected).length === 0
+                    }
+                    onClick={() =>
+                      updateInput(targetState.target.id, (current) => ({
+                        ...current,
+                        selected: {},
+                      }))
+                    }
+                    type="button"
+                  >
+                    {t("collections.clearSelection")}
+                  </button>
+                </div>
                 <div className="collection-table-wrap">
                   <table className="collection-table">
                     <caption className="sr-only">

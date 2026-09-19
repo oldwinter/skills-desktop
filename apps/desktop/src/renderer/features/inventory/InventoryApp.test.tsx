@@ -30,6 +30,7 @@ import type {
   WorkspaceSnapshot,
 } from "../../../contracts/workspace.js";
 import { buildApplicationMenu } from "../../../main/application/application-menu.js";
+import { CollectionsView } from "../collections/CollectionsView.js";
 import { InventoryApp } from "./InventoryApp.js";
 
 const targetV4Metadata = {
@@ -1873,6 +1874,100 @@ describe("Local Target Inventory shell", () => {
         targetId: snapshot.target.id,
       }],
     }));
+  });
+
+  it("clears add and reapply choices without preparing a mutation", async () => {
+    const value = structuredClone(collectionSnapshot);
+    const assessment = value.collections?.releases[0]?.assessments[0];
+    if (assessment === undefined) throw new Error("Missing collection fixture");
+    assessment.entries.push({
+      inRelease: true,
+      name: "existing-skill",
+      selectable: true,
+      selectionModes: ["reapply"],
+      status: "present-content-unknown",
+    });
+    const prepareCollectionAcrossTargets = vi.fn(clientFor(value).prepareCollectionAcrossTargets);
+    render(<CollectionsView client={{ ...clientFor(value), prepareCollectionAcrossTargets }} snapshot={value} />);
+    const clear = screen.getByRole("button", { name: "Clear selection on This device" });
+    expect(clear).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Select missing skills on This device" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select existing-skill" }));
+    expect(clear).toBeEnabled();
+    fireEvent.click(clear);
+    expect(screen.getByRole("checkbox", { name: "Select find-skills" })).not.toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Select existing-skill" })).not.toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Include This device" })).toBeChecked();
+    expect(screen.getByRole("combobox", { name: "Scope" })).toHaveValue("project");
+    expect(clear).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Prepare plan" })).toBeDisabled();
+    expect(prepareCollectionAcrossTargets).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select find-skills" }));
+    fireEvent.click(screen.getByRole("button", { name: "Prepare plan" }));
+    await waitFor(() => expect(prepareCollectionAcrossTargets).toHaveBeenCalledWith(
+      expect.objectContaining({ targets: [{
+        scope: "project",
+        selections: [{ mode: "add", name: "find-skills" }],
+        targetId: snapshot.target.id,
+      }] }),
+    ));
+  });
+
+  it("clears only the chosen Target and preserves its global scope", () => {
+    const otherTarget = { ...snapshot.target, id: "00000000-0000-4000-8000-000000000002", label: "Second local" };
+    const otherCollections = structuredClone(collectionSnapshot.collections);
+    if (otherCollections === undefined) throw new Error("Missing collection fixture");
+    for (const release of otherCollections.releases) {
+      for (const assessment of release.assessments) assessment.targetId = otherTarget.id;
+    }
+    const targetState = { deletionBlocked: false, inventory: snapshot.inventory, mutation: snapshot.mutation };
+    const value: WorkspaceSnapshot = {
+      ...collectionSnapshot,
+      targets: [
+        { ...targetState, collections: collectionSnapshot.collections, target: snapshot.target },
+        { ...targetState, collections: otherCollections, target: otherTarget },
+      ],
+    };
+    render(<CollectionsView client={clientFor(value)} snapshot={value} />);
+    const scopes = screen.getAllByRole("combobox", { name: "Scope" });
+    const firstScope = scopes[0];
+    if (firstScope === undefined) throw new Error("Missing scope control");
+    fireEvent.change(firstScope, { target: { value: "global" } });
+    fireEvent.click(screen.getByRole("checkbox", { name: "Include Second local" }));
+    fireEvent.click(screen.getByRole("button", { name: "Select missing skills on This device" }));
+    fireEvent.click(screen.getByRole("button", { name: "Select missing skills on Second local" }));
+    const include = screen.getByRole("checkbox", { name: "Include This device" });
+    const clear = screen.getByRole("button", { name: "Clear selection on This device" });
+    fireEvent.click(include);
+    expect(clear).toBeDisabled();
+    fireEvent.click(include);
+    fireEvent.click(clear);
+    expect(screen.getByRole("checkbox", { name: "Select find-skills on This device" })).not.toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Select tdd on This device" })).not.toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Select find-skills on Second local" })).toBeChecked();
+    expect(firstScope).toHaveValue("global");
+    expect(include).toBeChecked();
+  });
+
+  it("keeps selection locked while a Collection plan is being prepared", async () => {
+    let finish: (() => void) | undefined;
+    const pending = new Promise<void>((resolve) => { finish = resolve; });
+    const client: DesktopBridge = {
+      ...clientFor(collectionSnapshot),
+      async prepareCollectionAcrossTargets() {
+        await pending;
+        return { ok: true, value: { operationId: "collection-plan-1" } };
+      },
+    };
+    render(<CollectionsView client={client} snapshot={collectionSnapshot} />);
+    fireEvent.click(screen.getByRole("button", { name: "Select missing skills on This device" }));
+    fireEvent.click(screen.getByRole("button", { name: "Prepare plan" }));
+    const clear = screen.getByRole("button", { name: "Clear selection on This device" });
+    expect(clear).toBeDisabled();
+    fireEvent.click(clear);
+    expect(screen.getByRole("checkbox", { name: "Select find-skills" })).toBeChecked();
+    await act(async () => { finish?.(); await pending; });
+    expect(clear).toBeEnabled();
   });
 
   it("limits bulk selection to the current scope and included Target", async () => {
