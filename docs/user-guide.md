@@ -213,7 +213,8 @@ skills.sh 交接：
 
 1. 打开 **Collections**，选择一个已打包的 Official Collection release。
 2. 勾选要包含的 **Local** Target 与 scope；查看每项 Assessment（如 missing / present-content-unknown / source-conflict / removal-candidate / incompatible）。
-3. 生成 **Collection Plan**，审阅后进入 Trusted Review，再执行。
+3. 点 **选择缺失技能 / Select missing skills**，一次勾选当前 Target 与 scope 内可添加的 Missing 条目；也可逐项勾选或取消。此操作保留已有选择，不会自动选择 Reapply、来源冲突或不可选条目。
+4. 生成 **Collection Plan**，审阅后进入 Trusted Review，再执行。
 
 执行不是跨机事务：每个子 Target 的确认变更独立；若某子项进入 reconciliation，按该 Target 单独处理。
 

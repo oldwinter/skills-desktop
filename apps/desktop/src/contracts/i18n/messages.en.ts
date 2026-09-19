@@ -595,6 +595,8 @@ export const en = {
   "collections.table.include": "Include",
   "collections.table.assessment": "Assessment",
   "collections.table.action": "Action",
+  "collections.selectMissing": "Select missing skills",
+  "collections.selectMissingOn": "Select missing skills on {label}",
   "collections.select": "Select {name}",
   "collections.selectOn": "Select {name} on {label}",
   "collections.status.incompatible": "Incompatible",

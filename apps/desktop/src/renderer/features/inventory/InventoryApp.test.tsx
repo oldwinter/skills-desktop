@@ -1805,6 +1805,120 @@ describe("Local Target Inventory shell", () => {
     );
   });
 
+  it("selects only missing addable skills and preserves explicit reapply choices", async () => {
+    const value = structuredClone(collectionSnapshot);
+    const assessment = value.collections?.releases[0]?.assessments[0];
+    if (assessment === undefined) throw new Error("Missing collection fixture");
+    assessment.entries.push(
+      {
+        inRelease: true,
+        name: "another-missing",
+        selectable: true,
+        selectionModes: ["add"],
+        status: "missing",
+      },
+      {
+        inRelease: true,
+        name: "existing-skill",
+        selectable: true,
+        selectionModes: ["reapply"],
+        status: "present-content-unknown",
+      },
+      {
+        inRelease: true,
+        name: "blocked-missing",
+        selectable: false,
+        selectionModes: ["add"],
+        status: "missing",
+      },
+    );
+    const prepareCollectionAcrossTargets = vi.fn(
+      clientFor(value).prepareCollectionAcrossTargets,
+    );
+    render(
+      <InventoryApp client={{ ...clientFor(value), prepareCollectionAcrossTargets }} />,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Collections" }));
+    const selectMissing = screen.getByRole("button", {
+      name: "Select missing skills on This device",
+    });
+    fireEvent.click(selectMissing);
+    for (const name of ["find-skills", "another-missing"]) {
+      expect(screen.getByRole("checkbox", { name: `Select ${name}` })).toBeChecked();
+    }
+    for (const name of ["existing-skill", "blocked-missing", "tdd"]) {
+      expect(screen.getByRole("checkbox", { name: `Select ${name}` })).not.toBeChecked();
+    }
+    expect(selectMissing).toBeDisabled();
+    expect(prepareCollectionAcrossTargets).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select existing-skill" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select find-skills" }));
+    expect(selectMissing).toBeEnabled();
+    fireEvent.click(selectMissing);
+    expect(screen.getByRole("checkbox", { name: "Select existing-skill" })).toBeChecked();
+    fireEvent.click(screen.getByRole("button", { name: "Prepare plan" }));
+    await waitFor(() => expect(prepareCollectionAcrossTargets).toHaveBeenCalledWith({
+      collectionId: "skills-desktop-starter",
+      manifestDigest: `sha256:${"a".repeat(64)}`,
+      origin: "official",
+      releaseNumber: 1,
+      targets: [{
+        scope: "project",
+        selections: [
+          { mode: "add", name: "find-skills" },
+          { mode: "add", name: "another-missing" },
+          { mode: "reapply", name: "existing-skill" },
+        ],
+        targetId: snapshot.target.id,
+      }],
+    }));
+  });
+
+  it("limits bulk selection to the current scope and included Target", async () => {
+    render(<InventoryApp client={clientFor(collectionSnapshot)} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Collections" }));
+    const selectMissing = screen.getByRole("button", {
+      name: "Select missing skills on This device",
+    });
+    const include = screen.getByRole("checkbox", { name: "Include This device" });
+    fireEvent.click(include);
+    expect(selectMissing).toBeDisabled();
+    fireEvent.click(include);
+    fireEvent.click(selectMissing);
+    fireEvent.change(screen.getByRole("combobox", { name: "Scope" }), {
+      target: { value: "global" },
+    });
+    expect(screen.getByRole("checkbox", { name: "Select find-skills" })).not.toBeChecked();
+    expect(selectMissing).toBeEnabled();
+    fireEvent.click(selectMissing);
+    expect(screen.getByRole("checkbox", { name: "Select find-skills" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Select tdd" })).toBeChecked();
+  });
+
+  it.each(["stale", "incompatible", "not-executable", "no-missing", "reconciliation", "ssh"])(
+    "disables bulk selection for %s evidence",
+    async (condition) => {
+      const value = structuredClone(collectionSnapshot);
+      const release = value.collections?.releases[0];
+      const assessment = release?.assessments[0];
+      if (release === undefined || assessment === undefined) {
+        throw new Error("Missing collection fixture");
+      }
+      if (condition === "stale") assessment.inventoryFreshness = "stale";
+      if (condition === "incompatible") assessment.compatibility = "incompatible";
+      if (condition === "not-executable") release.executable = false;
+      if (condition === "no-missing") assessment.entries = [];
+      if (condition === "reconciliation") value.mutation.phase = "reconciliation-required";
+      if (condition === "ssh") value.target.kind = "ssh";
+      render(<InventoryApp client={clientFor(value)} />);
+      fireEvent.click(await screen.findByRole("button", { name: "Collections" }));
+      expect(screen.getByRole("button", {
+        name: "Select missing skills on This device",
+      })).toBeDisabled();
+    },
+  );
+
   it("routes an empty Official Collections page back to Inventory (#180)", async () => {
     render(
       <InventoryApp
