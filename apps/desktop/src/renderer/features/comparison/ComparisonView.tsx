@@ -429,6 +429,19 @@ export function ComparisonView({
                   )}
                 </span>
               </label>
+              {searchQuery !== "" || differencesOnly ? (
+                <button
+                  className="text-button"
+                  onClick={() => {
+                    setDifferencesOnly(false);
+                    setSelectedKey(undefined);
+                    clearSearch();
+                  }}
+                  type="button"
+                >
+                  {t("comparison.clearFilters")}
+                </button>
+              ) : null}
             </div>
           ) : null}
         </section>
