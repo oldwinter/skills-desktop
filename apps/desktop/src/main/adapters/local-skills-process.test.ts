@@ -104,15 +104,23 @@ describe("Local SkillsProcess inventory contract", () => {
       const bin = join(home, ".local", "bin");
       const executable = join(bin, "npx");
       await mkdir(bin, { recursive: true });
-      await copyFile(process.execPath, join(bin, "node"));
+      // A bare copy of process.execPath cannot run where Node is a
+      // shared-library build (e.g. Homebrew's @rpath/libnode), so the stubs
+      // below never execute node: the adapter only checks its mode bits.
+      await writeFile(join(bin, "node"), "#!/bin/sh\n", { mode: 0o700 });
       await writeFile(
         executable,
-        `#!/usr/bin/env node
-const args = process.argv.slice(2);
-if (args.at(-1) === "--version") process.stdout.write("1.5.23\\n");
-else if (args.join(" ").endsWith("list --json")) process.stdout.write(${JSON.stringify(projectOutput)});
-else if (args.join(" ").endsWith("list --global --json")) process.stdout.write(${JSON.stringify(globalOutput)});
-else process.exitCode = 2;
+        `#!/bin/sh
+for last in "$@"; do :; done
+if [ "$last" = "--version" ]; then
+  printf '1.5.23\\n'
+  exit 0
+fi
+case "$*" in
+  *"list --global --json") printf '%s\\n' '${globalOutput}' ;;
+  *"list --json") printf '%s\\n' '${projectOutput}' ;;
+  *) exit 2 ;;
+esac
 `,
         { mode: 0o700 },
       );
