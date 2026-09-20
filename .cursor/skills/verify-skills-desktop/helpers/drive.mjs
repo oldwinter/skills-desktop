@@ -28,6 +28,7 @@ function usage() {
     "  node helpers/drive.mjs toggle <aria-label> <true|false>",
     "  node helpers/drive.mjs wait <js-expression> <label>",
     "  node helpers/drive.mjs eval <js-expression>",
+    "  node helpers/drive.mjs write-eval <json-name> <js-expression>",
     "  node helpers/drive.mjs state [json-name]",
     "  node helpers/drive.mjs screenshot <png-name>",
     "  node helpers/drive.mjs invocations",
@@ -119,6 +120,21 @@ try {
     if (!expression) throw new Error("eval requires a JS expression.");
     const value = await withWorkspace((page) => page.evaluate(expression));
     process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
+  } else if (command === "write-eval") {
+    const name = rest[0];
+    const expression = rest.slice(1).join(" ");
+    if (!name || expression.trim().length === 0) {
+      throw new Error("write-eval requires a file name and a JS expression.");
+    }
+    const value = await withWorkspace((page) => page.evaluate(expression));
+    const path = await writeJson(
+      join(
+        session.evidenceDir,
+        name.endsWith(".json") ? name : `${name}.json`,
+      ),
+      value,
+    );
+    process.stdout.write(`${JSON.stringify({ path, value }, null, 2)}\n`);
   } else if (command === "state") {
     const state = await withWorkspace((page) => workspaceState(page));
     const name = rest[0] ?? "workspace-state";

@@ -12,6 +12,11 @@ Drive the real window over CDP (`helpers/drive.mjs`). Do not treat
 | [Collections](collections.md) | Primary **Collections** | Bundled **Skills Desktop Starter** assesses Local Targets; **Prepare plan** shows a Collection Plan. |
 | [About](about.md) | Primary **About** | Product name, version `0.1.0`, and **Manual upgrade** for unsigned/preview policy. |
 
+One-shot proofs that launch, doctor, drive, then assert evidence:
+
+- Inventory browse/filter: `helpers/prove-inventory.mjs`
+- About unsigned-preview identity: `helpers/prove-about.mjs`
+
 Trusted Review is not a sidebar page. It is opened from Inventory or
 Collections after a Command Plan / Collection Plan exists. See Inventory
 sub-features and Collections sub-features.

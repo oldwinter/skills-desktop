@@ -9,6 +9,7 @@ import {
   fixtureParent,
   PINNED_CLI,
   processAlive,
+  QA_PROJECT_SKILL,
   readSession,
   requireDisplay,
   requirePackagedExecutable,
@@ -54,7 +55,7 @@ let launched;
 try {
   launched = await launchPackagedElectron({ executable, fixture });
   await launched.page.waitFor(
-    `document.body?.textContent?.includes("qa-project-skill") === true &&
+    `document.body?.textContent?.includes(${JSON.stringify(QA_PROJECT_SKILL)}) === true &&
       document.querySelector("h1")?.textContent === "Inventory"`,
     "fixture inventory on Inventory",
   );

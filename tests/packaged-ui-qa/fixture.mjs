@@ -12,6 +12,11 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const CLI_VERSION = "1.5.23";
+export const QA_PROJECT_SKILL = "qa-project-skill";
+export const QA_GLOBAL_SKILL = "qa-global-skill";
+export const QA_PROJECT_SOURCE = "example/skills-desktop-qa";
+export const QA_PROJECT_SOURCE_URL =
+  "https://example.test/skills-desktop-qa.git";
 const repositoryRoot = resolve(
   dirname(fileURLToPath(import.meta.url)),
   "../..",
@@ -63,18 +68,18 @@ export function assertRuntimeArchitecture(
 
 const projectEntry = (workspace) => ({
   agents: ["Codex"],
-  name: "qa-project-skill",
-  path: join(workspace, ".agents", "skills", "qa-project-skill"),
+  name: QA_PROJECT_SKILL,
+  path: join(workspace, ".agents", "skills", QA_PROJECT_SKILL),
   scope: "project",
-  source: "example/skills-desktop-qa",
+  source: QA_PROJECT_SOURCE,
   sourceType: "github",
-  sourceUrl: "https://example.test/skills-desktop-qa.git",
+  sourceUrl: QA_PROJECT_SOURCE_URL,
 });
 
 const globalEntry = (home) => ({
   agents: ["Codex"],
-  name: "qa-global-skill",
-  path: join(home, ".agents", "skills", "qa-global-skill"),
+  name: QA_GLOBAL_SKILL,
+  path: join(home, ".agents", "skills", QA_GLOBAL_SKILL),
   scope: "global",
   source: null,
   sourceType: null,
