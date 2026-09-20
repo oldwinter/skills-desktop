@@ -75,11 +75,11 @@ npm run verify
 
 本地 candidate 构建见仓库 README；本地候选 **没有** 公开发布权威。
 
-启动应用后，侧栏可见：**Inventory / Comparison / Collections / Targets / About**。
+启动应用后，侧栏可见：**Inventory / Comparison / Collections / Targets / Publish / Studio / Recovery / About**。会话切换器标题是 **Active Target**，与主导航里的 **Targets** 定义页不是同一处。
 
-![侧栏与主界面：Inventory / Comparison / Collections / Targets / About](images/user-guide/inventory-fresh-evidence.png)
+![Inventory：Fresh evidence 与清单表](images/user-guide/inventory-fresh-evidence.png)
 
-侧栏五项与页眉 **Fresh evidence** 如上。后续各节按同一套 chrome 对照截图。
+页眉 **Fresh evidence** 如上。这张截图仍是较早的五栏 chrome，没有 Publish / Studio / Recovery；以当前侧栏为准。后续各节按同一套工作区对照截图。
 
 ---
 
