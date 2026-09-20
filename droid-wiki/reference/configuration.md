@@ -21,9 +21,12 @@ Skills Desktop 是 npm workspaces 仓库。生产包共享一个根 lockfile 和
 | 导入边界 | `check:imports` | 运行 `scripts/check-imports.mjs` |
 | 测试 | `test` / `test:watch` | Vitest 单次运行 / watch |
 | 覆盖率 | `test:coverage` | Vitest V8 coverage |
-| 总门禁 | `verify` | typecheck → ESLint → import check → coverage → build |
+| 总门禁 | `verify` | typecheck → ESLint → import check → CONTEXT glossary → coverage → build |
+| glossary | `check:context` | 运行 `scripts/check-context.mjs`，检查 CONTEXT.md 术语唯一 |
 | CLI smoke | `smoke:cli` | 使用 `vitest.smoke.config.ts`，120 秒 timeout |
 | SSH smoke | `smoke:ssh` | 使用 `vitest.ssh-smoke.config.ts`；这是实验门禁，不扩大 Local-only V1 |
+| well-known smoke | `smoke:well-known` | 使用 `vitest.well-known-smoke.config.ts`；本机 HTTP 只读回读 |
+| Git 发布 smoke | `smoke:git-publish` | 使用 `vitest.git-publish-smoke.config.ts`；本机 Git smart HTTP |
 | Linux package | `package:linux` | 先 build，再用 Electron Forge package Linux x64 |
 | packaged smoke | `smoke:packaged` | Linux package 后以 Xvfb 运行 Electron smoke |
 | packaged QA | `qa:packaged-ui` | 对已有 packaged executable 运行隔离 UI QA |
@@ -35,6 +38,7 @@ Skills Desktop 是 npm workspaces 仓库。生产包共享一个根 lockfile 和
 | Manifest | scripts |
 | --- | --- |
 | `apps/desktop/package.json` | `build` 依次构建 main、两个 preload、两个 renderer；另有 `typecheck`、`package` |
+| `apps/website/package.json` | 落地页 `dev` / `build` / `preview`；另有 `typecheck`。不进入打包应用 |
 | `packages/skills-runtime/package.json` | `build: tsc -b`、`typecheck` |
 | `packages/remote-bootstrap/package.json` | `tsc -b` 后用 release Vite config 生成固定 bundle；另有 `typecheck` |
 
