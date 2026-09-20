@@ -102,5 +102,12 @@ describe("accepted comprehensive-evolution decisions", () => {
     expect(normalizedGuide).toContain("当前产品仍只开放 Local Target");
     expect(normalizedGuide).toContain("Milestone 3");
     expect(normalizedGuide).toContain("Milestone 4");
+    expect(guide).toMatch(
+      /侧栏可见：\*\*Inventory \/ Comparison \/ Collections \/ Targets \/ Publish \/ Studio \/ Recovery \/ About\*\*/,
+    );
+    expect(guide).not.toContain("侧栏五项");
+    expect(readme).not.toMatch(
+      /`packages\/remote-bootstrap` is retained for\s+`packages\/remote-bootstrap` is retained for/,
+    );
   });
 });

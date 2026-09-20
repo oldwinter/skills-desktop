@@ -70,6 +70,26 @@ function renderNavigation(state: PublicInventoryState) {
 afterEach(cleanup);
 
 describe("WorkspaceNavigation rail (#179)", () => {
+  it("lists every workspace view in the primary rail", () => {
+    renderNavigation(inventory);
+
+    const primary = screen.getByRole("navigation", { name: "Primary" });
+    for (const name of [
+      "Inventory",
+      "Comparison",
+      "Collections",
+      "Targets",
+      "Publish",
+      "Studio",
+      "Recovery",
+      "About",
+    ]) {
+      expect(
+        within(primary).getByRole("button", { name }),
+      ).toBeInTheDocument();
+    }
+  });
+
   it("keeps Target Definitions and the Target Session switcher under distinct labels", () => {
     renderNavigation(inventory);
 

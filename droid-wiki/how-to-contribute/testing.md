@@ -45,7 +45,7 @@ npm run test:coverage
 npm run verify
 ```
 
-`vitest.config.ts` 对 statements、branches、functions 和 lines 设置 80% 全局阈值。`npm run verify` 依次执行 typecheck、ESLint、导入边界、coverage 和全部 workspace build。行为变化不能只跑一个聚焦测试后就宣告完成。
+`vitest.config.ts` 对 statements、branches、functions 和 lines 设置 80% 全局阈值。`npm run verify` 依次执行 typecheck、ESLint、导入边界、CONTEXT.md glossary 检查、coverage 和全部 workspace build。行为变化不能只跑一个聚焦测试后就宣告完成。
 
 ## Real CLI smoke
 

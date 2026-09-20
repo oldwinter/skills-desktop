@@ -7,6 +7,7 @@
 - 根 `package.json` 要求 Node.js 22.20.0 或更高版本；GitHub Actions 使用 Node.js 24。
 - 根 `package-lock.json` 锁定依赖；本地初次安装可用 `npm install`，CI 和可复现检查使用 `npm ci`。
 - 生产 workspace 是 `apps/desktop`、`packages/skills-runtime` 与 `packages/remote-bootstrap`。后者保留给 gated SSH 工作，不是当前 V1 公开能力。
+- `apps/website` 是落地页 workspace，不进入打包应用。
 - `apps/desktop/package.json` 定义 Electron 应用的 Vite build 与 Forge package；`prototype/package.json` 属于独立证据应用，不进入生产 workspace。
 
 ## 根脚本
@@ -19,9 +20,11 @@
 | `npm test` | `vitest.config.ts` | 默认 Unit 与 Contract |
 | `npm run test:coverage` | `vitest.config.ts` | V8 coverage 与四项 80% 全局阈值 |
 | `npm run build` | 根 `package.json`、workspace scripts | 构建所有存在 build script 的 workspace |
-| `npm run verify` | 根 `package.json` | typecheck → lint → imports → coverage → build |
+| `npm run verify` | 根 `package.json` | typecheck → lint → imports → CONTEXT glossary → coverage → build |
 | `npm run smoke:cli` | `vitest.smoke.config.ts` | 隔离的真实固定 CLI smoke |
 | `npm run smoke:ssh` | `vitest.ssh-smoke.config.ts` | 实验性的 localhost OpenSSH smoke |
+| `npm run smoke:well-known` | `vitest.well-known-smoke.config.ts` | 本机 HTTP 上的确定性 well-known 只读回读 |
+| `npm run smoke:git-publish` | `vitest.git-publish-smoke.config.ts` | 本机 Git smart HTTP 发布与 readback |
 | `npm run smoke:packaged` | `tests/packaged-electron.smoke.mjs` | Linux 打包 Electron smoke |
 | `npm run qa:packaged-ui:linux` | `tests/packaged-ui-qa/run.mjs` | Linux package 与 headless UI QA |
 
@@ -63,9 +66,11 @@ npm run lint:biome
 
 ## Vitest
 
-- `vitest.config.ts`：默认 Unit/Contract、fork pool、V8 coverage 和 80% thresholds；排除真实 CLI 与 localhost SSH smoke。
+- `vitest.config.ts`：默认 Unit/Contract、fork pool、V8 coverage 和 80% thresholds；排除真实 CLI、localhost SSH、well-known HTTP 与 Git 发布 smoke。
 - `vitest.smoke.config.ts`：仅 `tests/real-cli.smoke.test.ts`，120 秒超时。
 - `vitest.ssh-smoke.config.ts`：仅 `tests/localhost-ssh.smoke.test.ts`，120 秒超时。
+- `vitest.well-known-smoke.config.ts`：仅 `tests/well-known-http.smoke.test.ts`。
+- `vitest.git-publish-smoke.config.ts`：仅 `tests/git-publish.smoke.test.ts`。
 
 聚焦测试可把仓库根完整路径传给 Vitest，例如：
 

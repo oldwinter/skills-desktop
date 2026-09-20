@@ -5,7 +5,7 @@
 ## 前置条件
 
 - Node.js 22.20 或更高版本。CI 在 `.github/workflows/verify.yml` 中使用 Node.js 24。
-- npm，仓库使用根 `package-lock.json` 管理三个 workspace。
+- npm，仓库使用根 `package-lock.json` 管理四个 workspace：`apps/desktop`、`apps/website`、`packages/skills-runtime`、`packages/remote-bootstrap`。
 - Linux 打包候选还需要 `fakeroot` 与 `rpmbuild`；打包 Electron smoke 通常需要 Xvfb。
 - 真实 CLI smoke 会运行固定的 `skills@1.5.23`，但使用隔离 HOME、workspace 和 npm cache。
 
@@ -33,7 +33,7 @@ npm ci
 | `npm test` | 运行 Vitest 单元与契约测试 |
 | `npm run test:coverage` | 运行 V8 coverage，并执行 80% 全局阈值 |
 | `npm run build` | 构建所有 workspace |
-| `npm run verify` | 依次执行 typecheck、lint、import 检查、coverage 和 build |
+| `npm run verify` | 依次执行 typecheck、lint、import 检查、CONTEXT.md glossary 检查、coverage 和 build |
 
 行为变更完成前应运行：
 

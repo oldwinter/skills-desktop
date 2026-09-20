@@ -26,7 +26,7 @@ Run:
 npm run verify
 ```
 
-This covers typecheck, lint when configured, import checks, tests, and build. Do not skip it for behavior changes.
+This runs typecheck, lint, import-boundary checks, the CONTEXT.md glossary check, coverage tests, and the workspace build. Do not skip it for behavior changes.
 
 ## Issues
 

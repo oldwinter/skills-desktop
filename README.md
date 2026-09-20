@@ -77,9 +77,9 @@ reading or changing developer inventory.
 
 The production workspaces are `apps/desktop`, `packages/skills-runtime`, and
 `packages/remote-bootstrap`. `packages/remote-bootstrap` is retained for
-`packages/remote-bootstrap` is retained for gated SSH work; it is not a current
-public capability. Production skill discovery and mutation must keep using
-argument-array invocations of the pinned `npx skills` package.
+gated SSH work; it is not a current public capability. Production skill
+discovery and mutation must keep using argument-array invocations of the
+pinned `npx skills` package.
 
 ## Landing Page
 

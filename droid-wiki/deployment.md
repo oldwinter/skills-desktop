@@ -13,7 +13,7 @@ npm run smoke:cli
 npm run smoke:packaged
 ```
 
-`npm run verify` 依次执行 typecheck、ESLint、import 边界检查、覆盖率测试和全部 workspace build。`apps/desktop/package.json` 的 desktop build 显式构建五个 Vite 入口：
+`npm run verify` 依次执行 typecheck、ESLint、import 边界检查、CONTEXT.md glossary 检查、覆盖率测试和全部 workspace build。`apps/desktop/package.json` 的 desktop build 显式构建五个 Vite 入口：
 
 1. Electron main；
 2. workspace preload；

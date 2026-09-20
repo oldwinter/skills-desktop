@@ -12,7 +12,7 @@
   ],
   "allowScripts": {
     "electron-winstaller@5.4.4": true,
-    "electron@44.0.0": true
+    "electron@44.3.0": true
   },
   "overrides": {
     "extract-zip": "npm:@electron-internal/extract-zip@1.0.5",
