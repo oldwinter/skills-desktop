@@ -216,6 +216,9 @@ skills.sh 交接：
 3. 点 **选择缺失技能 / Select missing skills**，一次勾选当前 Target 与 scope 内可添加的 Missing 条目；也可逐项勾选或取消。此操作保留已有选择，不会自动选择 Reapply、来源冲突或不可选条目。
 4. 生成 **Collection Plan**，审阅后进入 Trusted Review，再执行。
 
+点 **清空选择 / Clear selection** 可撤销当前 Target 的全部勾选，包括手动选择的 Reapply。
+此操作保留 Target 和 scope，不会卸载技能。计划准备中、已有待确认计划或执行中不可清空。
+
 执行不是跨机事务：每个子 Target 的确认变更独立；若某子项进入 reconciliation，按该 Target 单独处理。
 
 ### 导入的包（Imported Package）

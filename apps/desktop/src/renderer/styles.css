@@ -602,7 +602,7 @@ html[data-appearance="system"] .status-pill.status-pill--neutral {
 .collection-scope-select { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 8px; color: var(--text-tertiary); font-size: var(--font-size-meta); }
 .collection-scope-select select { min-width: 0; width: 100%; height: 36px; padding: 0 8px; color: var(--text); background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--radius-control); }
 .collection-target-blockers { display: grid; gap: 3px; margin: 0 0 10px 74px; color: var(--danger); font-size: var(--font-size-meta); }
-.collection-select-missing { margin-bottom: 10px; }
+.collection-selection-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
 .collection-table-wrap { min-width: 0; overflow: auto; }
 .collection-table { width: 100%; border-spacing: 0; background: var(--surface); box-shadow: 0 0 0 1px var(--line); border-radius: var(--radius-panel); overflow: hidden; table-layout: fixed; }
 .collection-table th { height: 36px; padding: 0 10px; color: var(--text-tertiary); background: var(--surface-raised); border-bottom: 1px solid var(--line); font-size: var(--font-size-meta); font-weight: 600; text-align: left; }
