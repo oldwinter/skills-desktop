@@ -357,6 +357,8 @@ export const zhCN: Readonly<Record<keyof typeof en, string>> = {
   "targets.created": "Target 已创建",
   "targets.updated": "Target 已更新",
   "targets.deleted": "Target 已删除",
+  "targets.refresh": "刷新 {label}",
+  "targets.refreshStarted": "已请求刷新",
   "targets.pill.loading": "加载中",
   "targets.pill.fresh": "新鲜",
   "targets.pill.stale": "过期",

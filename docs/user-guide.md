@@ -97,6 +97,8 @@ npm run verify
 
 列表上 Local 显示为 Local；若仍看到历史残留的 SSH 项，会标 **SSH · 未在 V1 开放**，编辑只读、不能保存。新建 SSH 在 V1 中不可用。
 
+每个 Local Target 卡片都提供刷新按钮。遇到 Stale 或 No evidence 时，可以直接在 Targets 页面重新观测该 Target 的 Inventory；SSH Target 的刷新按钮保持禁用。
+
 ![Inventory Target 选择器中的 SSH · 未开放](images/user-guide/inventory-ssh-unavailable.png)
 
 页眉会显示当前 Target 标签与工作区路径。侧栏 **Active Target** 区可切换当前观察对象（这是会话级切换器；编辑 Target Definition 请进入主导航的 **Targets** 页）。侧栏底部显示实际观察到的 `skills` CLI 版本，尚未观察时显示 unobserved。

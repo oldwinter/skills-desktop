@@ -412,6 +412,40 @@ describe("TargetsView", () => {
     );
   });
 
+  it("refreshes a Local Target from the list and keeps SSH unavailable", async () => {
+    const refreshInventory = vi.fn(async () => ({
+      ok: true as const,
+      value: { operationId: "refresh-local" },
+    }));
+    render(
+      <TargetsView
+        client={bridge({ refreshInventory })}
+        onSelected={vi.fn()}
+        targets={[
+          targetState(localTarget, {
+            inventory: { ...inventory, freshness: "stale" },
+          }),
+          targetState(sshTarget),
+        ]}
+      />,
+    );
+
+    const refreshLocal = screen.getByRole("button", {
+      name: `Refresh ${localTarget.label}`,
+    });
+    const refreshSsh = screen.getByRole("button", {
+      name: `Refresh ${sshTarget.label}`,
+    });
+    expect(refreshLocal).toBeEnabled();
+    expect(refreshSsh).toBeDisabled();
+
+    fireEvent.click(refreshLocal);
+    await waitFor(() =>
+      expect(refreshInventory).toHaveBeenCalledExactlyOnceWith(localId),
+    );
+    expect(await screen.findByText("Refresh requested")).toBeInTheDocument();
+  });
+
   it("hides Generation from the default list and humanizes inventory status (#141)", () => {
     const emptyHost = {
       ...sshTarget,

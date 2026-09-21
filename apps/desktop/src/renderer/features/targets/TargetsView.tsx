@@ -4,6 +4,7 @@ import {
   HardDrive,
   Pencil,
   Plus,
+  RefreshCw,
   Save,
   Server,
   Trash2,
@@ -61,6 +62,7 @@ export function TargetsView({
   const [draft, setDraft] = useState<TargetDraft>(blankTarget);
   const [error, setError] = useState<RendererError>();
   const [savedMessage, setSavedMessage] = useState<MessageKey>();
+  const [refreshingTargetId, setRefreshingTargetId] = useState<string>();
 
   useEffect(() => {
     if (
@@ -115,6 +117,26 @@ export function TargetsView({
       );
       if (remaining !== undefined) onSelected(remaining.target.id);
     } else setError(result.error);
+  };
+
+  const refresh = async (state: TargetState) => {
+    if (
+      refreshingTargetId !== undefined ||
+      state.target.kind === "ssh" ||
+      state.inventory.phase === "loading"
+    ) {
+      return;
+    }
+    setError(undefined);
+    setSavedMessage(undefined);
+    setRefreshingTargetId(state.target.id);
+    try {
+      const result = await client.refreshInventory(state.target.id);
+      if (result.ok) setSavedMessage("targets.refreshStarted");
+      else setError(result.error);
+    } finally {
+      setRefreshingTargetId(undefined);
+    }
   };
 
   return (
@@ -214,6 +236,32 @@ export function TargetsView({
                 </div>
               ) : null}
               <div className="target-item-actions">
+                <button
+                  aria-label={t("targets.refresh", {
+                    label: state.target.label,
+                  })}
+                  className="icon-button"
+                  disabled={
+                    state.target.kind === "ssh" ||
+                    state.inventory.phase === "loading" ||
+                    refreshingTargetId !== undefined
+                  }
+                  onClick={() => void refresh(state)}
+                  title={
+                    state.target.kind === "ssh"
+                      ? t("common.ssh.notInV1")
+                      : t("targets.refresh", { label: state.target.label })
+                  }
+                  type="button"
+                >
+                  <RefreshCw
+                    aria-hidden="true"
+                    className={
+                      refreshingTargetId === state.target.id ? "spin" : undefined
+                    }
+                    size={15}
+                  />
+                </button>
                 <button
                   aria-label={t("targets.edit", { label: state.target.label })}
                   className="icon-button"
