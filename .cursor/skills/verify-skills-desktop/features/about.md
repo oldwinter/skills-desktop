@@ -37,6 +37,12 @@ End state that proves it: `h1` About, `h2` Skills Desktop, version `0.1.0`,
 update status heading **Manual upgrade**, no claim of a signed Stable
 Release or live Squirrel feed.
 
+One-shot:
+
+```bash
+node .cursor/skills/verify-skills-desktop/helpers/prove-about.mjs
+```
+
 ## Gotchas
 
 - Loading state shows `Loading application details` until the about

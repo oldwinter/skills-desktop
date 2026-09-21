@@ -8,6 +8,7 @@ import {
   listCdpTargets,
   PINNED_CLI,
   processAlive,
+  QA_PROJECT_SKILL,
   readSession,
   requirePackagedExecutable,
   WORKSPACE_TITLE,
@@ -81,7 +82,7 @@ if (checks.every((check) => check.ok)) {
     );
     note(
       "owned-instance",
-      state.skillNames.includes("qa-project-skill") ||
+      state.skillNames.includes(QA_PROJECT_SKILL) ||
         state.banners.some((banner) => banner.includes("No skills found")) ||
         state.banners.some((banner) =>
           banner.includes("Inventory unavailable"),

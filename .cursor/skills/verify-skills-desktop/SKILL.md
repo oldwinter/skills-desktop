@@ -118,6 +118,7 @@ node .cursor/skills/verify-skills-desktop/helpers/drive.mjs state after-select
 | `toggle <aria-label> <true\|false>` | Clicks a checkbox/radio if its checked state differs. |
 | `wait <js> <label>` | `CdpPage.waitFor` on a workspace expression. |
 | `eval <js>` | `Runtime.evaluate` on the workspace, JSON to stdout. |
+| `write-eval <file> <js>` | Same as `eval`, then writes the JSON value into the run evidence dir. |
 | `state [name]` | Writes heading, freshness pill, skill names, banners to evidence. |
 | `screenshot <file>` | `Page.captureScreenshot` into the run evidence dir. |
 | `invocations` | Copies fixture `invocations.log` (stub `npx` argv arrays). |
@@ -214,10 +215,20 @@ node .cursor/skills/verify-skills-desktop/helpers/drive.mjs --help
 node .cursor/skills/verify-skills-desktop/helpers/cleanup.mjs
 ```
 
-One-shot seed proof (Inventory browse/filter only):
+One-shot seed proof (Inventory browse/filter only). After cleanup it
+asserts fixture `qa-project-skill` / `qa-global-skill` and a pinned
+`skills@1.5.23` `list` argv in `invocations.json`:
 
 ```bash
 node .cursor/skills/verify-skills-desktop/helpers/prove-inventory.mjs
 ```
 
-On a machine without `DISPLAY`, prefix that line with `xvfb-run -a`.
+One-shot packaging identity proof (About / unsigned preview). After cleanup
+it asserts `Manual upgrade`, version `0.1.0`, **Export release diagnostics**,
+and no automatic-update chrome:
+
+```bash
+node .cursor/skills/verify-skills-desktop/helpers/prove-about.mjs
+```
+
+On a machine without `DISPLAY`, prefix those lines with `xvfb-run -a`.

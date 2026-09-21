@@ -7,17 +7,31 @@ import { fileURLToPath } from "node:url";
 
 import { CdpPage } from "../../../../tests/packaged-ui-qa/cdp.mjs";
 import {
+  CLI_VERSION,
   createPackagedQaFixture,
+  QA_GLOBAL_SKILL,
+  QA_PROJECT_SKILL,
+  QA_PROJECT_SOURCE,
+  QA_PROJECT_SOURCE_URL,
   resolvePackagedExecutable,
 } from "../../../../tests/packaged-ui-qa/fixture.mjs";
 import { EXPECTED_URL, stopChild } from "../../../../tests/packaged-ui-qa/launch.mjs";
 
-export { CdpPage, createPackagedQaFixture, EXPECTED_URL, resolvePackagedExecutable };
+export {
+  CdpPage,
+  createPackagedQaFixture,
+  EXPECTED_URL,
+  QA_GLOBAL_SKILL,
+  QA_PROJECT_SKILL,
+  QA_PROJECT_SOURCE,
+  QA_PROJECT_SOURCE_URL,
+  resolvePackagedExecutable,
+};
 
 export const REVIEW_URL = "skills-desktop://review/index.html";
 export const REVIEW_TITLE = "Skills Desktop Trusted Review";
 export const WORKSPACE_TITLE = "Skills Desktop";
-export const PINNED_CLI = "1.5.23";
+export const PINNED_CLI = CLI_VERSION;
 export const PRIMARY_NAV = [
   "Inventory",
   "Comparison",
