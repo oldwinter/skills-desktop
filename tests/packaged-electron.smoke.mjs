@@ -28,6 +28,14 @@ const invocationLog = join(homeDirectory, "invocations.log");
 const projectInventoryState = join(homeDirectory, "project-inventory.json");
 const activeChildren = new Set();
 const filePollIntervalMs = 25;
+const missingExecutionContextRetryMs = 2_000;
+
+function isMissingDefaultExecutionContext(error) {
+  return (
+    error instanceof Error &&
+    error.message.includes("Cannot find default execution context")
+  );
+}
 
 function observeChildExit(child) {
   return new Promise((resolveExit) => {
@@ -206,18 +214,32 @@ class CdpPage {
   }
 
   async evaluate(expression) {
-    const response = await this.send("Runtime.evaluate", {
-      awaitPromise: true,
-      expression,
-      returnByValue: true,
-    });
-    if (response.exceptionDetails !== undefined) {
-      throw new Error(
-        response.exceptionDetails.exception?.description ??
-          response.exceptionDetails.text,
-      );
+    // Electron 44.4.2 can briefly drop the default CDP execution context
+    // after About → Inventory/Collections SPA navigation. Retry only that
+    // protocol error; the window starts at the first miss so a drop during
+    // waitFor still gets a brief reconnect budget.
+    let retryUntil;
+    for (;;) {
+      try {
+        const response = await this.send("Runtime.evaluate", {
+          awaitPromise: true,
+          expression,
+          returnByValue: true,
+        });
+        if (response.exceptionDetails !== undefined) {
+          throw new Error(
+            response.exceptionDetails.exception?.description ??
+              response.exceptionDetails.text,
+          );
+        }
+        return response.result.value;
+      } catch (error) {
+        if (!isMissingDefaultExecutionContext(error)) throw error;
+        retryUntil ??= Date.now() + missingExecutionContextRetryMs;
+        if (Date.now() >= retryUntil) throw error;
+        await delay(filePollIntervalMs);
+      }
     }
-    return response.result.value;
   }
 
   send(method, params = {}) {
