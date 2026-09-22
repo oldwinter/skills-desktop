@@ -394,6 +394,8 @@ export const en = {
   "targets.created": "Target created",
   "targets.updated": "Target updated",
   "targets.deleted": "Target deleted",
+  "targets.refresh": "Refresh {label}",
+  "targets.refreshStarted": "Refresh requested",
   "targets.pill.loading": "Loading",
   "targets.pill.fresh": "Fresh",
   "targets.pill.stale": "Stale",
