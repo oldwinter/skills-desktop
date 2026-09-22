@@ -1191,7 +1191,10 @@ function InventoryWorkspace({
                     <button
                       aria-label={t("inventory.clearSearch")}
                       className="search-clear"
-                      onClick={() => setQuery("")}
+                      onClick={() => {
+                        setQuery("");
+                        searchInputRef.current?.focus();
+                      }}
                       title={t("inventory.clearSearch")}
                       type="button"
                     >
@@ -1200,7 +1203,12 @@ function InventoryWorkspace({
                   ) : null}
                 </div>
                 <span aria-live="polite" className="inventory-result-count">
-                  {t("inventory.shown", { count: filteredEntries.length })}
+                  {isFiltered
+                    ? t("inventory.shownOf", {
+                        shown: filteredEntries.length,
+                        total: snapshot.inventory.entries.length,
+                      })
+                    : t("inventory.shown", { count: filteredEntries.length })}
                 </span>
                 <div
                   className="segmented-control"

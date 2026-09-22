@@ -575,7 +575,7 @@ describe("Local Target Inventory shell", () => {
     });
     fireEvent.change(search, { target: { value: "no-match" } });
 
-    expect(screen.getByText("0 shown")).toBeInTheDocument();
+    expect(screen.getByText("0 of 2 shown")).toBeInTheDocument();
     expect(
       screen.getByRole("heading", { name: "No matching skills" }),
     ).toBeInTheDocument();
@@ -597,6 +597,7 @@ describe("Local Target Inventory shell", () => {
     );
 
     expect(await screen.findByText("2 shown")).toBeInTheDocument();
+    expect(search).toHaveFocus();
     expect(search).toHaveValue("");
     expect(
       screen.queryByRole("button", { name: "Clear inventory search" }),
@@ -920,6 +921,7 @@ describe("Local Target Inventory shell", () => {
       screen.getByRole("searchbox", { name: "Search inventory" }),
       { target: { value: "zzzzqwxnotfound999" } },
     );
+    expect(screen.getByText("0 of 1 shown")).toBeInTheDocument();
     expect(screen.getByText("0 matching skills")).toBeInTheDocument();
     expect(
       screen.queryByText("1 skill across project and global scopes"),
