@@ -352,6 +352,12 @@ export const zhCN: Readonly<Record<keyof typeof en, string>> = {
   "about.exportDiagnostics": "导出发布诊断",
 
   "targets.title": "Targets",
+  "targets.search": "搜索 Target",
+  "targets.searchPlaceholder": "名称、工作区、Harness 或 SSH 别名",
+  "targets.clearSearch": "清除 Target 搜索",
+  "targets.searchCount": "显示 {visible} / {total} 个 Target",
+  "targets.searchEmpty": "没有匹配的 Target",
+  "targets.searchEmptyHint": "试试其他名称、工作区路径、Harness ID 或 SSH 别名。",
   "targets.subtitle.one": "{count} 个 Target Definition · V1 仅支持 Local",
   "targets.subtitle.other": "{count} 个 Target Definition · V1 仅支持 Local",
   "targets.new": "新建 Target",

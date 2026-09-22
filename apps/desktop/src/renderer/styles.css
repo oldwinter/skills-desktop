@@ -677,7 +677,11 @@ html[data-appearance="system"] .status-pill.status-pill--neutral {
 .comparison-evidence-detail section > div { display: grid; gap: 4px; min-width: 0; padding-left: 8px; border-left: 2px solid var(--line-strong); }
 .comparison-evidence-detail span, .comparison-evidence-detail code { min-width: 0; color: var(--text-secondary); overflow-wrap: anywhere; }
 
-.targets-workspace { grid-template-rows: auto auto minmax(0, 1fr); }
+.targets-workspace { display: flex; flex-direction: column; }
+.targets-workspace > :not(.target-list) { flex-shrink: 0; }
+.targets-search-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 0 20px 12px; }
+.targets-search-toolbar > [role="status"] { color: var(--text-secondary); font-size: var(--font-size-meta); }
+.targets-workspace .target-list { flex: 1; }
 .recovery-workspace { display: grid; grid-auto-rows: max-content; grid-column: 2 / -1; min-width: 0; min-height: 0; overflow: auto; }
 .recovery-section { padding: 0 20px 20px; }
 .recovery-section h2 { margin: 0 0 4px; font-size: var(--font-size-panel); font-weight: 600; }
