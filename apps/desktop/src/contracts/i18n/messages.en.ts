@@ -389,6 +389,13 @@ export const en = {
   "about.exportDiagnostics": "Export release diagnostics",
 
   "targets.title": "Targets",
+  "targets.search": "Search Targets",
+  "targets.searchPlaceholder": "Name, workspace, harness or SSH alias",
+  "targets.clearSearch": "Clear Target search",
+  "targets.searchCount": "{visible} of {total} Targets",
+  "targets.searchEmpty": "No matching Targets",
+  "targets.searchEmptyHint":
+    "Try another name, workspace path, harness ID or SSH alias.",
   "targets.subtitle.one": "{count} Target Definition · V1 is Local-only",
   "targets.subtitle.other": "{count} Target Definitions · V1 is Local-only",
   "targets.new": "New Target",

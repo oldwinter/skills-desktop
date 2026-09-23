@@ -97,6 +97,8 @@ npm run verify
 
 列表上 Local 显示为 Local；若仍看到历史残留的 SSH 项，会标 **SSH · 未在 V1 开放**，编辑只读、不能保存。新建 SSH 在 V1 中不可用。
 
+Target 较多时，可在列表上方按名称、工作区路径、Harness ID 或 SSH 别名搜索。搜索忽略大小写和首尾空格，并显示匹配数与总数；按 Esc 或点击清除按钮可恢复完整列表并回到搜索框。筛选不会切换当前 Target，也不会清空右侧正在编辑的草稿。
+
 每个 Local Target 卡片都提供刷新按钮。遇到 Stale 或 No evidence 时，可以直接在 Targets 页面重新观测该 Target 的 Inventory；SSH Target 的刷新按钮保持禁用。
 
 ![Inventory Target 选择器中的 SSH · 未开放](images/user-guide/inventory-ssh-unavailable.png)

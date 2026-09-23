@@ -231,6 +231,85 @@ function bridge(overrides: Partial<WorkspaceBridge> = {}): WorkspaceBridge {
 }
 
 describe("TargetsView", () => {
+  it.each([
+    ["  SECOND DEVICE  ", "Second device"],
+    ["/WORK/SECOND", "Second device"],
+    ["claude-code", "Second device"],
+    ["BUILD-HOST", "Build host"],
+  ])("filters Targets by %s without selecting or refreshing them", (query, label) => {
+    const onSelected = vi.fn();
+    const refreshInventory = vi.fn();
+    render(
+      <TargetsView
+        client={bridge({ refreshInventory })}
+        onSelected={onSelected}
+        targets={[
+          targetState(localTarget),
+          targetState({ ...secondTarget, harnessIds: ["claude-code"] }),
+          targetState(sshTarget),
+        ]}
+      />,
+    );
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search Targets" }), {
+      target: { value: query },
+    });
+    expect(screen.getAllByRole("article")).toHaveLength(1);
+    expect(within(screen.getByRole("article")).getByRole("heading", { name: label })).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("1 of 3 Targets");
+    expect(onSelected).not.toHaveBeenCalled();
+    expect(refreshInventory).not.toHaveBeenCalled();
+    if (label === "Build host") {
+      expect(screen.getByRole("button", { name: "Refresh Build host" })).toBeDisabled();
+    }
+  });
+
+  it("clears an empty search with keyboard focus and preserves the editing draft", () => {
+    render(
+      <TargetsView client={bridge()} onSelected={vi.fn()} targets={[targetState(localTarget), targetState(secondTarget)]} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Edit This device" }));
+    fireEvent.change(screen.getByLabelText("Display label"), { target: { value: "Unsaved label" } });
+    const search = screen.getByRole("searchbox", { name: "Search Targets" });
+    fireEvent.change(search, { target: { value: "no-such-target" } });
+    expect(screen.queryAllByRole("article")).toHaveLength(0);
+    expect(screen.getByRole("heading", { name: "No matching Targets" })).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("0 of 2 Targets");
+    fireEvent.click(screen.getByText("Clear Target search", { selector: "button" }));
+    expect(search).toHaveValue("");
+    expect(search).toHaveFocus();
+    expect(screen.getAllByRole("article")).toHaveLength(2);
+    expect(screen.getByLabelText("Display label")).toHaveValue("Unsaved label");
+    fireEvent.change(search, { target: { value: "second" } });
+    fireEvent.keyDown(search, { key: "Escape", isComposing: true });
+    expect(search).toHaveValue("second");
+    fireEvent.keyDown(search, { key: "Escape" });
+    expect(search).toHaveValue("");
+    expect(search).toHaveFocus();
+    expect(screen.getAllByRole("article")).toHaveLength(2);
+    expect(screen.queryByRole("button", { name: "Clear Target search" })).not.toBeInTheDocument();
+    fireEvent.change(search, { target: { value: "   " } });
+    expect(screen.getAllByRole("article")).toHaveLength(2);
+  });
+
+  it("keeps the query and recomputes results after a Target snapshot changes", () => {
+    const client = bridge();
+    const onSelected = vi.fn();
+    const { rerender } = render(
+      <TargetsView client={client} onSelected={onSelected} targets={[targetState(localTarget)]} />,
+    );
+    const search = screen.getByRole("searchbox", { name: "Search Targets" });
+    fireEvent.change(search, { target: { value: "second" } });
+    rerender(
+      <TargetsView client={client} onSelected={onSelected} targets={[targetState(localTarget), targetState(secondTarget)]} />,
+    );
+    expect(search).toHaveValue("second");
+    expect(screen.getByRole("status")).toHaveTextContent("1 of 2 Targets");
+    expect(screen.getAllByRole("article")).toHaveLength(1);
+    rerender(<TargetsView client={client} onSelected={onSelected} targets={[]} />);
+    expect(screen.getByRole("status")).toHaveTextContent("0 of 0 Targets");
+    expect(screen.queryAllByRole("article")).toHaveLength(0);
+  });
+
   it("creates a Local Target and surfaces save feedback", async () => {
     const createTarget = vi.fn(async () => ({
       ok: true as const,

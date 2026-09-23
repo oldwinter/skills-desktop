@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   AlertCircle,
   HardDrive,
@@ -6,8 +6,10 @@ import {
   Plus,
   RefreshCw,
   Save,
+  Search,
   Server,
   Trash2,
+  X,
 } from "lucide-react";
 
 import type {
@@ -58,6 +60,21 @@ export function TargetsView({
   readonly targets: readonly TargetState[];
 }) {
   const { t, tc } = useTranslator();
+  const [searchQuery, setSearchQuery] = useState("");
+  const searchRef = useRef<HTMLInputElement>(null);
+  const normalizedQuery = searchQuery.trim().toLowerCase();
+  const visibleTargets = targets.filter(({ target }) =>
+    [
+      target.label,
+      target.workspace,
+      target.connectionReference,
+      ...target.harnessIds,
+    ].some((value) => value?.toLowerCase().includes(normalizedQuery)),
+  );
+  const clearSearch = () => {
+    setSearchQuery("");
+    searchRef.current?.focus();
+  };
   const [editingTargetId, setEditingTargetId] = useState<string>();
   const [draft, setDraft] = useState<TargetDraft>(blankTarget);
   const [error, setError] = useState<RendererError>();
@@ -164,8 +181,53 @@ export function TargetsView({
             <span>{t(savedMessage)}</span>
           </div>
         ) : null}
+        <div className="targets-search-toolbar">
+          <div className="search-control">
+            <Search aria-hidden="true" size={16} />
+            <input
+              aria-label={t("targets.search")}
+              onChange={(event) => setSearchQuery(event.currentTarget.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Escape" && !event.nativeEvent.isComposing) {
+                  event.preventDefault();
+                  clearSearch();
+                }
+              }}
+              placeholder={t("targets.searchPlaceholder")}
+              ref={searchRef}
+              type="search"
+              value={searchQuery}
+            />
+            {searchQuery !== "" ? (
+              <button
+                aria-label={t("targets.clearSearch")}
+                className="search-clear"
+                onClick={clearSearch}
+                type="button"
+              >
+                <X aria-hidden="true" size={14} />
+              </button>
+            ) : null}
+          </div>
+          <span role="status">
+            {t("targets.searchCount", {
+              visible: visibleTargets.length,
+              total: targets.length,
+            })}
+          </span>
+        </div>
         <div className="target-list">
-          {targets.map((state) => {
+          {normalizedQuery !== "" && visibleTargets.length === 0 ? (
+            <div className="empty-state">
+              <Search aria-hidden="true" size={22} />
+              <h2>{t("targets.searchEmpty")}</h2>
+              <p>{t("targets.searchEmptyHint")}</p>
+              <button className="text-button" onClick={clearSearch} type="button">
+                {t("targets.clearSearch")}
+              </button>
+            </div>
+          ) : null}
+          {visibleTargets.map((state) => {
             const pill = inventoryPill(state);
             return (
             <article
