@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import {
   AlertCircle,
   CheckCircle2,
@@ -26,6 +26,10 @@ import type {
 } from "../../../contracts/workspace.js";
 import { useTranslator } from "../../i18n/LocaleProvider.js";
 import { UserFacingErrorCopy } from "../../UserFacingErrorCopy.js";
+import {
+  type DraftSession,
+  studioDraftSessionsFor,
+} from "./studio-draft-sessions.js";
 
 /**
  * ADR 0018 Studio surface. This window never learns a path: folders are
@@ -34,8 +38,6 @@ import { UserFacingErrorCopy } from "../../UserFacingErrorCopy.js";
  * rendered by React; there is no HTML injection point and nothing here can
  * navigate or fetch. Autosave is compare-and-swap on the Draft revision.
  */
-
-const AUTOSAVE_DELAY_MS = 400;
 
 type RequestResult = Awaited<ReturnType<WorkspaceBridge["openStudioFolder"]>>;
 
@@ -276,15 +278,6 @@ function GrantCard({
   );
 }
 
-interface DraftSession {
-  readonly conflict: boolean;
-  readonly draftId: string;
-  readonly revision: number;
-  readonly savedText: string;
-  readonly saving: boolean;
-  readonly text: string;
-}
-
 function DraftEditor({
   busy,
   client,
@@ -446,129 +439,52 @@ export function StudioView({
   const [error, setError] = useState<RendererError>();
   const [selectedId, setSelectedId] = useState<string>();
   const [pending, setPending] = useState(false);
-  // Draft edit sessions outlive the keyed DraftEditor below: switching Drafts
-  // must never drop authored text or the autosave that owns it. The ref map is
-  // authoritative so save completions can still be recorded after unmount.
-  const sessionsRef = useRef(new Map<string, DraftSession>());
-  const [sessions, setSessions] = useState<ReadonlyMap<string, DraftSession>>(
-    () => new Map(),
-  );
-  const saveChainsRef = useRef(new Map<string, Promise<void>>());
+  // Draft edit sessions live in a per-bridge owner so leaving the Studio
+  // view never strands pending text: the flush below runs on the owner's
+  // serialized save chains and a remounted editor reconnects to the same
+  // pending text, acknowledged revision, and in-flight save.
+  const drafts = useMemo(() => studioDraftSessionsFor(client), [client]);
+  const sessions = useSyncExternalStore(drafts.subscribe, drafts.getSnapshot);
 
-  const saveDraftNow = useCallback(
-    async (draftId: string): Promise<void> => {
-      const session = sessionsRef.current.get(draftId);
-      if (
-        session === undefined ||
-        session.conflict ||
-        session.saving ||
-        session.text === session.savedText
-      ) {
-        return;
-      }
-      sessionsRef.current.set(draftId, { ...session, saving: true });
-      setSessions(new Map(sessionsRef.current));
-      const { revision, text } = session;
-      const result = await client
-        .saveStudioDraft(draftId, revision, text)
-        .catch(() => undefined);
-      const latest = sessionsRef.current.get(draftId);
-      if (latest === undefined || !latest.saving) return;
-      if (result === undefined) {
-        sessionsRef.current.set(draftId, { ...latest, saving: false });
-      } else if (result.ok) {
-        sessionsRef.current.set(draftId, {
-          ...latest,
-          revision: revision + 1,
-          savedText: text,
-          saving: false,
-        });
-        setError(undefined);
-      } else if (result.error.code === "studio_draft_conflict") {
-        sessionsRef.current.set(draftId, {
-          ...latest,
-          conflict: true,
-          saving: false,
-        });
-      } else {
-        sessionsRef.current.set(draftId, { ...latest, saving: false });
-        setError(result.error);
-      }
-      setSessions(new Map(sessionsRef.current));
-    },
-    [client],
-  );
-
-  const enqueueSave = useCallback(
-    (draftId: string) => {
-      const chain = saveChainsRef.current.get(draftId) ?? Promise.resolve();
-      const next = chain
-        .then(() => saveDraftNow(draftId))
-        .catch(() => undefined);
-      saveChainsRef.current.set(draftId, next);
-    },
-    [saveDraftNow],
-  );
+  // Save outcomes surface through whichever Studio view is mounted.
+  useEffect(() => {
+    drafts.onError = setError;
+    return () => {
+      drafts.onError = undefined;
+    };
+  }, [drafts]);
 
   // A Draft whose revision moves beyond what a session acknowledges was
   // written elsewhere; sessions for deleted Drafts are dropped.
   useEffect(() => {
     if (studio === undefined) return;
-    let changed = false;
-    for (const draftId of sessionsRef.current.keys()) {
+    for (const draftId of sessions.keys()) {
       if (!studio.drafts.some(({ id }) => id === draftId)) {
-        sessionsRef.current.delete(draftId);
-        changed = true;
+        drafts.drop(draftId);
       }
     }
     for (const draft of studio.drafts) {
-      const session = sessionsRef.current.get(draft.id);
+      const session = sessions.get(draft.id);
       if (
         session !== undefined &&
         !session.conflict &&
         !session.saving &&
         draft.revision > session.revision
       ) {
-        sessionsRef.current.set(draft.id, { ...session, conflict: true });
-        changed = true;
+        drafts.write(draft.id, { ...session, conflict: true });
       }
     }
-    if (changed) setSessions(new Map(sessionsRef.current));
-  }, [sessions, studio]);
+  }, [drafts, sessions, studio]);
 
-  // Debounced autosave runs here, not in the keyed editor, so a pending save
-  // is never cancelled by switching Drafts.
-  useEffect(() => {
-    if (studio === undefined) return;
-    const timers: ReturnType<typeof setTimeout>[] = [];
-    for (const draft of studio.drafts) {
-      const session = sessions.get(draft.id);
-      if (
-        session === undefined ||
-        session.conflict ||
-        session.saving ||
-        session.text === session.savedText
-      ) {
-        continue;
-      }
-      timers.push(
-        setTimeout(() => enqueueSave(draft.id), AUTOSAVE_DELAY_MS),
-      );
-    }
-    return () => {
-      for (const timer of timers) clearTimeout(timer);
-    };
-  }, [enqueueSave, sessions, studio]);
-
-  // Leaving the Studio view flushes unsaved sessions through the same
+  // Leaving the Studio view flushes unsaved sessions through the owner's
   // serialized chain so an in-flight save cannot strand newer text.
   useEffect(
     () => () => {
-      for (const draftId of sessionsRef.current.keys()) {
-        enqueueSave(draftId);
+      for (const draftId of drafts.draftIds()) {
+        drafts.flushSave(draftId);
       }
     },
-    [enqueueSave],
+    [drafts],
   );
 
   if (studio === undefined) {
@@ -599,9 +515,9 @@ export function StudioView({
 
   const changeDraftText = (draftId: string, text: string) => {
     const draft = studio.drafts.find(({ id }) => id === draftId);
-    const current = sessionsRef.current.get(draftId);
+    const current = drafts.session(draftId);
     if (draft === undefined || current?.conflict) return;
-    sessionsRef.current.set(draftId, {
+    drafts.write(draftId, {
       conflict: false,
       draftId,
       revision: current?.revision ?? draft.revision,
@@ -609,12 +525,11 @@ export function StudioView({
       saving: current?.saving ?? false,
       text,
     });
-    setSessions(new Map(sessionsRef.current));
+    drafts.scheduleAutosave(draftId);
   };
 
   const reloadDraft = (draftId: string) => {
-    sessionsRef.current.delete(draftId);
-    setSessions(new Map(sessionsRef.current));
+    drafts.drop(draftId);
     setError(undefined);
   };
 

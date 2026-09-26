@@ -345,6 +345,116 @@ describe("StudioView (ADR 0018)", () => {
     expect(saveStudioDraft).toHaveBeenCalledTimes(2);
   });
 
+  it("keeps an idle Draft's autosave deadline across unrelated snapshots and sibling edits", async () => {
+    vi.useFakeTimers();
+    const saveStudioDraft = vi.fn(async () => ({
+      ok: true as const,
+      value: { operationId: "op-idle" },
+    }));
+    const client = bridge({ saveStudioDraft });
+    const { rerender } = render(
+      <StudioView
+        client={client}
+        studio={state({ drafts: [draft, secondDraft] })}
+      />,
+    );
+    const edited = `${draft.skillMd}\nIdle.\n`;
+    fireEvent.change(screen.getByTestId("studio-editor-textarea"), {
+      target: { value: edited },
+    });
+    // Editing another Draft and receiving unchanged snapshots must not
+    // postpone the idle Draft's pending autosave.
+    fireEvent.change(screen.getByTestId("studio-draft-select"), {
+      target: { value: "draft-2" },
+    });
+    fireEvent.change(screen.getByTestId("studio-editor-textarea"), {
+      target: { value: `${secondDraft.skillMd}Sibling.\n` },
+    });
+    for (let index = 0; index < 10; index += 1) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(300);
+      });
+      rerender(
+        <StudioView
+          client={client}
+          studio={state({ drafts: [draft, secondDraft] })}
+        />,
+      );
+    }
+    expect(saveStudioDraft).toHaveBeenCalledWith("draft-1", 3, edited);
+  });
+
+  it("reconnects a remounted editor to an in-flight save and keeps newer edits", async () => {
+    vi.useFakeTimers();
+    let persistedRevision = draft.revision;
+    let persistedText = draft.skillMd;
+    const pendingResolutions: Array<() => void> = [];
+    const conflict = {
+      error: {
+        code: "studio_draft_conflict" as const,
+        effects: "none" as const,
+        message: "conflict",
+        phase: "studio",
+        retryable: false,
+      },
+      ok: false as const,
+    };
+    const saveStudioDraft = vi.fn(
+      (_draftId: string, expectedRevision: number, skillMd: string) =>
+        new Promise<
+          { ok: true; value: { operationId: string } } | typeof conflict
+        >((resolve) => {
+          pendingResolutions.push(() => {
+            if (expectedRevision !== persistedRevision) {
+              resolve(conflict);
+              return;
+            }
+            persistedRevision = expectedRevision + 1;
+            persistedText = skillMd;
+            resolve({
+              ok: true,
+              value: { operationId: `op-${persistedRevision}` },
+            });
+          });
+        }),
+    );
+    const client = bridge({ saveStudioDraft });
+    const studio = state({ drafts: [draft] });
+    const first = render(<StudioView client={client} studio={studio} />);
+    const edited = `${draft.skillMd}\nBefore navigation.\n`;
+    fireEvent.change(screen.getByTestId("studio-editor-textarea"), {
+      target: { value: edited },
+    });
+    // Leave Studio before the debounce: the flush's save stays in flight.
+    act(() => first.unmount());
+    await act(async () => {});
+    expect(saveStudioDraft).toHaveBeenCalledWith("draft-1", 3, edited);
+    // Returning while the flush is still pending reconnects the same
+    // session instead of starting over at the persisted revision.
+    render(<StudioView client={client} studio={studio} />);
+    const textarea = screen.getByTestId("studio-editor-textarea");
+    expect(textarea).toHaveValue(edited);
+    expect(textarea).toBeEnabled();
+    const newer = `${edited}After returning.\n`;
+    fireEvent.change(textarea, { target: { value: newer } });
+    await act(async () => {
+      pendingResolutions.shift()?.();
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500);
+    });
+    // The follow-up save carries the revision the flush acknowledged, so
+    // the editor's own earlier save cannot conflict it away.
+    expect(saveStudioDraft).toHaveBeenLastCalledWith("draft-1", 4, newer);
+    await act(async () => {
+      pendingResolutions.shift()?.();
+    });
+    expect(persistedText).toBe(newer);
+    expect(textarea).toBeEnabled();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByTestId("studio-draft-revision")).toHaveTextContent("5");
+  });
+
   it("reports a compare-and-swap conflict instead of overwriting", async () => {
     const saveStudioDraft = vi.fn(async () => ({
       error: {
