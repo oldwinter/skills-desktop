@@ -242,6 +242,75 @@ describe("publication coordinator (ADR 0019 / ADR 0020)", () => {
     expect(h.coordinator.state().source).toBeNull();
   });
 
+  it("clears the active operation and reports a sanitized error when a source read rejects", async () => {
+    let reads = 0;
+    const host = fakeHost({
+      async readSourceFolder(path) {
+        reads += 1;
+        if (reads === 1) {
+          throw new Error(
+            `EACCES: permission denied, scandir '${path}/hello/assets'`,
+          );
+        }
+        return { ok: true, value: skills };
+      },
+    });
+    const h = harness({ host });
+    const result = await h.coordinator.chooseSource();
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe("internal_error");
+    const state = h.coordinator.state();
+    expect(state).toMatchObject({
+      activeOperationId: null,
+      phase: "idle",
+      source: null,
+    });
+    expect(state.lastError?.code).toBe("internal_error");
+    expect(JSON.stringify(state)).not.toContain("/private/skills");
+    expect(h.coordinator.busy()).toBe(false);
+
+    expect((await h.coordinator.chooseSource()).ok).toBe(true);
+    const recovered = h.coordinator.state();
+    expect(recovered.source?.skills).toEqual(["hello"]);
+    expect(recovered.lastError).toBeNull();
+    expect(publicPublicationStateSchema.safeParse(recovered).success).toBe(
+      true,
+    );
+  });
+
+  it("recovers and retains any Guard when the source picker rejects", async () => {
+    const { plan } = await planned();
+    let picks = 0;
+    const host = fakeHost({
+      async chooseSourceFolder() {
+        picks += 1;
+        if (picks === 1) throw new Error("dialog failed");
+        return { label: "skills", path: "/private/skills", status: "picked" };
+      },
+    });
+    const h = harness({
+      host,
+      initialGuard: {
+        committedAt: "2026-09-15T09:00:00.000Z",
+        lastReadback: "uncertain",
+        lastReadbackAt: "2026-09-15T09:00:05.000Z",
+        phase: "uncertain",
+        plan,
+      },
+    });
+    const result = await h.coordinator.chooseSource();
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe("internal_error");
+    const state = h.coordinator.state();
+    expect(state.activeOperationId).toBeNull();
+    expect(state.phase).toBe("idle");
+    expect(state.guard?.plan.id).toBe(plan.id);
+    expect(h.coordinator.guarded()).toBe(true);
+
+    expect((await h.coordinator.chooseSource()).ok).toBe(true);
+    expect(h.coordinator.state().source?.skills).toEqual(["hello"]);
+  });
+
   it("export-only writes the exact tree and invokes no Git", async () => {
     const host = fakeHost();
     const h = harness({ host });

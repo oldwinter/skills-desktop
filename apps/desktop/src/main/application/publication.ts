@@ -137,6 +137,16 @@ function busy(): RendererError {
   );
 }
 
+/** Adapters may still reject; never let a raw failure reach the renderer. */
+function unexpected(phase: string): RendererError {
+  return publicError(
+    "internal_error",
+    "The publication step could not be completed.",
+    phase,
+    true,
+  );
+}
+
 function emptyState(
   available: boolean,
   guard: PublicationGuardRecord | null,
@@ -207,7 +217,9 @@ export function createPublicationCoordinator(
     const operationId = id();
     update({ activeOperationId: operationId, lastError: null, phase });
     try {
-      const result = await body(operationId);
+      const result = await body(operationId).catch(() =>
+        failure(unexpected(phase)),
+      );
       update({
         activeOperationId: null,
         lastError: result.ok ? null : result.error,
