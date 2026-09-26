@@ -4320,4 +4320,71 @@ describe("Local Target Inventory shell", () => {
       "aria-keyshortcuts",
     );
   });
+
+  it("flushes a pending Studio Draft save when the view unmounts", async () => {
+    const studioDraft = {
+      createdAt: "2026-09-15T10:00:00.000Z",
+      id: "draft-1",
+      name: "demo-skill",
+      revision: 3,
+      skillMd: "---\nname: demo-skill\ndescription: Demo.\n---\n\n# Demo\n",
+      updatedAt: "2026-09-15T10:05:00.000Z",
+      validation: {
+        description: "Demo.",
+        fileCount: 1,
+        findings: [],
+        name: "demo-skill",
+        ok: true,
+        profileVersion: 1 as const,
+        totalBytes: 40,
+      },
+    };
+    const saveStudioDraft = vi.fn(async () => ({
+      ok: true as const,
+      value: { operationId: "studio-save" },
+    }));
+    const menuHarness: MenuHarness = { listener: undefined };
+    const client: DesktopBridge = {
+      ...clientFor(
+        {
+          ...snapshot,
+          studio: {
+            activeOperationId: null,
+            available: true,
+            draftFailures: [],
+            drafts: [studioDraft],
+            grants: [],
+            lastError: null,
+            lastExport: null,
+            preview: null,
+          },
+        },
+        undefined,
+        menuHarness,
+      ),
+      saveStudioDraft,
+    };
+    render(<InventoryApp client={client} />);
+    await screen.findByRole("heading", { level: 1, name: "Inventory" });
+    await waitFor(() => expect(menuHarness.listener).toBeDefined());
+
+    act(() => {
+      menuHarness.listener?.({ command: "navigate.studio", schemaVersion: 1 });
+    });
+    const edited = `${studioDraft.skillMd}\nEdited.\n`;
+    fireEvent.change(await screen.findByTestId("studio-editor-textarea"), {
+      target: { value: edited },
+    });
+    // Navigate away before the autosave debounce elapses.
+    act(() => {
+      menuHarness.listener?.({
+        command: "navigate.inventory",
+        schemaVersion: 1,
+      });
+    });
+    await screen.findByRole("heading", { level: 1, name: "Inventory" });
+    await waitFor(() =>
+      expect(saveStudioDraft).toHaveBeenCalledWith("draft-1", 3, edited),
+    );
+  });
 });

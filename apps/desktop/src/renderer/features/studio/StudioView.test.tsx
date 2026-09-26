@@ -3,6 +3,7 @@
 import "@testing-library/jest-dom/vitest";
 
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -20,7 +21,10 @@ import type {
 } from "../../../contracts/workspace.js";
 import { StudioView } from "./StudioView.js";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
 
 function bridge(overrides: Partial<WorkspaceBridge> = {}): WorkspaceBridge {
   const ok = async () => ({ ok: true as const, value: { operationId: "op" } });
@@ -122,6 +126,14 @@ const draft: PublicStudioDraft = {
   validation: validOk,
 };
 
+const secondDraft: PublicStudioDraft = {
+  ...draft,
+  id: "draft-2",
+  name: "other-skill",
+  revision: 1,
+  skillMd: "---\nname: other-skill\ndescription: Other.\n---\n\n# Other\n",
+};
+
 describe("StudioView (ADR 0018)", () => {
   it("explains unavailability without offering any action", () => {
     render(<StudioView client={bridge()} studio={undefined} />);
@@ -212,6 +224,125 @@ describe("StudioView (ADR 0018)", () => {
         "4",
       ),
     );
+  });
+
+  it("autosaves the edited Draft after switching away before the debounce", async () => {
+    vi.useFakeTimers();
+    const saveStudioDraft = vi.fn(async () => ({
+      ok: true as const,
+      value: { operationId: "op-switch" },
+    }));
+    render(
+      <StudioView
+        client={bridge({ saveStudioDraft })}
+        studio={state({ drafts: [draft, secondDraft] })}
+      />,
+    );
+    const edited = `${draft.skillMd}\nPending.\n`;
+    fireEvent.change(screen.getByTestId("studio-editor-textarea"), {
+      target: { value: edited },
+    });
+    // Switch Drafts before the autosave debounce fires.
+    fireEvent.change(screen.getByTestId("studio-draft-select"), {
+      target: { value: "draft-2" },
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500);
+    });
+    expect(saveStudioDraft).toHaveBeenCalledWith("draft-1", 3, edited);
+    // The acknowledged save settles the session; nothing else is pending.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+    expect(saveStudioDraft).toHaveBeenCalledTimes(1);
+    // Switching back shows the authored text, not the stale persisted copy.
+    fireEvent.change(screen.getByTestId("studio-draft-select"), {
+      target: { value: "draft-1" },
+    });
+    expect(screen.getByTestId("studio-editor-textarea")).toHaveValue(edited);
+  });
+
+  it("completes an in-flight save and retains the text across a Draft switch", async () => {
+    vi.useFakeTimers();
+    let resolveSave:
+      | ((result: { ok: true; value: { operationId: string } }) => void)
+      | undefined;
+    const saveStudioDraft = vi.fn(
+      () =>
+        new Promise<{ ok: true; value: { operationId: string } }>(
+          (resolve) => {
+            resolveSave = resolve;
+          },
+        ),
+    );
+    render(
+      <StudioView
+        client={bridge({ saveStudioDraft })}
+        studio={state({ drafts: [draft, secondDraft] })}
+      />,
+    );
+    const edited = `${draft.skillMd}\nIn flight.\n`;
+    fireEvent.change(screen.getByTestId("studio-editor-textarea"), {
+      target: { value: edited },
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(400);
+    });
+    expect(saveStudioDraft).toHaveBeenCalledWith("draft-1", 3, edited);
+    // Switch away while the save is still in flight, then let it land.
+    fireEvent.change(screen.getByTestId("studio-draft-select"), {
+      target: { value: "draft-2" },
+    });
+    await act(async () => {
+      resolveSave?.({ ok: true, value: { operationId: "op-flight" } });
+    });
+    fireEvent.change(screen.getByTestId("studio-draft-select"), {
+      target: { value: "draft-1" },
+    });
+    expect(screen.getByTestId("studio-editor-textarea")).toHaveValue(edited);
+    expect(screen.getByTestId("studio-draft-revision")).toHaveTextContent("4");
+  });
+
+  it("serializes a follow-up save when edits arrive during a save", async () => {
+    vi.useFakeTimers();
+    let resolveSave:
+      | ((result: { ok: true; value: { operationId: string } }) => void)
+      | undefined;
+    const saveStudioDraft = vi.fn(
+      () =>
+        new Promise<{ ok: true; value: { operationId: string } }>(
+          (resolve) => {
+            resolveSave = resolve;
+          },
+        ),
+    );
+    render(
+      <StudioView
+        client={bridge({ saveStudioDraft })}
+        studio={state({ drafts: [draft] })}
+      />,
+    );
+    const first = `${draft.skillMd}\nFirst.\n`;
+    fireEvent.change(screen.getByTestId("studio-editor-textarea"), {
+      target: { value: first },
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(400);
+    });
+    expect(saveStudioDraft).toHaveBeenCalledWith("draft-1", 3, first);
+    // More text arrives while that save is in flight.
+    const second = `${first}Second.\n`;
+    fireEvent.change(screen.getByTestId("studio-editor-textarea"), {
+      target: { value: second },
+    });
+    await act(async () => {
+      resolveSave?.({ ok: true, value: { operationId: "op-a" } });
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500);
+    });
+    expect(saveStudioDraft).toHaveBeenLastCalledWith("draft-1", 4, second);
+    expect(saveStudioDraft).toHaveBeenCalledTimes(2);
   });
 
   it("reports a compare-and-swap conflict instead of overwriting", async () => {

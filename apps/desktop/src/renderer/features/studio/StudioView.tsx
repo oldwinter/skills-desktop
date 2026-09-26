@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   AlertCircle,
   CheckCircle2,
@@ -276,9 +276,12 @@ function GrantCard({
   );
 }
 
-interface Editing {
+interface DraftSession {
+  readonly conflict: boolean;
   readonly draftId: string;
   readonly revision: number;
+  readonly savedText: string;
+  readonly saving: boolean;
   readonly text: string;
 }
 
@@ -288,84 +291,26 @@ function DraftEditor({
   draft,
   hostAvailable,
   onError,
+  onReload,
+  onTextChange,
   preview,
+  session,
 }: {
   readonly busy: boolean;
   readonly client: WorkspaceBridge;
   readonly draft: PublicStudioDraft;
   readonly hostAvailable: boolean;
   readonly onError: (error: RendererError | undefined) => void;
+  readonly onReload: (draftId: string) => void;
+  readonly onTextChange: (draftId: string, text: string) => void;
   readonly preview: PublicStudioState["preview"];
+  readonly session: DraftSession | undefined;
 }) {
   const { locale, t } = useTranslator();
-  const [editing, setEditing] = useState<Editing>({
-    draftId: draft.id,
-    revision: draft.revision,
-    text: draft.skillMd,
-  });
-  const [saving, setSaving] = useState(false);
-  const [conflict, setConflict] = useState(false);
-  const savingRef = useRef(false);
-
-  const reload = () => {
-    setEditing({
-      draftId: draft.id,
-      revision: draft.revision,
-      text: draft.skillMd,
-    });
-    setConflict(false);
-    onError(undefined);
-  };
-
-  useEffect(() => {
-    if (editing.draftId !== draft.id) {
-      reload();
-      return;
-    }
-    // Another window (or a restore) moved the Draft past what we hold.
-    if (!savingRef.current && draft.revision !== editing.revision) {
-      setConflict(true);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draft.id, draft.revision]);
-
-  useEffect(() => {
-    if (conflict || saving || editing.draftId !== draft.id) return;
-    if (editing.text === draft.skillMd) return;
-    const timer = setTimeout(() => {
-      savingRef.current = true;
-      setSaving(true);
-      void client
-        .saveStudioDraft(draft.id, editing.revision, editing.text)
-        .then((result) => {
-          if (result.ok) {
-            setEditing((current) =>
-              current.draftId === draft.id
-                ? { ...current, revision: editing.revision + 1 }
-                : current,
-            );
-            onError(undefined);
-          } else if (result.error.code === "studio_draft_conflict") {
-            setConflict(true);
-          } else {
-            onError(result.error);
-          }
-        })
-        .finally(() => {
-          savingRef.current = false;
-          setSaving(false);
-        });
-    }, AUTOSAVE_DELAY_MS);
-    return () => clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    editing.text,
-    editing.revision,
-    conflict,
-    saving,
-    draft.id,
-    draft.skillMd,
-  ]);
+  const conflict = session?.conflict ?? false;
+  const revision = session?.revision ?? draft.revision;
+  const saving = session?.saving ?? false;
+  const text = session?.text ?? draft.skillMd;
 
   const act = async (request: () => Promise<RequestResult>) => {
     onError(undefined);
@@ -373,7 +318,8 @@ function DraftEditor({
     if (!result.ok) onError(result.error);
   };
 
-  const dirty = editing.text !== draft.skillMd;
+  const dirty =
+    session !== undefined && session.text !== session.savedText;
   const exportBlocked = !draft.validation.ok || draft.name === "";
 
   return (
@@ -382,7 +328,11 @@ function DraftEditor({
         <div className="state-banner state-banner--danger" role="alert">
           <AlertCircle aria-hidden="true" size={16} />
           <span>{t("studio.drafts.conflict")}</span>
-          <button className="text-button" onClick={reload} type="button">
+          <button
+            className="text-button"
+            onClick={() => onReload(draft.id)}
+            type="button"
+          >
             <RotateCcw aria-hidden="true" size={15} />
             {t("studio.drafts.reload")}
           </button>
@@ -397,7 +347,7 @@ function DraftEditor({
         </div>
         <div>
           <dt>{t("studio.drafts.revision")}</dt>
-          <dd data-testid="studio-draft-revision">{editing.revision}</dd>
+          <dd data-testid="studio-draft-revision">{revision}</dd>
         </div>
         <div>
           <dt>{t("studio.drafts.updatedAt")}</dt>
@@ -411,12 +361,10 @@ function DraftEditor({
           className="studio-editor-textarea"
           data-testid="studio-editor-textarea"
           disabled={conflict}
-          onChange={(event) =>
-            setEditing((current) => ({ ...current, text: event.target.value }))
-          }
+          onChange={(event) => onTextChange(draft.id, event.target.value)}
           rows={18}
           spellCheck={false}
-          value={editing.text}
+          value={text}
         />
       </label>
       <p className="studio-editor-status" id="studio-editor-hint" role="status">
@@ -453,7 +401,7 @@ function DraftEditor({
           className="text-button text-button--danger"
           disabled={busy}
           onClick={() =>
-            void act(() => client.deleteStudioDraft(draft.id, editing.revision))
+            void act(() => client.deleteStudioDraft(draft.id, revision))
           }
           type="button"
         >
@@ -469,7 +417,7 @@ function DraftEditor({
         >
           <h3 id="studio-preview-heading">
             {t("studio.preview.heading")}
-            {preview.revision !== editing.revision ? (
+            {preview.revision !== revision ? (
               <small> · {t("studio.preview.stale")}</small>
             ) : null}
           </h3>
@@ -498,6 +446,130 @@ export function StudioView({
   const [error, setError] = useState<RendererError>();
   const [selectedId, setSelectedId] = useState<string>();
   const [pending, setPending] = useState(false);
+  // Draft edit sessions outlive the keyed DraftEditor below: switching Drafts
+  // must never drop authored text or the autosave that owns it. The ref map is
+  // authoritative so save completions can still be recorded after unmount.
+  const sessionsRef = useRef(new Map<string, DraftSession>());
+  const [sessions, setSessions] = useState<ReadonlyMap<string, DraftSession>>(
+    () => new Map(),
+  );
+  const saveChainsRef = useRef(new Map<string, Promise<void>>());
+
+  const saveDraftNow = useCallback(
+    async (draftId: string): Promise<void> => {
+      const session = sessionsRef.current.get(draftId);
+      if (
+        session === undefined ||
+        session.conflict ||
+        session.saving ||
+        session.text === session.savedText
+      ) {
+        return;
+      }
+      sessionsRef.current.set(draftId, { ...session, saving: true });
+      setSessions(new Map(sessionsRef.current));
+      const { revision, text } = session;
+      const result = await client
+        .saveStudioDraft(draftId, revision, text)
+        .catch(() => undefined);
+      const latest = sessionsRef.current.get(draftId);
+      if (latest === undefined || !latest.saving) return;
+      if (result === undefined) {
+        sessionsRef.current.set(draftId, { ...latest, saving: false });
+      } else if (result.ok) {
+        sessionsRef.current.set(draftId, {
+          ...latest,
+          revision: revision + 1,
+          savedText: text,
+          saving: false,
+        });
+        setError(undefined);
+      } else if (result.error.code === "studio_draft_conflict") {
+        sessionsRef.current.set(draftId, {
+          ...latest,
+          conflict: true,
+          saving: false,
+        });
+      } else {
+        sessionsRef.current.set(draftId, { ...latest, saving: false });
+        setError(result.error);
+      }
+      setSessions(new Map(sessionsRef.current));
+    },
+    [client],
+  );
+
+  const enqueueSave = useCallback(
+    (draftId: string) => {
+      const chain = saveChainsRef.current.get(draftId) ?? Promise.resolve();
+      const next = chain
+        .then(() => saveDraftNow(draftId))
+        .catch(() => undefined);
+      saveChainsRef.current.set(draftId, next);
+    },
+    [saveDraftNow],
+  );
+
+  // A Draft whose revision moves beyond what a session acknowledges was
+  // written elsewhere; sessions for deleted Drafts are dropped.
+  useEffect(() => {
+    if (studio === undefined) return;
+    let changed = false;
+    for (const draftId of sessionsRef.current.keys()) {
+      if (!studio.drafts.some(({ id }) => id === draftId)) {
+        sessionsRef.current.delete(draftId);
+        changed = true;
+      }
+    }
+    for (const draft of studio.drafts) {
+      const session = sessionsRef.current.get(draft.id);
+      if (
+        session !== undefined &&
+        !session.conflict &&
+        !session.saving &&
+        draft.revision > session.revision
+      ) {
+        sessionsRef.current.set(draft.id, { ...session, conflict: true });
+        changed = true;
+      }
+    }
+    if (changed) setSessions(new Map(sessionsRef.current));
+  }, [sessions, studio]);
+
+  // Debounced autosave runs here, not in the keyed editor, so a pending save
+  // is never cancelled by switching Drafts.
+  useEffect(() => {
+    if (studio === undefined) return;
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    for (const draft of studio.drafts) {
+      const session = sessions.get(draft.id);
+      if (
+        session === undefined ||
+        session.conflict ||
+        session.saving ||
+        session.text === session.savedText
+      ) {
+        continue;
+      }
+      timers.push(
+        setTimeout(() => enqueueSave(draft.id), AUTOSAVE_DELAY_MS),
+      );
+    }
+    return () => {
+      for (const timer of timers) clearTimeout(timer);
+    };
+  }, [enqueueSave, sessions, studio]);
+
+  // Leaving the Studio view flushes unsaved sessions through the same
+  // serialized chain so an in-flight save cannot strand newer text.
+  useEffect(
+    () => () => {
+      for (const draftId of sessionsRef.current.keys()) {
+        enqueueSave(draftId);
+      }
+    },
+    [enqueueSave],
+  );
 
   if (studio === undefined) {
     return (
@@ -523,6 +595,27 @@ export function StudioView({
     const result = await request();
     setPending(false);
     if (!result.ok) setError(result.error);
+  };
+
+  const changeDraftText = (draftId: string, text: string) => {
+    const draft = studio.drafts.find(({ id }) => id === draftId);
+    const current = sessionsRef.current.get(draftId);
+    if (draft === undefined || current?.conflict) return;
+    sessionsRef.current.set(draftId, {
+      conflict: false,
+      draftId,
+      revision: current?.revision ?? draft.revision,
+      savedText: current?.savedText ?? draft.skillMd,
+      saving: current?.saving ?? false,
+      text,
+    });
+    setSessions(new Map(sessionsRef.current));
+  };
+
+  const reloadDraft = (draftId: string) => {
+    sessionsRef.current.delete(draftId);
+    setSessions(new Map(sessionsRef.current));
+    setError(undefined);
   };
 
   return (
@@ -659,7 +752,10 @@ export function StudioView({
             hostAvailable={studio.available}
             key={selected.id}
             onError={setError}
+            onReload={reloadDraft}
+            onTextChange={changeDraftText}
             preview={studio.preview}
+            session={sessions.get(selected.id)}
           />
         )}
       </section>
