@@ -1,3 +1,4 @@
+import { constants } from "node:fs";
 import { open } from "node:fs/promises";
 import { basename } from "node:path";
 
@@ -9,6 +10,14 @@ import type {
   SkillpackPick,
   SkillpackPicker,
 } from "../application/imported-packages.js";
+
+// O_NONBLOCK keeps open(2) from waiting on a FIFO writer that may never
+// connect, so the non-regular-file rejection below still runs. Windows has no
+// POSIX FIFOs and keeps the plain string flag.
+const PICK_OPEN_FLAGS =
+  process.platform === "win32"
+    ? "r"
+    : constants.O_RDONLY | (constants.O_NONBLOCK ?? 0);
 
 /**
  * ADR 0017 offline import edge. The renderer never learns a path: main owns
@@ -30,7 +39,7 @@ export function createElectronSkillpackPicker(input: {
       if (selection.canceled || path === undefined) {
         return { status: "cancelled" };
       }
-      const handle = await open(path, "r");
+      const handle = await open(path, PICK_OPEN_FLAGS);
       try {
         const metadata = await handle.stat();
         if (!metadata.isFile()) {
