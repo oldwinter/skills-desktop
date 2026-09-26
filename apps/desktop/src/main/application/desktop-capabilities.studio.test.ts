@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type {
   Inventory,
@@ -308,5 +308,30 @@ describe("DesktopCapabilities Studio contract (ADR 0018)", () => {
         version: 2,
       }),
     ).toMatchObject({ error: { code: "studio_unavailable" }, ok: false });
+  });
+
+  it("does not republish a grant opened by an endpoint torn down mid-read", async () => {
+    let finishRead!: (
+      result: Awaited<ReturnType<StudioHost["readTree"]>>,
+    ) => void;
+    const studioHost = host();
+    studioHost.readTree = () =>
+      new Promise<Awaited<ReturnType<StudioHost["readTree"]>>>((resolve) => {
+        finishRead = resolve;
+      });
+    const fixture = await createFixture({
+      ids: ["op-1", "grant-1"],
+      studio: { drafts: createMemoryStudioDraftRecords(), host: studioHost },
+    });
+    const pending = fixture.workspace.request(open);
+    await vi.waitFor(() => expect(finishRead).toBeDefined());
+    fixture.workspace.teardown();
+    finishRead({ ok: true, value: tree() });
+    expect(await pending).toMatchObject({
+      error: { code: "studio_grant_invalid" },
+      ok: false,
+    });
+    const observer = fixture.attach("workspace-2");
+    expect((await studioOf(observer))?.grants).toEqual([]);
   });
 });
