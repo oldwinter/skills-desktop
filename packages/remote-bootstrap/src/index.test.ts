@@ -1,5 +1,6 @@
 import {
   chmod,
+  mkdir,
   mkdtemp,
   readFile,
   readdir,
@@ -99,7 +100,55 @@ async function waitForFile(path: string) {
   });
 }
 
+// Extensionless executables inherit the module type of the nearest ancestor
+// package.json, so every fixture directory gets its own CommonJS scope to
+// keep require() working when TMPDIR sits inside an ES-module package.
+async function writeCommonJsExecutable(
+  directory: string,
+  name: string,
+  source: string,
+) {
+  await writeFile(
+    join(directory, "package.json"),
+    '{"type":"commonjs"}\n',
+    "utf8",
+  );
+  const executable = join(directory, name);
+  await writeFile(executable, source, "utf8");
+  await chmod(executable, 0o700);
+  return executable;
+}
+
 describe("fixed Remote Bootstrap", () => {
+  it("scopes generated executables as CommonJS inside an ES-module package", async () => {
+    const parent = await mkdtemp(join(tmpdir(), "skills-esm-parent-"));
+    temporaryDirectories.push(parent);
+    await writeFile(
+      join(parent, "package.json"),
+      '{"type":"module"}\n',
+      "utf8",
+    );
+    const bin = join(parent, "bin");
+    await mkdir(bin);
+    const marker = join(parent, "marker");
+    const executable = await writeCommonJsExecutable(
+      bin,
+      "npx",
+      `#!/usr/bin/env node
+require("node:fs").writeFileSync(${JSON.stringify(marker)}, "ran");
+`,
+    );
+
+    const exitCode = await new Promise<number | null>((resolve, reject) => {
+      const child = spawn(process.execPath, [executable], { stdio: "ignore" });
+      child.once("error", reject);
+      child.once("close", resolve);
+    });
+
+    expect(exitCode).toBe(0);
+    await expect(readFile(marker, "utf8")).resolves.toBe("ran");
+  });
+
   it("embeds the shared Wire request validator and frame encoder", () => {
     expect(REMOTE_BOOTSTRAP_PROGRAM).toContain(WIRE_REQUEST_VALIDATOR_SOURCE);
     expect(REMOTE_BOOTSTRAP_PROGRAM).toContain(WIRE_FRAME_ENCODER_SOURCE);
@@ -114,16 +163,14 @@ describe("fixed Remote Bootstrap", () => {
       const directory = await mkdtemp(join(tmpdir(), "skills-bootstrap-"));
       temporaryDirectories.push(directory);
       await pinNodeInterpreter(directory);
-      const executable = join(directory, "npx");
       const invocationLog = join(directory, "invocations.ndjson");
-      await writeFile(
-        executable,
+      await writeCommonJsExecutable(
+        directory,
+        "npx",
         `#!/usr/bin/env node
 require("node:fs").appendFileSync(${JSON.stringify(invocationLog)}, "invoked\\n");
 `,
-        "utf8",
       );
-      await chmod(executable, 0o700);
 
       const outcome = await runBootstrap(
         encodeWireFrame({
@@ -165,10 +212,10 @@ require("node:fs").appendFileSync(${JSON.stringify(invocationLog)}, "invoked\\n"
       const directory = await mkdtemp(join(tmpdir(), "skills-bootstrap-"));
       temporaryDirectories.push(directory);
       await pinNodeInterpreter(directory);
-      const executable = join(directory, "npx");
       const invocationLog = join(directory, "invocations.ndjson");
-      await writeFile(
-        executable,
+      await writeCommonJsExecutable(
+        directory,
+        "npx",
         `#!/usr/bin/env node
 const { appendFileSync, fstatSync } = require("node:fs");
 const { join } = require("node:path");
@@ -183,9 +230,7 @@ else if (operation === "list --global --json") {
 }
 else process.exitCode = 2;
 `,
-        "utf8",
       );
-      await chmod(executable, 0o700);
       const workspace = join(directory, "workspace; touch should-not-exist");
       await import("node:fs/promises").then(({ mkdir }) =>
         mkdir(workspace, { recursive: true }),
@@ -281,10 +326,10 @@ else process.exitCode = 2;
       );
       temporaryDirectories.push(directory);
       await pinNodeInterpreter(directory);
-      const executable = join(directory, "npx");
       const invocationLog = join(directory, "invocations.ndjson");
-      await writeFile(
-        executable,
+      await writeCommonJsExecutable(
+        directory,
+        "npx",
         `#!/usr/bin/env node
 const { appendFileSync } = require("node:fs");
 const { join } = require("node:path");
@@ -296,9 +341,7 @@ else if (operation === "list --json") process.stdout.write("[]");
 else if (operation === "list --global --json") process.stdout.write("[]");
 else process.exitCode = 2;
 `,
-        "utf8",
       );
-      await chmod(executable, 0o700);
       const workspace = join(directory, "workspace; touch should-not-exist");
       await import("node:fs/promises").then(({ mkdir }) =>
         mkdir(workspace, { recursive: true }),
@@ -376,10 +419,10 @@ else process.exitCode = 2;
       );
       temporaryDirectories.push(directory);
       await pinNodeInterpreter(directory);
-      const executable = join(directory, "npx");
       const invocationLog = join(directory, "invocations.ndjson");
-      await writeFile(
-        executable,
+      await writeCommonJsExecutable(
+        directory,
+        "npx",
         `#!/usr/bin/env node
 const { appendFileSync } = require("node:fs");
 const { join } = require("node:path");
@@ -391,9 +434,7 @@ else if (operation === "update project-skill --project --yes") process.stdout.wr
 else if (operation === "list --json" || operation === "list --global --json") process.stdout.write("[]");
 else process.exitCode = 2;
 `,
-        "utf8",
       );
-      await chmod(executable, 0o700);
       const environment = {
         HOME: directory,
         PATH: `${directory}${delimiter}${process.env.PATH ?? ""}`,
@@ -485,10 +526,10 @@ else process.exitCode = 2;
       );
       temporaryDirectories.push(directory);
       await pinNodeInterpreter(directory);
-      const executable = join(directory, "npx");
       const invocationLog = join(directory, "invocations.ndjson");
-      await writeFile(
-        executable,
+      await writeCommonJsExecutable(
+        directory,
+        "npx",
         `#!/usr/bin/env node
 const { appendFileSync } = require("node:fs");
 const { join } = require("node:path");
@@ -502,9 +543,7 @@ else if (operation === "remove project-skill --agent codex --yes") {
 else if (operation === "list --json" || operation === "list --global --json") process.stdout.write("[]");
 else process.exitCode = 2;
 `,
-        "utf8",
       );
-      await chmod(executable, 0o700);
       const mutation = encodeWireFrame({
         harness: "codex",
         mutation: {
@@ -567,9 +606,9 @@ else process.exitCode = 2;
       );
       temporaryDirectories.push(directory);
       await pinNodeInterpreter(directory);
-      const executable = join(directory, "npx");
-      await writeFile(
-        executable,
+      await writeCommonJsExecutable(
+        directory,
+        "npx",
         `#!/usr/bin/env node
 const operation = process.argv.slice(2).slice(2).join(" ");
 if (operation === "--version") process.stdout.write("1.5.23\\n");
@@ -578,9 +617,7 @@ else if (operation === "list --json") process.exitCode = 2;
 else if (operation === "list --global --json") process.stdout.write("[]");
 else process.exitCode = 2;
 `,
-        "utf8",
       );
-      await chmod(executable, 0o700);
 
       const outcome = await runBootstrap(
         encodeWireFrame({
@@ -630,7 +667,6 @@ else process.exitCode = 2;
       );
       temporaryDirectories.push(directory);
       await pinNodeInterpreter(directory);
-      const executable = join(directory, "npx");
       const startedFile = join(directory, "mutation-started");
       const lateMutationFile = join(directory, "late-mutation");
       const descendantProgram = `
@@ -640,8 +676,9 @@ process.on("SIGUSR1", () => writeFileSync(${JSON.stringify(lateMutationFile)}, "
 writeFileSync(${JSON.stringify(startedFile)}, String(process.ppid));
 setInterval(() => {}, 30_000);
 `;
-      await writeFile(
-        executable,
+      await writeCommonJsExecutable(
+        directory,
+        "npx",
         `#!/usr/bin/env node
 const { spawn } = require("node:child_process");
 const operation = process.argv.slice(2).slice(2).join(" ");
@@ -655,9 +692,7 @@ else if (operation === "list --json") process.stdout.write("[]");
 else if (operation === "list --global --json") process.stdout.write("[]");
 else process.exitCode = 2;
 `,
-        "utf8",
       );
-      await chmod(executable, 0o700);
       const child = spawn("sh", ["-c", REMOTE_BOOTSTRAP_COMMAND], {
         env: {
           HOME: directory,
@@ -733,11 +768,11 @@ else process.exitCode = 2;
       );
       temporaryDirectories.push(directory);
       await pinNodeInterpreter(directory);
-      const executable = join(directory, "npx");
       const invocationLog = join(directory, "invocations.ndjson");
       const mutationStarted = join(directory, "mutation-started");
-      await writeFile(
-        executable,
+      await writeCommonJsExecutable(
+        directory,
+        "npx",
         `#!/usr/bin/env node
 const { appendFileSync } = require("node:fs");
 const { join } = require("node:path");
@@ -752,9 +787,7 @@ else if (operation === "remove project-skill --agent codex --yes") {
 else if (operation === "list --json" || operation === "list --global --json") process.stdout.write("[]");
 else process.exitCode = 2;
 `,
-        "utf8",
       );
-      await chmod(executable, 0o700);
 
       const child = spawn("sh", ["-c", REMOTE_BOOTSTRAP_COMMAND], {
         env: {
@@ -823,16 +856,14 @@ else process.exitCode = 2;
       );
       temporaryDirectories.push(directory);
       await pinNodeInterpreter(directory);
-      const executable = join(directory, "npx");
       const invocationLog = join(directory, "invoked");
-      await writeFile(
-        executable,
+      await writeCommonJsExecutable(
+        directory,
+        "npx",
         `#!/usr/bin/env node
 require("node:fs").writeFileSync(${JSON.stringify(invocationLog)}, "invoked");
 `,
-        "utf8",
       );
-      await chmod(executable, 0o700);
       const requestId = "observe-cancel-immediate";
       const observation = encodeWireFrame({
         harness: "codex",
@@ -889,14 +920,14 @@ require("node:fs").writeFileSync(${JSON.stringify(invocationLog)}, "invoked");
       );
       temporaryDirectories.push(directory);
       await pinNodeInterpreter(directory);
-      const executable = join(directory, "npx");
       const invocationLog = join(directory, "invocations.ndjson");
       const observationStarted = join(directory, "observation-started");
       const observationPid = join(directory, "observation-pid");
       const observationSignals = join(directory, "observation-signals");
       const observationExit = join(directory, "observation-exit");
-      await writeFile(
-        executable,
+      await writeCommonJsExecutable(
+        directory,
+        "npx",
         `#!/usr/bin/env node
 const { appendFileSync, writeFileSync } = require("node:fs");
 const operation = process.argv.slice(2).slice(2).join(" ");
@@ -914,9 +945,7 @@ else if (operation === "list --json") {
 else if (operation === "list --global --json") process.stdout.write("[]");
 else process.exitCode = 2;
 `,
-        "utf8",
       );
-      await chmod(executable, 0o700);
       const requestId = "observe-cancel-active";
       const child = spawn("sh", ["-c", REMOTE_BOOTSTRAP_COMMAND], {
         detached: true,
@@ -1013,10 +1042,10 @@ else process.exitCode = 2;
       );
       temporaryDirectories.push(directory);
       await pinNodeInterpreter(directory);
-      const executable = join(directory, "npx");
       const invocationLog = join(directory, "invoked");
-      await writeFile(
-        executable,
+      await writeCommonJsExecutable(
+        directory,
+        "npx",
         `#!/usr/bin/env node
 require("node:fs").writeFileSync(${JSON.stringify(invocationLog)}, "invoked");
 const operation = process.argv.slice(2).slice(2).join(" ");
@@ -1024,9 +1053,7 @@ if (operation === "--version") process.stdout.write("1.5.23\\n");
 else if (operation === "list --json" || operation === "list --global --json") process.stdout.write("[]");
 else process.exitCode = 2;
 `,
-        "utf8",
       );
-      await chmod(executable, 0o700);
       const observation = encodeWireFrame({
         harness: "codex",
         operation: "observe",
@@ -1106,17 +1133,15 @@ else process.exitCode = 2;
       );
       temporaryDirectories.push(directory);
       await pinNodeInterpreter(directory);
-      const executable = join(directory, "npx");
-      await writeFile(
-        executable,
+      await writeCommonJsExecutable(
+        directory,
+        "npx",
         `#!/usr/bin/env node
 const operation = process.argv.slice(2).slice(2).join(" ");
 if (operation === "--version") process.stdout.write("1.5.23\\n");
 else process.stdout.write(JSON.stringify([{ filler: "\\\\".repeat(4500000) }]));
 `,
-        "utf8",
       );
-      await chmod(executable, 0o700);
 
       const outcome = await runBootstrap(
         encodeWireFrame({

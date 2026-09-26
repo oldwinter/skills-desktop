@@ -133,6 +133,13 @@ describe("disposable localhost OpenSSH integration", () => {
       const observationSignalFile = join(root, "observation-signals");
       const observationExitFile = join(root, "observation-exit");
       const removedFile = join(root, "remote-project-removed");
+      // Scope the extensionless fixture as CommonJS so require() survives an
+      // ES-module TMPDIR ancestor package.json.
+      await writeFile(
+        join(bin, "package.json"),
+        '{"type":"commonjs"}\n',
+        "utf8",
+      );
       await writeFile(
         npx,
         `#!/usr/bin/env node
