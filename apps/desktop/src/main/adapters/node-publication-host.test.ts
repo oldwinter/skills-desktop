@@ -1,4 +1,5 @@
 import {
+  link,
   mkdir,
   mkdtemp,
   readdir,
@@ -84,6 +85,39 @@ describe("node publication host (ADR 0019)", () => {
     if (!result.ok) {
       expect(result.error.code).toBe("export_invalid");
       expect(result.error.message).toContain("symbolic link");
+    }
+  });
+
+  it("refuses a file hard-linked to content outside the chosen folder", async () => {
+    const root = await tempRoot();
+    const outside = await tempRoot();
+    await seedSkills(root);
+    const before = await readSkillFolder(root);
+    expect(before.ok).toBe(true);
+    await writeFile(join(outside, "private.txt"), "fixture-private-content");
+    await link(
+      join(outside, "private.txt"),
+      join(root, "hello", "linked.txt"),
+    );
+    const result = await readSkillFolder(root);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("export_invalid");
+      expect(result.error.message).toContain("hard link");
+      expect(result.error.message).toContain("linked.txt");
+    }
+  });
+
+  it("refuses a Skill whose SKILL.md is hard-linked elsewhere", async () => {
+    const root = await tempRoot();
+    const outside = await tempRoot();
+    await seedSkills(root);
+    await link(join(root, "hello", "SKILL.md"), join(outside, "SKILL.md"));
+    const result = await readSkillFolder(root);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("export_invalid");
+      expect(result.error.message).toContain("hard link");
     }
   });
 
