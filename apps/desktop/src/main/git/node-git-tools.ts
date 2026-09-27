@@ -87,6 +87,8 @@ export function createSpawnGitRunner(options?: {
             stdout: Buffer.concat(stdout).toString("utf8"),
           });
         });
+        // Git may exit before draining stdin; its outcome is settled above.
+        child.stdin.once("error", () => undefined);
         if (invocation.stdin !== undefined) {
           child.stdin.end(Buffer.from(invocation.stdin));
         } else {
