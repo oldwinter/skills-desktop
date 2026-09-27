@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import {
   AlertCircle,
   CheckCircle2,
@@ -26,6 +26,10 @@ import type {
 } from "../../../contracts/workspace.js";
 import { useTranslator } from "../../i18n/LocaleProvider.js";
 import { UserFacingErrorCopy } from "../../UserFacingErrorCopy.js";
+import {
+  type DraftSession,
+  studioDraftSessionsFor,
+} from "./studio-draft-sessions.js";
 
 /**
  * ADR 0018 Studio surface. This window never learns a path: folders are
@@ -34,8 +38,6 @@ import { UserFacingErrorCopy } from "../../UserFacingErrorCopy.js";
  * rendered by React; there is no HTML injection point and nothing here can
  * navigate or fetch. Autosave is compare-and-swap on the Draft revision.
  */
-
-const AUTOSAVE_DELAY_MS = 400;
 
 type RequestResult = Awaited<ReturnType<WorkspaceBridge["openStudioFolder"]>>;
 
@@ -276,96 +278,32 @@ function GrantCard({
   );
 }
 
-interface Editing {
-  readonly draftId: string;
-  readonly revision: number;
-  readonly text: string;
-}
-
 function DraftEditor({
   busy,
   client,
   draft,
   hostAvailable,
   onError,
+  onReload,
+  onTextChange,
   preview,
+  session,
 }: {
   readonly busy: boolean;
   readonly client: WorkspaceBridge;
   readonly draft: PublicStudioDraft;
   readonly hostAvailable: boolean;
   readonly onError: (error: RendererError | undefined) => void;
+  readonly onReload: (draftId: string) => void;
+  readonly onTextChange: (draftId: string, text: string) => void;
   readonly preview: PublicStudioState["preview"];
+  readonly session: DraftSession | undefined;
 }) {
   const { locale, t } = useTranslator();
-  const [editing, setEditing] = useState<Editing>({
-    draftId: draft.id,
-    revision: draft.revision,
-    text: draft.skillMd,
-  });
-  const [saving, setSaving] = useState(false);
-  const [conflict, setConflict] = useState(false);
-  const savingRef = useRef(false);
-
-  const reload = () => {
-    setEditing({
-      draftId: draft.id,
-      revision: draft.revision,
-      text: draft.skillMd,
-    });
-    setConflict(false);
-    onError(undefined);
-  };
-
-  useEffect(() => {
-    if (editing.draftId !== draft.id) {
-      reload();
-      return;
-    }
-    // Another window (or a restore) moved the Draft past what we hold.
-    if (!savingRef.current && draft.revision !== editing.revision) {
-      setConflict(true);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draft.id, draft.revision]);
-
-  useEffect(() => {
-    if (conflict || saving || editing.draftId !== draft.id) return;
-    if (editing.text === draft.skillMd) return;
-    const timer = setTimeout(() => {
-      savingRef.current = true;
-      setSaving(true);
-      void client
-        .saveStudioDraft(draft.id, editing.revision, editing.text)
-        .then((result) => {
-          if (result.ok) {
-            setEditing((current) =>
-              current.draftId === draft.id
-                ? { ...current, revision: editing.revision + 1 }
-                : current,
-            );
-            onError(undefined);
-          } else if (result.error.code === "studio_draft_conflict") {
-            setConflict(true);
-          } else {
-            onError(result.error);
-          }
-        })
-        .finally(() => {
-          savingRef.current = false;
-          setSaving(false);
-        });
-    }, AUTOSAVE_DELAY_MS);
-    return () => clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    editing.text,
-    editing.revision,
-    conflict,
-    saving,
-    draft.id,
-    draft.skillMd,
-  ]);
+  const conflict = session?.conflict ?? false;
+  const revision = session?.revision ?? draft.revision;
+  const saving = session?.saving ?? false;
+  const text = session?.text ?? draft.skillMd;
 
   const act = async (request: () => Promise<RequestResult>) => {
     onError(undefined);
@@ -373,7 +311,8 @@ function DraftEditor({
     if (!result.ok) onError(result.error);
   };
 
-  const dirty = editing.text !== draft.skillMd;
+  const dirty =
+    session !== undefined && session.text !== session.savedText;
   const exportBlocked = !draft.validation.ok || draft.name === "";
 
   return (
@@ -382,7 +321,11 @@ function DraftEditor({
         <div className="state-banner state-banner--danger" role="alert">
           <AlertCircle aria-hidden="true" size={16} />
           <span>{t("studio.drafts.conflict")}</span>
-          <button className="text-button" onClick={reload} type="button">
+          <button
+            className="text-button"
+            onClick={() => onReload(draft.id)}
+            type="button"
+          >
             <RotateCcw aria-hidden="true" size={15} />
             {t("studio.drafts.reload")}
           </button>
@@ -397,7 +340,7 @@ function DraftEditor({
         </div>
         <div>
           <dt>{t("studio.drafts.revision")}</dt>
-          <dd data-testid="studio-draft-revision">{editing.revision}</dd>
+          <dd data-testid="studio-draft-revision">{revision}</dd>
         </div>
         <div>
           <dt>{t("studio.drafts.updatedAt")}</dt>
@@ -411,12 +354,10 @@ function DraftEditor({
           className="studio-editor-textarea"
           data-testid="studio-editor-textarea"
           disabled={conflict}
-          onChange={(event) =>
-            setEditing((current) => ({ ...current, text: event.target.value }))
-          }
+          onChange={(event) => onTextChange(draft.id, event.target.value)}
           rows={18}
           spellCheck={false}
-          value={editing.text}
+          value={text}
         />
       </label>
       <p className="studio-editor-status" id="studio-editor-hint" role="status">
@@ -453,7 +394,7 @@ function DraftEditor({
           className="text-button text-button--danger"
           disabled={busy}
           onClick={() =>
-            void act(() => client.deleteStudioDraft(draft.id, editing.revision))
+            void act(() => client.deleteStudioDraft(draft.id, revision))
           }
           type="button"
         >
@@ -469,7 +410,7 @@ function DraftEditor({
         >
           <h3 id="studio-preview-heading">
             {t("studio.preview.heading")}
-            {preview.revision !== editing.revision ? (
+            {preview.revision !== revision ? (
               <small> · {t("studio.preview.stale")}</small>
             ) : null}
           </h3>
@@ -498,6 +439,53 @@ export function StudioView({
   const [error, setError] = useState<RendererError>();
   const [selectedId, setSelectedId] = useState<string>();
   const [pending, setPending] = useState(false);
+  // Draft edit sessions live in a per-bridge owner so leaving the Studio
+  // view never strands pending text: the flush below runs on the owner's
+  // serialized save chains and a remounted editor reconnects to the same
+  // pending text, acknowledged revision, and in-flight save.
+  const drafts = useMemo(() => studioDraftSessionsFor(client), [client]);
+  const sessions = useSyncExternalStore(drafts.subscribe, drafts.getSnapshot);
+
+  // Save outcomes surface through whichever Studio view is mounted.
+  useEffect(() => {
+    drafts.onError = setError;
+    return () => {
+      drafts.onError = undefined;
+    };
+  }, [drafts]);
+
+  // A Draft whose revision moves beyond what a session acknowledges was
+  // written elsewhere; sessions for deleted Drafts are dropped.
+  useEffect(() => {
+    if (studio === undefined) return;
+    for (const draftId of sessions.keys()) {
+      if (!studio.drafts.some(({ id }) => id === draftId)) {
+        drafts.drop(draftId);
+      }
+    }
+    for (const draft of studio.drafts) {
+      const session = sessions.get(draft.id);
+      if (
+        session !== undefined &&
+        !session.conflict &&
+        !session.saving &&
+        draft.revision > session.revision
+      ) {
+        drafts.write(draft.id, { ...session, conflict: true });
+      }
+    }
+  }, [drafts, sessions, studio]);
+
+  // Leaving the Studio view flushes unsaved sessions through the owner's
+  // serialized chain so an in-flight save cannot strand newer text.
+  useEffect(
+    () => () => {
+      for (const draftId of drafts.draftIds()) {
+        drafts.flushSave(draftId);
+      }
+    },
+    [drafts],
+  );
 
   if (studio === undefined) {
     return (
@@ -523,6 +511,26 @@ export function StudioView({
     const result = await request();
     setPending(false);
     if (!result.ok) setError(result.error);
+  };
+
+  const changeDraftText = (draftId: string, text: string) => {
+    const draft = studio.drafts.find(({ id }) => id === draftId);
+    const current = drafts.session(draftId);
+    if (draft === undefined || current?.conflict) return;
+    drafts.write(draftId, {
+      conflict: false,
+      draftId,
+      revision: current?.revision ?? draft.revision,
+      savedText: current?.savedText ?? draft.skillMd,
+      saving: current?.saving ?? false,
+      text,
+    });
+    drafts.scheduleAutosave(draftId);
+  };
+
+  const reloadDraft = (draftId: string) => {
+    drafts.drop(draftId);
+    setError(undefined);
   };
 
   return (
@@ -659,7 +667,10 @@ export function StudioView({
             hostAvailable={studio.available}
             key={selected.id}
             onError={setError}
+            onReload={reloadDraft}
+            onTextChange={changeDraftText}
             preview={studio.preview}
+            session={sessions.get(selected.id)}
           />
         )}
       </section>
