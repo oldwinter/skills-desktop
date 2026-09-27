@@ -5,6 +5,7 @@ import {
   readdir,
   realpath,
   rm,
+  symlink,
   writeFile,
 } from "node:fs/promises";
 import { watch } from "node:fs";
@@ -65,6 +66,10 @@ async function runBootstrap(
   };
 }
 
+async function pinNodeInterpreter(directory: string) {
+  await symlink(process.execPath, join(directory, "node"));
+}
+
 async function waitForFile(path: string) {
   await new Promise<void>((resolve, reject) => {
     const watcher = watch(dirname(path));
@@ -108,6 +113,7 @@ describe("fixed Remote Bootstrap", () => {
     async () => {
       const directory = await mkdtemp(join(tmpdir(), "skills-bootstrap-"));
       temporaryDirectories.push(directory);
+      await pinNodeInterpreter(directory);
       const executable = join(directory, "npx");
       const invocationLog = join(directory, "invocations.ndjson");
       await writeFile(
@@ -158,6 +164,7 @@ require("node:fs").appendFileSync(${JSON.stringify(invocationLog)}, "invoked\\n"
     async () => {
       const directory = await mkdtemp(join(tmpdir(), "skills-bootstrap-"));
       temporaryDirectories.push(directory);
+      await pinNodeInterpreter(directory);
       const executable = join(directory, "npx");
       const invocationLog = join(directory, "invocations.ndjson");
       await writeFile(
@@ -273,6 +280,7 @@ else process.exitCode = 2;
         join(tmpdir(), "skills-bootstrap-mutate-"),
       );
       temporaryDirectories.push(directory);
+      await pinNodeInterpreter(directory);
       const executable = join(directory, "npx");
       const invocationLog = join(directory, "invocations.ndjson");
       await writeFile(
@@ -367,6 +375,7 @@ else process.exitCode = 2;
         join(tmpdir(), "skills-bootstrap-writes-"),
       );
       temporaryDirectories.push(directory);
+      await pinNodeInterpreter(directory);
       const executable = join(directory, "npx");
       const invocationLog = join(directory, "invocations.ndjson");
       await writeFile(
@@ -475,6 +484,7 @@ else process.exitCode = 2;
         join(tmpdir(), "skills-bootstrap-invalid-cancel-"),
       );
       temporaryDirectories.push(directory);
+      await pinNodeInterpreter(directory);
       const executable = join(directory, "npx");
       const invocationLog = join(directory, "invocations.ndjson");
       await writeFile(
@@ -556,6 +566,7 @@ else process.exitCode = 2;
         join(tmpdir(), "skills-bootstrap-postflight-"),
       );
       temporaryDirectories.push(directory);
+      await pinNodeInterpreter(directory);
       const executable = join(directory, "npx");
       await writeFile(
         executable,
@@ -618,6 +629,7 @@ else process.exitCode = 2;
         join(tmpdir(), "skills-bootstrap-cancel-"),
       );
       temporaryDirectories.push(directory);
+      await pinNodeInterpreter(directory);
       const executable = join(directory, "npx");
       const startedFile = join(directory, "mutation-started");
       const lateMutationFile = join(directory, "late-mutation");
@@ -720,6 +732,7 @@ else process.exitCode = 2;
         join(tmpdir(), "skills-bootstrap-transport-loss-"),
       );
       temporaryDirectories.push(directory);
+      await pinNodeInterpreter(directory);
       const executable = join(directory, "npx");
       const invocationLog = join(directory, "invocations.ndjson");
       const mutationStarted = join(directory, "mutation-started");
@@ -809,6 +822,7 @@ else process.exitCode = 2;
         join(tmpdir(), "skills-bootstrap-observe-cancel-immediate-"),
       );
       temporaryDirectories.push(directory);
+      await pinNodeInterpreter(directory);
       const executable = join(directory, "npx");
       const invocationLog = join(directory, "invoked");
       await writeFile(
@@ -874,6 +888,7 @@ require("node:fs").writeFileSync(${JSON.stringify(invocationLog)}, "invoked");
         join(tmpdir(), "skills-bootstrap-observe-cancel-active-"),
       );
       temporaryDirectories.push(directory);
+      await pinNodeInterpreter(directory);
       const executable = join(directory, "npx");
       const invocationLog = join(directory, "invocations.ndjson");
       const observationStarted = join(directory, "observation-started");
@@ -997,6 +1012,7 @@ else process.exitCode = 2;
         join(tmpdir(), "skills-bootstrap-observe-extra-"),
       );
       temporaryDirectories.push(directory);
+      await pinNodeInterpreter(directory);
       const executable = join(directory, "npx");
       const invocationLog = join(directory, "invoked");
       await writeFile(
@@ -1059,9 +1075,10 @@ else process.exitCode = 2;
     async () => {
       const directory = await mkdtemp(join(tmpdir(), "skills-bootstrap-bad-"));
       temporaryDirectories.push(directory);
+      await pinNodeInterpreter(directory);
       const outcome = await runBootstrap(new Uint8Array([0, 0, 0, 1, 123]), {
         HOME: directory,
-        PATH: process.env.PATH,
+        PATH: `${directory}${delimiter}${process.env.PATH ?? ""}`,
       });
 
       const decoded = decodeWireFrames(outcome.stdout);
@@ -1088,6 +1105,7 @@ else process.exitCode = 2;
         join(tmpdir(), "skills-bootstrap-limit-"),
       );
       temporaryDirectories.push(directory);
+      await pinNodeInterpreter(directory);
       const executable = join(directory, "npx");
       await writeFile(
         executable,
