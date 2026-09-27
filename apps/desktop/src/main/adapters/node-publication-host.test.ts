@@ -1,4 +1,5 @@
 import {
+  chmod,
   link,
   mkdir,
   mkdtemp,
@@ -127,6 +128,25 @@ describe("node publication host (ADR 0019)", () => {
     expect(empty.ok).toBe(false);
     const missing = await readSkillFolder(join(root, "missing"));
     expect(missing.ok).toBe(false);
+  });
+
+  it("returns export_invalid when a nested Skill directory cannot be read", async () => {
+    // Directory mode bits do not restrict root, and Windows ignores them.
+    if (process.platform === "win32" || process.getuid?.() === 0) return;
+    const root = await tempRoot();
+    await seedSkills(root);
+    const denied = join(root, "with-assets", "assets");
+    await chmod(denied, 0o000);
+    try {
+      const result = await readSkillFolder(root);
+      expect(result).toMatchObject({
+        error: { code: "export_invalid" },
+        ok: false,
+      });
+      if (!result.ok) expect(result.error.message).not.toContain(root);
+    } finally {
+      await chmod(denied, 0o700);
+    }
   });
 
   it("writes the exact export into a new folder and refuses a non-empty one", async () => {

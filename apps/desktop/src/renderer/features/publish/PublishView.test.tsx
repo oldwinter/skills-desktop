@@ -156,6 +156,49 @@ describe("PublishView (ADR 0019 / ADR 0020)", () => {
     expect(screen.getByTestId("publish-export")).toBeEnabled();
   });
 
+  it("re-enables controls once a failed source pick clears the operation", async () => {
+    const choosePublicationSource = vi.fn(async () => ({
+      error: {
+        code: "internal_error" as const,
+        effects: "none" as const,
+        message: "The publication step could not be completed.",
+        phase: "choosing",
+        retryable: true,
+      },
+      ok: false as const,
+    }));
+    const { rerender } = render(
+      <PublishView
+        client={bridge({ choosePublicationSource })}
+        publication={state({
+          activeOperationId: "op-1",
+          phase: "choosing",
+        })}
+      />,
+    );
+    expect(screen.getByTestId("publish-choose-source")).toBeDisabled();
+
+    rerender(
+      <PublishView
+        client={bridge({ choosePublicationSource })}
+        publication={state({
+          lastError: {
+            code: "internal_error",
+            effects: "none",
+            message: "The publication step could not be completed.",
+            phase: "choosing",
+            retryable: true,
+          },
+        })}
+      />,
+    );
+    const choose = screen.getByTestId("publish-choose-source");
+    expect(choose).toBeEnabled();
+    fireEvent.click(choose);
+    await waitFor(() => expect(choosePublicationSource).toHaveBeenCalledOnce());
+    expect(screen.getByRole("alert")).toHaveTextContent("Internal error");
+  });
+
   it("forwards exactly the remote text and branch name to main", async () => {
     const preparePublication = vi.fn(async () => ({
       ok: true as const,

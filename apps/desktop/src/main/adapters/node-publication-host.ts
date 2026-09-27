@@ -53,61 +53,65 @@ async function readSkillFiles(
   const files: WellKnownFileInput[] = [];
   let totalBytes = 0;
   const pending: string[] = [""];
-  while (pending.length > 0) {
-    const relative = pending.pop()!;
-    const absolute = relative === "" ? skillRoot : join(skillRoot, relative);
-    const entries = await readdir(absolute, { withFileTypes: true });
-    for (const entry of entries) {
-      if (entry.name.startsWith(".")) continue;
-      const childRelative =
-        relative === "" ? entry.name : `${relative}/${entry.name}`;
-      if (!isValidArchivePath(childRelative)) {
-        return invalid(
-          `Skill "${skillName}" contains an unsupported path: ${childRelative}`,
-        );
+  try {
+    while (pending.length > 0) {
+      const relative = pending.pop()!;
+      const absolute = relative === "" ? skillRoot : join(skillRoot, relative);
+      const entries = await readdir(absolute, { withFileTypes: true });
+      for (const entry of entries) {
+        if (entry.name.startsWith(".")) continue;
+        const childRelative =
+          relative === "" ? entry.name : `${relative}/${entry.name}`;
+        if (!isValidArchivePath(childRelative)) {
+          return invalid(
+            `Skill "${skillName}" contains an unsupported path: ${childRelative}`,
+          );
+        }
+        const childAbsolute = join(absolute, entry.name);
+        const metadata = await lstat(childAbsolute);
+        if (metadata.isSymbolicLink()) {
+          return invalid(
+            `Skill "${skillName}" contains a symbolic link: ${childRelative}`,
+          );
+        }
+        if (metadata.isDirectory()) {
+          pending.push(childRelative);
+          continue;
+        }
+        if (!metadata.isFile()) {
+          return invalid(
+            `Skill "${skillName}" contains a special file: ${childRelative}`,
+          );
+        }
+        if (metadata.nlink > 1) {
+          return invalid(
+            `Skill "${skillName}" contains a hard link: ${childRelative}`,
+          );
+        }
+        if (metadata.size > WELL_KNOWN_LIMITS.maxFileBytes) {
+          return invalid(
+            `Skill "${skillName}" file exceeds ${WELL_KNOWN_LIMITS.maxFileBytes} bytes: ${childRelative}`,
+          );
+        }
+        totalBytes += metadata.size;
+        if (totalBytes > WELL_KNOWN_LIMITS.maxSkillBytes) {
+          return invalid(
+            `Skill "${skillName}" exceeds ${WELL_KNOWN_LIMITS.maxSkillBytes} bytes.`,
+          );
+        }
+        if (files.length >= WELL_KNOWN_LIMITS.maxFilesPerSkill) {
+          return invalid(
+            `Skill "${skillName}" exceeds ${WELL_KNOWN_LIMITS.maxFilesPerSkill} files.`,
+          );
+        }
+        files.push({
+          bytes: new Uint8Array(await readFile(childAbsolute)),
+          path: childRelative,
+        });
       }
-      const childAbsolute = join(absolute, entry.name);
-      const metadata = await lstat(childAbsolute);
-      if (metadata.isSymbolicLink()) {
-        return invalid(
-          `Skill "${skillName}" contains a symbolic link: ${childRelative}`,
-        );
-      }
-      if (metadata.isDirectory()) {
-        pending.push(childRelative);
-        continue;
-      }
-      if (!metadata.isFile()) {
-        return invalid(
-          `Skill "${skillName}" contains a special file: ${childRelative}`,
-        );
-      }
-      if (metadata.nlink > 1) {
-        return invalid(
-          `Skill "${skillName}" contains a hard link: ${childRelative}`,
-        );
-      }
-      if (metadata.size > WELL_KNOWN_LIMITS.maxFileBytes) {
-        return invalid(
-          `Skill "${skillName}" file exceeds ${WELL_KNOWN_LIMITS.maxFileBytes} bytes: ${childRelative}`,
-        );
-      }
-      totalBytes += metadata.size;
-      if (totalBytes > WELL_KNOWN_LIMITS.maxSkillBytes) {
-        return invalid(
-          `Skill "${skillName}" exceeds ${WELL_KNOWN_LIMITS.maxSkillBytes} bytes.`,
-        );
-      }
-      if (files.length >= WELL_KNOWN_LIMITS.maxFilesPerSkill) {
-        return invalid(
-          `Skill "${skillName}" exceeds ${WELL_KNOWN_LIMITS.maxFilesPerSkill} files.`,
-        );
-      }
-      files.push({
-        bytes: new Uint8Array(await readFile(childAbsolute)),
-        path: childRelative,
-      });
     }
+  } catch {
+    return invalid(`Skill "${skillName}" could not be read.`);
   }
   return { ok: true, value: files };
 }
@@ -125,13 +129,19 @@ export async function readSkillFolder(
   for (const entry of entries) {
     if (entry.name.startsWith(".")) continue;
     const skillRoot = join(root, entry.name);
-    const metadata = await lstat(skillRoot);
+    let metadata;
+    try {
+      metadata = await lstat(skillRoot);
+    } catch {
+      return invalid("The chosen folder could not be read.");
+    }
     if (!metadata.isDirectory()) continue;
     let skillMd;
     try {
       skillMd = await lstat(join(skillRoot, "SKILL.md"));
-    } catch {
-      continue;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+      return invalid("The chosen folder could not be read.");
     }
     if (!skillMd.isFile()) continue;
     if (skills.length >= WELL_KNOWN_LIMITS.maxSkills) {
