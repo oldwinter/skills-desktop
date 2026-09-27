@@ -20,6 +20,7 @@ import type {
   WorkspaceBridge,
 } from "../../../contracts/workspace.js";
 import { StudioView } from "./StudioView.js";
+import { LocaleProvider } from "../../i18n/LocaleProvider.js";
 
 afterEach(() => {
   cleanup();
@@ -135,6 +136,103 @@ const secondDraft: PublicStudioDraft = {
 };
 
 describe("StudioView (ADR 0018)", () => {
+  it("offers search only when there are Drafts to find", () => {
+    render(<StudioView client={bridge()} studio={state()} />);
+    expect(screen.queryByRole("searchbox")).not.toBeInTheDocument();
+    expect(screen.getByText("No Drafts yet.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "New Draft" })).toBeEnabled();
+  });
+
+  it("filters Draft names and descriptions, trimming whitespace and ignoring case", () => {
+    render(
+      <StudioView
+        client={bridge()}
+        studio={state({ drafts: [draft, {
+          ...secondDraft,
+          validation: { ...validOk, description: "Review pull requests." },
+        }] })}
+      />,
+    );
+    const search = screen.getByRole("searchbox", { name: "Search Drafts" });
+    fireEvent.change(search, { target: { value: "  OTHER-SKILL  " } });
+    expect(screen.getByText("1 of 2 Drafts")).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "other-skill · r1" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "demo-skill · r3" })).not.toBeInTheDocument();
+    expect(screen.getByTestId("studio-draft-select")).toHaveValue("");
+    expect(screen.getByRole("option", { name: "Choose a matching Draft" })).toBeDisabled();
+    fireEvent.change(search, { target: { value: " PULL REQUESTS " } });
+    expect(screen.getByRole("option", { name: "other-skill · r1" })).toBeInTheDocument();
+    fireEvent.change(search, { target: { value: "   " } });
+    expect(screen.getByText("2 of 2 Drafts")).toBeInTheDocument();
+    expect(screen.getAllByRole("option")).toHaveLength(2);
+  });
+
+  it("keeps pending edits and autosave on the open Draft when search hides it", async () => {
+    const saveStudioDraft = vi.fn(async () => ({
+      ok: true as const, value: { operationId: "save" },
+    }));
+    render(
+      <StudioView client={bridge({ saveStudioDraft })}
+        studio={state({ drafts: [draft, secondDraft] })} />,
+    );
+    const editor = screen.getByTestId("studio-editor-textarea");
+    const edited = `${draft.skillMd}Pending text`;
+    fireEvent.change(editor, { target: { value: edited } });
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "no match" } });
+    expect(screen.getByText("0 of 2 Drafts")).toBeInTheDocument();
+    expect(screen.getByText(/No matching Drafts/)).toBeInTheDocument();
+    expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
+    expect(screen.getByTestId("studio-editor-textarea")).toBe(editor);
+    expect(editor).toHaveValue(edited);
+    await waitFor(() =>
+      expect(saveStudioDraft).toHaveBeenCalledWith(draft.id, draft.revision, edited),
+    );
+    expect(saveStudioDraft).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "Clear Draft search" }));
+    expect(editor).toHaveValue(edited);
+  });
+
+  it("clears search by button or Escape and keeps the explicitly chosen Draft", () => {
+    render(<StudioView client={bridge()} studio={state({ drafts: [draft, secondDraft] })} />);
+    const search = screen.getByRole("searchbox");
+    fireEvent.change(search, { target: { value: "other" } });
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: secondDraft.id } });
+    expect(screen.getByTestId("studio-editor-textarea")).toHaveValue(secondDraft.skillMd);
+    fireEvent.click(screen.getByRole("button", { name: "Clear Draft search" }));
+    expect(search).toHaveFocus();
+    expect(search).toHaveValue("");
+    expect(screen.getByRole("combobox")).toHaveValue(secondDraft.id);
+    fireEvent.change(search, { target: { value: "missing" } });
+    fireEvent.keyDown(search, { key: "Escape" });
+    expect(search).toHaveFocus();
+    expect(search).toHaveValue("");
+    expect(screen.getByRole("combobox")).toHaveValue(secondDraft.id);
+    expect(screen.queryByRole("button", { name: "Clear Draft search" })).not.toBeInTheDocument();
+  });
+
+  it("finds localized Untitled Drafts and updates results from new snapshots", () => {
+    const client = bridge();
+    const untitled = { ...secondDraft, name: "" };
+    const view = (drafts: PublicStudioDraft[]) => (
+      <LocaleProvider locale="zh-CN">
+        <StudioView client={client} studio={state({ drafts })} />
+      </LocaleProvider>
+    );
+    const { rerender } = render(view([draft, untitled]));
+    const search = screen.getByRole("searchbox", { name: "搜索草稿" });
+    expect(search).toHaveAttribute("placeholder", "名称或描述");
+    fireEvent.change(search, { target: { value: "未命名" } });
+    expect(screen.getByText("显示 1 / 2 个草稿")).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "未命名 · r1" })).toBeInTheDocument();
+    rerender(view([draft, secondDraft]));
+    expect(search).toHaveValue("未命名");
+    expect(screen.getByText("显示 0 / 2 个草稿")).toBeInTheDocument();
+    expect(screen.getByText(/没有匹配的草稿/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "清除草稿搜索" }));
+    expect(search).toHaveFocus();
+    expect(screen.getByText("显示 2 / 2 个草稿")).toBeInTheDocument();
+  });
+
   it("explains unavailability without offering any action", () => {
     render(<StudioView client={bridge()} studio={undefined} />);
     expect(

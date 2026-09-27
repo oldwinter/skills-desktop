@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import {
   AlertCircle,
   CheckCircle2,
@@ -8,6 +8,7 @@ import {
   FolderOpen,
   LoaderCircle,
   RotateCcw,
+  Search,
   Trash2,
   X,
 } from "lucide-react";
@@ -439,6 +440,8 @@ export function StudioView({
   const [error, setError] = useState<RendererError>();
   const [selectedId, setSelectedId] = useState<string>();
   const [pending, setPending] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const searchRef = useRef<HTMLInputElement>(null);
   // Draft edit sessions live in a per-bridge owner so leaving the Studio
   // view never strands pending text: the flush below runs on the owner's
   // serialized save chains and a remounted editor reconnects to the same
@@ -504,6 +507,16 @@ export function StudioView({
   const shownError = error ?? studio.lastError ?? undefined;
   const selected =
     studio.drafts.find(({ id }) => id === selectedId) ?? studio.drafts[0];
+  const normalizedQuery = searchQuery.trim().toLowerCase();
+  const matchingDrafts = studio.drafts.filter((draft) =>
+    [draft.name || t("studio.drafts.untitled"), draft.validation.description]
+      .some((value) => value.toLowerCase().includes(normalizedQuery)),
+  );
+  const selectedMatches = matchingDrafts.some(({ id }) => id === selected?.id);
+  const clearSearch = () => {
+    setSearchQuery("");
+    searchRef.current?.focus();
+  };
 
   const run = async (request: () => Promise<RequestResult>) => {
     setPending(true);
@@ -626,6 +639,46 @@ export function StudioView({
             </span>
           </div>
         ) : null}
+        {studio.drafts.length > 0 ? (
+          <div className="studio-draft-search">
+            <div className="search-control">
+              <Search aria-hidden="true" size={16} />
+              <input
+                aria-label={t("studio.drafts.search")}
+                onChange={(event) => setSearchQuery(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") {
+                    event.preventDefault();
+                    clearSearch();
+                  }
+                }}
+                placeholder={t("studio.drafts.searchPlaceholder")}
+                ref={searchRef}
+                type="search"
+                value={searchQuery}
+              />
+              {searchQuery !== "" ? (
+                <button
+                  aria-label={t("studio.drafts.clearSearch")}
+                  className="search-clear"
+                  onClick={clearSearch}
+                  type="button"
+                >
+                  <X aria-hidden="true" size={14} />
+                </button>
+              ) : null}
+            </div>
+            <span role="status">
+              {t("studio.drafts.searchCount", {
+                visible: matchingDrafts.length,
+                total: studio.drafts.length,
+              })}
+            </span>
+          </div>
+        ) : null}
+        {studio.drafts.length > 0 && matchingDrafts.length === 0 ? (
+          <p>{t("studio.drafts.searchEmpty")}</p>
+        ) : null}
         <div className="publish-actions">
           <button
             className="text-button"
@@ -637,15 +690,20 @@ export function StudioView({
             <FilePlus2 aria-hidden="true" size={15} />
             {t("studio.drafts.new")}
           </button>
-          {studio.drafts.length > 0 ? (
+          {matchingDrafts.length > 0 ? (
             <label className="studio-draft-select">
               <span>{t("studio.drafts.select")}</span>
               <select
                 data-testid="studio-draft-select"
                 onChange={(event) => setSelectedId(event.target.value)}
-                value={selected?.id ?? ""}
+                value={selectedMatches ? selected?.id ?? "" : ""}
               >
-                {studio.drafts.map((draft) => (
+                {!selectedMatches ? (
+                  <option disabled value="">
+                    {t("studio.drafts.selectMatch")}
+                  </option>
+                ) : null}
+                {matchingDrafts.map((draft) => (
                   <option key={draft.id} value={draft.id}>
                     {draft.name === ""
                       ? t("studio.drafts.untitled")
