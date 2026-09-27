@@ -275,6 +275,107 @@ describe("createStudioCoordinator (ADR 0018)", () => {
     expect(studio.state().grants).toEqual([]);
   });
 
+  it("does not revive a grant released while revalidation is still reading", async () => {
+    type ReadResult = Awaited<ReturnType<StudioHost["readTree"]>>;
+    const pendingReads: Array<(result: ReadResult) => void> = [];
+    const host = fakeHost({
+      readTree: vi.fn(
+        () => new Promise<ReadResult>((resolve) => pendingReads.push(resolve)),
+      ),
+    });
+    host.picks.push({ label: "demo-skill", path: "/p", status: "picked" });
+    const { studio } = harness(host);
+    const opening = studio.open("w1");
+    await vi.waitFor(() => expect(pendingReads).toHaveLength(1));
+    pendingReads[0]!({ ok: true, value: [file("SKILL.md", SKILL_MD)] });
+    expect((await opening).ok).toBe(true);
+    const grant = studio.state().grants[0]!;
+
+    const validating = studio.validate("w1", grant.id);
+    await vi.waitFor(() => expect(pendingReads).toHaveLength(2));
+    expect((await studio.release("w1", grant.id)).ok).toBe(true);
+    pendingReads[1]!({ ok: true, value: [file("SKILL.md", SKILL_MD)] });
+    expect(await validating).toMatchObject({
+      error: { code: "studio_grant_invalid" },
+      ok: false,
+    });
+    expect(studio.state().grants).toEqual([]);
+  });
+
+  it("does not publish a grant for an endpoint released during the dialog", async () => {
+    let finishPick!: (pick: FolderPick) => void;
+    const host = fakeHost({
+      chooseSkillFolder: vi.fn(
+        () =>
+          new Promise<FolderPick>((resolve) => {
+            finishPick = resolve;
+          }),
+      ),
+    });
+    const { studio } = harness(host);
+    const opening = studio.open("w1");
+    studio.releaseGrantsFor("w1");
+    finishPick({ label: "demo-skill", path: "/p", status: "picked" });
+    expect(await opening).toMatchObject({
+      error: { code: "studio_grant_invalid" },
+      ok: false,
+    });
+    expect(studio.state().grants).toEqual([]);
+    expect(host.readTree).not.toHaveBeenCalled();
+  });
+
+  it("does not publish a grant for an endpoint released while reading", async () => {
+    type ReadResult = Awaited<ReturnType<StudioHost["readTree"]>>;
+    const pendingReads: Array<(result: ReadResult) => void> = [];
+    const host = fakeHost({
+      readTree: vi.fn(
+        () => new Promise<ReadResult>((resolve) => pendingReads.push(resolve)),
+      ),
+    });
+    host.picks.push({ label: "demo-skill", path: "/p", status: "picked" });
+    const { studio } = harness(host);
+    const opening = studio.open("w1");
+    await vi.waitFor(() => expect(pendingReads).toHaveLength(1));
+    studio.releaseGrantsFor("w1");
+    pendingReads[0]!({ ok: true, value: [file("SKILL.md", SKILL_MD)] });
+    expect(await opening).toMatchObject({
+      error: { code: "studio_grant_invalid" },
+      ok: false,
+    });
+    expect(studio.state().grants).toEqual([]);
+  });
+
+  it("does not revive a grant when shutdown lands during a read", async () => {
+    type ReadResult = Awaited<ReturnType<StudioHost["readTree"]>>;
+    const pendingReads: Array<(result: ReadResult) => void> = [];
+    const host = fakeHost({
+      readTree: vi.fn(
+        () => new Promise<ReadResult>((resolve) => pendingReads.push(resolve)),
+      ),
+    });
+    host.picks.push({ label: "demo-skill", path: "/p", status: "picked" });
+    const { studio } = harness(host);
+    const opening = studio.open("w1");
+    await vi.waitFor(() => expect(pendingReads).toHaveLength(1));
+    pendingReads[0]!({ ok: true, value: [file("SKILL.md", SKILL_MD)] });
+    expect((await opening).ok).toBe(true);
+    const grant = studio.state().grants[0]!;
+
+    const validating = studio.validate("w1", grant.id);
+    await vi.waitFor(() => expect(pendingReads).toHaveLength(2));
+    await studio.shutdown();
+    pendingReads[1]!({ ok: true, value: [file("SKILL.md", SKILL_MD)] });
+    expect(await validating).toMatchObject({
+      error: { code: "studio_grant_invalid" },
+      ok: false,
+    });
+    expect(studio.state().grants).toEqual([]);
+    expect(await studio.open("w1")).toMatchObject({
+      error: { code: "studio_unavailable" },
+      ok: false,
+    });
+  });
+
   it("restores Drafts and quarantined ids without content", async () => {
     const drafts = createMemoryStudioDraftRecords([
       {

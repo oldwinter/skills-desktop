@@ -210,7 +210,10 @@ export function createStudioCoordinator(
   const { clock, drafts, host, id } = options;
   let state = emptyState(host !== undefined);
   const grants = new Map<string, Grant>();
+  /** One revocable token per owner endpoint; releaseGrantsFor and shutdown invalidate it. */
+  const endpointTokens = new Map<string, object>();
   const records = new Map<string, StudioDraftRecord>();
+  let closed = false;
   let running = false;
   let draftQueue: Promise<unknown> = Promise.resolve();
 
@@ -232,9 +235,21 @@ export function createStudioCoordinator(
       : undefined;
   };
 
+  const endpointToken = (ownerEndpointId: string) => {
+    const existing = endpointTokens.get(ownerEndpointId);
+    if (existing !== undefined) return existing;
+    const token = {};
+    endpointTokens.set(ownerEndpointId, token);
+    return token;
+  };
+
+  const endpointLive = (ownerEndpointId: string, token: object) =>
+    !closed && endpointTokens.get(ownerEndpointId) === token;
+
   const withRun = async (
     body: (operationId: string) => Promise<RequestResult>,
   ): Promise<RequestResult> => {
+    if (closed) return failure(unavailable());
     if (running) return failure(busyError());
     running = true;
     const operationId = id();
@@ -316,7 +331,11 @@ export function createStudioCoordinator(
         );
       }
       return withRun(async (operationId) => {
+        const token = endpointToken(ownerEndpointId);
         const pick = await host.chooseSkillFolder();
+        if (!endpointLive(ownerEndpointId, token)) {
+          return failure(grantInvalid());
+        }
         if (pick.status === "cancelled") {
           return { ok: true, value: { operationId } };
         }
@@ -342,6 +361,9 @@ export function createStudioCoordinator(
         };
         const observed = await observe(grant);
         if (!observed.ok) return failure(observed.error);
+        if (!endpointLive(ownerEndpointId, token)) {
+          return failure(grantInvalid());
+        }
         grants.set(grant.public.id, { ...grant, public: observed.value });
         update({ grants: publicGrants() });
         return { ok: true, value: { operationId } };
@@ -355,6 +377,9 @@ export function createStudioCoordinator(
       return withRun(async (operationId) => {
         const observed = await observe(grant);
         if (!observed.ok) return failure(observed.error);
+        if (closed || grants.get(grantId) !== grant) {
+          return failure(grantInvalid());
+        }
         grants.set(grantId, { ...grant, public: observed.value });
         update({ grants: publicGrants() });
         return { ok: true, value: { operationId } };
@@ -371,6 +396,7 @@ export function createStudioCoordinator(
     },
 
     releaseGrantsFor(ownerEndpointId) {
+      endpointTokens.delete(ownerEndpointId);
       let changed = false;
       for (const [grantId, grant] of grants) {
         if (grant.ownerEndpointId === ownerEndpointId) {
@@ -552,7 +578,9 @@ export function createStudioCoordinator(
     },
 
     async shutdown() {
+      closed = true;
       grants.clear();
+      endpointTokens.clear();
       state = { ...state, grants: [] };
     },
   };
