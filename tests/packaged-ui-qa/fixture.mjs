@@ -142,6 +142,9 @@ export async function createPackagedQaFixture({
     }),
   );
 
+  // Scope generated Node fixtures as CommonJS so require() survives an
+  // ES-module TMPDIR ancestor package.json (npx-cli.js on Windows).
+  await writeFile(join(bin, "package.json"), '{"type":"commonjs"}\n');
   const npxScript = join(bin, platform === "win32" ? "npx.cmd" : "npx");
   const npxProgram = join(bin, "qa-npx.cjs");
   const windowsNode = join(bin, "node.exe");

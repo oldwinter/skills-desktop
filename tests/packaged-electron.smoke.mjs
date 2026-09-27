@@ -313,6 +313,13 @@ await Promise.all([
   mkdir(workspace, { recursive: true }),
   mkdir(secondWorkspace, { recursive: true }),
 ]);
+// Scope the extensionless fake npx as CommonJS so require() survives an
+// ES-module TMPDIR ancestor package.json.
+await writeFile(
+  join(binDirectory, "package.json"),
+  '{"type":"commonjs"}\n',
+  "utf8",
+);
 await writeFile(projectInventoryState, JSON.stringify([projectEntry]), "utf8");
 
 async function writeScript(mode) {

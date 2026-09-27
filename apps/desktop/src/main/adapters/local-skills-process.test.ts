@@ -13,6 +13,7 @@ import {
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { spawn } from "node:child_process";
 
 import { describe, expect, it, vi } from "vitest";
 
@@ -94,7 +95,60 @@ function scriptedRunner(): ProcessRunner & {
   };
 }
 
+// Extensionless executables inherit the module type of the nearest ancestor
+// package.json, so every fixture directory gets its own CommonJS scope to
+// keep require() working when TMPDIR sits inside an ES-module package.
+async function writeCommonJsExecutable(
+  directory: string,
+  name: string,
+  source: string,
+) {
+  await writeFile(
+    join(directory, "package.json"),
+    '{"type":"commonjs"}\n',
+    "utf8",
+  );
+  const executable = join(directory, name);
+  await writeFile(executable, source, "utf8");
+  await chmod(executable, 0o700);
+  return executable;
+}
+
 describe("Local SkillsProcess inventory contract", () => {
+  it("scopes generated executables as CommonJS inside an ES-module package", async () => {
+    const parent = await mkdtemp(join(tmpdir(), "skills-esm-parent-"));
+    try {
+      await writeFile(
+        join(parent, "package.json"),
+        '{"type":"module"}\n',
+        "utf8",
+      );
+      const bin = join(parent, "bin");
+      await mkdir(bin);
+      const marker = join(parent, "marker");
+      const executable = await writeCommonJsExecutable(
+        bin,
+        "npx",
+        `#!/usr/bin/env node
+require("node:fs").writeFileSync(${JSON.stringify(marker)}, "ran");
+`,
+      );
+
+      const exitCode = await new Promise<number | null>((resolve, reject) => {
+        const child = spawn(process.execPath, [executable], {
+          stdio: "ignore",
+        });
+        child.once("error", reject);
+        child.once("close", resolve);
+      });
+
+      expect(exitCode).toBe(0);
+      await expect(readFile(marker, "utf8")).resolves.toBe("ran");
+    } finally {
+      await rm(parent, { force: true, recursive: true });
+    }
+  });
+
   it.skipIf(process.platform === "win32")(
     "resolves a user-installed npx outside the macOS GUI launch PATH",
     async () => {
@@ -102,11 +156,11 @@ describe("Local SkillsProcess inventory contract", () => {
         join(tmpdir(), "skills-desktop-macos-path-"),
       );
       const bin = join(home, ".local", "bin");
-      const executable = join(bin, "npx");
       await mkdir(bin, { recursive: true });
       await copyFile(process.execPath, join(bin, "node"));
-      await writeFile(
-        executable,
+      await writeCommonJsExecutable(
+        bin,
+        "npx",
         `#!/usr/bin/env node
 const args = process.argv.slice(2);
 if (args.at(-1) === "--version") process.stdout.write("1.5.23\\n");
@@ -114,7 +168,6 @@ else if (args.join(" ").endsWith("list --json")) process.stdout.write(${JSON.str
 else if (args.join(" ").endsWith("list --global --json")) process.stdout.write(${JSON.stringify(globalOutput)});
 else process.exitCode = 2;
 `,
-        { mode: 0o700 },
       );
 
       try {
@@ -515,9 +568,9 @@ else process.exitCode = 2;
       const directory = await mkdtemp(
         join(tmpdir(), "skills-desktop-process-"),
       );
-      const executable = join(directory, "npx");
-      await writeFile(
-        executable,
+      await writeCommonJsExecutable(
+        directory,
+        "npx",
         `#!/usr/bin/env node
 const args = process.argv.slice(2);
 if (args.at(-1) === "--version") {
@@ -530,9 +583,7 @@ if (args.at(-1) === "--version") {
   process.exitCode = 2;
 }
 `,
-        { mode: 0o700 },
       );
-      await chmod(executable, 0o700);
 
       try {
         const localProcess = createLocalSkillsProcess({
@@ -569,9 +620,9 @@ if (args.at(-1) === "--version") {
     "terminates a cancelled production process tree without publishing partial output",
     async () => {
       const directory = await mkdtemp(join(tmpdir(), "skills-desktop-cancel-"));
-      const executable = join(directory, "npx");
-      await writeFile(
-        executable,
+      await writeCommonJsExecutable(
+        directory,
+        "npx",
         `#!/usr/bin/env node
 const { writeFileSync } = require("node:fs");
 const { join } = require("node:path");
@@ -584,9 +635,7 @@ if (args.at(-1) === "--version") {
   setInterval(() => undefined, 1000);
 }
 `,
-        { mode: 0o700 },
       );
-      await chmod(executable, 0o700);
       const changes = watch(directory);
       const iterator = changes[Symbol.asyncIterator]();
 

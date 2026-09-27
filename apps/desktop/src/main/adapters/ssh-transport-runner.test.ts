@@ -1,7 +1,15 @@
 import { watch } from "node:fs";
-import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
+import { spawn } from "node:child_process";
 
 import { describe, expect, it, vi } from "vitest";
 
@@ -88,6 +96,25 @@ async function killOwnedHelper(path: string, knownPid?: number) {
   // postcondition here and would add up to a second per retained-stream case.
 }
 
+// Extensionless executables inherit the module type of the nearest ancestor
+// package.json, so every fixture directory gets its own CommonJS scope to
+// keep require() working when TMPDIR sits inside an ES-module package.
+async function writeCommonJsExecutable(
+  directory: string,
+  name: string,
+  source: string,
+) {
+  await writeFile(
+    join(directory, "package.json"),
+    '{"type":"commonjs"}\n',
+    "utf8",
+  );
+  const executable = join(directory, name);
+  await writeFile(executable, source, "utf8");
+  await chmod(executable, 0o700);
+  return executable;
+}
+
 const detachedHelperScript = `
 const { spawn } = require("node:child_process");
 const { renameSync, writeFileSync } = require("node:fs");
@@ -129,12 +156,43 @@ function observeRunnerResult(pending: Promise<unknown>) {
   );
 }
 
+it("scopes generated executables as CommonJS inside an ES-module package", async () => {
+  const parent = await mkdtemp(join(tmpdir(), "skills-esm-parent-"));
+  try {
+    await writeFile(
+      join(parent, "package.json"),
+      '{"type":"module"}\n',
+      "utf8",
+    );
+    const bin = join(parent, "bin");
+    await mkdir(bin);
+    const marker = join(parent, "marker");
+    const executable = await writeCommonJsExecutable(
+      bin,
+      "ssh",
+      `#!/usr/bin/env node
+require("node:fs").writeFileSync(${JSON.stringify(marker)}, "ran");
+`,
+    );
+
+    const exitCode = await new Promise<number | null>((resolve, reject) => {
+      const child = spawn(process.execPath, [executable], { stdio: "ignore" });
+      child.once("error", reject);
+      child.once("close", resolve);
+    });
+
+    expect(exitCode).toBe(0);
+    await expect(readFile(marker, "utf8")).resolves.toBe("ran");
+  } finally {
+    await rm(parent, { force: true, recursive: true });
+  }
+});
+
 it.skipIf(process.platform === "win32")(
   "sends cancellation and waits boundedly for a terminal SSH response",
   async () => {
     const directory = await mkdtemp(join(tmpdir(), "skills-ssh-runner-"));
     try {
-      const executable = join(directory, "ssh");
       const inputLog = join(directory, "input.bin");
       const startedFile = join(directory, "started");
       const responseFile = join(directory, "response.bin");
@@ -166,8 +224,9 @@ it.skipIf(process.platform === "win32")(
         type: "failure",
       });
       await writeFile(responseFile, response);
-      await writeFile(
-        executable,
+      await writeCommonJsExecutable(
+        directory,
+        "ssh",
         `#!/usr/bin/env node
 const { appendFileSync, readFileSync, writeFileSync } = require("node:fs");
 let chunks = 0;
@@ -181,9 +240,7 @@ process.stdin.on("data", (chunk) => {
   }
 });
 `,
-        "utf8",
       );
-      await chmod(executable, 0o700);
       const runner = createSshTransportRunner({
         cancellationGraceMs: 2_000,
         environment: {
@@ -236,18 +293,16 @@ it.skipIf(process.platform === "win32")(
   async () => {
     const directory = await mkdtemp(join(tmpdir(), "skills-ssh-runner-win-"));
     try {
-      const executable = join(directory, "ssh");
       const startedFile = join(directory, "started");
-      await writeFile(
-        executable,
+      await writeCommonJsExecutable(
+        directory,
+        "ssh",
         `#!/usr/bin/env node
 const { writeFileSync } = require("node:fs");
 writeFileSync(process.env.TEST_STARTED_FILE, "started");
 process.stdin.resume();
 `,
-        "utf8",
       );
-      await chmod(executable, 0o700);
       let terminatedPid: number | undefined;
       const runner = createSshTransportRunner({
         cancellationGraceMs: 25,
@@ -312,18 +367,16 @@ it.skipIf(process.platform === "win32")(
   async () => {
     const directory = await mkdtemp(join(tmpdir(), "skills-ssh-runner-"));
     try {
-      const executable = join(directory, "ssh");
       const startedFile = join(directory, "started");
-      await writeFile(
-        executable,
+      await writeCommonJsExecutable(
+        directory,
+        "ssh",
         `#!/usr/bin/env node
 const { writeFileSync } = require("node:fs");
 writeFileSync(process.env.TEST_STARTED_FILE, "started");
 process.stdin.resume();
 `,
-        "utf8",
       );
-      await chmod(executable, 0o700);
       const runner = createSshTransportRunner({
         cancellationGraceMs: 25,
         environment: {
@@ -395,11 +448,11 @@ describe.skipIf(process.platform === "win32")(
       let pending: Promise<unknown> | undefined;
       if (useControlledTimeout) vi.useFakeTimers();
       try {
-        const executable = join(directory, "ssh");
-        await writeFile(executable, `#!/usr/bin/env node\n${detachedHelperScript}`, {
-          mode: 0o700,
-        });
-        await chmod(executable, 0o700);
+        await writeCommonJsExecutable(
+          directory,
+          "ssh",
+          `#!/usr/bin/env node\n${detachedHelperScript}`,
+        );
         const runner = createSshTransportRunner({
           cancellationGraceMs: 20,
           environment: {
