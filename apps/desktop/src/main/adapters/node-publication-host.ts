@@ -22,8 +22,9 @@ import type {
 /**
  * ADR 0019 filesystem edge for export. Main owns both native folder dialogs;
  * the renderer receives a display label only. Reading follows no symbolic
- * links, skips dot-entries, and stops at the exporter limits so oversized or
- * hostile trees fail closed before any bytes reach the deterministic exporter.
+ * links, rejects hard-linked files, skips dot-entries, and stops at the
+ * exporter limits so oversized or hostile trees fail closed before any bytes
+ * reach the deterministic exporter.
  * Writing creates files exclusively inside a new or empty destination and
  * never touches anything that already exists.
  */
@@ -79,6 +80,11 @@ async function readSkillFiles(
       if (!metadata.isFile()) {
         return invalid(
           `Skill "${skillName}" contains a special file: ${childRelative}`,
+        );
+      }
+      if (metadata.nlink > 1) {
+        return invalid(
+          `Skill "${skillName}" contains a hard link: ${childRelative}`,
         );
       }
       if (metadata.size > WELL_KNOWN_LIMITS.maxFileBytes) {
