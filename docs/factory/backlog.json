@@ -963,6 +963,30 @@
       "notes": [
         "packages/skills-runtime/src/studio.ts ~325,344,396,431-437"
       ]
+    },
+    {
+      "id": "SDF-037",
+      "title": "Fix InventoryApp native-focus test: await the post-render restore-poll schedule (Linux CI flake at run 36494744718)",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 370,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "pendingCount==1 after the phase flip is awaited via waitFor instead of asserted synchronously, matching the pattern at 2851/2897",
+        "the native-focus contract is unchanged: the restore timer must still be scheduled and drained; no assertions loosened",
+        "npm run test:coverage and npm run verify stay green; Linux CI passes on the pushed head"
+      ],
+      "dependsOn": [],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "run 36494744718 job 109171562943 @26e1600: pendingCount expected 1 got 0 at InventoryApp.test.tsx:2733. Test block identical to base 24f879f; flake = sync assert racing the passive phase-flip effect (InventoryApp.tsx:619-628) that schedules the 16ms restore poll"
+      ]
     }
   ]
 }

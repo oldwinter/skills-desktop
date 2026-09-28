@@ -2730,7 +2730,9 @@ describe("Local Target Inventory shell", () => {
         screen.getByRole("button", { name: "Open Trusted Review" }),
       ).toBeEnabled(),
     );
-    expect(focusTimers.pendingCount()).toBe(1);
+    // The restore poll is scheduled by a passive effect on the phase flip,
+    // so await it rather than racing the commit.
+    await waitFor(() => expect(focusTimers.pendingCount()).toBe(1));
     for (let tick = 0; tick < 60; tick += 1) {
       act(() => focusTimers.runTick());
     }
