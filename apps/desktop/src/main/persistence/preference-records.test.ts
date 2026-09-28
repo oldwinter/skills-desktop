@@ -1,4 +1,11 @@
-import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -87,6 +94,47 @@ describe("createJsonPreferenceRecords", () => {
       "preferences.json.corrupt.q3",
     ]);
     expect(await records.load()).toEqual({ status: "absent" });
+  });
+
+  it("quarantines a path that is not a small regular file", async () => {
+    const directory = await scratch();
+    const path = join(directory, "preferences.json");
+    let counter = 0;
+    const records = createJsonPreferenceRecords({
+      id: () => `q${(counter += 1)}`,
+      path,
+    });
+
+    // A directory at the record path is quarantined, not read.
+    await mkdir(path);
+    expect(await records.load()).toMatchObject({
+      reason: expect.stringContaining("not a small regular file"),
+      status: "quarantined",
+    });
+    expect(await readdir(directory)).toEqual(["preferences.json.corrupt.q1"]);
+
+    // An oversized regular file is quarantined before parsing.
+    await writeFile(path, Buffer.alloc(4_097, 0x20));
+    expect(await records.load()).toMatchObject({
+      reason: expect.stringContaining("not a small regular file"),
+      status: "quarantined",
+    });
+    expect((await readdir(directory)).sort()).toEqual([
+      "preferences.json.corrupt.q1",
+      "preferences.json.corrupt.q2",
+    ]);
+  });
+
+  it("rejects saves when the file identity is invalid", async () => {
+    const directory = await scratch();
+    const records = createJsonPreferenceRecords({
+      id: () => "../escape",
+      path: join(directory, "preferences.json"),
+    });
+    await expect(
+      records.save({ appearance: "dark", localePreference: "system" }),
+    ).rejects.toThrow("Preference file identity is invalid.");
+    expect(await readdir(directory)).toEqual([]);
   });
 
   it("rejects an invalid stored value at save time", async () => {

@@ -385,6 +385,31 @@
         "test:coverage"
       ],
       "notes": "CollectionsView.tsx had no test file (67% branches). jsdom + testing-library harness follows StudioView/ComparisonView conventions."
+    },
+    {
+      "id": "SDF-014",
+      "title": "Cover recovery host-trust store, OpenSSH public-key parsing, and preference quarantine edges",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 140,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "createRecoveryHostTrustStore round-trips lookup/replace through real memory recovery records",
+        "restore failures scoped to hostTrustRecords reject lookup and replace",
+        "a failed commit rejects replace without mutating the loaded map",
+        "parseOpenSshPublicKey accepts valid OpenSSH keys and rejects extra tokens, unknown algorithms, and non-base64 material",
+        "preference load quarantines directory paths and oversized files instead of crashing",
+        "save rejects invalid file identities",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": "recovery-host-trust.ts 66.7% branches untested; host-public-key.ts parse path uncovered; preference-records.ts 72.2% branches."
     }
   ]
 }
