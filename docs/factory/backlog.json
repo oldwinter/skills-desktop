@@ -165,7 +165,7 @@
       "id": "SDF-004",
       "title": "Backfill coverage for the weakest-covered production module after the factory's first full coverage run",
       "kind": "code-change",
-      "state": "queued",
+      "state": "delivered",
       "order": 40,
       "source": {
         "type": "local"
@@ -181,6 +181,69 @@
         "test:coverage"
       ],
       "notes": "Pick the target from the coverage report produced during iteration; prefer boundary modules with real branch gaps."
+    },
+    {
+      "id": "SDF-005",
+      "title": "Route every publication and studio preload bridge capability through its fixed IPC channel",
+      "kind": "code-change",
+      "state": "queued",
+      "order": 50,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "preload/workspace.test.ts asserts channel, attachment-epoch, and forwarded arguments for package.import, publication choose-source/export/prepare/review/discard/reconcile, and studio open/release/validate/draft-create/draft-save/draft-delete/preview/export",
+        "a regression in any routed channel name or argument order fails the test",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": "Coverage run showed preload/workspace.ts at 78.57% statements; uncovered 143-222 are the package/publication/studio bridge methods added for Publish and Studio views."
+    },
+    {
+      "id": "SDF-006",
+      "title": "Cover publication and studio main-process IPC handlers including authorized forwarding and bounded failures",
+      "kind": "code-change",
+      "state": "queued",
+      "order": 60,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "electron-ipc.test.ts exercises the publicationHandler family: package:import, publication choose-source/export/prepare/review/discard/reconcile, studio open/release/validate/draft-create/draft-save/draft-delete/preview/export",
+        "each handler is asserted to reject unauthorized senders, forward the closed request type with version 2 to the session, and return the bounded internal_error on session failure",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": "Coverage run showed electron-ipc.ts at 71.23% statements; uncovered handler bodies cluster in lines 720-833 (publicationHandler family) and studio channels."
+    },
+    {
+      "id": "SDF-007",
+      "title": "Cover the uncovered StudioView user paths surfaced by the coverage report",
+      "kind": "code-change",
+      "state": "queued",
+      "order": 70,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "StudioView.test.tsx gains tests for the uncovered user-visible paths identified by the coverage report",
+        "tests assert rendered behavior rather than implementation internals",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": "StudioView.tsx reported 74.6% statements; uncovered blocks cluster around lines 509-513 and 603-634 per the coverage table."
     }
   ]
 }
