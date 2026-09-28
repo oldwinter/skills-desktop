@@ -214,15 +214,18 @@ describe("node publication host (ADR 0019)", () => {
   });
 
   it("refuses archive-unsupported paths, special files, and over-limit content", async () => {
-    // A backslashed name is legal POSIX but not a valid archive path.
-    const backslash = await tempRoot();
-    await seedSkills(backslash);
-    await writeFile(join(backslash, "hello", "bad\\name.md"), "x\n");
-    const badPath = await readSkillFolder(backslash);
-    expect(badPath.ok).toBe(false);
-    if (!badPath.ok) {
-      expect(badPath.error.code).toBe("export_invalid");
-      expect(badPath.error.message).toContain("unsupported path");
+    // A backslashed name is legal POSIX but not a valid archive path; on
+    // Windows "\" is a separator, so no creatable name can carry one.
+    if (process.platform !== "win32") {
+      const backslash = await tempRoot();
+      await seedSkills(backslash);
+      await writeFile(join(backslash, "hello", "bad\\name.md"), "x\n");
+      const badPath = await readSkillFolder(backslash);
+      expect(badPath.ok).toBe(false);
+      if (!badPath.ok) {
+        expect(badPath.error.code).toBe("export_invalid");
+        expect(badPath.error.message).toContain("unsupported path");
+      }
     }
 
     // A unix socket inside a Skill is a special file, not content.

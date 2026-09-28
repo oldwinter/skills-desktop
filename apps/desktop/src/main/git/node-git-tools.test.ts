@@ -1,7 +1,7 @@
 import { mkdtemp, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { basename, join, relative, sep } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
@@ -138,7 +138,11 @@ describe("createNodePublicationWorkspace", { timeout: SUITE_TIMEOUT_MS }, () => 
     try {
       const workspace = createNodePublicationWorkspace({ baseDirectory: base });
       const root = await workspace.create();
-      expect(root.startsWith(`${await realpath(base)}/`)).toBe(true);
+      const withinBase = relative(await realpath(base), root);
+      expect(withinBase.startsWith("..")).toBe(false);
+      expect(withinBase.split(sep)[0]?.startsWith("skills-desktop-publication-")).toBe(
+        true,
+      );
       expect(basename(root).startsWith("skills-desktop-publication-")).toBe(
         true,
       );

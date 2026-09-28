@@ -1983,12 +1983,11 @@ describe("Local SkillsProcess npx resolution fallbacks", () => {
       "linux",
       async (path) => executables.has(path),
     );
-    expect(command.executable).toBe(
-      join(versions, "v22.1.0", "bin", "npx"),
-    );
-    expect(command.path.split(":")[0]).toBe(
-      join(versions, "v22.1.0", "bin"),
-    );
+    const newestBin = join(versions, "v22.1.0", "bin");
+    expect(command.executable).toBe(join(newestBin, "npx"));
+    // The managed directory leads the PATH prefix the resolved env carries;
+    // it cannot be split on ":" because Windows drive letters contain one.
+    expect(command.path.startsWith(newestBin)).toBe(true);
   });
 
   it("resolves npx through a fallback directory that is not on PATH", async () => {

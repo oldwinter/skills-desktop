@@ -506,6 +506,31 @@
         "test:coverage"
       ],
       "notes": "composition-root.ts 20% funcs (openExternal); node-publication-host.ts 75% branches; node-studio-host.ts 76.9% branches."
+    },
+    {
+      "id": "SDF-019",
+      "title": "Fix Windows platform-contract regressions in SDF-004/011/018 tests",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 190,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "node-git-tools workspace-prefix assertion is separator-safe on win32",
+        "local-skills-process nvm PATH assertion does not split on ':'",
+        "publication-host archive-path case is platform-honest about backslash names",
+        "npm run typecheck passes and the three touched test files pass locally"
+      ],
+      "dependsOn": [],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "Reproduced on hosted windows-2025 job 109146095426 at 8f0b397"
+      ]
     }
   ]
 }
