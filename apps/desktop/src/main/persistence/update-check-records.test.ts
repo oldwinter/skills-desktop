@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -49,6 +49,39 @@ describe("JSON update check records", () => {
       await expect(
         createJsonUpdateCheckRecords({ path }).load(),
       ).rejects.toThrow();
+    } finally {
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("rethrows a non-ENOENT read failure instead of reporting absence", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "skills-update-check-"));
+    const path = join(directory, "update-check.json");
+    try {
+      // A directory at the record path fails readFile with EISDIR.
+      await mkdir(path);
+      await expect(
+        createJsonUpdateCheckRecords({ path }).load(),
+      ).rejects.toThrow();
+    } finally {
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("removes the temporary file when the atomic rename fails", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "skills-update-check-"));
+    const path = join(directory, "update-check.json");
+    try {
+      // rename(temp, path) fails because the destination is a directory.
+      await mkdir(path);
+      await expect(
+        createJsonUpdateCheckRecords({ path }).save(
+          "2026-08-22T06:00:00.000Z",
+        ),
+      ).rejects.toThrow();
+      expect(
+        (await readdir(directory)).filter((name) => name.endsWith(".tmp")),
+      ).toEqual([]);
     } finally {
       await rm(directory, { force: true, recursive: true });
     }

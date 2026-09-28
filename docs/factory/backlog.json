@@ -555,6 +555,31 @@
       "notes": [
         "windows-2025 denied listen() on filesystem sockets (EACCES) at 7c73803"
       ]
+    },
+    {
+      "id": "SDF-021",
+      "title": "Cover persistence failure edges: quarantine-unreadable, rename-failure, invalid identity",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 210,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "update-check records rethrow non-ENOENT reads and remove the temp file when rename fails",
+        "deferred-update records surface quarantined state, pass through unsupported-schema, reject bad identities, and report unquarantinable corruption",
+        "preference records append could-not-be-quarantined when the rename fails",
+        "chmod-based cases keep the existing win32/root guards"
+      ],
+      "dependsOn": [],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "save-too-large in preference-records is schema-unreachable (bounded enums)"
+      ]
     }
   ]
 }

@@ -1,4 +1,5 @@
 import {
+  chmod,
   mkdir,
   mkdtemp,
   readdir,
@@ -150,5 +151,31 @@ describe("createJsonPreferenceRecords", () => {
       } as never),
     ).rejects.toThrow();
     expect(await readdir(directory)).toEqual([]);
+  });
+
+  it("reports quarantined-with-warning when the invalid file cannot move", async () => {
+    // Directory mode bits do not block rename for root, and Windows ignores
+    // them entirely, so the read-only directory cannot be simulated there.
+    if (process.platform === "win32" || process.getuid?.() === 0) return;
+    const directory = await scratch();
+    const path = join(directory, "preferences.json");
+    await writeFile(path, "{ not json", "utf8");
+    await chmod(directory, 0o500);
+    try {
+      const records = createJsonPreferenceRecords({
+        id: () => "w",
+        path,
+      });
+      await expect(records.load()).resolves.toMatchObject({
+        reason: expect.stringContaining("could not be quarantined"),
+        status: "quarantined",
+      });
+      // The invalid file was left in place rather than destroyed.
+      await expect(readdir(directory)).resolves.toEqual([
+        "preferences.json",
+      ]);
+    } finally {
+      await chmod(directory, 0o700);
+    }
   });
 });
