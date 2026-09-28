@@ -813,6 +813,31 @@
       "notes": [
         "desktop-capabilities.ts ~4730-4738 remap break, ~4800-4808 inventoryStoreFailed branch"
       ]
+    },
+    {
+      "id": "SDF-031",
+      "title": "Cover recovery-records durable-commit guards: pending legacy migration and invalid document rejections",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 310,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "inventory.replace refuses while a legacy Snapshot is pending migration",
+        "an inventory.replace producing an invalid durable document returns persist_failed without poisoning the store",
+        "a guard.put producing an invalid durable document returns persist_failed without poisoning the store",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "dependsOn": [],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "recovery-records.ts ~2675/2710/2727 commitFailure paths"
+      ]
     }
   ]
 }
