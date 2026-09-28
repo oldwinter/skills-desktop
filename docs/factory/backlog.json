@@ -335,6 +335,30 @@
         "test:coverage"
       ],
       "notes": "local-skills-process.ts at 79.1% stmts / 67.1% branches after SDF-010; uncovered regions are deterministic resolver branches and injected-runner failure/abort edges, not new spawn behavior."
+    },
+    {
+      "id": "SDF-012",
+      "title": "Cover ssh-skills-process confirmation guards, wire-failure matrix, and observation error mapping",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 120,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "inspectSource covers schema-invalid, local-only, and portable descriptor branches",
+        "executeConfirmed covers unknown plan, digest mismatch consuming the plan, expiry, mutation_conflict during an in-flight operation, and pre-aborted not-observed outcome",
+        "executeConfirmed covers the wire-failure matrix: transport throws (timed-out/cancelled/failed), malformed or mismatched frames, and postflight parse failure producing possible effects",
+        "observeInventory covers conflict, transport failure, post-transport abort, protocol violations, exit-127 and transport_lost classification, remote failure-frame code mapping, and parse-error propagation",
+        "prepareMutation covers the multi-harness wire failure and the inspected-source ineligibility",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": "ssh-skills-process.ts at ~81% stmts / ~69% branches with combined adapter tests; gaps are scripted-transport edges identical in shape to SDF-011 (SSH lane stays experimental per AGENTS.md)."
     }
   ]
 }
