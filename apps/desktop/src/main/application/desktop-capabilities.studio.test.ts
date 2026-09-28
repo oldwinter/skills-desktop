@@ -334,4 +334,35 @@ describe("DesktopCapabilities Studio contract (ADR 0018)", () => {
     const observer = fixture.attach("workspace-2");
     expect((await studioOf(observer))?.grants).toEqual([]);
   });
+
+  it("reports a protected process while a Studio read is in flight", async () => {
+    let finishRead!: (
+      result: Awaited<ReturnType<StudioHost["readTree"]>>,
+    ) => void;
+    const studioHost = host();
+    studioHost.readTree = () =>
+      new Promise<Awaited<ReturnType<StudioHost["readTree"]>>>((resolve) => {
+        finishRead = resolve;
+      });
+    const fixture = await createFixture({
+      ids: ["op-1", "grant-1"],
+      studio: { drafts: createMemoryStudioDraftRecords(), host: studioHost },
+    });
+    expect(fixture.capabilities.restartSafety().guardReasons).toEqual([]);
+
+    const pending = fixture.workspace.request(open);
+    await vi.waitFor(() => expect(finishRead).toBeDefined());
+    expect(fixture.capabilities.restartSafety().guardReasons).toContain(
+      "protected-process-active",
+    );
+
+    finishRead({ ok: true, value: tree() });
+    expect(await pending).toEqual({
+      ok: true,
+      value: { operationId: "op-1" },
+    });
+    expect(fixture.capabilities.restartSafety().guardReasons).not.toContain(
+      "protected-process-active",
+    );
+  });
 });

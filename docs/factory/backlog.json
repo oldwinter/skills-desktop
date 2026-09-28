@@ -739,6 +739,30 @@
       "notes": [
         "PublishView.tsx uncovered 276-282 spinner ternary + 337-378 plan-summary block"
       ]
+    },
+    {
+      "id": "SDF-028",
+      "title": "Cover restartSafety protected-process-active while a Studio operation is in flight",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 280,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "restartSafety reports protected-process-active while a serialized Studio read is unresolved",
+        "the guard clears once the operation settles",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "dependsOn": [],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "desktop-capabilities.ts ~4884-4885 publication.busy||studio.busy guard branch"
+      ]
     }
   ]
 }
