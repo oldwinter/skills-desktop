@@ -104,6 +104,28 @@ describe("importSkillpack (ADR 0017)", () => {
     );
   });
 
+  it("keeps ordering deterministic when inserts arrive out of order", () => {
+    let records = importSkillpack({
+      document: documentFor({ id: "zeta.pack" }),
+      now,
+      records: [],
+    }).records;
+    for (const id of ["m.pack", "a.pack", "zeta2.pack", "b.pack"]) {
+      records = importSkillpack({
+        document: documentFor({ id }),
+        now,
+        records,
+      }).records;
+    }
+    expect(records.map(({ document }) => document.package.id)).toEqual([
+      "a.pack",
+      "b.pack",
+      "m.pack",
+      "zeta.pack",
+      "zeta2.pack",
+    ]);
+  });
+
   it("is idempotent for the same ID, release, and digest", () => {
     const document = documentFor();
     const first = importSkillpack({ document, now, records: [] });

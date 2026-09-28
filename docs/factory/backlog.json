@@ -912,6 +912,32 @@
       "notes": [
         "openssh-target.ts 164-193 createOpenSshToolRunner; capabilities ~4620 ack-prune commit + ~4662 repair commit failure"
       ]
+    },
+    {
+      "id": "SDF-035",
+      "title": "Cover deferred-update records failure tails and imported-packages sort ordering",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 350,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "clear() rethrows a non-ENOENT removal failure",
+        "load() rejects a directory at the record path as invalid state",
+        "save() removes its temporary file when the atomic open fails (EEXIST)",
+        "importSkillpack ordering stays deterministic across out-of-order inserts",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "dependsOn": [],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "deferred-update-records.ts 119/126/169; imported-packages.ts sortRecords comparator 64-66"
+      ]
     }
   ]
 }

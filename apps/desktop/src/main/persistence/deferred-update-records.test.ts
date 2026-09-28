@@ -1,5 +1,6 @@
 import {
   chmod,
+  mkdir,
   mkdtemp,
   readdir,
   readFile,
@@ -197,6 +198,61 @@ describe("JSON deferred update records", () => {
       await expect(records.load()).resolves.toEqual(record);
       await records.clear();
       await expect(records.load()).resolves.toBeNull();
+    } finally {
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+});
+
+describe("JSON deferred update records failure tails", () => {
+  it("rethrows a removal failure that is not a missing file", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "skills-deferred-update-"));
+    try {
+      const records = createJsonDeferredUpdateRecords({
+        id: () => "w1",
+        path: directory,
+      });
+      await expect(records.clear()).rejects.toThrow();
+    } finally {
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("quarantines a directory at the record path as invalid state", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "skills-deferred-update-"));
+    const path = join(directory, "record");
+    try {
+      await mkdir(path);
+      const records = createJsonDeferredUpdateRecords({
+        id: () => "w1",
+        path,
+      });
+      await expect(records.load()).rejects.toThrow(
+        "Invalid deferred update state was quarantined.",
+      );
+      await expect(readdir(directory)).resolves.toEqual([
+        "record.corrupt.w1",
+      ]);
+    } finally {
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("removes its temporary file when the atomic open fails", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "skills-deferred-update-"));
+    const path = join(directory, "deferred-update.json");
+    try {
+      const records = createJsonDeferredUpdateRecords({
+        id: () => "fixed-write",
+        path,
+      });
+      const temporaryPath = join(
+        directory,
+        ".deferred-update.json.fixed-write.tmp",
+      );
+      await writeFile(temporaryPath, "stale temp", "utf8");
+      await expect(records.save(record)).rejects.toThrow();
+      await expect(readdir(directory)).resolves.toEqual([]);
     } finally {
       await rm(directory, { force: true, recursive: true });
     }
