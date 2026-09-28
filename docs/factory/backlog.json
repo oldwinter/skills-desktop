@@ -410,6 +410,31 @@
         "test:coverage"
       ],
       "notes": "recovery-host-trust.ts 66.7% branches untested; host-public-key.ts parse path uncovered; preference-records.ts 72.2% branches."
+    },
+    {
+      "id": "SDF-015",
+      "title": "Cover remaining electron-ipc handler families: mutation/target/comparison/cancel, review role, about failure branches",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 150,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "workspace:inventory:cancel, comparison:prepare, target:update, target:delete, mutation:prepare, mutation:reconcile forward closed versioned requests with exact payloads",
+        "review:snapshot:get returns the session snapshot to the review role and rejects workspace frames",
+        "review:decision:approve/reject forward {decision, type: review.decide, version: 2}",
+        "about:update:snapshot:get and about:release-diagnostics:export cover unauthorized, invalid_request, and internal_error branches",
+        "menu:application:get reports internal_error when no menu provider is configured",
+        "attach() on a destroyed webContents tears the session down and returns undefined",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": "electron-ipc.ts 75.6% branches; uncovered handler families around lines 265-370, 450-720, 925-960, 1024."
     }
   ]
 }
