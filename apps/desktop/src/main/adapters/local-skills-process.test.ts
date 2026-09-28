@@ -7,6 +7,7 @@ import {
   readdir,
   readFile,
   rm,
+  symlink,
   watch,
   writeFile,
 } from "node:fs/promises";
@@ -157,7 +158,10 @@ require("node:fs").writeFileSync(${JSON.stringify(marker)}, "ran");
       );
       const bin = join(home, ".local", "bin");
       await mkdir(bin, { recursive: true });
-      await copyFile(process.execPath, join(bin, "node"));
+      // A symlink, not a copy: dynamically linked Node builds (for example a
+      // Homebrew Cellar install) resolve their shared libraries relative to
+      // the real executable, so a copied binary cannot start.
+      await symlink(process.execPath, join(bin, "node"));
       await writeCommonJsExecutable(
         bin,
         "npx",
