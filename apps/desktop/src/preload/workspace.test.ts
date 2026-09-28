@@ -109,6 +109,28 @@ async function loadBridge() {
     ): Promise<unknown>;
     handoffSkillsSh(recordId: string): Promise<unknown>;
     inspectSource(targetId: string, source: string): Promise<unknown>;
+    importPackage(): Promise<unknown>;
+    choosePublicationSource(): Promise<unknown>;
+    exportPublication(): Promise<unknown>;
+    preparePublication(remote: string, branch: string): Promise<unknown>;
+    requestPublicationReview(planId: string): Promise<unknown>;
+    discardPublication(planId: string): Promise<unknown>;
+    reconcilePublication(): Promise<unknown>;
+    openStudioFolder(): Promise<unknown>;
+    releaseStudioGrant(grantId: string): Promise<unknown>;
+    validateStudioGrant(grantId: string): Promise<unknown>;
+    createStudioDraft(grantId?: string): Promise<unknown>;
+    saveStudioDraft(
+      draftId: string,
+      expectedRevision: number,
+      skillMd: string,
+    ): Promise<unknown>;
+    deleteStudioDraft(
+      draftId: string,
+      expectedRevision: number,
+    ): Promise<unknown>;
+    previewStudioDraft(draftId: string): Promise<unknown>;
+    exportStudioDraft(draftId: string): Promise<unknown>;
     readonly menu: {
       getMenu(): Promise<unknown>;
       subscribeMenuCommand(listener: (event: unknown) => void): () => void;
@@ -282,6 +304,57 @@ describe("workspace preload authority", () => {
       ["workspace:host-trust:review", "attachment-epoch", targetId],
       ["workspace:review:request", "attachment-epoch", "prepared-1"],
       ["workspace:target:update", "attachment-epoch", targetId, targetDraft],
+    ]);
+  });
+
+  it("routes package, publication, and studio capabilities through fixed channels", async () => {
+    const bridge = await loadBridge();
+
+    await bridge.importPackage();
+    await bridge.choosePublicationSource();
+    await bridge.exportPublication();
+    await bridge.preparePublication("origin", "skills-desktop/publication");
+    await bridge.requestPublicationReview("plan-1");
+    await bridge.discardPublication("plan-2");
+    await bridge.reconcilePublication();
+    await bridge.openStudioFolder();
+    await bridge.releaseStudioGrant("grant-1");
+    await bridge.validateStudioGrant("grant-2");
+    await bridge.createStudioDraft("grant-3");
+    await bridge.createStudioDraft();
+    await bridge.saveStudioDraft("draft-1", 4, "# Skill\n");
+    await bridge.deleteStudioDraft("draft-2", 7);
+    await bridge.previewStudioDraft("draft-3");
+    await bridge.exportStudioDraft("draft-4");
+
+    expect(electron.invoke.mock.calls).toEqual([
+      ["workspace:package:import", "attachment-epoch"],
+      ["workspace:publication:choose-source", "attachment-epoch"],
+      ["workspace:publication:export", "attachment-epoch"],
+      [
+        "workspace:publication:prepare",
+        "attachment-epoch",
+        "origin",
+        "skills-desktop/publication",
+      ],
+      ["workspace:publication:review-request", "attachment-epoch", "plan-1"],
+      ["workspace:publication:discard", "attachment-epoch", "plan-2"],
+      ["workspace:publication:reconcile", "attachment-epoch"],
+      ["workspace:studio:open", "attachment-epoch"],
+      ["workspace:studio:release", "attachment-epoch", "grant-1"],
+      ["workspace:studio:validate", "attachment-epoch", "grant-2"],
+      ["workspace:studio:draft-create", "attachment-epoch", "grant-3"],
+      ["workspace:studio:draft-create", "attachment-epoch", undefined],
+      [
+        "workspace:studio:draft-save",
+        "attachment-epoch",
+        "draft-1",
+        4,
+        "# Skill\n",
+      ],
+      ["workspace:studio:draft-delete", "attachment-epoch", "draft-2", 7],
+      ["workspace:studio:preview", "attachment-epoch", "draft-3"],
+      ["workspace:studio:export", "attachment-epoch", "draft-4"],
     ]);
   });
 
