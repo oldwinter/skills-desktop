@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   createMemoryHostTrustStore,
   createOpenSshHostKeyProbe,
+  createOpenSshToolRunner,
   createOpenSshTargetAccess,
   quoteOpenSshConfigValue,
   type HostPublicKey,
@@ -985,3 +986,43 @@ describe("OpenSSH Effective Target Binding and host trust", () => {
     });
   });
 });
+
+// createOpenSshToolRunner execs a real `ssh` binary; OpenSSH is absent on the
+// Windows runners, so these platform-contract cases stay POSIX-only.
+describe.runIf(process.platform !== "win32")(
+  "createOpenSshToolRunner",
+  () => {
+    it("maps a nonzero ssh exit to the outcome contract", async () => {
+      const missingConfig = join(tmpdir(), "devin-factory-no-such-config");
+      const runner = createOpenSshToolRunner({
+        sshConfigPath: missingConfig,
+      });
+      const outcome = await runner.run({
+        args: ["-G", "localhost"],
+        executable: "ssh",
+        maxOutputBytes: 1 << 20,
+        timeoutMs: 10_000,
+      });
+      expect(outcome.exitCode).not.toBe(0);
+      expect(outcome.stderrBytes).toBeGreaterThan(0);
+    });
+
+    it("does not inject -F when the invocation already carries one", async () => {
+      const dir = await mkdtemp(join(tmpdir(), "openssh-runner-"));
+      temporaryDirectories.push(dir);
+      const config = join(dir, "ssh_config");
+      await writeFile(config, "", "utf8");
+      const runner = createOpenSshToolRunner({
+        sshConfigPath: join(dir, "ignored-config"),
+      });
+      const outcome = await runner.run({
+        args: ["-F", config, "-G", "localhost"],
+        executable: "ssh",
+        maxOutputBytes: 1 << 20,
+        timeoutMs: 10_000,
+      });
+      expect(outcome.exitCode).toBe(0);
+      expect(outcome.stdout).toContain("hostname localhost");
+    });
+  },
+);

@@ -681,6 +681,78 @@ describe("DesktopCapabilities inventory role-session contract", () => {
     );
   });
 
+  it("marks recovery uncertain when the workspace repair cannot commit", async () => {
+    const records = createMemoryRecoveryRecords(
+      [],
+      [],
+      [
+        {
+          connectionReference: null,
+          generation: 1,
+          harnessIds: target.harnessIds,
+          id: target.id,
+          kind: "local",
+          label: target.label,
+          workspace: "/",
+        },
+      ],
+    );
+    const capabilities = createDesktopCapabilities({
+      id: () => "operation-repair-failure",
+      recoveryRecords: {
+        async commit(change) {
+          return change.type === "targets.replace"
+            ? {
+                error: {
+                  code: "persist_failed" as const,
+                  effects: "possible" as const,
+                  message: "The repair could not be persisted.",
+                  phase: "restore" as const,
+                  retryable: true,
+                },
+                ok: false as const,
+              }
+            : records.commit(change);
+        },
+        restore: () => records.restore(),
+      },
+      skillsTargets: createLocalSkillsTargets({
+        id: () => target.id,
+        processFor: () => ({
+          ...mutationNotExercised,
+          async observeInventory() {
+            return { ok: true, value: freshInventory };
+          },
+        }),
+        workspace: target.workspace,
+      }),
+    });
+
+    await capabilities.initialize();
+    const session = capabilities.attach(
+      {
+        endpointId: "workspace-repair-failure",
+        role: "workspace",
+        sessionEpoch: "epoch-repair-failure",
+      },
+      () => undefined,
+    );
+
+    await expect(session.snapshot()).resolves.toMatchObject({
+      inventory: {
+        lastError: {
+          code: "process_failed",
+          message:
+            "Saved Target or recovery authority could not be restored.",
+        },
+        phase: "error",
+      },
+    });
+    expect(capabilities.restartSafety().guardReasons).toContain(
+      "recovery-uncertain",
+    );
+  });
+
   it("marks recovery uncertain when the durable Target write cannot commit", async () => {
     const records = createMemoryRecoveryRecords();
     const capabilities = createDesktopCapabilities({
@@ -5730,6 +5802,50 @@ describe("DesktopCapabilities Official Collection contract", () => {
         ]),
       },
     });
+  });
+
+  it("prunes a restored acknowledgement that no longer matches the catalog", async () => {
+    const records = createMemoryRecoveryRecords(
+      [],
+      [],
+      [],
+      [],
+      [
+        {
+          acknowledgedAt: "2026-08-21T09:00:00.000Z",
+          collectionId: "skills-desktop-starter",
+          kind: "release",
+          manifestDigest: `sha256:${"0".repeat(64)}`,
+          releaseNumber: 1,
+        },
+      ],
+    );
+    const capabilities = createDesktopCapabilities({
+      id: () => "unused",
+      officialCollectionCatalog: validCatalog,
+      recoveryRecords: records,
+      skillsTargets: targetsWith({
+        ...mutationNotExercised,
+        async observeInventory() {
+          return { ok: true, value: freshInventory };
+        },
+      }),
+    });
+    await capabilities.initialize();
+    const workspace = capabilities.attach(
+      {
+        endpointId: "workspace-ack-prune",
+        role: "workspace",
+        sessionEpoch: "ack-prune-epoch",
+      },
+      () => undefined,
+    );
+
+    await expect(workspace.snapshot()).resolves.toMatchObject({
+      collections: { acknowledgements: [] },
+    });
+    const restored = await records.restore();
+    expect(restored.collectionAcknowledgements).toEqual([]);
   });
 
   it("workspace teardown rejects its owned Collection review and discards the plan", async () => {

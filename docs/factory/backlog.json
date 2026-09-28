@@ -887,6 +887,31 @@
       "notes": [
         "application/publication.ts ~447-456 retain-on-transport-loss; ~523/533 reconcile guards"
       ]
+    },
+    {
+      "id": "SDF-034",
+      "title": "Cover OpenSSH tool-runner exit mapping; collection-ack pruning and repair commit-failure edges",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 340,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "createOpenSshToolRunner: nonzero exit maps to outcome and -F sshConfigPath injection (POSIX-guarded); explicit -F suppresses injection and exit-0 resolves",
+        "desktop-capabilities: stale collection acknowledgement pruned and committed as collections.acknowledgements.replace",
+        "desktop-capabilities: targets.replace commit failure during workspace repair marks recovery-uncertain and inventory phase error",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "dependsOn": [],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "openssh-target.ts 164-193 createOpenSshToolRunner; capabilities ~4620 ack-prune commit + ~4662 repair commit failure"
+      ]
     }
   ]
 }
