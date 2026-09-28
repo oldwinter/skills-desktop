@@ -862,6 +862,31 @@
       "notes": [
         "openssh-target.ts jumpReferences ~418-426; desktop-capabilities.ts ~4664/4683-4685"
       ]
+    },
+    {
+      "id": "SDF-033",
+      "title": "Cover publication coordinator push git_unavailable retention and reconcile guards",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 330,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "a push-time git_unavailable retains the Guard as uncertain, discards the prepared root, and returns the error with possible effects",
+        "reconcile with no Guard returns publication_invalid",
+        "reconcile with a restored Guard but no publisher returns git_unavailable",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "dependsOn": [],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "application/publication.ts ~447-456 retain-on-transport-loss; ~523/533 reconcile guards"
+      ]
     }
   ]
 }

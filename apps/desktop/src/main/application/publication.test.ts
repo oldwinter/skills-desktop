@@ -503,6 +503,69 @@ describe("publication coordinator (ADR 0019 / ADR 0020)", () => {
     expect(coordinator.guarded()).toBe(false);
   });
 
+  it("retains the Guard as uncertain when Git dies mid-transport", async () => {
+    const publisher = fakePublisher();
+    publisher.pushResult = {
+      error: {
+        code: "git_unavailable",
+        effects: "none",
+        message: "git exited before transport could be observed",
+        phase: "push",
+        retryable: true,
+      },
+      ok: false,
+    };
+    const { coordinator, guards, plan } = await planned(publisher);
+    const result = await coordinator.approve(plan.id);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("git_unavailable");
+      // Transport loss cannot confirm remote state, so effects are possible.
+      expect(result.error.effects).toBe("possible");
+    }
+    // The Guard is retained until a readback can prove the remote state.
+    expect(guards.at(-1)).toMatchObject({
+      lastReadback: "uncertain",
+      lastReadbackAt: expect.any(String),
+      phase: "uncertain",
+      plan,
+    });
+    expect(publisher.discarded).toHaveLength(1);
+    expect(coordinator.state()).toMatchObject({
+      guard: { phase: "uncertain" },
+      plan: null,
+    });
+    expect(coordinator.guarded()).toBe(true);
+  });
+
+  it("refuses reconcile without a Guard and without Git authority", async () => {
+    const h = harness({ host: fakeHost() });
+    expect(await h.coordinator.reconcile()).toMatchObject({
+      error: { code: "publication_invalid" },
+      ok: false,
+    });
+  });
+
+  it("reports git_unavailable for reconcile when no publisher is wired", async () => {
+    const { plan } = await planned();
+    const restored = harness({
+      initialGuard: {
+        committedAt: "2026-09-15T09:00:00.000Z",
+        lastReadback: "uncertain",
+        lastReadbackAt: "2026-09-15T09:00:05.000Z",
+        phase: "uncertain",
+        plan: plan as PublicationPlanV1,
+      },
+    });
+    expect(restored.coordinator.guarded()).toBe(true);
+    await expect(restored.coordinator.reconcile()).resolves.toMatchObject({
+      error: { code: "git_unavailable" },
+      ok: false,
+    });
+    // The Guard survives: nothing was pushed or released.
+    expect(restored.coordinator.state().guard?.phase).toBe("uncertain");
+  });
+
   it("restores a durable Guard and reconciles it without a source", async () => {
     const publisher = fakePublisher();
     const { plan } = await planned();
