@@ -186,7 +186,7 @@
       "id": "SDF-005",
       "title": "Route every publication and studio preload bridge capability through its fixed IPC channel",
       "kind": "code-change",
-      "state": "queued",
+      "state": "delivered",
       "order": 50,
       "source": {
         "type": "local"
@@ -207,7 +207,7 @@
       "id": "SDF-006",
       "title": "Cover publication and studio main-process IPC handlers including authorized forwarding and bounded failures",
       "kind": "code-change",
-      "state": "queued",
+      "state": "delivered",
       "order": 60,
       "source": {
         "type": "local"
@@ -228,7 +228,7 @@
       "id": "SDF-007",
       "title": "Cover the uncovered StudioView user paths surfaced by the coverage report",
       "kind": "code-change",
-      "state": "queued",
+      "state": "delivered",
       "order": 70,
       "source": {
         "type": "local"
@@ -244,6 +244,28 @@
         "test:coverage"
       ],
       "notes": "StudioView.tsx reported 74.6% statements; uncovered blocks cluster around lines 509-513 and 603-634 per the coverage table."
+    },
+    {
+      "id": "SDF-008",
+      "title": "Cover OpenSSH host-trust confirm lifecycle, resolution validation, and tool runner bounds",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 80,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "openssh-target.test.ts covers confirm() success, expiry, target drift, mid-review key change, and pendingChallenge projection",
+        "resolve failures are covered: nonzero -G exit, incomplete effective config, unsafe hostkeyalias, port-22 identity, scan failure classification",
+        "quoteOpenSshConfigValue escaping/rejection and memory trust store replace/lookup are covered",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": "openssh-target.ts reported 67.83% statements / 52.77% branches after SDF-007; SSH stays experimental scope, but the trust and resolution paths are pure interfaces behind injected runners and stores."
     }
   ]
 }
