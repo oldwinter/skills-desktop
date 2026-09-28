@@ -266,6 +266,29 @@
         "test:coverage"
       ],
       "notes": "openssh-target.ts reported 67.83% statements / 52.77% branches after SDF-007; SSH stays experimental scope, but the trust and resolution paths are pure interfaces behind injected runners and stores."
+    },
+    {
+      "id": "SDF-009",
+      "title": "Bind verified state to source freshness, gate plan, and complete required-gate coverage",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 90,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "deliver rejects tracked-file edits made after a passing verify even when HEAD is unchanged",
+        "deliver rejects untracked non-ignored files that appear after a passing verify",
+        "deliver rejects gate-plan edits (argv, timeouts, or item gate list) made after a passing verify",
+        "verify --gates <subset> records complete:false with the missing required gates and lands in failed instead of verified",
+        "regression tests cover failure, retry, recovery, honest partial diagnostics, and in-repo tracked backlog state churn"
+      ],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": "Root probes reproduced three false-success paths (boundary-20260928T190712.598065Z); follow-up probe confirmed the fix at 19:58Z. Backlog file is excluded from sourceDigest but bound via planDigest + itemDigest."
     }
   ]
 }

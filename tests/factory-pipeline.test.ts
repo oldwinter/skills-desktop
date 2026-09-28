@@ -186,6 +186,155 @@ describe("factory pipeline", () => {
     expect((await readBacklogFile()).items[0].state).toBe("verified");
   });
 
+  it("refuses delivery when tracked source changed after the passing verify", async () => {
+    await writeFile(join(repoDir, "product.txt"), "verified bytes\n", "utf8");
+    await execFileAsync("git", ["-C", repoDir, "add", "product.txt"]);
+    await execFileAsync("git", [
+      "-C", repoDir, "-c", "user.email=factory@test", "-c", "user.name=factory",
+      "commit", "-qm", "add product",
+    ]);
+    await writeBacklogFile(
+      backlogWith({ pass: [process.execPath, "-e", "process.exit(0)"] }, [item("SDF-013")]),
+    );
+    await run("claim", "SDF-013");
+    await run("review", "SDF-013");
+    expect((await run("verify", "SDF-013")).code).toBe(0);
+
+    // Reproduced probe: HEAD is unchanged, but the verified bytes moved.
+    await writeFile(join(repoDir, "product.txt"), "tampered bytes\n", "utf8");
+    const deliver = await run("deliver", "SDF-013");
+    expect(deliver.code).toBe(2);
+    expect(deliver.lines.join("\n")).toContain("source changed");
+    expect((await readBacklogFile()).items[0].state).toBe("verified");
+
+    // Committing the change also fails freshness; only re-verification binds.
+    await execFileAsync("git", [
+      "-C", repoDir, "-c", "user.email=factory@test", "-c", "user.name=factory",
+      "commit", "-qam", "tamper",
+    ]);
+    expect((await run("deliver", "SDF-013")).code).toBe(2);
+    expect((await run("verify", "SDF-013")).code).toBe(0);
+    expect((await run("deliver", "SDF-013")).code).toBe(0);
+  });
+
+  it("refuses delivery when an untracked file appears after the passing verify", async () => {
+    await writeBacklogFile(
+      backlogWith({ pass: [process.execPath, "-e", "process.exit(0)"] }, [item("SDF-014")]),
+    );
+    await run("claim", "SDF-014");
+    await run("review", "SDF-014");
+    expect((await run("verify", "SDF-014")).code).toBe(0);
+
+    await writeFile(join(repoDir, "surprise.txt"), "unverified\n", "utf8");
+    const deliver = await run("deliver", "SDF-014");
+    expect(deliver.code).toBe(2);
+    expect(deliver.lines.join("\n")).toContain("source changed");
+
+    await execFileAsync("git", ["-C", repoDir, "clean", "-fq"]);
+    expect((await run("deliver", "SDF-014")).code).toBe(0);
+  });
+
+  it("refuses delivery when the gate plan changed after the passing verify", async () => {
+    await writeBacklogFile(
+      backlogWith({ pass: [process.execPath, "-e", "process.exit(0)"] }, [item("SDF-015")]),
+    );
+    await run("claim", "SDF-015");
+    await run("review", "SDF-015");
+    expect((await run("verify", "SDF-015")).code).toBe(0);
+
+    // Reproduced probe: rewrite the gate argv to exit 1 while preserving the
+    // verified state; the resolved plan digest must reject the delivery.
+    await writeBacklogFile(
+      backlogWith({ pass: [process.execPath, "-e", "process.exit(1)"] }, [
+        item("SDF-015", { state: "verified" }),
+      ]),
+    );
+    const deliver = await run("deliver", "SDF-015");
+    expect(deliver.code).toBe(2);
+    expect(deliver.lines.join("\n")).toContain("gate plan changed");
+
+    // Restoring the verified plan restores delivery; verification is bound.
+    await writeBacklogFile(
+      backlogWith({ pass: [process.execPath, "-e", "process.exit(0)"] }, [
+        item("SDF-015", { state: "verified" }),
+      ]),
+    );
+    expect((await run("deliver", "SDF-015")).code).toBe(0);
+  });
+
+  it("records honest partial coverage instead of verifying on a gate subset", async () => {
+    await writeBacklogFile(
+      backlogWith(
+        {
+          pass: [process.execPath, "-e", "process.exit(0)"],
+          strict: [process.execPath, "-e", "process.exit(1)"],
+        },
+        [item("SDF-016", { gates: ["pass", "strict"] })],
+      ),
+    );
+    await run("claim", "SDF-016");
+    await run("review", "SDF-016");
+
+    // Reproduced probe: --gates pass alone must not verify the item while the
+    // required strict gate never ran.
+    const partial = await run("verify", "SDF-016", "--gates", "pass");
+    expect(partial.code).toBe(1);
+    expect(partial.lines.join("\n")).toContain("partial");
+    expect(partial.lines.join("\n")).toContain("strict");
+    expect((await readBacklogFile()).items[0].state).toBe("failed");
+    const ledger = await readLedger(join(root, "rt"), "SDF-016");
+    expect(ledger?.attempts[0]).toMatchObject({
+      complete: false,
+      missing: ["strict"],
+      ok: true,
+      passed: false,
+    });
+    expect((await run("deliver", "SDF-016")).code).toBe(2);
+
+    // A full run still fails honestly on the strict gate.
+    const full = await run("verify", "SDF-016");
+    expect(full.code).toBe(1);
+    expect((await readBacklogFile()).items[0].state).toBe("failed");
+    expect((await run("deliver", "SDF-016")).code).toBe(2);
+
+    // Recovery: fixing the gate lets the full plan verify and deliver.
+    await writeBacklogFile(
+      backlogWith(
+        {
+          pass: [process.execPath, "-e", "process.exit(0)"],
+          strict: [process.execPath, "-e", "process.exit(0)"],
+        },
+        [item("SDF-016", { gates: ["pass", "strict"], state: "failed" })],
+      ),
+    );
+    expect((await run("verify", "SDF-016")).code).toBe(0);
+    expect((await run("deliver", "SDF-016")).code).toBe(0);
+  });
+
+  it("delivers cleanly when the tracked backlog file lives inside the repository", async () => {
+    // Real-repo topology: docs/factory/backlog.json is tracked, so every
+    // state transition rewrites it between verify and deliver. The source
+    // digest must exclude it; acceptance and gate-plan changes still bind.
+    backlogPath = join(repoDir, "docs", "factory", "backlog.json");
+    await mkdir(join(repoDir, "docs", "factory"), { recursive: true });
+    env = { ...env, SKILLS_DESKTOP_FACTORY_BACKLOG: backlogPath };
+    await writeBacklogFile(
+      backlogWith({ pass: [process.execPath, "-e", "process.exit(0)"] }, [item("SDF-017")]),
+    );
+    await execFileAsync("git", ["-C", repoDir, "add", "docs/factory/backlog.json"]);
+    await execFileAsync("git", [
+      "-C", repoDir, "-c", "user.email=factory@test", "-c", "user.name=factory",
+      "commit", "-qm", "track backlog",
+    ]);
+
+    expect((await run("claim", "SDF-017")).code).toBe(0);
+    expect((await run("implement", "SDF-017")).code).toBe(0);
+    expect((await run("review", "SDF-017")).code).toBe(0);
+    expect((await run("verify", "SDF-017")).code).toBe(0);
+    expect((await run("deliver", "SDF-017")).code).toBe(0);
+    expect((await readBacklogFile()).items[0].state).toBe("delivered");
+  });
+
   it("stops the plan at the first failing gate", async () => {
     await writeBacklogFile(
       backlogWith(

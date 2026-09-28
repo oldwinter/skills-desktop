@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -40,11 +41,15 @@ Commands:
   verify <id> [--gates a,b]  reviewing|verifying|failed|verified -> verifying
                            -> verified|failed. Runs the gate plan fail-fast
                            and records per-gate logs under the run directory.
-                           Exits non-zero on any gate failure; success is never
-                           recorded for a failed attempt.
+                           The verified state requires the attempt to pass AND
+                           to cover every gate required by the item; a subset
+                           run records an honest partial diagnosis and leaves
+                           the item failed. Exits non-zero unless all required
+                           gates passed.
   deliver <id>             verified -> delivered. Writes a reviewable
                            delivery report under deliveries/. Refuses when the
-                           verified HEAD is stale.
+                           verified HEAD, the working-tree source, or the
+                           resolved gate plan drifted after verification.
   abandon <id> --reason t  Move an open item to abandoned.
   requeue <id>             failed|abandoned -> queued.
   status                   Rewrite status.md and print a summary.
@@ -93,6 +98,64 @@ function git(root, args) {
 
 async function headSha(cwd) {
   return (await git(cwd, ["rev-parse", "HEAD"])).trim();
+}
+
+// Gates run against the working tree, so a verified attempt must bind to the
+// exact source it observed: the tracked diff against HEAD plus the content
+// hash of every untracked (non-ignored) path. Editing a tracked file,
+// staging changes, or adding/modifying an untracked file after verification
+// changes this digest and invalidates the attempt. The backlog file itself is
+// excluded — factory state transitions rewrite it between verify and
+// deliver; its meaningful content is bound separately by planDigest and
+// itemDigest.
+async function sourceDigest(cwd, backlogPath) {
+  const excluded = relative(cwd, backlogPath);
+  const pathspec =
+    excluded === "" || excluded.startsWith("..")
+      ? ["--", "."]
+      : ["--", ".", `:(exclude)${excluded}`];
+  const [diff, untracked] = await Promise.all([
+    git(cwd, ["diff", "HEAD", "--no-color", "--binary", ...pathspec]),
+    git(cwd, ["ls-files", "-z", "--others", "--exclude-standard"]),
+  ]);
+  const paths = untracked
+    .split("\0")
+    .filter(Boolean)
+    .filter((path) => path !== excluded)
+    .sort();
+  let blobs = "";
+  if (paths.length > 0) {
+    blobs = (await git(cwd, ["hash-object", "--", ...paths])).trim();
+  }
+  return createHash("sha256")
+    .update(diff)
+    .update("\0")
+    .update(paths.join("\0"))
+    .update("\0")
+    .update(blobs)
+    .digest("hex");
+}
+
+// The gate plan is resolved from the backlog at verify time; binding the plan
+// means a post-verification edit to gate argv, timeouts, or the item's gate
+// list invalidates the attempt even when the git state is unchanged.
+function planDigest(plan) {
+  return createHash("sha256").update(JSON.stringify(plan)).digest("hex");
+}
+
+// Binds the acceptance surface the delivery claims to satisfy: criteria text,
+// kind, title, and the item's own gate list.
+function itemDigest(item) {
+  return createHash("sha256")
+    .update(
+      JSON.stringify({
+        acceptance: item.acceptance,
+        gates: item.gates ?? null,
+        kind: item.kind,
+        title: item.title,
+      }),
+    )
+    .digest("hex");
 }
 
 async function context(env, options) {
@@ -235,41 +298,61 @@ async function cmdVerify(ctx, out, options) {
     await writeBacklog(ctx.backlogPath, ctx.backlog);
     throw new Error(`no gates selected for ${item.id}.`);
   }
+  const missing = plan
+    .filter((gate) => !selected.some((chosen) => chosen.name === gate.name))
+    .map((gate) => gate.name);
+  const complete = missing.length === 0;
   const head = await headSha(ctx.cwd).catch(() => "unknown");
   const attemptDir = await attemptDirectory(ctx.root, item.id, attempt);
   await appendProgress(ctx.root, {
     attempt,
+    complete,
     event: "verify-start",
     gates: selected.map((gate) => gate.name),
     head,
     item: item.id,
+    missing,
     state: "verifying",
   });
-  out(`${item.id}: verifying attempt ${attempt} (${selected.map((gate) => gate.name).join(", ")})`);
+  out(
+    `${item.id}: verifying attempt ${attempt} (${selected.map((gate) => gate.name).join(", ")})` +
+      (complete ? "" : `; partial run, missing: ${missing.join(", ")}`),
+  );
   const startedAt = Date.now();
   const outcome = await runGatePlan(selected, { attemptDir, cwd: ctx.cwd });
-  const to = outcome.ok ? "verified" : "failed";
+  const passed = outcome.ok && complete;
+  const to = passed ? "verified" : "failed";
+  const source = await sourceDigest(ctx.cwd, ctx.backlogPath);
   item.state = to;
   await writeBacklog(ctx.backlogPath, ctx.backlog);
   const finishedAt = new Date().toISOString();
   ledger.attempts.push({
     at: finishedAt,
+    complete,
     durationMs: Date.now() - startedAt,
+    gates: selected.map((gate) => gate.name),
     head,
+    itemDigest: itemDigest(item),
+    missing,
     n: attempt,
     ok: outcome.ok,
+    passed,
+    planDigest: planDigest(plan),
     results: outcome.results,
+    sourceDigest: source,
   });
   ledger.updatedAt = finishedAt;
   await writeLedger(ctx.root, item.id, ledger);
   await recordTransition(ctx.root, item.id, "verify", "verifying", to, finishedAt, `attempt ${attempt}`);
   await appendProgress(ctx.root, {
     attempt,
+    complete,
     durationMs: Date.now() - startedAt,
     event: "verify-end",
     gates: outcome.results.map(({ durationMs, name, ok }) => ({ durationMs, name, ok })),
     head,
     item: item.id,
+    missing,
     state: to,
   });
   for (const result of outcome.results) {
@@ -278,8 +361,14 @@ async function cmdVerify(ctx, out, options) {
         `${result.durationMs}ms exit=${result.exitCode ?? "spawn"}${result.timedOut ? " timed-out" : ""} log=${result.logPath}`,
     );
   }
+  if (outcome.ok && !complete) {
+    out(
+      `  partial diagnosis: ${missing.length} required gate(s) never ran: ${missing.join(", ")}. ` +
+        "Run verify without --gates for full coverage; the item is not verified.",
+    );
+  }
   out(`${item.id}: verifying -> ${to}`);
-  return outcome.ok ? 0 : 1;
+  return passed ? 0 : 1;
 }
 
 async function cmdDeliver(ctx, out, options) {
@@ -298,12 +387,38 @@ async function cmdDeliver(ctx, out, options) {
     throw new Error(`cannot deliver ${item.id} while it is "${item.state}" (requires verified).`);
   }
   const lastAttempt = ledger?.attempts.at(-1);
-  if (lastAttempt?.ok !== true) {
+  if (lastAttempt?.ok !== true || lastAttempt?.passed !== true) {
     throw new Error(`cannot deliver ${item.id}: no passing verify attempt on record.`);
+  }
+  const plan = gatePlanFor(item, ctx.backlog);
+  const ran = new Set(lastAttempt.results.map((result) => result.name));
+  const uncovered = plan.map((gate) => gate.name).filter((name) => !ran.has(name));
+  if (lastAttempt.complete !== true || uncovered.length > 0) {
+    throw new Error(
+      `cannot deliver ${item.id}: verification did not cover every required gate` +
+        (uncovered.length > 0 ? ` (missing ${uncovered.join(", ")})` : "") +
+        ". Run the full gate plan with verify.",
+    );
   }
   if (lastAttempt.head !== "unknown" && lastAttempt.head !== head) {
     throw new Error(
       `cannot deliver ${item.id}: verified at ${lastAttempt.head.slice(0, 12)} but HEAD is now ${head.slice(0, 12)}. Re-run verify.`,
+    );
+  }
+  const currentSource = await sourceDigest(ctx.cwd, ctx.backlogPath);
+  if (lastAttempt.sourceDigest !== currentSource) {
+    throw new Error(
+      `cannot deliver ${item.id}: the working-tree source changed after verification. Re-run verify.`,
+    );
+  }
+  if (lastAttempt.planDigest !== planDigest(plan)) {
+    throw new Error(
+      `cannot deliver ${item.id}: the gate plan changed after verification. Re-run verify.`,
+    );
+  }
+  if (lastAttempt.itemDigest !== itemDigest(item)) {
+    throw new Error(
+      `cannot deliver ${item.id}: the item's acceptance surface changed after verification. Re-run verify.`,
     );
   }
   const deliveryIndex = (existing?.n ?? 0) + 1;
@@ -324,6 +439,8 @@ async function cmdDeliver(ctx, out, options) {
 - delivered at: ${new Date().toISOString()}
 - head: ${head}
 - verify attempt: ${lastAttempt.n} (${lastAttempt.at}, ${lastAttempt.durationMs}ms)
+- verified source digest: ${lastAttempt.sourceDigest}
+- verified gate-plan digest: ${lastAttempt.planDigest}
 
 ## Acceptance criteria
 
