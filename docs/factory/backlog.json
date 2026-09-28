@@ -606,6 +606,31 @@
       "notes": [
         "local-skills-targets.ts at 78.9% branches; uncovered guards around 135, 322-357"
       ]
+    },
+    {
+      "id": "SDF-023",
+      "title": "Cover studio coordinator failure edges: cancelled export pick, oversized draft, records.put failure",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 230,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "cancelled export pick returns ok without invoking exportSkill or touching lastExport/lastError",
+        "saveDraft rejects text over STUDIO_MAX_DRAFT_TEXT_LENGTH before touching records",
+        "a failed records.put surfaces the error and does not advance the draft revision",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "dependsOn": [],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "application/studio.ts at 78.1% branches; uncovered ~474, 503-504, 561"
+      ]
     }
   ]
 }

@@ -3,7 +3,10 @@ import { describe, expect, it, vi } from "vitest";
 import type { StudioTreeEntry } from "@skills-desktop/skills-runtime";
 
 import { publicStudioStateSchema } from "../../contracts/workspace.js";
-import { createMemoryStudioDraftRecords } from "../persistence/studio-draft-records.js";
+import {
+  createMemoryStudioDraftRecords,
+  type StudioDraftRecords,
+} from "../persistence/studio-draft-records.js";
 import type { FolderPick } from "./publication.js";
 import {
   createStudioCoordinator,
@@ -49,19 +52,19 @@ function fakeHost(overrides: Partial<StudioHost> = {}) {
   return host;
 }
 
-function harness(host?: StudioHost) {
+function harness(host?: StudioHost, drafts?: StudioDraftRecords) {
   let ids = 0;
   let now = Date.parse("2026-09-15T10:00:00.000Z");
   const onChange = vi.fn();
-  const drafts = createMemoryStudioDraftRecords();
+  const records = drafts ?? createMemoryStudioDraftRecords();
   const studio = createStudioCoordinator({
     clock: () => new Date((now += 1_000)),
-    drafts,
+    drafts: records,
     ...(host === undefined ? {} : { host }),
     id: () => `id-${(ids += 1)}`,
     onChange,
   });
-  return { drafts, onChange, studio };
+  return { drafts: records, onChange, studio };
 }
 
 describe("createStudioCoordinator (ADR 0018)", () => {
@@ -249,6 +252,75 @@ describe("createStudioCoordinator (ADR 0018)", () => {
     });
     expect(studio.state().lastExport).toBeNull();
     expect(studio.state().lastError?.code).toBe("studio_export_failed");
+  });
+
+  it("treats a cancelled export pick as a no-op without host writes", async () => {
+    const host = fakeHost();
+    const { studio } = harness(host);
+    await studio.createDraft("w1");
+    const draft = studio.state().drafts[0]!;
+    await studio.saveDraft(draft.id, 1, SKILL_MD);
+
+    const cancelled = await studio.exportDraft(draft.id);
+    expect(cancelled).toMatchObject({ ok: true });
+    expect(host.chooseExportParent).toHaveBeenCalledOnce();
+    expect(host.exportSkill).not.toHaveBeenCalled();
+    expect(studio.state().lastExport).toBeNull();
+    expect(studio.state().lastError).toBeNull();
+  });
+
+  it("rejects draft text over the bounded length before touching records", async () => {
+    const { studio } = harness();
+    await studio.createDraft("w1");
+    const draft = studio.state().drafts[0]!;
+    const huge = `${"x".repeat(128 * 1_024 + 1)}`;
+    expect(
+      await studio.saveDraft(draft.id, 1, huge),
+    ).toMatchObject({
+      error: { code: "studio_draft_invalid" },
+      ok: false,
+    });
+    // The draft keeps its original text; nothing was persisted.
+    expect(
+      studio.state().drafts.find(({ id }) => id === draft.id)?.skillMd,
+    ).toBe(draft.skillMd);
+  });
+
+  it("surfaces a failed records put without advancing the draft revision", async () => {
+    const memory = createMemoryStudioDraftRecords();
+    // createDraft (expectedRevision null) succeeds; the revision-bumping
+    // saveDraft put fails, so the in-memory draft must stay at revision 1.
+    const failingPut = vi.fn(
+      async (
+        record: Parameters<StudioDraftRecords["put"]>[0],
+        expectedRevision: number | null,
+      ) =>
+        expectedRevision === null
+          ? memory.put(record, expectedRevision)
+          : {
+              error: {
+                code: "persist_failed" as const,
+                effects: "none" as const,
+                message: "disk full",
+                phase: "persist" as const,
+                retryable: true,
+              },
+              ok: false as const,
+            },
+    );
+    const { studio } = harness(fakeHost(), {
+      ...memory,
+      put: failingPut,
+    });
+    await studio.createDraft("w1");
+    const draft = studio.state().drafts[0]!;
+
+    const saved = await studio.saveDraft(draft.id, 1, "# updated\n");
+    expect(saved).toMatchObject({ ok: false });
+    expect(studio.state().lastError?.message).toBe("disk full");
+    expect(
+      studio.state().drafts.find(({ id }) => id === draft.id)?.revision,
+    ).toBe(1);
   });
 
   it("serializes host-backed steps and clears grants on shutdown", async () => {
