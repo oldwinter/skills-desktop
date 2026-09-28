@@ -289,6 +289,29 @@
         "test:coverage"
       ],
       "notes": "Root probes reproduced three false-success paths (boundary-20260928T190712.598065Z); follow-up probe confirmed the fix at 19:58Z. Backlog file is excluded from sourceDigest but bound via planDigest + itemDigest."
+    },
+    {
+      "id": "SDF-010",
+      "title": "Cover git-publisher failure matrix: plumbing exits, abort, drift guards, and readback fallback",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 100,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "git-publisher.test.ts covers prepare() failures: empty export, init/read-tree/fetch/read-tree-base/force-remove/hash-object/cacheinfo/write-tree/commit-tree nonzero or malformed exits, each cleaning up the workspace root",
+        "prepare() with an aborted signal reports git_unavailable via GitUnavailableError",
+        "push() covers invalid files, unreadable remote before push, and the abort catch path",
+        "readback() returns status uncertain and still removes its root when the runner throws",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": "git-publisher.ts at 70% branches after SDF-009 verify; uncovered lines cluster on cleanup-on-failure plumbing exits and the push/readback fallback paths (26 uncovered statement lines)."
     }
   ]
 }
