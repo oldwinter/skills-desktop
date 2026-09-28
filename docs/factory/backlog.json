@@ -938,6 +938,31 @@
       "notes": [
         "deferred-update-records.ts 119/126/169; imported-packages.ts sortRecords comparator 64-66"
       ]
+    },
+    {
+      "id": "SDF-036",
+      "title": "Cover Studio tree-validator summary and decode tails",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 360,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "skill_too_large fires when total authored bytes exceed the Skill budget while each file stays within the per-file bound",
+        "description_invalid fires on a blank frontmatter description",
+        "not_utf8 fires for non-SKILL.md markdown while SKILL.md decode failure stays silent",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "dependsOn": [],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "packages/skills-runtime/src/studio.ts ~325,344,396,431-437"
+      ]
     }
   ]
 }
