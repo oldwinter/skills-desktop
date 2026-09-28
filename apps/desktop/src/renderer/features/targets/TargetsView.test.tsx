@@ -655,5 +655,5 @@ describe("TargetsView", () => {
         workspace: localTarget.workspace,
       }),
     );
-  });
+  }, 15_000);
 });

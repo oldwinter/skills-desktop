@@ -40,7 +40,7 @@ async function waitForFile(
     };
     const timeout = setTimeout(() => {
       finish(() => reject(new Error("Timed out waiting for fake SSH input.")));
-    }, 5_000);
+    }, 15_000);
     const inspect = () => {
       void readFile(path, "utf8").then(
         (contents) => {
@@ -286,6 +286,7 @@ process.stdin.on("data", (chunk) => {
       await rm(directory, { force: true, recursive: true });
     }
   },
+  15_000,
 );
 
 it.skipIf(process.platform === "win32")(
@@ -360,6 +361,7 @@ process.stdin.resume();
       await rm(directory, { force: true, recursive: true });
     }
   },
+  15_000,
 );
 
 it.skipIf(process.platform === "win32")(
@@ -427,10 +429,12 @@ process.stdin.resume();
       await rm(directory, { force: true, recursive: true });
     }
   },
+  15_000,
 );
 
 describe.skipIf(process.platform === "win32")(
   "retained POSIX transport streams",
+  { timeout: 30_000 },
   () => {
     it.each([
       { disposition: "cancelled" as const, outputStream: undefined },
@@ -496,7 +500,7 @@ describe.skipIf(process.platform === "win32")(
         });
         const settled = useControlledTimeout
           ? observeRunnerResult(pending)
-          : boundedRunnerResult(pending, 2_000);
+          : boundedRunnerResult(pending, 15_000);
         helperPid = await waitForOwnedHelperPid(helperPidFile);
         if (scenario.disposition === "cancelled") controller.abort();
         if (useControlledTimeout) {

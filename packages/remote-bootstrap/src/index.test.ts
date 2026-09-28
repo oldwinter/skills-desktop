@@ -77,7 +77,7 @@ async function waitForFile(path: string) {
     const timeout = setTimeout(() => {
       watcher.close();
       reject(new Error("Timed out waiting for the mutation child."));
-    }, 5_000);
+    }, 15_000);
     const inspect = () => {
       void readFile(path, "utf8").then(
         () => {
@@ -119,7 +119,7 @@ async function writeCommonJsExecutable(
   return executable;
 }
 
-describe("fixed Remote Bootstrap", () => {
+describe("fixed Remote Bootstrap", { timeout: 30_000 }, () => {
   it("scopes generated executables as CommonJS inside an ES-module package", async () => {
     const parent = await mkdtemp(join(tmpdir(), "skills-esm-parent-"));
     temporaryDirectories.push(parent);

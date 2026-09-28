@@ -122,7 +122,7 @@
       "id": "SDF-002",
       "title": "Widen process-lifecycle observation budgets in timing-sensitive tests that flake under parallel load",
       "kind": "code-change",
-      "state": "queued",
+      "state": "delivered",
       "order": 20,
       "source": {
         "type": "local"
