@@ -5,12 +5,16 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { runFactory } from "../scripts/factory/factory.mjs";
 import { readLedger } from "../scripts/factory/run-store.mjs";
 
 const execFileAsync = promisify(execFile);
+
+// Every run() drives git plus one or more gate subprocesses; the default
+// 5s test timeout is too tight under coverage instrumentation.
+vi.setConfig({ testTimeout: 20_000 });
 
 function backlogWith(gates: Record<string, string[]>, items: object[]) {
   return {

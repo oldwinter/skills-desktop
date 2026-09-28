@@ -453,6 +453,48 @@ describe("About surface", () => {
     ).toBeInTheDocument();
   });
 
+  it("renders the up-to-date state and no status copy for manual or unavailable", async () => {
+    const automatic: AboutUpdateSnapshot = {
+      application: {
+        architecture: "arm64",
+        platform: "darwin",
+        version: "0.1.0",
+      },
+      candidate: null,
+      lastCheckAt: "2026-08-22T06:00:00.000Z",
+      nextAutomaticCheckAt: "2026-08-23T06:00:00.000Z",
+      policy: { channel: "stable", mode: "automatic" },
+      restart: {
+        guardReasons: [],
+        immediateRestartAvailable: false,
+        kind: "none",
+      },
+      schemaVersion: 2,
+      state: { kind: "up-to-date" },
+    };
+    render(<AboutView client={clientFor(automatic)} />);
+    expect(
+      await screen.findByRole("heading", { name: "Up to date" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("This is the latest available stable version."),
+    ).toBeInTheDocument();
+    cleanup();
+
+    for (const kind of ["manual", "unavailable"] as const) {
+      render(
+        <AboutView
+          client={clientFor({ ...automatic, state: { kind } })}
+        />,
+      );
+      await screen.findByRole("heading", { name: "About" });
+      const heading = document.getElementById("update-status-heading");
+      expect(heading).toBeInTheDocument();
+      expect(heading?.textContent).toBe("");
+      cleanup();
+    }
+  });
+
   it("surfaces check, restart, export, and initial-load failures as alerts", async () => {
     const failure = {
       code: "internal_error" as const,

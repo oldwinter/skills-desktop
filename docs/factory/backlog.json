@@ -763,6 +763,31 @@
       "notes": [
         "desktop-capabilities.ts ~4884-4885 publication.busy||studio.busy guard branch"
       ]
+    },
+    {
+      "id": "SDF-029",
+      "title": "Cover preference-records unreadable-file quarantine and AboutView up-to-date/manual/unavailable status branches",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 290,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "a file that stats as regular but fails readFile is quarantined as unreadable (POSIX-only fixture)",
+        "up-to-date automatic state renders its heading and message",
+        "manual and unavailable states under automatic policy render no status copy",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "dependsOn": [],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "preference-records.ts:101 non-ENOENT readFile -> quarantine; AboutView.tsx:40,58 statusCopy branches"
+      ]
     }
   ]
 }
