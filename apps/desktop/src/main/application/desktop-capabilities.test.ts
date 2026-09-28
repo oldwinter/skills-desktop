@@ -681,6 +681,58 @@ describe("DesktopCapabilities inventory role-session contract", () => {
     );
   });
 
+  it("marks recovery uncertain when the durable Target write cannot commit", async () => {
+    const records = createMemoryRecoveryRecords();
+    const capabilities = createDesktopCapabilities({
+      id: () => "operation-targets-failure",
+      recoveryRecords: {
+        async commit(change) {
+          return change.type === "targets.replace"
+            ? {
+                error: {
+                  code: "persist_failed" as const,
+                  effects: "possible" as const,
+                  message: "The Target Definition could not be persisted.",
+                  phase: "restore" as const,
+                  retryable: true,
+                },
+                ok: false as const,
+              }
+            : records.commit(change);
+        },
+        restore: () => records.restore(),
+      },
+      skillsTargets: targetsWith({
+        ...mutationNotExercised,
+        async observeInventory() {
+          return { ok: true as const, value: freshInventory };
+        },
+      }),
+    });
+    await capabilities.initialize();
+    const workspace = capabilities.attach(
+      {
+        endpointId: "workspace-targets-failure",
+        role: "workspace",
+        sessionEpoch: "epoch-targets-failure",
+      },
+      () => undefined,
+    );
+    await expect(workspace.snapshot()).resolves.toMatchObject({
+      inventory: {
+        lastError: {
+          code: "process_failed",
+          message:
+            "Saved Target or recovery authority could not be restored.",
+        },
+        phase: "error",
+      },
+    });
+    expect(capabilities.restartSafety().guardReasons).toContain(
+      "recovery-uncertain",
+    );
+  });
+
   it("keeps the last complete Inventory as stale when a later refresh fails", async () => {
     let observations = 0;
     const process: SkillsProcess = {

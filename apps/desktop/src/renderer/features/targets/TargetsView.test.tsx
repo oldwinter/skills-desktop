@@ -23,6 +23,10 @@ import { TargetsView } from "./TargetsView.js";
 
 afterEach(cleanup);
 
+// Each form test drives several fireEvent/waitFor cycles; coverage
+// instrumentation and worker contention have pushed them past 5s.
+vi.setConfig({ testTimeout: 20_000 });
+
 const localId = "00000000-0000-4000-8000-000000000001";
 const secondId = "00000000-0000-4000-8000-00000000000a";
 const sshId = "00000000-0000-4000-8000-000000000018";

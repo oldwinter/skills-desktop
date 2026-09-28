@@ -838,6 +838,30 @@
       "notes": [
         "recovery-records.ts ~2675/2710/2727 commitFailure paths"
       ]
+    },
+    {
+      "id": "SDF-032",
+      "title": "Cover openssh jump-reference normalization and capabilities targets.replace commit failure",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 320,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "a ProxyJump reference with user@, [ipv6-brackets], and :port is normalized before -G resolution and freezing",
+        "a failed targets.replace commit leaves the authority unavailable and the recovery-uncertain restart guard set",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "dependsOn": [],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "openssh-target.ts jumpReferences ~418-426; desktop-capabilities.ts ~4664/4683-4685"
+      ]
     }
   ]
 }

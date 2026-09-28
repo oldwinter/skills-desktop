@@ -776,6 +776,67 @@ describe("OpenSSH Effective Target Binding and host trust", () => {
     expect(depth).toBe(8);
   });
 
+  it("normalizes user, bracketed IPv6, and port decoration on jump references", async () => {
+    const resolved: string[] = [];
+    const runner: OpenSshToolRunner = {
+      async run(invocation) {
+        if (invocation.executable !== "ssh") {
+          return {
+            exitCode: 0,
+            stderrBytes: 0,
+            stdout: `resolved.internal ${keyA}\n`,
+          };
+        }
+        const reference = invocation.args.at(-1) ?? "";
+        resolved.push(reference);
+        if (reference === "build-host") {
+          return {
+            exitCode: 0,
+            stderrBytes: 0,
+            stdout:
+              "hostname resolved.internal\nuser deploy\nport 2222\nproxyjump deploy@[2001:db8::10]:2222,jump-2.internal:2200\n",
+          };
+        }
+        return {
+          exitCode: 0,
+          stderrBytes: 0,
+          stdout: `hostname ${reference}\nuser deploy\nport 22\nproxyjump none\n`,
+        };
+      },
+    };
+    const access = createOpenSshTargetAccess({
+      clock: () => new Date("2026-08-22T10:00:00.000Z"),
+      id: () => "challenge",
+      runner,
+      trustStore: createMemoryHostTrustStore(),
+    });
+
+    const inspected = await access.inspect(target);
+    if (!inspected.ok || inspected.value.status !== "trust-required") {
+      throw new Error("expected a trust challenge");
+    }
+    await access.confirm(inspected.value.challenge.id, target);
+    const ready = await access.inspect(target);
+    if (!ready.ok || ready.value.status !== "ready") {
+      throw new Error("expected a ready binding");
+    }
+    // user@, brackets, and :port are stripped before each -G resolution;
+    // the chain is re-resolved on inspect, confirm, and re-inspect.
+    expect(resolved).toContain("2001:db8::10");
+    expect(resolved).toContain("jump-2.internal");
+    expect(
+      resolved.every(
+        (reference) => !reference.includes("@") && !reference.startsWith("["),
+      ),
+    ).toBe(true);
+    expect(ready.value.binding.connectionConfig).toContain(
+      "Host 2001:db8::10",
+    );
+    expect(ready.value.binding.connectionConfig).toContain(
+      "Host jump-2.internal",
+    );
+  });
+
   it("exposes a bounded pending-challenge projection and confirms first-use trust", async () => {
     const trustStore = createMemoryHostTrustStore();
     const access = createOpenSshTargetAccess({
