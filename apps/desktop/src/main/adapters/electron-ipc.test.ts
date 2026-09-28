@@ -527,6 +527,196 @@ describe("Electron IPC sender authorization", () => {
     });
   });
 
+  it("forwards package, publication, and studio intents as closed versioned requests", async () => {
+    const handlers = new Map<
+      string,
+      (event: never, ...args: unknown[]) => unknown
+    >();
+    const ipcMain = {
+      handle(
+        channel: string,
+        handler: (event: never, ...args: unknown[]) => unknown,
+      ) {
+        handlers.set(channel, handler);
+      },
+      removeHandler: vi.fn(),
+    };
+    const session = {
+      request: vi.fn(async () => ({
+        ok: true as const,
+        value: { operationId: "operation-9" },
+      })),
+      snapshot: vi.fn(),
+      teardown: vi.fn(),
+    };
+    const capabilities = {
+      attach: vi.fn(() => session),
+      initialize: vi.fn(async () => undefined),
+    };
+    const registration = registerDesktopIpc({
+      capabilities: capabilities as never,
+      ipcMain: ipcMain as never,
+      newEpoch: () => "epoch-1",
+      updates: {
+        exportDiagnostics: vi.fn(async () => "cancelled" as const),
+        getSnapshot: vi.fn(),
+        requestCheck: vi.fn(async () => undefined),
+        requestRestart: vi.fn(async () => "stale" as const),
+        subscribe: vi.fn(() => () => undefined),
+      },
+    });
+    const mainFrame = { url: "skills-desktop://workspace/index.html" };
+    const webContents = {
+      id: 17,
+      isDestroyed: () => false,
+      mainFrame,
+      send: vi.fn(),
+    };
+    registration.attach(webContents as never, "workspace", mainFrame.url);
+    const authorizedEvent = { sender: webContents, senderFrame: mainFrame };
+    const hostileEvent = {
+      sender: webContents,
+      senderFrame: { url: "skills-desktop://review/index.html" },
+    };
+
+    const cases: Array<{
+      readonly args: readonly unknown[];
+      readonly channel: string;
+      readonly forwarded: Record<string, unknown>;
+    }> = [
+      {
+        args: [],
+        channel: "workspace:package:import",
+        forwarded: { type: "package.import" },
+      },
+      {
+        args: [],
+        channel: "workspace:publication:choose-source",
+        forwarded: { type: "publication.choose-source" },
+      },
+      {
+        args: [],
+        channel: "workspace:publication:export",
+        forwarded: { type: "publication.export" },
+      },
+      {
+        args: ["origin", "skills-desktop/publication"],
+        channel: "workspace:publication:prepare",
+        forwarded: {
+          branch: "skills-desktop/publication",
+          remote: "origin",
+          type: "publication.prepare",
+        },
+      },
+      {
+        args: ["plan-1"],
+        channel: "workspace:publication:review-request",
+        forwarded: { planId: "plan-1", type: "publication.review.request" },
+      },
+      {
+        args: ["plan-2"],
+        channel: "workspace:publication:discard",
+        forwarded: { planId: "plan-2", type: "publication.discard" },
+      },
+      {
+        args: [],
+        channel: "workspace:publication:reconcile",
+        forwarded: { type: "publication.reconcile" },
+      },
+      {
+        args: [],
+        channel: "workspace:studio:open",
+        forwarded: { type: "studio.open" },
+      },
+      {
+        args: ["grant-1"],
+        channel: "workspace:studio:release",
+        forwarded: { grantId: "grant-1", type: "studio.release" },
+      },
+      {
+        args: ["grant-2"],
+        channel: "workspace:studio:validate",
+        forwarded: { grantId: "grant-2", type: "studio.validate" },
+      },
+      {
+        args: ["grant-3"],
+        channel: "workspace:studio:draft-create",
+        forwarded: { grantId: "grant-3", type: "studio.draft.create" },
+      },
+      {
+        args: [],
+        channel: "workspace:studio:draft-create",
+        forwarded: { type: "studio.draft.create" },
+      },
+      {
+        args: ["draft-1", 4, "# Skill\n"],
+        channel: "workspace:studio:draft-save",
+        forwarded: {
+          draftId: "draft-1",
+          expectedRevision: 4,
+          skillMd: "# Skill\n",
+          type: "studio.draft.save",
+        },
+      },
+      {
+        args: ["draft-2", 7],
+        channel: "workspace:studio:draft-delete",
+        forwarded: {
+          draftId: "draft-2",
+          expectedRevision: 7,
+          type: "studio.draft.delete",
+        },
+      },
+      {
+        args: ["draft-3"],
+        channel: "workspace:studio:preview",
+        forwarded: { draftId: "draft-3", type: "studio.preview" },
+      },
+      {
+        args: ["draft-4"],
+        channel: "workspace:studio:export",
+        forwarded: { draftId: "draft-4", type: "studio.export" },
+      },
+    ];
+
+    for (const { args, channel, forwarded } of cases) {
+      await expect(
+        handlers.get(channel)!(authorizedEvent as never, "epoch-1", ...args),
+      ).resolves.toEqual({ ok: true, value: { operationId: "operation-9" } });
+      expect(session.request).toHaveBeenLastCalledWith({
+        ...forwarded,
+        version: 2,
+      });
+    }
+
+    await expect(
+      handlers.get("workspace:publication:export")!(
+        hostileEvent as never,
+        "epoch-1",
+      ),
+    ).resolves.toMatchObject({ error: { code: "unauthorized" }, ok: false });
+    await expect(
+      handlers.get("workspace:studio:draft-save")!(
+        hostileEvent as never,
+        "epoch-1",
+        "draft-1",
+        4,
+        "# Skill\n",
+      ),
+    ).resolves.toMatchObject({ error: { code: "unauthorized" }, ok: false });
+
+    session.request.mockRejectedValueOnce(new Error("session crashed"));
+    await expect(
+      handlers.get("workspace:studio:open")!(
+        authorizedEvent as never,
+        "epoch-1",
+      ),
+    ).resolves.toMatchObject({
+      error: { code: "internal_error", phase: "ipc" },
+      ok: false,
+    });
+  });
+
   it("rejects queued workspace and review invokes from a prior attachment epoch", async () => {
     const handlers = new Map<
       string,
