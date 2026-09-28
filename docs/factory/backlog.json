@@ -1,0 +1,186 @@
+{
+  "schemaVersion": 1,
+  "defaults": {
+    "gates": [
+      "typecheck",
+      "lint",
+      "check:imports",
+      "check:context",
+      "test",
+      "build"
+    ]
+  },
+  "gateCommands": {
+    "typecheck": {
+      "argv": [
+        "npm",
+        "run",
+        "typecheck"
+      ],
+      "timeoutMs": 300000
+    },
+    "lint": {
+      "argv": [
+        "npm",
+        "run",
+        "lint"
+      ],
+      "timeoutMs": 300000
+    },
+    "check:imports": {
+      "argv": [
+        "npm",
+        "run",
+        "check:imports"
+      ],
+      "timeoutMs": 120000
+    },
+    "check:context": {
+      "argv": [
+        "npm",
+        "run",
+        "check:context"
+      ],
+      "timeoutMs": 120000
+    },
+    "test": {
+      "argv": [
+        "npm",
+        "test"
+      ],
+      "timeoutMs": 600000
+    },
+    "test:coverage": {
+      "argv": [
+        "npm",
+        "run",
+        "test:coverage"
+      ],
+      "timeoutMs": 900000
+    },
+    "build": {
+      "argv": [
+        "npm",
+        "run",
+        "build"
+      ],
+      "timeoutMs": 600000
+    },
+    "package:darwin": {
+      "argv": [
+        "npm",
+        "run",
+        "package:darwin"
+      ],
+      "timeoutMs": 900000
+    },
+    "packaged-ui": {
+      "argv": [
+        "node",
+        "tests/packaged-ui-qa/run.mjs"
+      ],
+      "timeoutMs": 600000
+    },
+    "prove-inventory": {
+      "argv": [
+        "node",
+        ".cursor/skills/verify-skills-desktop/helpers/prove-inventory.mjs"
+      ],
+      "timeoutMs": 300000
+    },
+    "prove-about": {
+      "argv": [
+        "node",
+        ".cursor/skills/verify-skills-desktop/helpers/prove-about.mjs"
+      ],
+      "timeoutMs": 300000
+    }
+  },
+  "items": [
+    {
+      "id": "SDF-001",
+      "title": "Symlink node in the macOS fallback-PATH fixture so dynamically linked Node (Homebrew Cellar) resolves",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 10,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "local-skills-process.test.ts 'resolves a user-installed npx outside the macOS GUI launch PATH' passes on a machine whose node binary needs its sibling lib directory",
+        "the fixture no longer copies the node binary; behavior on CI/Linux Node (self-contained binary) is unchanged",
+        "npm test is green for apps/desktop/src/main/adapters/local-skills-process.test.ts"
+      ],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test"
+      ],
+      "notes": "Baseline failure observed 2026-09-28: copyFile(process.execPath) breaks Homebrew Cellar node (@rpath libnode.dylib lookup fails outside Cellar)."
+    },
+    {
+      "id": "SDF-002",
+      "title": "Widen process-lifecycle observation budgets in timing-sensitive tests that flake under parallel load",
+      "kind": "code-change",
+      "state": "queued",
+      "order": 20,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "ssh-transport-runner.test.ts retained-stream scenarios no longer race a 2s wall-clock budget against real spawn+terminate chains",
+        "remote-bootstrap postflight tests and the TargetsView registry test carry explicit timeouts sized for loaded CI machines",
+        "npm test passes twice in a row on this workstation without flaky timeouts"
+      ],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test"
+      ],
+      "notes": "Baseline failures observed 2026-09-28 under coverage load: boundedRunnerResult 2000ms race lost; 5000ms default testTimeout exceeded by remote-bootstrap postflight cases."
+    },
+    {
+      "id": "SDF-003",
+      "title": "Exercise the packaged darwin arm64 app through the repo's CDP proof lane in a disposable fixture",
+      "kind": "verification",
+      "state": "queued",
+      "order": 30,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "npm run package:darwin produces apps/desktop/out/Skills Desktop-darwin-arm64/Skills Desktop.app",
+        "prove-inventory drives the packaged workspace against the stub-npx fixture and asserts the pinned skills@1.5.23 list argv",
+        "prove-about asserts the unsigned-preview About surface (Manual upgrade, version, diagnostics export)",
+        "fixture is disposable; evidence lands under .scratch/verify-skills-desktop/evidence and is not committed"
+      ],
+      "gates": [
+        "package:darwin",
+        "prove-inventory",
+        "prove-about"
+      ],
+      "notes": "Extends the Linux-only packaged lanes to this darwin-arm64 operator machine; no product change intended."
+    },
+    {
+      "id": "SDF-004",
+      "title": "Backfill coverage for the weakest-covered production module after the factory's first full coverage run",
+      "kind": "code-change",
+      "state": "queued",
+      "order": 40,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "one module below or nearest the 80 percent coverage threshold gains behavior-focused tests",
+        "the new tests fail without the production behavior they lock in (checked by mutation spot-check or coverage delta)",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": "Pick the target from the coverage report produced during iteration; prefer boundary modules with real branch gaps."
+    }
+  ]
+}
