@@ -162,4 +162,29 @@ describe("createPreferenceAuthority", () => {
     expect(seen).toEqual(["zh-CN/system"]);
     expect(authority.current().appearance).toBe("light");
   });
+
+  it("surfaces a thrown load as a warning and falls back to defaults", async () => {
+    const failing = (thrown: unknown) =>
+      createPreferenceAuthority({
+        records: {
+          async load() {
+            throw thrown;
+          },
+          async save() {},
+        },
+        systemLocaleTag: () => undefined,
+      });
+
+    const errored = failing(new Error("permission denied"));
+    await errored.initialize();
+    expect(errored.warning()).toBe("permission denied");
+    expect(errored.current().localePreference).toBe("system");
+
+    const nonError = failing("disk offline");
+    await nonError.initialize();
+    expect(nonError.warning()).toBe(
+      "Preference state could not be read.",
+    );
+    expect(nonError.current().localePreference).toBe("system");
+  });
 });

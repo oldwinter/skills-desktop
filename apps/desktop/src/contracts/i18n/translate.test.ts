@@ -7,6 +7,7 @@ import {
   CATALOGS,
   createTranslator,
   interpolate,
+  isLocale,
   placeholdersOf,
   type MessageKey,
 } from "./translate.js";
@@ -143,5 +144,19 @@ describe("createTranslator", () => {
 
   it("defaults to English", () => {
     expect(createTranslator().t("nav.inventory")).toBe("Inventory");
+  });
+});
+
+describe("isLocale", () => {
+  it("accepts only catalog locales", () => {
+    for (const locale of LOCALES) {
+      expect(isLocale(locale)).toBe(true);
+    }
+    expect(isLocale("fr")).toBe(false);
+    expect(isLocale("en-US-x-private")).toBe(false);
+    expect(isLocale(42)).toBe(false);
+    expect(isLocale(null)).toBe(false);
+    expect(isLocale(undefined)).toBe(false);
+    expect(isLocale({ locale: "en" })).toBe(false);
   });
 });

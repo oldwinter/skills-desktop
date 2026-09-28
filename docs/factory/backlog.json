@@ -435,6 +435,30 @@
         "test:coverage"
       ],
       "notes": "electron-ipc.ts 75.6% branches; uncovered handler families around lines 265-370, 450-720, 925-960, 1024."
+    },
+    {
+      "id": "SDF-016",
+      "title": "Cover residual contract edges: imported-package sibling pass-through, about superRefines, preference load crash, isLocale",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 160,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "importSkillpack updates one record while leaving sibling records untouched across conflict and delta paths",
+        "sortRecords orders multiple records by package id",
+        "about schema rejects restart/guard disagreement, immediateRestartAvailable on non-deferred, v2 update-downloaded without candidate, and manual-policy restart authority",
+        "preference authority surfaces a thrown records.load() as a warning (Error message and non-Error fallback)",
+        "isLocale accepts catalog locales and rejects non-catalog strings and non-strings",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": "imported-packages.ts 72.2% branches (sibling map arm), about.ts 70% (superRefine issue paths), preferences.ts line ~70 catch, translate.ts isLocale."
     }
   ]
 }

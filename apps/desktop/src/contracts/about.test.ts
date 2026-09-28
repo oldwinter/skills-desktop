@@ -371,4 +371,107 @@ describe("About update contract", () => {
       ).toThrow();
     }
   });
+
+  it("rejects restart authority that contradicts its guards or candidate", () => {
+    const candidate = {
+      architecture: "x64",
+      id: "00000000-0000-4000-8000-000000000025",
+      platform: "win32",
+      version: "0.2.0",
+    };
+    const base = {
+      application: {
+        architecture: "x64",
+        platform: "win32",
+        version: "0.1.0",
+      },
+      candidate,
+      lastCheckAt: "2026-08-22T06:00:00.000Z",
+      nextAutomaticCheckAt: null,
+      policy: { channel: "stable", mode: "automatic" },
+      restart: {
+        guardReasons: ["mutation-active"],
+        immediateRestartAvailable: false,
+        kind: "blocked",
+      },
+      schemaVersion: 2,
+      state: { kind: "update-downloaded" },
+    };
+
+    // A blocked restart without guard reasons disagrees with itself.
+    expect(() =>
+      aboutUpdateSnapshotSchema.parse({
+        ...base,
+        restart: { ...base.restart, guardReasons: [] },
+      }),
+    ).toThrow();
+    // An unblocked restart must not claim blocking.
+    expect(() =>
+      aboutUpdateSnapshotSchema.parse({
+        ...base,
+        restart: {
+          ...base.restart,
+          guardReasons: ["mutation-active"],
+          kind: "deferred",
+        },
+        state: { kind: "update-downloaded" },
+      }),
+    ).toThrow();
+    // Immediate restart is only for an unblocked deferred candidate.
+    expect(() =>
+      aboutUpdateSnapshotSchema.parse({
+        ...base,
+        restart: { ...base.restart, immediateRestartAvailable: true },
+      }),
+    ).toThrow();
+    // Downloaded state requires the candidate identity it downloaded.
+    expect(() =>
+      aboutUpdateSnapshotSchema.parse({
+        ...base,
+        candidate: null,
+        restart: {
+          guardReasons: [],
+          immediateRestartAvailable: false,
+          kind: "none",
+        },
+      }),
+    ).toThrow();
+    // A candidate cannot sit beside restart: none.
+    expect(() =>
+      aboutUpdateSnapshotSchema.parse({
+        ...base,
+        restart: {
+          guardReasons: [],
+          immediateRestartAvailable: false,
+          kind: "none",
+        },
+      }),
+    ).toThrow();
+    // Deferred/restarting restart states require a candidate.
+    expect(() =>
+      aboutUpdateSnapshotSchema.parse({
+        ...base,
+        candidate: null,
+        restart: {
+          guardReasons: [],
+          immediateRestartAvailable: true,
+          kind: "deferred",
+        },
+        state: { kind: "idle" },
+      }),
+    ).toThrow();
+    // Manual platforms cannot expose a downloaded candidate or restart.
+    expect(() =>
+      aboutUpdateSnapshotSchema.parse({
+        ...base,
+        policy: {
+          message:
+            "Download a newer package from GitHub Releases and install it manually.",
+          mode: "manual",
+          releasePageUrl:
+            "https://github.com/oldwinter/skills-desktop/releases",
+        },
+      }),
+    ).toThrow();
+  });
 });
