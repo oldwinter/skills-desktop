@@ -1012,6 +1012,31 @@
       "notes": [
         "desktop-capabilities.ts ~4559 review-role teardown + ~4568-4572 workspace-owner teardown loops"
       ]
+    },
+    {
+      "id": "SDF-039",
+      "title": "Cover mutation conflict coordination guards in desktop capabilities",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 390,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "mutation.reconcile returns mutation_conflict/phase coordinate while an inventory.refresh observation is in flight",
+        "inventory.refresh returns mutation_conflict/phase coordinate while a mutation.reconcile (activeMutation) is in flight",
+        "the in-flight requests still complete successfully after the conflicting request is rejected",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "dependsOn": [],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "desktop-capabilities.ts ~4422-4493: both mutation_conflict arms — reconcile's activeObservation arm and refresh's activeMutation arm; seeded reconciliation-required guard + gated observeInventory on the skills-process fake"
+      ]
     }
   ]
 }

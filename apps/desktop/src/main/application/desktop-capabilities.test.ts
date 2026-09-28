@@ -7443,3 +7443,135 @@ describe("DesktopCapabilities publication review teardown", () => {
     });
   });
 });
+
+describe("DesktopCapabilities mutation conflict coordination", () => {
+  const uncertainGuard = {
+    deadline: "2026-08-20T11:10:00.000Z",
+    effects: "possible" as const,
+    generation: 1,
+    operationId: "prior-mutation",
+    phase: "reconciliation-required" as const,
+    targetId: target.id,
+  };
+  const persistedTarget = {
+    connectionReference: null,
+    generation: target.generation,
+    harnessIds: target.harnessIds,
+    id: target.id,
+    kind: target.kind,
+    label: target.label,
+    workspace: target.workspace,
+  };
+
+  it("refuses mutation.reconcile while an inventory observation is in flight", async () => {
+    let releaseObservation!: () => void;
+    const blocked = new Promise<void>((resolve) => {
+      releaseObservation = resolve;
+    });
+    let observationStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      observationStarted = resolve;
+    });
+    const records = createMemoryRecoveryRecords(
+      [],
+      [uncertainGuard],
+      [persistedTarget],
+    );
+    const capabilities = createDesktopCapabilities({
+      id: () => "reconcile-during-observe",
+      recoveryRecords: records,
+      skillsTargets: targetsWith({
+        ...mutationNotExercised,
+        async observeInventory() {
+          observationStarted();
+          await blocked;
+          return { ok: true as const, value: freshInventory };
+        },
+      }),
+    });
+    await capabilities.initialize();
+    const session = capabilities.attach(
+      {
+        endpointId: "workspace-reconcile-race",
+        role: "workspace",
+        sessionEpoch: "epoch-reconcile-race",
+      },
+      () => undefined,
+    );
+
+    const refresh = session.request({
+      targetId: target.id,
+      type: "inventory.refresh",
+      version: 2,
+    });
+    await started;
+    await expect(
+      session.request({
+        targetId: target.id,
+        type: "mutation.reconcile",
+        version: 2,
+      }),
+    ).resolves.toMatchObject({
+      error: { code: "mutation_conflict", phase: "coordinate" },
+      ok: false,
+    });
+    releaseObservation();
+    await expect(refresh).resolves.toMatchObject({ ok: true });
+  });
+
+  it("refuses inventory.refresh while a mutation reconciliation is in flight", async () => {
+    let releaseReconcile!: () => void;
+    const blocked = new Promise<void>((resolve) => {
+      releaseReconcile = resolve;
+    });
+    let reconcileStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      reconcileStarted = resolve;
+    });
+    const records = createMemoryRecoveryRecords(
+      [],
+      [uncertainGuard],
+      [persistedTarget],
+    );
+    const capabilities = createDesktopCapabilities({
+      id: () => "reconcile-blocks-refresh",
+      recoveryRecords: records,
+      skillsTargets: targetsWith({
+        ...mutationNotExercised,
+        async observeInventory() {
+          reconcileStarted();
+          await blocked;
+          return { ok: true as const, value: freshInventory };
+        },
+      }),
+    });
+    await capabilities.initialize();
+    const session = capabilities.attach(
+      {
+        endpointId: "workspace-refresh-race",
+        role: "workspace",
+        sessionEpoch: "epoch-refresh-race",
+      },
+      () => undefined,
+    );
+
+    const reconcile = session.request({
+      targetId: target.id,
+      type: "mutation.reconcile",
+      version: 2,
+    });
+    await started;
+    await expect(
+      session.request({
+        targetId: target.id,
+        type: "inventory.refresh",
+        version: 2,
+      }),
+    ).resolves.toMatchObject({
+      error: { code: "mutation_conflict", phase: "coordinate" },
+      ok: false,
+    });
+    releaseReconcile();
+    await expect(reconcile).resolves.toMatchObject({ ok: true });
+  });
+});
