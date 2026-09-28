@@ -713,6 +713,32 @@
       "notes": [
         "application/studio.ts ~415-466 createDraft grant edges; PublishView.tsx:273 export onClick"
       ]
+    },
+    {
+      "id": "SDF-027",
+      "title": "Cover PublishView prepared-plan summary, review/discard forwarding, and exporting/pushing phases",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 270,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "plan-summary renders remote, branch, candidate commit, digest, and expiry",
+        "review and discard buttons forward plan.id to the bridge",
+        "exporting phase shows the busy Exporting state and disables the action",
+        "unborn base renders its label and pushing phase shows the pushing banner",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "dependsOn": [],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "PublishView.tsx uncovered 276-282 spinner ternary + 337-378 plan-summary block"
+      ]
     }
   ]
 }

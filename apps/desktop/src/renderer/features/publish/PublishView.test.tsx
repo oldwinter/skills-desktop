@@ -172,6 +172,73 @@ describe("PublishView (ADR 0019 / ADR 0020)", () => {
     expect(exportPublication).toHaveBeenCalledWith();
   });
 
+  it("shows the exporting phase and honours the busy state", () => {
+    render(
+      <PublishView
+        client={bridge()}
+        publication={state({
+          activeOperationId: "op-5",
+          phase: "exporting",
+          source,
+        })}
+      />,
+    );
+    const exportButton = screen.getByTestId("publish-export");
+    expect(exportButton).toBeDisabled();
+    expect(exportButton).toHaveTextContent("Exporting");
+  });
+
+  it("summarises a prepared plan and forwards review and discard", async () => {
+    const requestPublicationReview = vi.fn(async () => ({
+      ok: true as const,
+      value: { operationId: "op-6" },
+    }));
+    const discardPublication = vi.fn(async () => ({
+      ok: true as const,
+      value: { operationId: "op-7" },
+    }));
+    render(
+      <PublishView
+        client={bridge({ discardPublication, requestPublicationReview })}
+        publication={state({ plan, source })}
+      />,
+    );
+    const summary = screen.getByTestId("publish-plan-summary");
+    expect(summary).toHaveTextContent("Plan ready for review");
+    expect(summary).toHaveTextContent("Plan expires at");
+    expect(summary).toHaveTextContent("https://github.com/acme/skills.git");
+    expect(summary).toHaveTextContent("main");
+    expect(summary).toHaveTextContent(CANDIDATE.slice(0, 12));
+    expect(summary).toHaveTextContent(DIGEST);
+    expect(screen.queryByTestId("publish-plan")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("publish-review"));
+    await waitFor(() =>
+      expect(requestPublicationReview).toHaveBeenCalledWith("plan-1"),
+    );
+    fireEvent.click(screen.getByTestId("publish-discard"));
+    await waitFor(() =>
+      expect(discardPublication).toHaveBeenCalledWith("plan-1"),
+    );
+  });
+
+  it("renders an unborn base and the pushing phase", () => {
+    render(
+      <PublishView
+        client={bridge()}
+        publication={state({
+          phase: "pushing",
+          plan: { ...plan, base: { kind: "unborn" } },
+          source,
+        })}
+      />,
+    );
+    const summary = screen.getByTestId("publish-plan-summary");
+    expect(summary).toHaveTextContent("Pushing");
+    expect(summary).toHaveTextContent("Unborn branch (will be created)");
+    expect(summary).not.toHaveTextContent(BASE.slice(0, 12));
+  });
+
   it("re-enables controls once a failed source pick clears the operation", async () => {
     const choosePublicationSource = vi.fn(async () => ({
       error: {
