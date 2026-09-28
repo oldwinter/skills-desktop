@@ -216,6 +216,11 @@ describe("PublishView (ADR 0019 / ADR 0020)", () => {
     await waitFor(() =>
       expect(requestPublicationReview).toHaveBeenCalledWith("plan-1"),
     );
+    // `busy` clears only after the bridge call settles; wait for the control
+    // to re-enable before clicking discard.
+    await waitFor(() =>
+      expect(screen.getByTestId("publish-discard")).toBeEnabled(),
+    );
     fireEvent.click(screen.getByTestId("publish-discard"));
     await waitFor(() =>
       expect(discardPublication).toHaveBeenCalledWith("plan-1"),
@@ -355,6 +360,11 @@ describe("PublishView (ADR 0019 / ADR 0020)", () => {
     fireEvent.click(screen.getByTestId("publish-review"));
     await waitFor(() =>
       expect(requestPublicationReview).toHaveBeenCalledWith("plan-1"),
+    );
+    // `busy` clears only after the bridge call settles; wait for the control
+    // to re-enable before clicking discard.
+    await waitFor(() =>
+      expect(screen.getByTestId("publish-discard")).toBeEnabled(),
     );
     fireEvent.click(screen.getByTestId("publish-discard"));
     await waitFor(() =>

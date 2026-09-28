@@ -987,6 +987,31 @@
       "notes": [
         "run 36494744718 job 109171562943 @26e1600: pendingCount expected 1 got 0 at InventoryApp.test.tsx:2733. Test block identical to base 24f879f; flake = sync assert racing the passive phase-flip effect (InventoryApp.tsx:619-628) that schedules the 16ms restore poll"
       ]
+    },
+    {
+      "id": "SDF-038",
+      "title": "Cover publication review teardown rejection in desktop capabilities",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 380,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "a pending publication review is rejected when its owning workspace endpoint tears down",
+        "a pending publication review is rejected when its review-role endpoint tears down",
+        "a later review endpoint observes status settled with decision reject",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "dependsOn": [],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "desktop-capabilities.ts ~4559 review-role teardown + ~4568-4572 workspace-owner teardown loops"
+      ]
     }
   ]
 }

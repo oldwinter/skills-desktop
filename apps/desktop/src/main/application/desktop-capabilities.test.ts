@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { Inventory } from "@skills-desktop/skills-runtime";
 
+import { createNodeWellKnownCodec } from "../adapters/node-well-known-codec.js";
 import {
   createJsonRecoveryRecords,
   createMemoryRecoveryRecords,
@@ -7272,5 +7273,173 @@ describe("DesktopCapabilities Official Collection contract", () => {
       target.id,
       secondTarget.id,
     ]);
+  });
+});
+
+describe("DesktopCapabilities publication review teardown", () => {
+  const encoder = new TextEncoder();
+  const publicationFixture = () => ({
+    codec: createNodeWellKnownCodec(),
+    host: {
+      async chooseExportDestination() {
+        return { status: "cancelled" as const };
+      },
+      async chooseSourceFolder() {
+        return {
+          label: "Source",
+          path: "/source",
+          status: "picked" as const,
+        };
+      },
+      async readSourceFolder() {
+        return {
+          ok: true as const,
+          value: [
+            {
+              files: [
+                {
+                  bytes: encoder.encode(
+                    "---\nname: demo\ndescription: Demo skill.\n---\n\n# Demo\n",
+                  ),
+                  path: "SKILL.md",
+                },
+              ],
+              name: "demo",
+            },
+          ],
+        };
+      },
+      async writeExport() {
+        return { ok: true as const, value: undefined };
+      },
+    },
+    publisher: {
+      async discard() {},
+      async prepare() {
+        return {
+          ok: true as const,
+          value: {
+            base: { commit: "b".repeat(40), kind: "commit" as const },
+            candidateCommit: "c".repeat(40),
+            files: [
+              {
+                digest: `sha256:${"d".repeat(64)}` as const,
+                path: ".well-known/agent-skills/index.json",
+              },
+            ],
+            root: "/tmp/owned-root",
+          },
+        };
+      },
+      async push() {
+        return {
+          ok: true as const,
+          value: {
+            observed: "c".repeat(40),
+            pushExitCode: 0,
+            status: "published" as const,
+          },
+        };
+      },
+      async readback() {
+        return { observed: "c".repeat(40), status: "published" as const };
+      },
+    },
+  });
+
+  const plannedReview = async () => {
+    let nextId = 0;
+    const capabilities = createDesktopCapabilities({
+      id: () => `pub-op-${(nextId += 1)}`,
+      publication: publicationFixture(),
+      recoveryRecords: createMemoryRecoveryRecords(),
+      skillsTargets: targetsWith({
+        ...mutationNotExercised,
+        async observeInventory() {
+          return { ok: true, value: freshInventory };
+        },
+      }),
+    });
+    await capabilities.initialize();
+    const workspace = capabilities.attach(
+      {
+        endpointId: "publication-owner",
+        role: "workspace",
+        sessionEpoch: "publication-epoch",
+      },
+      () => undefined,
+    );
+    await workspace.request({
+      type: "publication.choose-source",
+      version: 2,
+    });
+    const prepared = await workspace.request({
+      branch: "main",
+      remote: "https://github.com/vercel-labs/skills",
+      type: "publication.prepare",
+      version: 2,
+    });
+    if (!prepared.ok)
+      throw new Error(`publication.prepare failed: ${JSON.stringify(prepared.error)}`);
+    const snapshot = await workspace.snapshot();
+    if (!("publication" in snapshot) || snapshot.publication?.plan === undefined || snapshot.publication.plan === null) {
+      throw new Error("expected a prepared plan");
+    }
+    const requested = await workspace.request({
+      planId: snapshot.publication.plan.id,
+      type: "publication.review.request",
+      version: 2,
+    });
+    if (!requested.ok) throw new Error("publication.review.request failed");
+    return {
+      capabilities,
+      reviewId: requested.value.operationId,
+      workspace,
+    };
+  };
+
+  it("rejects a pending publication review when its owning workspace leaves", async () => {
+    const { capabilities, reviewId, workspace } = await plannedReview();
+    workspace.teardown();
+    const review = capabilities.attach(
+      {
+        endpointId: "publication-review-reader",
+        reviewId,
+        role: "review",
+        sessionEpoch: "publication-review-epoch",
+      },
+      () => undefined,
+    );
+    await expect(review.snapshot()).resolves.toMatchObject({
+      decision: "reject",
+      status: "settled",
+    });
+  });
+
+  it("rejects a pending publication review when its review window leaves", async () => {
+    const { capabilities, reviewId } = await plannedReview();
+    const opener = capabilities.attach(
+      {
+        endpointId: "publication-review-window",
+        reviewId,
+        role: "review",
+        sessionEpoch: "publication-window-epoch",
+      },
+      () => undefined,
+    );
+    opener.teardown();
+    const reader = capabilities.attach(
+      {
+        endpointId: "publication-review-reader-2",
+        reviewId,
+        role: "review",
+        sessionEpoch: "publication-reader-epoch",
+      },
+      () => undefined,
+    );
+    await expect(reader.snapshot()).resolves.toMatchObject({
+      decision: "reject",
+      status: "settled",
+    });
   });
 });
