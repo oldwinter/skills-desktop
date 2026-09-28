@@ -312,6 +312,29 @@
         "test:coverage"
       ],
       "notes": "git-publisher.ts at 70% branches after SDF-009 verify; uncovered lines cluster on cleanup-on-failure plumbing exits and the push/readback fallback paths (26 uncovered statement lines)."
+    },
+    {
+      "id": "SDF-011",
+      "title": "Cover local-skills-process resolver fallbacks, dialect/observation edges, and executeConfirmed guards",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 110,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "resolveWindowsNpxCommand and resolvePosixNpxCommand cover quoted/empty PATH dirs, partial tool discovery, managed nvm/fnm version dirs under HOME, and the unavailable failures",
+        "observeInventory covers --version nonzero and dialect mismatch, abort-before-start, list failures, post-list abort, and runner-throw classification",
+        "inspectSource covers abort, dialect propagation, timeout classification, and nonzero exit",
+        "executeConfirmed covers digest mismatch, expiry, mutation_conflict while an operation is active, unknown-termination effects, and postflight-failure possible effects",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": "local-skills-process.ts at 79.1% stmts / 67.1% branches after SDF-010; uncovered regions are deterministic resolver branches and injected-runner failure/abort edges, not new spawn behavior."
     }
   ]
 }
