@@ -607,4 +607,79 @@ describe("StudioView (ADR 0018)", () => {
       "The Skill could not be exported.",
     );
   });
+
+  it("requests folder access and a fresh Draft through main", async () => {
+    const openStudioFolder = vi.fn(async () => ({
+      ok: true as const,
+      value: { operationId: "op-folder" },
+    }));
+    const createStudioDraft = vi.fn(async () => ({
+      ok: true as const,
+      value: { operationId: "op-draft" },
+    }));
+    render(
+      <StudioView
+        client={bridge({ createStudioDraft, openStudioFolder })}
+        studio={state()}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("studio-open-folder"));
+    await waitFor(() => expect(openStudioFolder).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByTestId("studio-new-draft"));
+    await waitFor(() => expect(createStudioDraft).toHaveBeenCalledTimes(1));
+    expect(createStudioDraft.mock.calls[0]).toHaveLength(0);
+  });
+
+  it("surfaces a rejected intent instead of failing silently", async () => {
+    const openStudioFolder = vi.fn(async () => ({
+      error: {
+        code: "internal_error" as const,
+        effects: "none" as const,
+        message: "picker broke",
+        phase: "ipc" as const,
+        retryable: true,
+      },
+      ok: false as const,
+    }));
+    render(
+      <StudioView
+        client={bridge({ openStudioFolder })}
+        studio={state()}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("studio-open-folder"));
+    await waitFor(() =>
+      expect(screen.getByRole("alert")).toHaveTextContent("picker broke"),
+    );
+  });
+
+  it("blocks folder access while another operation is running", () => {
+    const { container } = render(
+      <StudioView
+        client={bridge()}
+        studio={state({ activeOperationId: "op-running" })}
+      />,
+    );
+    expect(screen.getByTestId("studio-open-folder")).toBeDisabled();
+    expect(screen.getByTestId("studio-new-draft")).toBeDisabled();
+    expect(container.querySelector(".spin")).not.toBeNull();
+  });
+
+  it("reports quarantined Drafts without exposing their contents", () => {
+    render(
+      <StudioView
+        client={bridge()}
+        studio={state({
+          draftFailures: [
+            { draftId: "draft-bad-1", reason: "corrupt" },
+            { draftId: "draft-bad-2", reason: "newer-schema" },
+          ],
+        })}
+      />,
+    );
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "2 Drafts could not be read and were set aside.",
+    );
+    expect(screen.getByRole("status")).not.toHaveTextContent("draft-bad-1");
+  });
 });
