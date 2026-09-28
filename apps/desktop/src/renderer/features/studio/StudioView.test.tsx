@@ -682,4 +682,76 @@ describe("StudioView (ADR 0018)", () => {
     );
     expect(screen.getByRole("status")).not.toHaveTextContent("draft-bad-1");
   });
+
+  it("deletes the selected Draft at its acknowledged revision", async () => {
+    const deleteStudioDraft = vi.fn(async () => ({
+      ok: true as const,
+      value: { operationId: "op-del" },
+    }));
+    render(
+      <StudioView
+        client={bridge({ deleteStudioDraft })}
+        studio={state({ drafts: [draft] })}
+      />,
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Delete Draft" }),
+    );
+    await waitFor(() =>
+      expect(deleteStudioDraft).toHaveBeenCalledWith("draft-1", 3),
+    );
+  });
+
+  it("requests a Draft preview through the bridge", async () => {
+    const previewStudioDraft = vi.fn(async () => ({
+      ok: true as const,
+      value: { operationId: "op-prev" },
+    }));
+    render(
+      <StudioView
+        client={bridge({ previewStudioDraft })}
+        studio={state({ drafts: [draft] })}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Preview" }));
+    await waitFor(() =>
+      expect(previewStudioDraft).toHaveBeenCalledWith("draft-1"),
+    );
+  });
+
+  it("flags a conflict when a Draft revision advances elsewhere and reloads on demand", async () => {
+    const saveStudioDraft = vi.fn(async () => ({
+      ok: true as const,
+      value: { operationId: "op-save" },
+    }));
+    const client = bridge({ saveStudioDraft });
+    const { rerender } = render(
+      <StudioView client={client} studio={state({ drafts: [draft] })} />,
+    );
+    const textarea = screen.getByTestId("studio-editor-textarea");
+    // An edit opens the session at the acknowledged revision.
+    fireEvent.change(textarea, { target: { value: `${draft.skillMd}\nx` } });
+    expect(textarea).not.toBeDisabled();
+
+    // A newer revision lands without this session acknowledging it.
+    rerender(
+      <StudioView
+        client={client}
+        studio={state({ drafts: [{ ...draft, revision: 5 }] })}
+      />,
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "changed elsewhere",
+      ),
+    );
+    expect(textarea).toBeDisabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Reload" }));
+    await waitFor(() =>
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument(),
+    );
+    expect(screen.getByTestId("studio-draft-revision")).toHaveTextContent("5");
+    expect(screen.getByTestId("studio-editor-textarea")).not.toBeDisabled();
+  });
 });

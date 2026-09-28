@@ -631,6 +631,33 @@
       "notes": [
         "application/studio.ts at 78.1% branches; uncovered ~474, 503-504, 561"
       ]
+    },
+    {
+      "id": "SDF-024",
+      "title": "Cover StudioView delete/preview/conflict-reload flow and electron-ipc review/broadcast catch edges",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 240,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "Delete Draft calls deleteStudioDraft with the acknowledged revision",
+        "Preview calls previewStudioDraft with the draft id",
+        "an externally advanced draft revision flags a conflict, disables the editor, and Reload clears it at the new revision",
+        "review snapshot/decision session crashes resolve to bounded internal_error",
+        "a malformed or disposed-endpoint update broadcast is never relayed",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "dependsOn": [],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "StudioView.tsx ~85% stmts (delete/conflict/preview edges); electron-ipc.ts catch edges at ~937/957/971"
+      ]
     }
   ]
 }

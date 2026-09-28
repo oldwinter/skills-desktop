@@ -1179,6 +1179,23 @@ describe("Electron IPC sender authorization", () => {
       "about:update:snapshot-changed",
       expect.anything(),
     );
+
+    // A malformed push is dropped at the schema boundary, never relayed.
+    workspaceContents.send.mockClear();
+    publishUpdate?.({ garbage: true } as never);
+    publishUpdate?.({ ...aboutSnapshot, schemaVersion: 99 } as never);
+    expect(workspaceContents.send).not.toHaveBeenCalledWith(
+      "about:update:snapshot-changed",
+      expect.anything(),
+    );
+
+    // A disposed renderer is skipped on the next broadcast.
+    workspaceContents.isDestroyed = () => true;
+    publishUpdate?.(aboutSnapshot);
+    expect(workspaceContents.send).not.toHaveBeenCalledWith(
+      "about:update:snapshot-changed",
+      expect.anything(),
+    );
   });
 
   it("reads the main-owned menu for the workspace only and relays commands to the exact owner", async () => {
@@ -1555,6 +1572,84 @@ describe("Electron IPC sender authorization", () => {
         "epoch-999",
       ),
     ).resolves.toMatchObject({ error: { code: "unauthorized" }, ok: false });
+  });
+
+  it("bounds review snapshot and decision failures to internal_error", async () => {
+    const handlers = new Map<
+      string,
+      (event: never, ...args: unknown[]) => unknown
+    >();
+    const ipcMain = {
+      handle(
+        channel: string,
+        handler: (event: never, ...args: unknown[]) => unknown,
+      ) {
+        handlers.set(channel, handler);
+      },
+      removeHandler: vi.fn(),
+    };
+    const session = {
+      request: vi.fn(async () => {
+        throw new Error("session crashed");
+      }),
+      snapshot: vi.fn(async () => {
+        throw new Error("snapshot crashed");
+      }),
+      teardown: vi.fn(),
+    };
+    const registration = registerDesktopIpc({
+      capabilities: { attach: vi.fn(() => session) } as never,
+      ipcMain: ipcMain as never,
+      newEpoch: () => "epoch-1",
+      updates: {
+        exportDiagnostics: vi.fn(async () => "cancelled" as const),
+        getSnapshot: vi.fn(),
+        requestCheck: vi.fn(async () => undefined),
+        requestRestart: vi.fn(async () => "stale" as const),
+        subscribe: vi.fn(() => () => undefined),
+      },
+    });
+    const reviewFrame = { url: "skills-desktop://review/index.html" };
+    const reviewContents = {
+      id: 51,
+      isDestroyed: () => false,
+      mainFrame: reviewFrame,
+      send: vi.fn(),
+    };
+    const attachment = registration.attach(
+      reviewContents as never,
+      "review",
+      reviewFrame.url,
+      "review-x",
+    );
+    const reviewEvent = {
+      sender: reviewContents,
+      senderFrame: reviewFrame,
+    };
+
+    await expect(
+      handlers.get("review:snapshot:get")!(
+        reviewEvent as never,
+        attachment!.attachmentEpoch,
+      ),
+    ).resolves.toMatchObject({
+      error: { code: "internal_error", phase: "ipc" },
+      ok: false,
+    });
+    for (const channel of [
+      "review:decision:approve",
+      "review:decision:reject",
+    ]) {
+      await expect(
+        handlers.get(channel)!(
+          reviewEvent as never,
+          attachment!.attachmentEpoch,
+        ),
+      ).resolves.toMatchObject({
+        error: { code: "internal_error", phase: "ipc" },
+        ok: false,
+      });
+    }
   });
 
   it("returns bounded About failures for hostile frames, bad requests, and update crashes", async () => {
