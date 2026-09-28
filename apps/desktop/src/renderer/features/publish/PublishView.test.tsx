@@ -156,6 +156,22 @@ describe("PublishView (ADR 0019 / ADR 0020)", () => {
     expect(screen.getByTestId("publish-export")).toBeEnabled();
   });
 
+  it("exports the chosen source through the bridge", async () => {
+    const exportPublication = vi.fn(async () => ({
+      ok: true as const,
+      value: { operationId: "op-9" },
+    }));
+    render(
+      <PublishView
+        client={bridge({ exportPublication })}
+        publication={state({ source })}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("publish-export"));
+    await waitFor(() => expect(exportPublication).toHaveBeenCalledOnce());
+    expect(exportPublication).toHaveBeenCalledWith();
+  });
+
   it("re-enables controls once a failed source pick clears the operation", async () => {
     const choosePublicationSource = vi.fn(async () => ({
       error: {

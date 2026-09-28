@@ -686,6 +686,33 @@
       "notes": [
         "packages/skills-runtime/src/inventory.ts lines 120,127,139,177; studio.ts push-failure branches ~656-660,725-731"
       ]
+    },
+    {
+      "id": "SDF-026",
+      "title": "Cover createDraft grant-derived failure edges and PublishView export action",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 260,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "createDraft from a grant with no readable SKILL.md fails closed",
+        "createDraft from a grant whose SKILL.md is not valid UTF-8 fails closed",
+        "createDraft from an oversized source SKILL.md rejects with studio_draft_invalid",
+        "a failed records.put inside createDraft surfaces the error without a new draft",
+        "clicking Export calls exportPublication through the bridge",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "dependsOn": [],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "application/studio.ts ~415-466 createDraft grant edges; PublishView.tsx:273 export onClick"
+      ]
     }
   ]
 }
