@@ -563,6 +563,124 @@ describe("DesktopCapabilities inventory role-session contract", () => {
     });
   });
 
+  it("projects a restore error when the Inventory evidence store failed", async () => {
+    const records = createMemoryRecoveryRecords();
+    const capabilities = createDesktopCapabilities({
+      id: () => "operation-restore-failure",
+      recoveryRecords: {
+        commit: (change) => records.commit(change),
+        async restore() {
+          const restored = await records.restore();
+          return {
+            ...restored,
+            failures: [
+              ...restored.failures,
+              { code: "corrupt_store", store: "inventorySnapshots" },
+            ],
+          };
+        },
+      },
+      skillsTargets: targetsWith({
+        ...mutationNotExercised,
+        async observeInventory() {
+          return { ok: true as const, value: freshInventory };
+        },
+      }),
+    });
+    await capabilities.initialize();
+    const workspace = capabilities.attach(
+      {
+        endpointId: "workspace-restore-failure",
+        role: "workspace",
+        sessionEpoch: "epoch-restore-failure",
+      },
+      () => undefined,
+    );
+    await expect(workspace.snapshot()).resolves.toMatchObject({
+      inventory: {
+        lastError: {
+          code: "process_failed",
+          message: "Saved Inventory evidence could not be restored.",
+        },
+        phase: "error",
+      },
+    });
+    expect(capabilities.restartSafety().guardReasons).not.toContain(
+      "recovery-uncertain",
+    );
+  });
+
+  it("marks recovery uncertain when a legacy Snapshot remap cannot commit", async () => {
+    const legacyTargetId = `local-codex-${createHash("sha256")
+      .update("/work/skills-desktop")
+      .digest("hex")
+      .slice(0, 24)}`;
+    const records = createMemoryRecoveryRecords(
+      [
+        {
+          cliVersion: freshInventory.cliVersion,
+          entries: [],
+          generation: 1,
+          observedAt: "2026-08-21T09:00:00.000Z",
+          targetId: legacyTargetId,
+        },
+      ],
+    );
+    const capabilities = createDesktopCapabilities({
+      id: () => "operation-remap-failure",
+      recoveryRecords: {
+        async commit(change) {
+          return change.type === "target.remap"
+            ? {
+                error: {
+                  code: "persist_failed" as const,
+                  effects: "possible" as const,
+                  message: "The remap could not be persisted.",
+                  phase: "restore" as const,
+                  retryable: true,
+                },
+                ok: false as const,
+              }
+            : records.commit(change);
+        },
+        restore: () => records.restore(),
+      },
+      skillsTargets: createSkillsTargetsCatalog({
+        id: () => "00000000-0000-4000-8000-000000000010",
+        initialTarget: target,
+        legacyIdFor: () => legacyTargetId,
+        processFor: () => ({
+          ...mutationNotExercised,
+          async observeInventory() {
+            return { ok: true as const, value: freshInventory };
+          },
+        }),
+      }),
+    });
+    await capabilities.initialize();
+    const workspace = capabilities.attach(
+      {
+        endpointId: "workspace-remap-failure",
+        role: "workspace",
+        sessionEpoch: "epoch-remap-failure",
+      },
+      () => undefined,
+    );
+    await expect(workspace.snapshot()).resolves.toMatchObject({
+      inventory: {
+        lastError: {
+          code: "process_failed",
+          message:
+            "Saved Target or recovery authority could not be restored.",
+        },
+        phase: "error",
+      },
+    });
+    expect(capabilities.restartSafety().guardReasons).toContain(
+      "recovery-uncertain",
+    );
+  });
+
   it("keeps the last complete Inventory as stale when a later refresh fails", async () => {
     let observations = 0;
     const process: SkillsProcess = {

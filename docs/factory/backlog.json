@@ -788,6 +788,31 @@
       "notes": [
         "preference-records.ts:101 non-ENOENT readFile -> quarantine; AboutView.tsx:40,58 statusCopy branches"
       ]
+    },
+    {
+      "id": "SDF-030",
+      "title": "Cover capabilities restore edges: inventorySnapshots store failure and legacy target remap commit failure",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 300,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "a restored failure for the inventorySnapshots store projects an error inventory state without a prior snapshot",
+        "a failed target.remap commit marks the target authority unavailable and surfaces the remap error",
+        "restartSafety reports recovery-uncertain after the failed remap",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "dependsOn": [],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "desktop-capabilities.ts ~4730-4738 remap break, ~4800-4808 inventoryStoreFailed branch"
+      ]
     }
   ]
 }
