@@ -580,6 +580,32 @@
       "notes": [
         "save-too-large in preference-records is schema-unreachable (bounded enums)"
       ]
+    },
+    {
+      "id": "SDF-022",
+      "title": "Cover local-skills-targets mutation guards: delete/update not-found, host-trust propose+commit matrix",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 220,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "proposeDelete returns the filtered definitions and the removed target; unknown id fails target_not_found",
+        "proposeUpdate on an unknown id fails target_not_found",
+        "proposeHostTrust rejects missing/stale/mismatched challenges and non-ssh targets with host_trust_invalid, and bumps generation on a match",
+        "commitHostTrust covers target_not_found, target_unavailable without sshAccess, stale expectedGeneration, confirm failure propagation, and digest-binding success",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "dependsOn": [],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "local-skills-targets.ts at 78.9% branches; uncovered guards around 135, 322-357"
+      ]
     }
   ]
 }
