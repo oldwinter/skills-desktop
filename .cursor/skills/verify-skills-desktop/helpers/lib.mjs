@@ -117,6 +117,9 @@ export async function requirePackagedExecutable() {
 }
 
 export function requireDisplay() {
+  // Electron renders through the native window server on macOS and Windows;
+  // DISPLAY/WAYLAND_DISPLAY only describe POSIX X11 sessions.
+  if (process.platform === "darwin" || process.platform === "win32") return;
   if (process.env.DISPLAY || process.env.WAYLAND_DISPLAY) return;
   throw new Error(
     [

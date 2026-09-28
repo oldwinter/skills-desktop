@@ -143,7 +143,7 @@
       "id": "SDF-003",
       "title": "Exercise the packaged darwin arm64 app through the repo's CDP proof lane in a disposable fixture",
       "kind": "verification",
-      "state": "queued",
+      "state": "delivered",
       "order": 30,
       "source": {
         "type": "local"
