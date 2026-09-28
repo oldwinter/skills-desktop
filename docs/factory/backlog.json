@@ -359,6 +359,32 @@
         "test:coverage"
       ],
       "notes": "ssh-skills-process.ts at ~81% stmts / ~69% branches with combined adapter tests; gaps are scripted-transport edges identical in shape to SDF-011 (SSH lane stays experimental per AGENTS.md)."
+    },
+    {
+      "id": "SDF-013",
+      "title": "Create CollectionsView renderer tests covering selection, blockers, prepare, and plan review",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 130,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "empty state renders and Import/Open Inventory actions call the bridge/prop",
+        "release picker switches the inspector between official and imported origins with correct evidence fields",
+        "missing-skill selection and Prepare plan call prepareCollectionAcrossTargets with exact target/scope/selection payloads",
+        "blockers (incompatible/stale inventory/no recipe) disable prepare and selection controls",
+        "SSH targets render excluded and never enter the selection set",
+        "an existing plan renders the summary and Open Trusted Review calls requestCollectionReview with the plan id; the plan heading receives focus",
+        "failed prepare and failed import surface the returned renderer error",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": "CollectionsView.tsx had no test file (67% branches). jsdom + testing-library harness follows StudioView/ComparisonView conventions."
     }
   ]
 }
