@@ -505,6 +505,282 @@ describe("ComparisonView", () => {
     }
   });
 
+  it.each([
+    { locale: "en", title: "Press / to focus search" },
+    { locale: "zh-CN", title: "按 / 聚焦搜索" },
+  ] as const)(
+    "exposes the search shortcut in $locale",
+    ({ locale, title }) => {
+      render(
+        <LocaleProvider locale={locale}>
+          <ComparisonView
+            client={bridge()}
+            onPrepared={vi.fn()}
+            snapshot={baseSnapshot({
+              comparison: {
+                id: "shortcut-label",
+                leftFreshness: "fresh",
+                leftTargetId: leftId,
+                rightFreshness: "fresh",
+                rightTargetId: rightId,
+                rows: [missingRow],
+              },
+            })}
+            targets={[targetState(leftTarget), targetState(rightTarget)]}
+          />
+        </LocaleProvider>,
+      );
+
+      const search = screen.getByRole("searchbox");
+      expect(search).toHaveAttribute("aria-keyshortcuts", "/");
+      expect(search).toHaveAttribute("title", title);
+    },
+  );
+
+  it("focuses search from the sidebar, body, and rows without changing comparison state", () => {
+    const compareTargets = vi.fn();
+    const prepareComparison = vi.fn();
+    const refreshInventory = vi.fn();
+    render(
+      <>
+        <button type="button">Sidebar action</button>
+        <ComparisonView
+          client={bridge({
+            compareTargets,
+            prepareComparison,
+            refreshInventory,
+          })}
+          onPrepared={vi.fn()}
+          snapshot={baseSnapshot({
+            comparison: {
+              id: "shortcut-focus",
+              leftFreshness: "fresh",
+              leftTargetId: leftId,
+              rightFreshness: "fresh",
+              rightTargetId: rightId,
+              rows: [missingRow, { ...driftRow, key: "TDD" }],
+            },
+          })}
+          targets={[targetState(leftTarget), targetState(rightTarget)]}
+        />
+      </>,
+    );
+
+    const search = screen.getByRole("searchbox", {
+      name: "Search comparison skills",
+    });
+    const toggle = screen.getByRole("checkbox", { name: "Differences only" });
+    fireEvent.change(search, { target: { value: "tdd" } });
+    fireEvent.click(toggle);
+    const row = screen.getByRole("button", { name: "TDD" });
+    fireEvent.click(row);
+
+    const sidebar = screen.getByRole("button", { name: "Sidebar action" });
+    sidebar.focus();
+    expect(fireEvent.keyDown(sidebar, { key: "/" })).toBe(false);
+    expect(search).toHaveFocus();
+
+    search.blur();
+    expect(document.activeElement).toBe(document.body);
+    expect(
+      fireEvent.keyDown(document.body, { key: "/", shiftKey: true }),
+    ).toBe(false);
+    expect(search).toHaveFocus();
+
+    row.focus();
+    expect(fireEvent.keyDown(row, { key: "/" })).toBe(false);
+    expect(search).toHaveFocus();
+    expect(search).toHaveValue("tdd");
+    expect(toggle).toBeChecked();
+    expect(screen.getByRole("heading", { name: "TDD" })).toBeInTheDocument();
+    expect(compareTargets).not.toHaveBeenCalled();
+    expect(prepareComparison).not.toHaveBeenCalled();
+    expect(refreshInventory).not.toHaveBeenCalled();
+  });
+
+  it("leaves editing, handled, modified, composing, and dialog shortcuts untouched", () => {
+    render(
+      <>
+        <input aria-label="Editor input" />
+        <select aria-label="Editor select">
+          <option>One</option>
+        </select>
+        <textarea aria-label="Editor textarea" />
+        <div contentEditable suppressContentEditableWarning>
+          <span data-testid="contenteditable-child" tabIndex={0}>
+            Editable child
+          </span>
+        </div>
+        <dialog open>
+          <button type="button">Native dialog action</button>
+        </dialog>
+        <div role="dialog">
+          <button type="button">Role dialog action</button>
+        </div>
+        <div role="alertdialog">
+          <button type="button">Alert dialog action</button>
+        </div>
+        <div aria-modal="true">
+          <button type="button">Modal action</button>
+        </div>
+        <ComparisonView
+          client={bridge()}
+          onPrepared={vi.fn()}
+          snapshot={baseSnapshot({
+            comparison: {
+              id: "shortcut-guards",
+              leftFreshness: "fresh",
+              leftTargetId: leftId,
+              rightFreshness: "fresh",
+              rightTargetId: rightId,
+              rows: [missingRow],
+            },
+          })}
+          targets={[targetState(leftTarget), targetState(rightTarget)]}
+        />
+      </>,
+    );
+
+    const contentEditableChild = screen.getByTestId("contenteditable-child");
+    Object.defineProperty(contentEditableChild, "isContentEditable", {
+      configurable: true,
+      value: true,
+    });
+    const guardedTargets = [
+      screen.getByRole("textbox", { name: "Editor input" }),
+      screen.getByRole("combobox", { name: "Editor select" }),
+      screen.getByRole("textbox", { name: "Editor textarea" }),
+      contentEditableChild,
+      screen.getByRole("button", { name: "Native dialog action" }),
+      screen.getByRole("button", { name: "Role dialog action" }),
+      screen.getByRole("button", { name: "Alert dialog action" }),
+      screen.getByRole("button", { name: "Modal action" }),
+    ];
+    for (const target of guardedTargets) {
+      target.focus();
+      expect(fireEvent.keyDown(target, { key: "/" })).toBe(true);
+      expect(target).toHaveFocus();
+    }
+
+    const row = screen.getByRole("button", { name: "find-skills" });
+    for (const event of [
+      { key: "/", altKey: true },
+      { key: "/", ctrlKey: true },
+      { key: "/", metaKey: true },
+      { key: "/", isComposing: true },
+      { key: "?" },
+    ]) {
+      row.focus();
+      expect(fireEvent.keyDown(row, event)).toBe(true);
+      expect(row).toHaveFocus();
+    }
+
+    row.focus();
+    const handled = new KeyboardEvent("keydown", {
+      bubbles: true,
+      cancelable: true,
+      key: "/",
+    });
+    handled.preventDefault();
+    row.dispatchEvent(handled);
+    expect(row).toHaveFocus();
+  });
+
+  it("uses the live search ref across comparison states and removes the listener on unmount", () => {
+    const addEventListener = vi.spyOn(window, "addEventListener");
+    const removeEventListener = vi.spyOn(window, "removeEventListener");
+    const renderView = (snapshot: WorkspaceSnapshot) => (
+      <>
+        <button type="button">Outside comparison</button>
+        <ComparisonView
+          client={bridge()}
+          onPrepared={vi.fn()}
+          snapshot={snapshot}
+          targets={[targetState(leftTarget), targetState(rightTarget)]}
+        />
+      </>
+    );
+    const { rerender, unmount } = render(renderView(baseSnapshot()));
+    const keydownRegistration = addEventListener.mock.calls.find(
+      ([type]) => type === "keydown",
+    );
+    if (keydownRegistration === undefined) {
+      throw new Error("Comparison shortcut listener was not registered");
+    }
+    const pressOutside = () => {
+      const outside = screen.getByRole("button", { name: "Outside comparison" });
+      outside.focus();
+      expect(fireEvent.keyDown(outside, { key: "/" })).toBe(true);
+      expect(outside).toHaveFocus();
+    };
+
+    pressOutside();
+    rerender(
+      renderView(
+        baseSnapshot({
+          comparison: {
+            id: "shortcut-mismatched",
+            leftFreshness: "fresh",
+            leftTargetId: rightId,
+            rightFreshness: "fresh",
+            rightTargetId: leftId,
+            rows: [missingRow],
+          },
+        }),
+      ),
+    );
+    pressOutside();
+    rerender(
+      renderView(
+        baseSnapshot({
+          comparison: {
+            id: "shortcut-empty",
+            leftFreshness: "fresh",
+            leftTargetId: leftId,
+            rightFreshness: "fresh",
+            rightTargetId: rightId,
+            rows: [],
+          },
+        }),
+      ),
+    );
+    pressOutside();
+    rerender(
+      renderView(
+        baseSnapshot({
+          comparison: {
+            id: "shortcut-live",
+            leftFreshness: "fresh",
+            leftTargetId: leftId,
+            rightFreshness: "fresh",
+            rightTargetId: rightId,
+            rows: [missingRow],
+          },
+        }),
+      ),
+    );
+    const search = screen.getByRole("searchbox", {
+      name: "Search comparison skills",
+    });
+    fireEvent.change(search, { target: { value: "no-match" } });
+    expect(
+      screen.getByRole("heading", { name: "No skills match your search" }),
+    ).toBeInTheDocument();
+    const outside = screen.getByRole("button", { name: "Outside comparison" });
+    outside.focus();
+    expect(fireEvent.keyDown(outside, { key: "/" })).toBe(false);
+    expect(search).toHaveFocus();
+    expect(search).toHaveValue("no-match");
+
+    unmount();
+    expect(removeEventListener).toHaveBeenCalledWith(
+      "keydown",
+      keydownRegistration[1],
+    );
+    addEventListener.mockRestore();
+    removeEventListener.mockRestore();
+  });
+
   it("searches only skill names and prepares the visible original key", async () => {
     const prepareComparison = vi.fn(async () => ({
       ok: false as const,

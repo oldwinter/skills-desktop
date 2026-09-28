@@ -518,6 +518,7 @@ export const en = {
   "comparison.left": "Left",
   "comparison.right": "Right",
   "comparison.search": "Search comparison skills",
+  "comparison.searchShortcut": "Press / to focus search",
   "comparison.searchPlaceholder": "Search skills by name",
   "comparison.clearFilters": "Clear filters",
   "comparison.clearSearch": "Clear search",
