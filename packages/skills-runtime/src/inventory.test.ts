@@ -113,4 +113,73 @@ describe("CLI Inventory schema", () => {
       ok: false,
     });
   });
+
+  it("rejects additive evidence above the field-count limit", () => {
+    const wide = Object.fromEntries(
+      Array.from({ length: 17 }, (_, index) => [`extra${index}`, true]),
+    );
+    const result = parseCliInventory(
+      JSON.stringify([{ ...validProjectSkill, ...wide }]),
+      "project",
+    );
+
+    expect(result).toMatchObject({
+      error: { code: "unsupported_schema", effects: "none", phase: "parse" },
+      ok: false,
+    });
+  });
+
+  it("rejects additive evidence above the byte limit", () => {
+    const result = parseCliInventory(
+      JSON.stringify([
+        { ...validProjectSkill, note: "x".repeat(64 * 1024) },
+      ]),
+      "project",
+    );
+
+    expect(result).toMatchObject({
+      error: { code: "inventory_too_large", effects: "none", phase: "parse" },
+      ok: false,
+    });
+  });
+
+  it("rejects wide shallow additive evidence above the node limit", () => {
+    const result = parseCliInventory(
+      JSON.stringify([
+        { ...validProjectSkill, flags: Array(2050).fill(0) },
+      ]),
+      "project",
+    );
+
+    expect(result).toMatchObject({
+      error: { code: "unsupported_schema", effects: "none", phase: "parse" },
+      ok: false,
+    });
+  });
+
+  it("rejects decoded output that is not a list", () => {
+    const result = parseCliInventory(
+      JSON.stringify({ name: "tdd" }),
+      "project",
+    );
+
+    expect(result).toMatchObject({
+      error: { code: "invalid_inventory", effects: "none", phase: "parse" },
+      ok: false,
+    });
+  });
+
+  it("rejects decoded output above the entry limit", () => {
+    const entries = Array.from({ length: 5_001 }, (_, index) => ({
+      ...validProjectSkill,
+      name: `skill-${index}`,
+      path: `/workspace/.agents/skills/skill-${index}`,
+    }));
+    const result = parseCliInventory(JSON.stringify(entries), "project");
+
+    expect(result).toMatchObject({
+      error: { code: "invalid_inventory", effects: "none", phase: "parse" },
+      ok: false,
+    });
+  });
 });

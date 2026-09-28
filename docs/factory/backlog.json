@@ -658,6 +658,34 @@
       "notes": [
         "StudioView.tsx ~85% stmts (delete/conflict/preview edges); electron-ipc.ts catch edges at ~937/957/971"
       ]
+    },
+    {
+      "id": "SDF-025",
+      "title": "Cover skills-runtime inventory additive-evidence limits and studio preview parser block-budget/terminator edges",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 250,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "extension field-count cap (>16) rejects with unsupported_schema",
+        "extension byte cap (>64KiB) rejects with inventory_too_large",
+        "wide shallow extension (>2048 nodes) rejects with unsupported_schema",
+        "non-array decoded output and >5000 entries reject with invalid_inventory",
+        "preview paragraph breaks on each terminator (fence, heading, rule, quote, bullet, ordered)",
+        "block-budget exhaustion inside code fence, list, and paragraph reports truncated",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "dependsOn": [],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "packages/skills-runtime/src/inventory.ts lines 120,127,139,177; studio.ts push-failure branches ~656-660,725-731"
+      ]
     }
   ]
 }
