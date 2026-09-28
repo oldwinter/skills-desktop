@@ -16,6 +16,9 @@ type TargetBinding = {
 const fixture = vi.hoisted(() => ({
   capabilitiesOptions: undefined as
     | {
+        readonly externalBrowser?: {
+          readonly openExternal: (url: string) => Promise<void>;
+        };
         readonly onReviewRequested?: unknown;
         readonly platform?: unknown;
         readonly skillsTargets: { readonly primaryTarget: unknown };
@@ -64,11 +67,13 @@ const factories = vi.hoisted(() => ({
 const getPath = vi.hoisted(() =>
   vi.fn((name: string) => (name === "home" ? fixture.home : fixture.userData)),
 );
+const shellOpenExternal = vi.hoisted(() => vi.fn(async () => undefined));
 
 vi.mock("electron", () => ({
   app: { getPath },
   autoUpdater: {},
   dialog: {},
+  shell: { openExternal: shellOpenExternal },
 }));
 
 vi.mock("./adapters/local-skills-process.js", () => ({
@@ -150,6 +155,7 @@ describe("desktop composition workspace selection", () => {
   afterEach(() => {
     vi.restoreAllMocks();
     getPath.mockClear();
+    shellOpenExternal.mockClear();
     fixture.capabilitiesOptions = undefined;
     fixture.skillsTargetsOptions = undefined;
     fixture.updateOptions = undefined;
@@ -328,6 +334,47 @@ describe("desktop composition workspace selection", () => {
         app: expect.any(Object),
         restartSafety: expect.any(Function),
       });
+    } finally {
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("opens only a canonical skills.sh URL through the process-edge allowlist", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "skills-desktop-browser-"));
+    fixture.home = join(directory, "unused-home");
+    fixture.userData = join(directory, "user-data");
+    process.env.SKILLS_DESKTOP_WORKSPACE = directory;
+
+    try {
+      await createCompositionRoot();
+      const openExternal = fixture.capabilitiesOptions?.externalBrowser
+        ?.openExternal;
+      expect(openExternal).toBeTypeOf("function");
+
+      await openExternal!("https://skills.sh/vercel-labs/skills");
+      expect(shellOpenExternal).toHaveBeenCalledWith(
+        "https://skills.sh/vercel-labs/skills",
+        { activate: true },
+      );
+      await openExternal!(
+        "https://skills.sh/vercel-labs/skills/find-skills",
+      );
+      expect(shellOpenExternal).toHaveBeenLastCalledWith(
+        "https://skills.sh/vercel-labs/skills/find-skills",
+        { activate: true },
+      );
+
+      for (const refused of [
+        "https://evil.example/vercel-labs/skills",
+        "http://skills.sh/vercel-labs/skills",
+        "https://skills.sh",
+        "https://user:pw@skills.sh/vercel-labs/skills",
+        "https://skills.sh/vercel-labs/skills?x=1",
+        "not a url",
+      ]) {
+        await expect(openExternal!(refused)).rejects.toThrow();
+      }
+      expect(shellOpenExternal).toHaveBeenCalledTimes(2);
     } finally {
       await rm(directory, { force: true, recursive: true });
     }

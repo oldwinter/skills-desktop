@@ -483,6 +483,29 @@
         "test:coverage"
       ],
       "notes": "ReviewSurface.tsx 77.1% branches (imported evidence 134-166, failure branches); AboutView.tsx 73.3% (error + state paths)."
+    },
+    {
+      "id": "SDF-018",
+      "title": "Cover node host bounds: composition openExternal allowlist, publication skill-folder matrix, studio tree kinds",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 180,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "composition-root openExternal opens only canonical skills.sh URLs via shell.openExternal and rejects non-allowlisted/credentialed/query URLs",
+        "publication host refuses unsupported archive paths, special files, oversized files, over-budget skill bytes, and too many files/skills",
+        "studio readStudioTree reports special/hardlink/oversized entries and caps entries at maxFilesPerSkill",
+        "studio folder pick returns cancelled when realpath fails",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": "composition-root.ts 20% funcs (openExternal); node-publication-host.ts 75% branches; node-studio-host.ts 76.9% branches."
     }
   ]
 }

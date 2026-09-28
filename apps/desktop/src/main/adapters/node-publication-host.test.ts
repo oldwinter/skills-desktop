@@ -9,6 +9,7 @@ import {
   symlink,
   writeFile,
 } from "node:fs/promises";
+import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -209,6 +210,105 @@ describe("node publication host (ADR 0019)", () => {
     });
     expect(await cancelled.chooseSourceFolder()).toEqual({
       status: "cancelled",
+    });
+  });
+
+  it("refuses archive-unsupported paths, special files, and over-limit content", async () => {
+    // A backslashed name is legal POSIX but not a valid archive path.
+    const backslash = await tempRoot();
+    await seedSkills(backslash);
+    await writeFile(join(backslash, "hello", "bad\\name.md"), "x\n");
+    const badPath = await readSkillFolder(backslash);
+    expect(badPath.ok).toBe(false);
+    if (!badPath.ok) {
+      expect(badPath.error.code).toBe("export_invalid");
+      expect(badPath.error.message).toContain("unsupported path");
+    }
+
+    // A unix socket inside a Skill is a special file, not content.
+    const withSocket = await tempRoot();
+    await seedSkills(withSocket);
+    const server = createServer();
+    try {
+      await new Promise<void>((resolve, reject) => {
+        server.once("error", reject);
+        server.listen(join(withSocket, "hello", "listener.sock"), resolve);
+      });
+      const special = await readSkillFolder(withSocket);
+      expect(special.ok).toBe(false);
+      if (!special.ok) {
+        expect(special.error.code).toBe("export_invalid");
+        expect(special.error.message).toContain("special file");
+      }
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+
+    // A file past the per-file byte bound is refused before reading.
+    const oversized = await tempRoot();
+    await seedSkills(oversized);
+    const big = Buffer.alloc(4 * 1_024 * 1_024 + 1, 0x41);
+    await writeFile(join(oversized, "hello", "big.bin"), big);
+    const tooBig = await readSkillFolder(oversized);
+    expect(tooBig.ok).toBe(false);
+    if (!tooBig.ok) {
+      expect(tooBig.error.code).toBe("export_invalid");
+      expect(tooBig.error.message).toContain("big.bin");
+    }
+
+    // More files than the per-skill bound is refused.
+    const many = await tempRoot();
+    await seedSkills(many);
+    for (let index = 0; index < 256; index += 1) {
+      await writeFile(join(many, "hello", `f${index}.txt`), "x");
+    }
+    const tooMany = await readSkillFolder(many);
+    expect(tooMany.ok).toBe(false);
+    if (!tooMany.ok) {
+      expect(tooMany.error.code).toBe("export_invalid");
+      expect(tooMany.error.message).toContain("256 files");
+    }
+  });
+
+  it("refuses a folder carrying more Skills than the bound", async () => {
+    const root = await tempRoot();
+    for (let index = 0; index < 129; index += 1) {
+      const name = `skill-${String(index).padStart(3, "0")}`;
+      await mkdir(join(root, name));
+      await writeFile(
+        join(root, name, "SKILL.md"),
+        `---\nname: ${name}\ndescription: x\n---\n`,
+      );
+    }
+    const result = await readSkillFolder(root);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("export_invalid");
+      expect(result.error.message).toContain("128 Skills");
+    }
+  });
+
+  it("fails closed when the export destination cannot be created", async () => {
+    const root = await tempRoot();
+    await seedSkills(root);
+    const skills = await readSkillFolder(root);
+    if (!skills.ok) throw new Error("skills expected");
+    const exported = exportWellKnownTree(
+      skills.value,
+      createNodeWellKnownCodec(),
+    );
+    if (!exported.ok) throw new Error("export expected");
+
+    // A regular file at the destination path cannot become a directory.
+    const blocked = join(root, "blocked");
+    await writeFile(blocked, "not a directory");
+    const result = await writeExportTree(blocked, exported.value.files);
+    expect(result).toMatchObject({
+      error: {
+        code: "export_invalid",
+        message: expect.stringContaining("could not be written"),
+      },
+      ok: false,
     });
   });
 });
