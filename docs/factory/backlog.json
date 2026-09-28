@@ -531,6 +531,30 @@
       "notes": [
         "Reproduced on hosted windows-2025 job 109146095426 at 8f0b397"
       ]
+    },
+    {
+      "id": "SDF-020",
+      "title": "Guard AF_UNIX socket fixtures on win32 in publication/studio host tests",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 200,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "studio special-file and publication special-file cases run on POSIX only",
+        "oversized-file and entry-cap coverage stays portable across platforms",
+        "the two touched test files pass locally"
+      ],
+      "dependsOn": [],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "windows-2025 denied listen() on filesystem sockets (EACCES) at 7c73803"
+      ]
     }
   ]
 }

@@ -80,10 +80,24 @@ describe("readStudioTree (ADR 0018)", () => {
     });
   });
 
-  it("labels special and out-of-bounds entries without reading their bytes", async () => {
+  it("labels out-of-bounds files by size without reading their bytes", async () => {
     const root = await scratch();
     const big = Buffer.alloc(4 * 1_024 * 1_024 + 1, 0x42);
     await writeFile(join(root, "huge.bin"), big);
+    const tree = await readStudioTree(root);
+    expect(tree.ok).toBe(true);
+    if (!tree.ok) return;
+    const entry = tree.value.find(({ path }) => path === "huge.bin");
+    expect(entry).toMatchObject({ kind: "file" });
+    // Out-of-bounds files are reported by size only; bytes stay unread.
+    expect(entry?.bytes).toBeUndefined();
+  });
+
+  it("labels a special file without following it", async () => {
+    // AF_UNIX socket files are the only portable special file; Windows
+    // runners deny listen() on a filesystem path outright.
+    if (process.platform === "win32") return;
+    const root = await scratch();
     const server = createServer();
     try {
       await new Promise<void>((resolve, reject) => {
@@ -93,11 +107,9 @@ describe("readStudioTree (ADR 0018)", () => {
       const tree = await readStudioTree(root);
       expect(tree.ok).toBe(true);
       if (!tree.ok) return;
-      const byPath = new Map(tree.value.map((entry) => [entry.path, entry]));
-      expect(byPath.get("daemon.sock")).toMatchObject({ kind: "special" });
-      expect(byPath.get("huge.bin")).toMatchObject({ kind: "file" });
-      // Out-of-bounds files are reported by size only; bytes stay unread.
-      expect(byPath.get("huge.bin")?.bytes).toBeUndefined();
+      expect(
+        tree.value.find(({ path }) => path === "daemon.sock"),
+      ).toMatchObject({ kind: "special" });
     } finally {
       await new Promise((resolve) => server.close(resolve));
     }

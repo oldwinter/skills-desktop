@@ -228,23 +228,26 @@ describe("node publication host (ADR 0019)", () => {
       }
     }
 
-    // A unix socket inside a Skill is a special file, not content.
-    const withSocket = await tempRoot();
-    await seedSkills(withSocket);
-    const server = createServer();
-    try {
-      await new Promise<void>((resolve, reject) => {
-        server.once("error", reject);
-        server.listen(join(withSocket, "hello", "listener.sock"), resolve);
-      });
-      const special = await readSkillFolder(withSocket);
-      expect(special.ok).toBe(false);
-      if (!special.ok) {
-        expect(special.error.code).toBe("export_invalid");
-        expect(special.error.message).toContain("special file");
+    // A unix socket inside a Skill is a special file, not content; Windows
+    // runners deny listen() on a filesystem path, so the case is POSIX-only.
+    if (process.platform !== "win32") {
+      const withSocket = await tempRoot();
+      await seedSkills(withSocket);
+      const server = createServer();
+      try {
+        await new Promise<void>((resolve, reject) => {
+          server.once("error", reject);
+          server.listen(join(withSocket, "hello", "listener.sock"), resolve);
+        });
+        const special = await readSkillFolder(withSocket);
+        expect(special.ok).toBe(false);
+        if (!special.ok) {
+          expect(special.error.code).toBe("export_invalid");
+          expect(special.error.message).toContain("special file");
+        }
+      } finally {
+        await new Promise((resolve) => server.close(resolve));
       }
-    } finally {
-      await new Promise((resolve) => server.close(resolve));
     }
 
     // A file past the per-file byte bound is refused before reading.
