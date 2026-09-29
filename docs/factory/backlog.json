@@ -1644,6 +1644,35 @@
         "release-integrity.mjs residual map after SDF-055: candidate-package validation, draft payload, attestation result, and GitHub release verification arms; the evidence pipeline (createSpdxDocument, evidenceFilePlan, finalizeReleaseEvidence, verifyReleaseEvidence, assembleVerifiedDraft, generateReleaseEvidence) plus two near-unreachable file-type arms (312, 391) remain for a follow-up item",
         "new tests/release-integrity.test.ts builds digest-addressed candidate packages through a manifest mutator + artifact-content fixture builder; no production changes"
       ]
+    },
+    {
+      "id": "SDF-062",
+      "title": "Cover release-integrity evidence-pipeline failure arms (finalize, verify, assemble)",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 620,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "finalizeReleaseEvidence covers bundle-set keys, provenance JSON/shape/digest/version failures, pre-attestation file-set mismatch, bundle non-string/non-file/empty/bad-JSON/non-object arms",
+        "generateReleaseEvidence covers the unsupported package-lock shape arm in createSpdxDocument",
+        "verifyReleaseEvidence covers file-set mismatch, evidence-index parse/shape/completeness, digest-identity, per-file byte, set-digest, artifact-digest, checksum, and manifest-evidence mismatches",
+        "assembleVerifiedDraft covers the attestation-receipt guards (keys, predicate types, signer workflow, source ref) and payload-assembly propagation",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "dependsOn": [
+        "SDF-061"
+      ],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "release-integrity.mjs residual after SDF-061: evidence pipeline arms (createSpdxDocument lock shape, finalizeReleaseEvidence bundle/provenance/file-set guards, verifyReleaseEvidence + parseEvidenceIndex index/digest/byte checks, assembleVerifiedDraft receipt + payload assembly); lines 312/391 (uncaught readFile ENOENT, artifact isFile) and 477-480 (globally-unique artifact names, unreachable by construction since names embed platform-arch) noted as constrained",
+        "extends tests/release-integrity.test.ts reusing writeCandidateSet/writePackageLock/generateReleaseEvidence happy-path fixtures with per-test mutation"
+      ]
     }
   ]
 }

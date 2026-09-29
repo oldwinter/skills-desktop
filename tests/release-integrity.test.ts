@@ -2069,3 +2069,532 @@ describe("release integrity candidate validation failure arms", () => {
     }
   });
 });
+
+describe("release integrity evidence pipeline failure arms", () => {
+  async function generateEvidence(root: string) {
+    const { packageLockPath, sha256: lockfileSha256 } =
+      await writePackageLock(root);
+    const candidateRoot = await writeCandidateSet(root, lockfileSha256);
+    const evidenceRoot = join(root, "evidence");
+    const generated = await generateReleaseEvidence({
+      candidateRoot,
+      createdAt: "2026-08-22T08:00:00.000Z",
+      expected: releaseContext,
+      outputRoot: evidenceRoot,
+      packageLockPath,
+    });
+    return { candidateRoot, evidenceRoot, generated, packageLockPath };
+  }
+
+  async function writeBundles(root: string) {
+    const bundleRoot = join(root, "bundles");
+    await mkdir(bundleRoot);
+    const bundles = {
+      candidateIdentity: join(bundleRoot, "identity.json"),
+      provenance: join(bundleRoot, "provenance.json"),
+      sbom: join(bundleRoot, "sbom.json"),
+    };
+    for (const [kind, path] of Object.entries(bundles)) {
+      await writeFile(path, `${JSON.stringify({ kind })}\n`);
+    }
+    return bundles;
+  }
+
+  const bundleSet = (bundles: Record<string, string>) => bundles;
+
+  it("rejects an attestation bundle set with an unexpected key shape", async () => {
+    const root = await mkdtemp(join(tmpdir(), "skills-release-finalize-"));
+    try {
+      const { evidenceRoot, generated } = await generateEvidence(root);
+      await expect(
+        finalizeReleaseEvidence({
+          attestationBundles: { provenance: "x" },
+          evidenceRoot,
+          expectedCandidateSetDigest: generated.candidateSetDigest,
+        }),
+      ).rejects.toThrow("Release attestation bundle set is invalid.");
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+
+  it.each([
+    ["is not valid JSON", () => "not json{"],
+    ["is not a plain object", () => "[]"],
+    [
+      "has the wrong schema version",
+      (predicate: Record<string, unknown>) => ({
+        ...predicate,
+        schemaVersion: 2,
+      }),
+    ],
+    [
+      "binds a different candidate set",
+      (predicate: Record<string, unknown>) => ({
+        ...predicate,
+        candidateSetDigest: "0".repeat(64),
+      }),
+    ],
+    [
+      "has a malformed version",
+      (predicate: Record<string, unknown>) => ({
+        ...predicate,
+        version: "v0",
+      }),
+    ],
+  ])(
+    "rejects provenance evidence that %s",
+    async (_name, mutate: (predicate: Record<string, unknown>) => unknown) => {
+      const root = await mkdtemp(join(tmpdir(), "skills-release-finalize-"));
+      try {
+        const { evidenceRoot, generated } = await generateEvidence(root);
+        const predicatePath = join(
+          evidenceRoot,
+          "candidate-provenance-v1.json",
+        );
+        const predicate = JSON.parse(await readFile(predicatePath, "utf8"));
+        const mutated = mutate(predicate);
+        await writeFile(
+          predicatePath,
+          typeof mutated === "string" ? mutated : JSON.stringify(mutated),
+        );
+        await expect(
+          finalizeReleaseEvidence({
+            attestationBundles: bundleSet({
+              candidateIdentity: "unused",
+              provenance: "unused",
+              sbom: "unused",
+            }),
+            evidenceRoot,
+            expectedCandidateSetDigest: generated.candidateSetDigest,
+          }),
+        ).rejects.toThrow("Release candidate provenance evidence is invalid.");
+      } finally {
+        await rm(root, { force: true, recursive: true });
+      }
+    },
+  );
+
+  it("rejects an unexpected pre-attestation evidence file", async () => {
+    const root = await mkdtemp(join(tmpdir(), "skills-release-finalize-"));
+    try {
+      const { evidenceRoot, generated } = await generateEvidence(root);
+      await writeFile(join(evidenceRoot, "stray.txt"), "unexpected");
+      const bundles = await writeBundles(root);
+      await expect(
+        finalizeReleaseEvidence({
+          attestationBundles: bundleSet(bundles),
+          evidenceRoot,
+          expectedCandidateSetDigest: generated.candidateSetDigest,
+        }),
+      ).rejects.toThrow(
+        "Release evidence contains an unexpected pre-attestation file set.",
+      );
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+
+  it.each([
+    [
+      "a non-string bundle path",
+      (bundles: Record<string, string>) => ({ ...bundles, sbom: 42 }),
+    ],
+    [
+      "a missing bundle file",
+      (bundles: Record<string, string>) => ({
+        ...bundles,
+        sbom: join(bundles.sbom, "..", "missing.json"),
+      }),
+    ],
+  ])(
+    "rejects attestation bundles with %s",
+    async (
+      _name,
+      mutate: (bundles: Record<string, string>) => Record<string, unknown>,
+    ) => {
+      const root = await mkdtemp(join(tmpdir(), "skills-release-finalize-"));
+      try {
+        const { evidenceRoot, generated } = await generateEvidence(root);
+        const bundles = await writeBundles(root);
+        await expect(
+          finalizeReleaseEvidence({
+            attestationBundles: bundleSet(mutate(bundles) as Record<string, string>),
+            evidenceRoot,
+            expectedCandidateSetDigest: generated.candidateSetDigest,
+          }),
+        ).rejects.toThrow("Release attestation bundle");
+      } finally {
+        await rm(root, { force: true, recursive: true });
+      }
+    },
+  );
+
+  it.each([
+    ["an empty bundle file", async (path: string) => writeFile(path, "")],
+    [
+      "a bundle that is not valid JSON",
+      async (path: string) => writeFile(path, "{nope"),
+    ],
+    [
+      "a bundle that is not a plain object",
+      async (path: string) => writeFile(path, "[1]"),
+    ],
+  ])(
+    "rejects %s",
+    async (_name, corrupt: (path: string) => Promise<unknown>) => {
+      const root = await mkdtemp(join(tmpdir(), "skills-release-finalize-"));
+      try {
+        const { evidenceRoot, generated } = await generateEvidence(root);
+        const bundles = await writeBundles(root);
+        await corrupt(bundles.sbom);
+        await expect(
+          finalizeReleaseEvidence({
+            attestationBundles: bundleSet(bundles),
+            evidenceRoot,
+            expectedCandidateSetDigest: generated.candidateSetDigest,
+          }),
+        ).rejects.toThrow("Release attestation bundle is invalid.");
+      } finally {
+        await rm(root, { force: true, recursive: true });
+      }
+    },
+  );
+
+  it("rejects evidence generation when the package lock shape is unsupported", async () => {
+    const root = await mkdtemp(join(tmpdir(), "skills-release-evidence-"));
+    try {
+      const packageLockPath = join(root, "package-lock.json");
+      const bytes = '{"lockfileVersion":2,"packages":{}}\n';
+      await writeFile(packageLockPath, bytes);
+      const candidateRoot = await writeCandidateSet(root, sha256(bytes));
+      const outputRoot = join(root, "evidence");
+      await expect(
+        generateReleaseEvidence({
+          candidateRoot,
+          createdAt: "2026-08-22T08:00:00.000Z",
+          expected: releaseContext,
+          outputRoot,
+          packageLockPath,
+        }),
+      ).rejects.toThrow("Release package lock is unsupported.");
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+
+  async function sealedEvidence(root: string) {
+    const fixture = await generateEvidence(root);
+    const bundles = await writeBundles(root);
+    const finalized = await finalizeReleaseEvidence({
+      attestationBundles: bundles,
+      evidenceRoot: fixture.evidenceRoot,
+      expectedCandidateSetDigest: fixture.generated.candidateSetDigest,
+    });
+    return { ...fixture, finalized };
+  }
+
+  const assemble = (
+    fixture: Awaited<ReturnType<typeof sealedEvidence>>,
+    root: string,
+    attestationPatch: Record<string, unknown> = {},
+  ) =>
+    assembleVerifiedDraft({
+      attestation: {
+        predicateTypes: [
+          SLSA_PROVENANCE_PREDICATE_TYPE,
+          SPDX_PREDICATE_TYPE,
+          CANDIDATE_IDENTITY_PREDICATE_TYPE,
+        ],
+        signerWorkflow:
+          "oldwinter/skills-desktop/.github/workflows/release-candidates.yml",
+        sourceRef: "refs/heads/main",
+        ...attestationPatch,
+      },
+      candidateRoot: fixture.candidateRoot,
+      evidenceRoot: fixture.evidenceRoot,
+      expected: releaseContext,
+      expectedEvidenceArtifactDigest: fixture.finalized.evidenceArtifactDigest,
+      expectedEvidenceSetDigest: fixture.finalized.evidenceSetDigest,
+      outputRoot: join(root, "verified-draft"),
+      packageLockPath: fixture.packageLockPath,
+      verifiedAt: "2026-08-22T08:05:00.000Z",
+    });
+
+  it.each([
+    [
+      "a missing receipt key",
+      { predicateTypes: undefined },
+      "Release attestation verification receipt is invalid.",
+    ],
+    [
+      "an incomplete predicate type set",
+      { predicateTypes: [SLSA_PROVENANCE_PREDICATE_TYPE] },
+      "Release attestation verification receipt is invalid.",
+    ],
+    [
+      "a signer workflow outside the repository",
+      { signerWorkflow: "other/repo/.github/workflows/release-candidates.yml" },
+      "Release attestation verification receipt is invalid.",
+    ],
+    [
+      "a malformed source ref",
+      { sourceRef: "main" },
+      "Release attestation verification receipt is invalid.",
+    ],
+  ])(
+    "rejects the attestation receipt with %s",
+    async (
+      _name,
+      patch: Record<string, unknown>,
+      message: string,
+    ) => {
+      const root = await mkdtemp(join(tmpdir(), "skills-release-assemble-"));
+      try {
+        const fixture = await sealedEvidence(root);
+        await expect(assemble(fixture, root, patch)).rejects.toThrow(message);
+      } finally {
+        await rm(root, { force: true, recursive: true });
+      }
+    },
+  );
+
+  const readIndex = async (evidenceRoot: string) =>
+    JSON.parse(
+      await readFile(join(evidenceRoot, "candidate-evidence-v1.json"), "utf8"),
+    ) as Record<string, unknown>;
+
+  const writeIndex = (evidenceRoot: string, index: unknown) =>
+    writeFile(
+      join(evidenceRoot, "candidate-evidence-v1.json"),
+      typeof index === "string" ? index : JSON.stringify(index),
+    );
+
+  it("rejects a missing or unparsable evidence index", async () => {
+    const root = await mkdtemp(join(tmpdir(), "skills-release-assemble-"));
+    try {
+      const fixture = await sealedEvidence(root);
+      await rm(join(fixture.evidenceRoot, "candidate-evidence-v1.json"));
+      await writeFile(
+        join(fixture.evidenceRoot, "filler.txt"),
+        "keeps the file count exact",
+      );
+      await expect(assemble(fixture, root)).rejects.toThrow(
+        "Release evidence contains an unexpected file set.",
+      );
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+
+  it.each([
+    [
+      "an unexpected schema version",
+      (index: Record<string, unknown>) => ({ ...index, schemaVersion: 2 }),
+      "Release evidence index is invalid.",
+    ],
+    [
+      "a wrong version field",
+      (index: Record<string, unknown>) => ({ ...index, version: "9.9.9" }),
+      "Release evidence index is invalid.",
+    ],
+    [
+      "a truncated file list",
+      (index: Record<string, unknown>) => ({
+        ...index,
+        files: (index.files as unknown[]).slice(1),
+      }),
+      "Release evidence index is incomplete.",
+    ],
+    [
+      "a file entry with an unexpected kind",
+      (index: Record<string, unknown>) => {
+        const files = [...(index.files as Array<Record<string, unknown>>)];
+        files[0] = { ...files[0], kind: "mystery" };
+        return { ...index, files };
+      },
+      "Release evidence index is invalid.",
+    ],
+    [
+      "a file entry with a malformed digest",
+      (index: Record<string, unknown>) => {
+        const files = [...(index.files as Array<Record<string, unknown>>)];
+        files[0] = { ...files[0], sha256: "zzz" };
+        return { ...index, files };
+      },
+      "Release evidence index is invalid.",
+    ],
+    [
+      "a duplicated file entry",
+      (index: Record<string, unknown>) => {
+        const files = [...(index.files as Array<Record<string, unknown>>)];
+        files[0] = { ...files[1] };
+        return { ...index, files };
+      },
+      "Release evidence index is invalid.",
+    ],
+  ])(
+    "rejects an evidence index with %s",
+    async (
+      _name,
+      mutate: (index: Record<string, unknown>) => unknown,
+      message: string,
+    ) => {
+      const root = await mkdtemp(join(tmpdir(), "skills-release-assemble-"));
+      try {
+        const fixture = await sealedEvidence(root);
+        const index = await readIndex(fixture.evidenceRoot);
+        await writeIndex(fixture.evidenceRoot, mutate(index));
+        await expect(assemble(fixture, root)).rejects.toThrow(message);
+      } finally {
+        await rm(root, { force: true, recursive: true });
+      }
+    },
+  );
+
+  it("rejects an evidence index whose candidate set digest differs", async () => {
+    const root = await mkdtemp(join(tmpdir(), "skills-release-assemble-"));
+    try {
+      const fixture = await sealedEvidence(root);
+      const index = await readIndex(fixture.evidenceRoot);
+      await writeIndex(fixture.evidenceRoot, {
+        ...index,
+        candidateSetDigest: "0".repeat(64),
+      });
+      await expect(assemble(fixture, root)).rejects.toThrow(
+        "Release evidence digest identity does not match verified inputs.",
+      );
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+
+  it("rejects a directory inside the pre-attestation evidence root", async () => {
+    const root = await mkdtemp(join(tmpdir(), "skills-release-finalize-"));
+    try {
+      const { evidenceRoot, generated } = await generateEvidence(root);
+      await mkdir(join(evidenceRoot, "stray-directory"));
+      const bundles = await writeBundles(root);
+      await expect(
+        finalizeReleaseEvidence({
+          attestationBundles: bundleSet(bundles),
+          evidenceRoot,
+          expectedCandidateSetDigest: generated.candidateSetDigest,
+        }),
+      ).rejects.toThrow(
+        "Release evidence contains an unexpected pre-attestation file set.",
+      );
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+
+  it("deduplicates lock dependencies and tolerates entries without checksums", async () => {
+    const root = await mkdtemp(join(tmpdir(), "skills-release-evidence-"));
+    try {
+      const packageLockPath = join(root, "package-lock.json");
+      const bytes = `${JSON.stringify({
+        lockfileVersion: 3,
+        packages: {
+          "": { name: "skills-desktop", version: "0.1.0" },
+          "node_modules/reused": { version: "1.0.0" },
+          "nested/node_modules/reused": { version: "1.0.0" },
+          "node_modules/unnamed": {
+            integrity: "sha256-not-sha512",
+            version: "2.0.0",
+          },
+        },
+      })}\n`;
+      await writeFile(packageLockPath, bytes);
+      const candidateRoot = await writeCandidateSet(root, sha256(bytes));
+      const outputRoot = join(root, "evidence");
+
+      const generated = await generateReleaseEvidence({
+        candidateRoot,
+        createdAt: "2026-08-22T08:00:00.000Z",
+        expected: releaseContext,
+        outputRoot,
+        packageLockPath,
+      });
+
+      const sbom = JSON.parse(
+        await readFile(
+          join(outputRoot, "skills-desktop-0.1.0.spdx.json"),
+          "utf8",
+        ),
+      ) as {
+        packages: Array<{ name: string; checksums?: unknown[] }>;
+      };
+      const reused = sbom.packages.filter((pkg) => pkg.name === "reused");
+      expect(reused).toHaveLength(1);
+      const unnamed = sbom.packages.find((pkg) => pkg.name === "unnamed");
+      expect(unnamed?.checksums).toBeUndefined();
+      expect(generated.candidateSetDigest).toMatch(/^[a-f0-9]{64}$/);
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+
+  it("rejects evidence bytes that disagree with the index", async () => {
+    const root = await mkdtemp(join(tmpdir(), "skills-release-assemble-"));
+    try {
+      const fixture = await sealedEvidence(root);
+      // Grow SHA256SUMS by one byte without updating the index: the recorded
+      // digest no longer matches the file on disk.
+      await writeFile(
+        join(fixture.evidenceRoot, "SHA256SUMS"),
+        (await readFile(join(fixture.evidenceRoot, "SHA256SUMS"), "utf8")) +
+          "\n",
+      );
+      await expect(assemble(fixture, root)).rejects.toThrow(
+        "Release evidence bytes do not match the evidence index.",
+      );
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+
+  it("rejects an evidence set digest that no longer matches the declared files", async () => {
+    const root = await mkdtemp(join(tmpdir(), "skills-release-assemble-"));
+    try {
+      const fixture = await sealedEvidence(root);
+      const index = await readIndex(fixture.evidenceRoot);
+      const files = index.files as Array<Record<string, unknown>>;
+      const target = files.find((file) => file.fileName === "SHA256SUMS")!;
+      const original = await readFile(
+        join(fixture.evidenceRoot, "SHA256SUMS"),
+        "utf8",
+      );
+      const replacement = `${original}x`;
+      target.sha256 = sha256(replacement);
+      target.sizeBytes = Buffer.byteLength(replacement);
+      await writeFile(join(fixture.evidenceRoot, "SHA256SUMS"), replacement);
+      await writeIndex(fixture.evidenceRoot, index);
+      await expect(assemble(fixture, root)).rejects.toThrow(
+        "Release evidence set digest is invalid.",
+      );
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+
+  it("rejects an evidence artifact digest drifted by index bytes", async () => {
+    const root = await mkdtemp(join(tmpdir(), "skills-release-assemble-"));
+    try {
+      const fixture = await sealedEvidence(root);
+      // Reformatting the index keeps every declared value identical but
+      // changes its bytes, so the artifact digest no longer matches.
+      const indexPath = join(
+        fixture.evidenceRoot,
+        "candidate-evidence-v1.json",
+      );
+      const index = await readIndex(fixture.evidenceRoot);
+      await writeFile(indexPath, JSON.stringify(index, null, 2));
+      await expect(assemble(fixture, root)).rejects.toThrow(
+        "Release evidence artifact digest is invalid.",
+      );
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+});
