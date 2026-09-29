@@ -4557,4 +4557,815 @@ describe("Local Target Inventory shell", () => {
       expect(saveStudioDraft).toHaveBeenCalledWith("draft-1", 3, edited),
     );
   });
+
+  it("resynchronizes after an out-of-order event and on resync.required", async () => {
+    let listener: ((event: DesktopEvent) => void) | undefined;
+    const getSnapshot = vi.fn(async () => ({
+      ok: true as const,
+      value: snapshot,
+    }));
+    const client: DesktopBridge = {
+      ...clientFor(snapshot),
+      getSnapshot,
+      subscribe(next) {
+        listener = next;
+        return () => undefined;
+      },
+    };
+    render(<InventoryApp client={client} />);
+    await screen.findByRole("heading", { level: 1, name: "Inventory" });
+    expect(getSnapshot).toHaveBeenCalledTimes(1);
+
+    // An event that skips a sequence cannot be applied incrementally.
+    act(() => {
+      listener?.({
+        sequence: 9,
+        sessionEpoch: "epoch-1",
+        snapshot,
+        stateRevision: 9,
+        type: "snapshot.changed",
+      });
+    });
+    await waitFor(() => expect(getSnapshot).toHaveBeenCalledTimes(2));
+
+    // An explicit resync request also pulls a fresh snapshot.
+    act(() => {
+      listener?.({
+        reason: "buffer_overflow",
+        sequence: 10,
+        sessionEpoch: "epoch-1",
+        stateRevision: 10,
+        type: "resync.required",
+      });
+    });
+    await waitFor(() => expect(getSnapshot).toHaveBeenCalledTimes(3));
+  });
+
+  it("keeps the current snapshot when a resync returns an older state revision", async () => {
+    let listener: ((event: DesktopEvent) => void) | undefined;
+    const getSnapshot = vi.fn(async () => ({
+      ok: true as const,
+      value: snapshot,
+    }));
+    const client: DesktopBridge = {
+      ...clientFor(snapshot),
+      getSnapshot,
+      subscribe(next) {
+        listener = next;
+        return () => undefined;
+      },
+    };
+    render(<InventoryApp client={client} />);
+    await screen.findByRole("heading", { level: 1, name: "Inventory" });
+
+    // Move the rendered state forward with an in-order event.
+    const advanced: WorkspaceSnapshot = {
+      ...snapshot,
+      eventSequence: 1,
+      inventory: {
+        ...snapshot.inventory,
+        entries: [
+          {
+            agents: [],
+            contentFingerprint: { status: "unknown" as const },
+            declaredSource: { source: null, sourceType: null },
+            name: "Persisted-Skill",
+            revision: { status: "unknown" as const },
+            scope: "project" as const,
+          },
+        ],
+      },
+      stateRevision: 5,
+    };
+    act(() => {
+      listener?.({
+        sequence: 1,
+        sessionEpoch: "epoch-1",
+        snapshot: advanced,
+        stateRevision: 5,
+        type: "snapshot.changed",
+      });
+    });
+    await screen.findByRole("heading", { name: "Persisted-Skill" });
+
+    // A skipped sequence resynchronizes, but the older fetched revision
+    // must not roll the rendered state backwards.
+    act(() => {
+      listener?.({
+        sequence: 9,
+        sessionEpoch: "epoch-1",
+        snapshot,
+        stateRevision: 9,
+        type: "snapshot.changed",
+      });
+    });
+    await waitFor(() => expect(getSnapshot).toHaveBeenCalledTimes(2));
+    expect(
+      screen.getByRole("heading", { name: "Persisted-Skill" }),
+    ).toBeInTheDocument();
+  });
+
+  it("ignores subscription events and a late bootstrap result after unmount", async () => {
+    let listener: ((event: DesktopEvent) => void) | undefined;
+    let resolveSnapshot: ((value: unknown) => void) | undefined;
+    const getSnapshot = vi.fn(
+      () =>
+        new Promise<unknown>((resolve) => {
+          resolveSnapshot = resolve;
+        }),
+    );
+    const client = {
+      ...clientFor(snapshot),
+      getSnapshot,
+      subscribe(next: (event: DesktopEvent) => void) {
+        listener = next;
+        return () => undefined;
+      },
+    };
+    const { unmount } = render(<InventoryApp client={client as never} />);
+    unmount();
+    resolveSnapshot?.({
+      error: {
+        code: "internal_error",
+        effects: "none",
+        message: "Arrived after unmount.",
+        phase: "observation",
+        retryable: false,
+      },
+      ok: false,
+    });
+    act(() => {
+      listener?.({
+        sequence: 1,
+        sessionEpoch: "epoch-1",
+        snapshot,
+        stateRevision: 2,
+        type: "snapshot.changed",
+      });
+    });
+    expect(getSnapshot).toHaveBeenCalledTimes(1);
+  });
+
+  it("re-checks the focus restore guard when the window regains focus without an intent", async () => {
+    render(<InventoryApp client={clientFor(snapshot)} />);
+    await screen.findByRole("heading", { level: 1, name: "Inventory" });
+    act(() => {
+      window.dispatchEvent(new FocusEvent("focus"));
+    });
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Inventory" }),
+    ).toBeInTheDocument();
+  });
+
+  it("follows the remaining navigate.* menu commands to their views", async () => {
+    const menuHarness: MenuHarness = { listener: undefined };
+    render(
+      <InventoryApp client={clientFor(snapshot, undefined, menuHarness)} />,
+    );
+    await screen.findByRole("heading", { level: 1, name: "Inventory" });
+    const cases: ReadonlyArray<readonly [MenuCommandEvent["command"], string]> =
+      [
+        ["navigate.about", "About"],
+        ["navigate.collections", "Official Collections"],
+        ["navigate.comparison", "Comparison"],
+        ["navigate.publish", "Publish"],
+        ["navigate.recovery", "Recovery"],
+        ["navigate.studio", "Studio"],
+      ];
+    for (const [command, heading] of cases) {
+      act(() => {
+        menuHarness.listener?.({ command, schemaVersion: 1 });
+      });
+      expect(
+        await screen.findByRole("heading", { level: 1, name: heading }),
+      ).toBeInTheDocument();
+      act(() => {
+        menuHarness.listener?.({
+          command: "navigate.inventory",
+          schemaVersion: 1,
+        });
+      });
+      expect(
+        await screen.findByRole("heading", { level: 1, name: "Inventory" }),
+      ).toBeInTheDocument();
+    }
+  });
+
+  it("retries opening the workspace after a bootstrap failure", async () => {
+    const getSnapshot = vi.fn<DesktopBridge["getSnapshot"]>(async () => ({
+      ok: true,
+      value: snapshot,
+    }));
+    getSnapshot.mockResolvedValueOnce({
+      error: {
+        code: "internal_error" as const,
+        effects: "none" as const,
+        message: "The workspace could not be opened.",
+        phase: "bootstrap",
+        retryable: true,
+      },
+      ok: false,
+    });
+    render(
+      <InventoryApp client={{ ...clientFor(snapshot), getSnapshot }} />,
+    );
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "Retry opening inventory",
+      }),
+    );
+    await screen.findByRole("heading", { level: 1, name: "Inventory" });
+    expect(getSnapshot).toHaveBeenCalledTimes(2);
+  });
+
+  it("surfaces the persisted-state warning while the inventory stays usable", async () => {
+    const warned: WorkspaceSnapshot = {
+      ...snapshot,
+      inventory: {
+        ...snapshot.inventory,
+        persistenceWarning: {
+          code: "persist_failed",
+          effects: "none",
+          message: "The last inventory refresh could not be saved.",
+          phase: "observation",
+          retryable: false,
+        },
+      },
+    };
+    render(<InventoryApp client={clientFor(warned)} />);
+    await screen.findByRole("heading", { level: 1, name: "Inventory" });
+    const banner = screen
+      .getByText("The last inventory refresh could not be saved.")
+      .closest("[role=status]");
+    expect(banner).not.toBeNull();
+    expect(
+      screen.getByRole("button", { name: "Prepare update" }),
+    ).toBeEnabled();
+  });
+
+  it("arms the trusted-review context after a successful prepare", async () => {
+    const prepareMutation = vi.fn(async () => ({
+      ok: true as const,
+      value: { operationId: "prepared-update" },
+    }));
+    render(
+      <InventoryApp
+        client={{ ...clientFor(reviewableSnapshot), prepareMutation }}
+      />,
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Prepare update" }),
+    );
+    await waitFor(() =>
+      expect(prepareMutation).toHaveBeenCalledWith(
+        reviewableSnapshot.target.id,
+        {
+          names: ["Case-Sensitive-Skill"],
+          scope: "project",
+          type: "update",
+        },
+      ),
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Open Trusted Review" }),
+      ).toBeEnabled(),
+    );
+  });
+
+  it("refuses to open review when the prepared target generation went stale", async () => {
+    let listener: ((event: DesktopEvent) => void) | undefined;
+    const requestReview = vi.fn(async () => ({
+      ok: true as const,
+      value: { operationId: "review-1" },
+    }));
+    const client: DesktopBridge = {
+      ...clientFor(reviewableSnapshot),
+      requestReview,
+      subscribe(next) {
+        listener = next;
+        return () => undefined;
+      },
+    };
+    render(<InventoryApp client={client} />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Prepare update" }),
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Open Trusted Review" }),
+      ).toBeEnabled(),
+    );
+
+    // The target moved forward after the plan was prepared.
+    act(() => {
+      listener?.({
+        sequence: 1,
+        sessionEpoch: "epoch-1",
+        snapshot: {
+          ...reviewableSnapshot,
+          eventSequence: 1,
+          stateRevision: 9,
+          target: {
+            ...reviewableSnapshot.target,
+            generation: reviewableSnapshot.target.generation + 1,
+          },
+        },
+        stateRevision: 9,
+        type: "snapshot.changed",
+      });
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open Trusted Review" }),
+    );
+    await act(async () => undefined);
+    expect(requestReview).not.toHaveBeenCalled();
+  });
+
+  it("surfaces a skills.sh handoff failure and keeps the record actionable", async () => {
+    const recordId = "e".repeat(64);
+    const handoffSkillsSh = vi.fn(async () => ({
+      error: {
+        code: "internal_error" as const,
+        effects: "none" as const,
+        message: "The handoff could not be opened.",
+        phase: "handoff",
+        retryable: false,
+      },
+      ok: false as const,
+    }));
+    const withHandoff: WorkspaceSnapshot = {
+      ...snapshot,
+      skillsShHandoffs: [
+        {
+          id: recordId,
+          kind: "skills-sh",
+          owner: "example",
+          repository: "skills",
+          skill: "Case-Sensitive-Skill",
+          sourceEntry: { name: "Case-Sensitive-Skill", scope: "project" },
+        },
+      ],
+    };
+    render(
+      <InventoryApp client={{ ...clientFor(withHandoff), handoffSkillsSh }} />,
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Open on skills.sh" }),
+    );
+    await waitFor(() => expect(handoffSkillsSh).toHaveBeenCalledWith(recordId));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "The handoff could not be opened.",
+    );
+    expect(
+      screen.getByRole("button", { name: "Open on skills.sh" }),
+    ).toBeEnabled();
+    expect(
+      screen.queryByText(/Opened in your browser/),
+    ).not.toBeInTheDocument();
+  });
+
+  it("describes a repo-level skills.sh record without a skill suffix", async () => {
+    const withHandoff: WorkspaceSnapshot = {
+      ...snapshot,
+      skillsShHandoffs: [
+        {
+          id: "f".repeat(64),
+          kind: "skills-sh",
+          owner: "example",
+          repository: "skills",
+          skill: null,
+          sourceEntry: { name: "Case-Sensitive-Skill", scope: "project" },
+        },
+      ],
+    };
+    render(<InventoryApp client={clientFor(withHandoff)} />);
+    await screen.findByRole("button", { name: "Open on skills.sh" });
+    expect(
+      screen.getByText(/Opens skills\.sh\/example\/skills\b(?!\/)/),
+    ).toBeInTheDocument();
+  });
+
+  it("reconciles a blocked mutation and surfaces a reconcile failure", async () => {
+    const reconcileMutation = vi
+      .fn()
+      .mockResolvedValueOnce({
+        error: {
+          code: "reconciliation_required" as const,
+          effects: "none" as const,
+          message: "The workspace still disagrees with the ledger.",
+          phase: "reconcile",
+          retryable: true,
+        },
+        ok: false,
+      })
+      .mockResolvedValue({
+        ok: true,
+        value: { operationId: "reconcile-1" },
+      });
+    const blocked: WorkspaceSnapshot = {
+      ...snapshot,
+      inventory: {
+        ...snapshot.inventory,
+        freshness: "stale",
+        lastError: {
+          code: "stale_inventory",
+          effects: "none",
+          message: "The stored inventory is older than the workspace.",
+          phase: "observation",
+          retryable: true,
+        },
+      },
+      mutation: {
+        ...snapshot.mutation,
+        lastError: {
+          code: "reconciliation_required",
+          effects: "possible",
+          message: "Reconciliation is required before further changes.",
+          phase: "mutation",
+          retryable: true,
+        },
+        phase: "reconciliation-required",
+      },
+    };
+    render(
+      <InventoryApp client={{ ...clientFor(blocked), reconcileMutation }} />,
+    );
+    await screen.findByRole("heading", { level: 1, name: "Inventory" });
+    expect(
+      screen.getByText("The stored inventory is older than the workspace."),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Reconciliation is required before further changes."),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Reconcile" }));
+    await waitFor(() =>
+      expect(reconcileMutation).toHaveBeenCalledWith(snapshot.target.id),
+    );
+    expect(
+      await screen.findByText(
+        "The workspace still disagrees with the ledger.",
+      ),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Reconcile" }));
+    await waitFor(() => expect(reconcileMutation).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(
+        screen.queryByText(
+          "The workspace still disagrees with the ledger.",
+        ),
+      ).not.toBeInTheDocument(),
+    );
+  });
+
+  it("acknowledges a cancellation review request for a running mutation", async () => {
+    const requestCancellationReview = vi.fn(async () => ({
+      ok: true as const,
+      value: { operationId: "cancel-review-1" },
+    }));
+    const running: WorkspaceSnapshot = {
+      ...snapshot,
+      mutation: {
+        ...snapshot.mutation,
+        activeOperationId: "operation-1",
+        phase: "running",
+      },
+    };
+    render(
+      <InventoryApp
+        client={{ ...clientFor(running), requestCancellationReview }}
+      />,
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Review cancellation" }),
+    );
+    await waitFor(() =>
+      expect(requestCancellationReview).toHaveBeenCalledWith("operation-1"),
+    );
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("shows the running-mutation banner without a cancel control when no operation id is published", async () => {
+    const running: WorkspaceSnapshot = {
+      ...snapshot,
+      mutation: {
+        ...snapshot.mutation,
+        activeOperationId: null,
+        phase: "running",
+      },
+    };
+    render(<InventoryApp client={clientFor(running)} />);
+    await screen.findByRole("heading", { level: 1, name: "Inventory" });
+    expect(
+      screen.queryByRole("button", { name: "Review cancellation" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("surfaces the mutation failure banner outside reconciliation", async () => {
+    const failed: WorkspaceSnapshot = {
+      ...snapshot,
+      mutation: {
+        ...snapshot.mutation,
+        lastError: {
+          code: "process_failed",
+          effects: "none",
+          message: "The mutation process exited non-zero.",
+          phase: "mutation",
+          retryable: true,
+        },
+        phase: "failed",
+      },
+    };
+    render(<InventoryApp client={clientFor(failed)} />);
+    await screen.findByRole("heading", { level: 1, name: "Inventory" });
+    expect(
+      screen.getByText("The mutation process exited non-zero."),
+    ).toBeInTheDocument();
+  });
+
+  it("refreshes from the toolbar icon", async () => {
+    const refreshInventory = vi.fn(async () => ({
+      ok: true as const,
+      value: { operationId: "refresh-1" },
+    }));
+    render(
+      <InventoryApp client={{ ...clientFor(snapshot), refreshInventory }} />,
+    );
+    await screen.findByRole("heading", { level: 1, name: "Inventory" });
+    fireEvent.click(screen.getByRole("button", { name: "Refresh inventory" }));
+    await waitFor(() =>
+      expect(refreshInventory).toHaveBeenCalledWith(snapshot.target.id),
+    );
+  });
+
+  it("refreshes from the blocked-mutation CTA while the inventory is stale", async () => {
+    const refreshInventory = vi.fn(async () => ({
+      ok: true as const,
+      value: { operationId: "refresh-1" },
+    }));
+    const stale: WorkspaceSnapshot = {
+      ...snapshot,
+      inventory: { ...snapshot.inventory, freshness: "stale" },
+    };
+    render(
+      <InventoryApp client={{ ...clientFor(stale), refreshInventory }} />,
+    );
+    await screen.findByRole("heading", { level: 1, name: "Inventory" });
+    // The bootstrap observer already asked for a refresh once.
+    await waitFor(() => expect(refreshInventory).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await waitFor(() => expect(refreshInventory).toHaveBeenCalledTimes(2));
+    expect(refreshInventory).toHaveBeenLastCalledWith(snapshot.target.id);
+  });
+
+  it("clears a non-empty search query on Escape", async () => {
+    render(<InventoryApp client={clientFor(snapshot)} />);
+    const search = await screen.findByRole("searchbox", {
+      name: "Search inventory",
+    });
+    fireEvent.keyDown(search, { key: "Escape" });
+    fireEvent.change(search, { target: { value: "missing" } });
+    await screen.findByRole("heading", { name: "No matching skills" });
+    fireEvent.keyDown(search, { key: "Escape" });
+    expect(search).toHaveValue("");
+    expect(
+      await screen.findByRole("heading", { name: "Case-Sensitive-Skill" }),
+    ).toBeInTheDocument();
+  });
+
+  it("flags an entry that is not linked to the target's harness", async () => {
+    const unlinked: WorkspaceSnapshot = {
+      ...snapshot,
+      inventory: {
+        ...snapshot.inventory,
+        entries: [
+          {
+            agents: ["claude-code"],
+            contentFingerprint: { status: "unknown" as const },
+            declaredSource: { source: null, sourceType: null },
+            name: "Claude-Only-Skill",
+            revision: { status: "unknown" as const },
+            scope: "project" as const,
+          },
+        ],
+      },
+    };
+    render(<InventoryApp client={clientFor(unlinked)} />);
+    await screen.findByRole("heading", { name: "Claude-Only-Skill" });
+    expect(screen.getByText("Not linked")).toBeInTheDocument();
+  });
+
+  it("describes an entry without declared-source metadata as unknown", async () => {
+    const unattributed: WorkspaceSnapshot = {
+      ...snapshot,
+      inventory: {
+        ...snapshot.inventory,
+        entries: [
+          {
+            agents: [],
+            contentFingerprint: { status: "unknown" as const },
+            declaredSource: { source: null, sourceType: null },
+            name: "Case-Sensitive-Skill",
+            revision: { status: "unknown" as const },
+            scope: "project" as const,
+          },
+        ],
+      },
+    };
+    render(<InventoryApp client={clientFor(unattributed)} />);
+    await screen.findByRole("heading", { name: "Case-Sensitive-Skill" });
+    expect(
+      screen.getAllByText("Unknown").length,
+    ).toBeGreaterThan(0);
+  });
+
+  it("shows the empty-inventory inspector guidance", async () => {
+    const empty: WorkspaceSnapshot = {
+      ...snapshot,
+      inventory: { ...snapshot.inventory, entries: [] },
+    };
+    render(<InventoryApp client={clientFor(empty)} />);
+    expect(
+      await screen.findByRole("heading", { name: "No skills to inspect" }),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Add Skill" }));
+    expect(
+      screen.getByRole("textbox", { name: "Source" }),
+    ).toHaveFocus();
+  });
+
+  it("prepares an update across the chosen scope", async () => {
+    const prepareMutation = vi.fn(async () => ({
+      ok: true as const,
+      value: { operationId: "prepared-all" },
+    }));
+    render(
+      <InventoryApp
+        client={{ ...clientFor(reviewableSnapshot), prepareMutation }}
+      />,
+    );
+    const inventoryScope = await screen.findByRole("group", {
+      name: "Inventory scope",
+    });
+    fireEvent.click(
+      within(inventoryScope).getByRole("button", { name: "Global scope" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Update scope" }));
+    await waitFor(() =>
+      expect(prepareMutation).toHaveBeenCalledWith(
+        reviewableSnapshot.target.id,
+        { scope: "global", type: "update-all" },
+      ),
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Open Trusted Review" }),
+      ).toBeEnabled(),
+    );
+  });
+
+  it("surfaces an add-mutation preparation failure", async () => {
+    const prepareMutation = vi.fn(async () => ({
+      error: {
+        code: "invalid_intent" as const,
+        effects: "none" as const,
+        message: "The add intent was rejected.",
+        phase: "prepare",
+        retryable: false,
+      },
+      ok: false as const,
+    }));
+    render(
+      <InventoryApp client={{ ...clientFor(snapshot), prepareMutation }} />,
+    );
+    fireEvent.change(await screen.findByRole("textbox", { name: "Source" }), {
+      target: { value: "example/skills" },
+    });
+    fireEvent.change(
+      screen.getByRole("textbox", { name: "Exact skill name" }),
+      { target: { value: "brand-new-skill" } },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Prepare add" }));
+    await waitFor(() =>
+      expect(prepareMutation).toHaveBeenCalledWith(
+        snapshot.target.id,
+        expect.objectContaining({
+          names: ["brand-new-skill"],
+          type: "add",
+        }),
+      ),
+    );
+    expect(
+      await screen.findByText("The add intent was rejected."),
+    ).toBeInTheDocument();
+  });
+
+  it("discards a bootstrap result that arrives after unmount", async () => {
+    let resolveSnapshot: ((value: unknown) => void) | undefined;
+    const getSnapshot = vi.fn(
+      () =>
+        new Promise<unknown>((resolve) => {
+          resolveSnapshot = resolve;
+        }),
+    );
+    const { unmount } = render(
+      <InventoryApp
+        client={{ ...clientFor(snapshot), getSnapshot: getSnapshot as never }}
+      />,
+    );
+    unmount();
+    await act(async () => {
+      resolveSnapshot?.({ ok: true, value: snapshot });
+    });
+    expect(getSnapshot).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows no-candidate guidance for an empty inspection", async () => {
+    const inspected: WorkspaceSnapshot = {
+      ...snapshot,
+      sourceInspection: {
+        activeOperationId: null,
+        inspection: {
+          candidates: [],
+          descriptor: {
+            family: "github" as const,
+            locality: "portable" as const,
+            mutability: "mutable" as const,
+            ref: null,
+            schemaVersion: 1 as const,
+            source: "vercel-labs/skills",
+          },
+          digest: "a".repeat(64),
+          inspectedAt: "2026-08-21T10:00:30.000Z",
+          inspectionId: "inspection-empty",
+          targetGeneration: snapshot.target.generation,
+          targetId: snapshot.target.id,
+        },
+        lastError: null,
+        phase: "ready",
+      },
+    };
+    render(<InventoryApp client={clientFor(inspected)} />);
+    await screen.findByRole("heading", { level: 1, name: "Inventory" });
+    fireEvent.change(screen.getByRole("textbox", { name: "Source" }), {
+      target: { value: "vercel-labs/skills" },
+    });
+    expect(
+      await screen.findByText("The source lists no Skills to add."),
+    ).toBeInTheDocument();
+  });
+
+  it("returns to inventory from an empty comparison", async () => {
+    const rightTarget = {
+      connectionReference: null,
+      ...targetV4Metadata,
+      generation: 2,
+      id: "00000000-0000-4000-8000-00000000000a",
+      kind: "local" as const,
+      label: "Other device",
+      workspace: "/work/other",
+      workspaceLabel: "other",
+    };
+    const targetStates = [
+      {
+        deletionBlocked: false,
+        inventory: snapshot.inventory,
+        mutation: snapshot.mutation,
+        target: snapshot.target,
+      },
+      {
+        deletionBlocked: false,
+        inventory: { ...snapshot.inventory, freshness: "stale" as const },
+        mutation: snapshot.mutation,
+        target: rightTarget,
+      },
+    ];
+    const comparison = {
+      id: "comparison-empty",
+      leftFreshness: "fresh" as const,
+      leftTargetId: snapshot.target.id,
+      rightFreshness: "stale" as const,
+      rightTargetId: rightTarget.id,
+      rows: [],
+    };
+    render(
+      <InventoryApp
+        client={clientFor({ ...snapshot, comparison, targets: targetStates })}
+      />,
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Comparison" }),
+    );
+    expect(
+      await screen.findByRole("heading", { name: "Comparison" }),
+    ).toBeInTheDocument();
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Open Inventory" }),
+    );
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Inventory" }),
+    ).toBeInTheDocument();
+  });
 });

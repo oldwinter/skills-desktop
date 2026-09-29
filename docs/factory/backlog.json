@@ -1553,6 +1553,36 @@
       "notes": [
         "hosted failures at daf0745 (run 36510442072): release-integrity-cli.test.ts expected no GITHUB_OUTPUT append while the runner env was inherited; recovery-records.test.ts read-fault cases expected corrupt_store on Windows where endsWith('/') never matches"
       ]
+    },
+    {
+      "id": "SDF-059",
+      "title": "Cover the InventoryApp renderer's uncovered user-visible branches",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 590,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "subscription resync arms (out-of-order event, resync.required, stale revision, post-unmount) are exercised through the injected subscribe listener",
+        "menu navigate.* commands reach about, collections, comparison, inventory, publish, recovery, and studio views",
+        "bootstrap retry re-invokes getSnapshot after an initial failure",
+        "persistenceWarning, stale-refresh CTA, reconcile banners, cancellation-review, toolbar refresh, Escape query clear, unlinked harness badge, unknown source, empty inventory, empty inspection, and empty-comparison return all assert real rendered behavior",
+        "prepared-mutation context success and stale-generation review refusal are asserted through the bridge mocks",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "dependsOn": [
+        "SDF-043"
+      ],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "InventoryApp.tsx residual arms after SDF-043: resync/focus/menu/boot-retry/prepare/handoff/reconcile/refresh/escape/harness/empty-state branches; guards unreachable through the UI (disabled controls, dead ref placeholders, focus-race timing) are noted rather than forced",
+        "same commit hardens two latent signal-test races surfaced by the SDF-059 attempt-2 coverage failure: signalCase now rendezvous on the descendant's pidFile instead of the gate-start file (the group signal could land between STARTED and spawn under load), and the unit timeout gate widens to 1500ms/2000ms/2200ms margins for the same spawn-gap class"
+      ]
     }
   ]
 }

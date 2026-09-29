@@ -474,7 +474,10 @@ describe("factory pipeline", () => {
     child.stdout!.on("data", (chunk) => (output += chunk));
     child.stderr!.on("data", (chunk) => (output += chunk));
     try {
-      await vi.waitFor(() => expect(existsSync(gateStarted)).toBe(true), {
+      // The descendant publishes its own pid the moment it joins the gate's
+      // process group; gateStarted alone races the spawn and would let the
+      // group signal land before the descendant exists.
+      await vi.waitFor(() => expect(existsSync(pidFile)).toBe(true), {
         interval: 25,
         timeout: 15_000,
       });

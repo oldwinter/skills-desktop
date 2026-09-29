@@ -67,7 +67,9 @@ describe("runGate cancellation semantics", () => {
         'const fs=require("fs");' +
         `fs.writeFileSync(${JSON.stringify(started)},"yes");` +
         `fs.writeFileSync(${JSON.stringify(pidFile)},String(process.pid));` +
-        `setTimeout(()=>fs.writeFileSync(${JSON.stringify(marker)},"late"),800);` +
+        // The marker deadline is measured from the descendant's own start;
+        // it must stay past the gate timeout so only a survivor could write.
+        `setTimeout(()=>fs.writeFileSync(${JSON.stringify(marker)},"late"),2000);` +
         "setTimeout(()=>{},30000);";
       const gate =
         'const{spawn}=require("child_process");' +
@@ -77,14 +79,16 @@ describe("runGate cancellation semantics", () => {
       try {
         const result = await runGate(
           { argv: [process.execPath, "-e", gate], name: "descendant" },
-          { cwd: dir, logPath: join(dir, "gate.log"), timeoutMs: 400 },
+          // The timeout must clear gate boot plus the descendant spawn or the
+          // group signal can fire before the descendant exists.
+          { cwd: dir, logPath: join(dir, "gate.log"), timeoutMs: 1_500 },
         );
         expect(result).toMatchObject({ ok: false, timedOut: true });
 
         // Past the descendant's scheduled write: nothing landed late. The
         // marker deadline is the leak witness; probing the published pid is
         // racy (zombie reaping, pid reuse under coverage load).
-        await sleep(1_400);
+        await sleep(2_200);
         expect(existsSync(marker)).toBe(false);
       } finally {
         rmSync(dir, { force: true, recursive: true });
