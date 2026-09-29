@@ -501,13 +501,13 @@ html[data-appearance="system"] .status-pill.status-pill--neutral {
 .empty-state .text-button { margin-top: 6px; }
 .empty-state__hint { color: var(--text-tertiary); }
 
-.inspector { display: flex; flex-direction: column; min-height: 0; overflow: hidden; padding: 16px; box-shadow: -1px 0 0 var(--line), 0 2px 8px var(--shadow); }
+.inspector { display: flex; flex-direction: column; min-height: 0; overflow: auto; padding: 16px; box-shadow: -1px 0 0 var(--line), 0 2px 8px var(--shadow); }
 .inspector-heading { flex: 0 0 auto; gap: 10px; padding: 2px 0 14px; border-bottom: 1px solid var(--line); }
 .inspector-heading > div { min-width: 0; }
 .inspector-heading p { color: var(--text-tertiary); font-size: var(--font-size-meta); }
 .inspector-heading h2 { margin-top: 2px; overflow-wrap: anywhere; }
 .inspector-empty { flex: 1 1 auto; min-height: 0; overflow: auto; }
-.evidence-list { display: grid; flex: 1 1 auto; min-height: 0; overflow: auto; }
+.evidence-list { display: grid; flex: 1 1 auto; min-height: 9rem; overflow: auto; }
 .evidence-list:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 .evidence-list > div { display: grid; gap: 4px; padding: 13px 0; border-bottom: 1px solid var(--line); }
 .evidence-list dt { color: var(--text-tertiary); font-size: var(--font-size-meta); }
