@@ -1711,6 +1711,25 @@
         "test:coverage"
       ],
       "notes": "Extends the existing mock-based composition test; no product behavior changes."
+    },
+    {
+      "id": "SDF-065",
+      "title": "Cover SSH transport-runner termination internals and process passthroughs",
+      "kind": "verification",
+      "priority": "p2",
+      "state": "delivered",
+      "order": 65,
+      "acceptance": [
+        "ssh-transport-runner.test.ts exercises pre-spawn abort, mid-staging abort, missing executable, stdin.end fallback, SIGTERM-resistant SIGKILL escalation, in-flight interruption guard, cancellation write failure, stdout byte-limit termination, and the three bounded Windows tree-kill arms",
+        "ssh-skills-process.test.ts covers pre-aborted observation, project/global inventory parse passthroughs, mutation-plan failure passthrough, and GitHub-source add preparation",
+        "All new tests are deterministic under coverage load (no wall-clock races on child boot)"
+      ],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": "ssh-skills-process.ts 87% -> ~92% statements; remaining arms need non-ESRCH kill failures or are unreachable via the public API (wireHarnessId is gated at prepare)."
     }
   ]
 }

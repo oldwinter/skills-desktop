@@ -529,3 +529,482 @@ describe.skipIf(process.platform === "win32")(
     );
   },
 );
+
+describe.skipIf(process.platform === "win32")(
+  "transport runner termination internals",
+  { timeout: 30_000 },
+  () => {
+    const input = encodeWireFrame({
+      harness: "Codex",
+      mutation: {
+        names: ["project-skill"],
+        scope: "project",
+        type: "remove",
+      },
+      operation: "mutate",
+      protocolVersion: WIRE_PROTOCOL_VERSION,
+      requestId: "internals",
+      type: "request",
+      workspace: "/srv/workspace",
+    });
+    const cancellationInput = encodeWireFrame({
+      operation: "cancel",
+      protocolVersion: WIRE_PROTOCOL_VERSION,
+      requestId: "internals",
+      type: "request",
+    });
+    const configuration = "Host fixed-command\n  HostName example.invalid\n";
+
+    function fixtureRunner(
+      directory: string,
+      overrides?: {
+        readonly cancellationGraceMs?: number;
+        readonly environment?: Record<string, string>;
+        readonly killWindowsTree?: (pid: number) => Promise<void>;
+        readonly platform?: NodeJS.Platform;
+        readonly windowsTreeTerminationTimeoutMs?: number;
+      },
+    ) {
+      return createSshTransportRunner({
+        cancellationGraceMs: 60,
+        platform: "linux",
+        ...overrides,
+        environment: {
+          PATH: `${directory}${delimiter}${process.env.PATH ?? ""}`,
+          ...overrides?.environment,
+        },
+      });
+    }
+
+    it("rejects when the signal is already aborted before spawning", async () => {
+      const directory = await mkdtemp(join(tmpdir(), "skills-ssh-runner-"));
+      try {
+        const runner = fixtureRunner(directory);
+        const controller = new AbortController();
+        controller.abort();
+        await expect(
+          runner.run({
+            args: ["fixed-command"],
+            configuration,
+            executable: "ssh",
+            input,
+            maxStderrBytes: 1_024,
+            maxStdoutBytes: 1_024,
+            signal: controller.signal,
+            timeoutMs: 30_000,
+          }),
+        ).rejects.toMatchObject({
+          disposition: "cancelled",
+          message: "SSH transport was cancelled before spawn.",
+        });
+      } finally {
+        await rm(directory, { force: true, recursive: true });
+      }
+    });
+
+    it("rejects when the signal is aborted while the configuration is staged", async () => {
+      const directory = await mkdtemp(join(tmpdir(), "skills-ssh-runner-"));
+      try {
+        const runner = fixtureRunner(directory);
+        const controller = new AbortController();
+        const pending = runner.run({
+          args: ["fixed-command"],
+          configuration,
+          executable: "ssh",
+          input,
+          maxStderrBytes: 1_024,
+          maxStdoutBytes: 1_024,
+          signal: controller.signal,
+          timeoutMs: 30_000,
+        });
+        controller.abort();
+        await expect(pending).rejects.toMatchObject({
+          disposition: "cancelled",
+          message: "SSH transport was cancelled before spawn.",
+        });
+      } finally {
+        await rm(directory, { force: true, recursive: true });
+      }
+    });
+
+    it("maps a missing executable to an unavailable transport failure", async () => {
+      const directory = await mkdtemp(join(tmpdir(), "skills-ssh-runner-"));
+      const emptyPath = join(directory, "empty-path");
+      await mkdir(emptyPath);
+      try {
+        const runner = fixtureRunner(directory, {
+          environment: { PATH: emptyPath },
+        });
+        await expect(
+          runner.run({
+            args: ["fixed-command"],
+            configuration,
+            executable: "ssh",
+            input,
+            maxStderrBytes: 1_024,
+            maxStdoutBytes: 1_024,
+            signal: new AbortController().signal,
+            timeoutMs: 30_000,
+          }),
+        ).rejects.toMatchObject({
+          disposition: "failed",
+          message: "SSH executable is unavailable.",
+        });
+      } finally {
+        await rm(directory, { force: true, recursive: true });
+      }
+    });
+
+    it("closes stdin itself when no cancellation frame is configured", async () => {
+      const directory = await mkdtemp(join(tmpdir(), "skills-ssh-runner-"));
+      try {
+        const responseFile = join(directory, "response.bin");
+        await writeFile(responseFile, "transport-response");
+        const executable = await writeCommonJsExecutable(
+          directory,
+          "ssh",
+          `#!/usr/bin/env node
+const { readFileSync } = require("node:fs");
+const chunks = [];
+process.stdin.on("data", (chunk) => chunks.push(chunk));
+process.stdin.on("end", () => {
+  process.stdout.write(readFileSync(process.env.TEST_RESPONSE_FILE));
+});
+`,
+        );
+        const runner = createSshTransportRunner({
+          environment: {
+            PATH: `${directory}${delimiter}${process.env.PATH ?? ""}`,
+            TEST_RESPONSE_FILE: responseFile,
+          },
+          platform: "linux",
+        });
+        const result = await runner.run({
+          args: ["fixed-command"],
+          configuration,
+          executable: "ssh",
+          input,
+          maxStderrBytes: 1_024,
+          maxStdoutBytes: 1_024,
+          signal: new AbortController().signal,
+          timeoutMs: 15_000,
+        });
+        expect(Buffer.from(result.stdout).toString()).toBe(
+          "transport-response",
+        );
+        expect(result.exitCode).toBe(0);
+        expect(result.interruption).toBeUndefined();
+      } finally {
+        await rm(directory, { force: true, recursive: true });
+      }
+    });
+
+    it("escalates to SIGKILL when a transport ignores SIGTERM", async () => {
+      const directory = await mkdtemp(join(tmpdir(), "skills-ssh-runner-"));
+      try {
+        const startedFile = join(directory, "started");
+        await writeCommonJsExecutable(
+          directory,
+          "ssh",
+          `#!/usr/bin/env node
+const { writeFileSync } = require("node:fs");
+process.on("SIGTERM", () => {});
+process.stdin.on("data", () => {});
+writeFileSync(process.env.TEST_STARTED_FILE, "started");
+`,
+        );
+        const runner = fixtureRunner(directory, {
+          cancellationGraceMs: 60,
+          environment: { TEST_STARTED_FILE: startedFile },
+        });
+        const controller = new AbortController();
+        const pending = runner.run({
+          args: ["fixed-command"],
+          cancellationGraceMs: 60,
+          cancellationInput,
+          configuration,
+          executable: "ssh",
+          input,
+          maxStderrBytes: 1_024,
+          maxStdoutBytes: 1_024,
+          signal: controller.signal,
+          timeoutMs: 15_000,
+        });
+        await waitForFile(startedFile);
+        controller.abort();
+        await expect(pending).rejects.toMatchObject({
+          disposition: "cancelled",
+          message: "SSH transport ended without remote cleanup proof.",
+        });
+      } finally {
+        await rm(directory, { force: true, recursive: true });
+      }
+    });
+
+    it("ignores a second interruption while cancellation is already in flight", async () => {
+      const directory = await mkdtemp(join(tmpdir(), "skills-ssh-runner-"));
+      try {
+        const startedFile = join(directory, "started");
+        await writeCommonJsExecutable(
+          directory,
+          "ssh",
+          `#!/usr/bin/env node
+const { writeFileSync } = require("node:fs");
+process.stdin.on("data", () => {});
+writeFileSync(process.env.TEST_STARTED_FILE, "started");
+setTimeout(() => {}, 10_000);
+`,
+        );
+        const runner = fixtureRunner(directory, {
+          cancellationGraceMs: 1_500,
+          environment: { TEST_STARTED_FILE: startedFile },
+        });
+        const controller = new AbortController();
+        const pending = runner.run({
+          args: ["fixed-command"],
+          cancellationGraceMs: 1_500,
+          cancellationInput,
+          configuration,
+          executable: "ssh",
+          input,
+          maxStderrBytes: 1_024,
+          maxStdoutBytes: 1_024,
+          signal: controller.signal,
+          timeoutMs: 600,
+        });
+        // Whichever interruption lands second hits the in-flight guard, so the
+        // ordering between the signal and the invocation timeout does not
+        // matter under load.
+        const settled = observeRunnerResult(pending);
+        await waitForFile(startedFile);
+        controller.abort();
+        expect(await settled).toMatchObject({
+          error: {
+            disposition: expect.stringMatching(/^(cancelled|timed-out)$/),
+          },
+          kind: "rejected",
+        });
+      } finally {
+        await rm(directory, { force: true, recursive: true });
+      }
+    });
+
+    it("rejects the transport when the cancellation write fails", async () => {
+      const directory = await mkdtemp(join(tmpdir(), "skills-ssh-runner-"));
+      try {
+        const startedFile = join(directory, "started");
+        await writeCommonJsExecutable(
+          directory,
+          "ssh",
+          `#!/usr/bin/env node
+const { writeFileSync } = require("node:fs");
+process.stdin.destroy();
+writeFileSync(process.env.TEST_STARTED_FILE, "started");
+setTimeout(() => {}, 10_000);
+`,
+        );
+        const runner = fixtureRunner(directory, {
+          cancellationGraceMs: 400,
+          environment: { TEST_STARTED_FILE: startedFile },
+        });
+        const controller = new AbortController();
+        const pending = runner.run({
+          args: ["fixed-command"],
+          cancellationGraceMs: 400,
+          cancellationInput,
+          configuration,
+          executable: "ssh",
+          input,
+          maxStderrBytes: 1_024,
+          maxStdoutBytes: 1_024,
+          signal: controller.signal,
+          timeoutMs: 15_000,
+        });
+        await waitForFile(startedFile);
+        controller.abort();
+        await expect(pending).rejects.toMatchObject({
+          disposition: "cancelled",
+          message: "SSH transport ended without remote cleanup proof.",
+        });
+      } finally {
+        await rm(directory, { force: true, recursive: true });
+      }
+    });
+
+    it("rejects the run when process output exceeds the stdout limit", async () => {
+      const directory = await mkdtemp(join(tmpdir(), "skills-ssh-runner-"));
+      try {
+        await writeCommonJsExecutable(
+          directory,
+          "ssh",
+          `#!/usr/bin/env node
+process.stdout.write("overflow");
+process.stdin.resume();
+`,
+        );
+        const runner = fixtureRunner(directory, {
+          cancellationGraceMs: 40,
+        });
+        await expect(
+          runner.run({
+            args: ["fixed-command"],
+            cancellationGraceMs: 40,
+            cancellationInput,
+            configuration,
+            executable: "ssh",
+            input,
+            maxStderrBytes: 1_024,
+            maxStdoutBytes: 1,
+            signal: new AbortController().signal,
+            timeoutMs: 15_000,
+          }),
+        ).rejects.toMatchObject({
+          disposition: "failed",
+          message: "SSH stdout exceeded its byte limit.",
+        });
+      } finally {
+        await rm(directory, { force: true, recursive: true });
+      }
+    });
+
+    it("fails the cancellation when Windows tree termination cannot be confirmed", async () => {
+      const directory = await mkdtemp(join(tmpdir(), "skills-ssh-runner-"));
+      try {
+        const startedFile = join(directory, "started");
+        await writeCommonJsExecutable(
+          directory,
+          "ssh",
+          `#!/usr/bin/env node
+const { writeFileSync } = require("node:fs");
+process.stdin.on("data", () => {});
+writeFileSync(process.env.TEST_STARTED_FILE, "started");
+setTimeout(() => {}, 10_000);
+`,
+        );
+        const runner = fixtureRunner(directory, {
+          environment: { TEST_STARTED_FILE: startedFile },
+          killWindowsTree: () => new Promise(() => {}),
+          platform: "win32",
+          windowsTreeTerminationTimeoutMs: 40,
+        });
+        const controller = new AbortController();
+        const pending = runner.run({
+          args: ["fixed-command"],
+          cancellationGraceMs: 400,
+          cancellationInput,
+          configuration,
+          executable: "ssh",
+          input,
+          maxStderrBytes: 1_024,
+          maxStdoutBytes: 1_024,
+          signal: controller.signal,
+          timeoutMs: 15_000,
+        });
+        await waitForFile(startedFile);
+        controller.abort();
+        await expect(pending).rejects.toMatchObject({
+          disposition: "cancelled",
+          message: "SSH process tree termination could not be confirmed.",
+        });
+      } finally {
+        await rm(directory, { force: true, recursive: true });
+      }
+    });
+
+    it("fails the cancellation when Windows tree termination rejects", async () => {
+      const directory = await mkdtemp(join(tmpdir(), "skills-ssh-runner-"));
+      try {
+        const startedFile = join(directory, "started");
+        await writeCommonJsExecutable(
+          directory,
+          "ssh",
+          `#!/usr/bin/env node
+const { writeFileSync } = require("node:fs");
+process.stdin.on("data", () => {});
+writeFileSync(process.env.TEST_STARTED_FILE, "started");
+setTimeout(() => {}, 10_000);
+`,
+        );
+        const runner = fixtureRunner(directory, {
+          environment: { TEST_STARTED_FILE: startedFile },
+          async killWindowsTree() {
+            throw new Error("termination refused");
+          },
+          platform: "win32",
+          windowsTreeTerminationTimeoutMs: 5_000,
+        });
+        const controller = new AbortController();
+        const pending = runner.run({
+          args: ["fixed-command"],
+          cancellationGraceMs: 400,
+          cancellationInput,
+          configuration,
+          executable: "ssh",
+          input,
+          maxStderrBytes: 1_024,
+          maxStdoutBytes: 1_024,
+          signal: controller.signal,
+          timeoutMs: 15_000,
+        });
+        await waitForFile(startedFile);
+        controller.abort();
+        await expect(pending).rejects.toMatchObject({
+          disposition: "cancelled",
+          message: "SSH process tree termination could not be confirmed.",
+        });
+      } finally {
+        await rm(directory, { force: true, recursive: true });
+      }
+    });
+
+    it("ignores a late Windows tree termination result after the bounded wait", async () => {
+      const directory = await mkdtemp(join(tmpdir(), "skills-ssh-runner-"));
+      try {
+        const startedFile = join(directory, "started");
+        await writeCommonJsExecutable(
+          directory,
+          "ssh",
+          `#!/usr/bin/env node
+const { writeFileSync } = require("node:fs");
+process.stdin.on("data", () => {});
+writeFileSync(process.env.TEST_STARTED_FILE, "started");
+setTimeout(() => {}, 10_000);
+`,
+        );
+        let terminatedPid: number | undefined;
+        const runner = fixtureRunner(directory, {
+          environment: { TEST_STARTED_FILE: startedFile },
+          async killWindowsTree(pid) {
+            terminatedPid = pid;
+            process.kill(pid, "SIGKILL");
+            await new Promise((resolve) => setTimeout(resolve, 150));
+          },
+          platform: "win32",
+          windowsTreeTerminationTimeoutMs: 40,
+        });
+        const controller = new AbortController();
+        const pending = runner.run({
+          args: ["fixed-command"],
+          cancellationGraceMs: 400,
+          cancellationInput,
+          configuration,
+          executable: "ssh",
+          input,
+          maxStderrBytes: 1_024,
+          maxStdoutBytes: 1_024,
+          signal: controller.signal,
+          timeoutMs: 15_000,
+        });
+        await waitForFile(startedFile);
+        controller.abort();
+        await expect(pending).rejects.toMatchObject({
+          disposition: "cancelled",
+          message: "SSH process tree termination could not be confirmed.",
+        });
+        expect(terminatedPid).toBeTypeOf("number");
+      } finally {
+        await rm(directory, { force: true, recursive: true });
+      }
+    });
+  },
+);

@@ -1645,3 +1645,127 @@ describe("SSH SkillsProcess executeConfirmed guards", () => {
     await expect(pending).resolves.toMatchObject({ ok: true });
   });
 });
+
+describe("SSH inventory passthrough failures", () => {
+  function inventoryResponse(request: WireFrame, overrides: {
+    readonly globalJson?: string;
+    readonly projectJson?: string;
+  }) {
+    return concat(
+      encodeWireFrame({
+        bootstrapDigest: REMOTE_BOOTSTRAP_DIGEST,
+        protocolVersion: WIRE_PROTOCOL_VERSION,
+        type: "hello",
+      }),
+      encodeWireFrame({
+        cliVersion: "1.5.23",
+        globalJson: overrides.globalJson ?? globalJson,
+        projectJson: overrides.projectJson ?? projectJson,
+        protocolVersion: WIRE_PROTOCOL_VERSION,
+        requestId: request.type === "request" ? request.requestId : "bad",
+        type: "inventory",
+      }),
+    );
+  }
+
+  function fixtureProcess(runner: SshTransportRunner) {
+    return createSshSkillsProcess({
+      binding,
+      clock: () => new Date("2026-08-22T10:00:00.000Z"),
+      id: () => "request-passthrough",
+      runner,
+    });
+  }
+
+  it("returns cancelled without spawning when observation is aborted", async () => {
+    const runner = scriptedTransport();
+    const process = fixtureProcess(runner);
+    const controller = new AbortController();
+    controller.abort();
+
+    const observed = await process.observeInventory({
+      signal: controller.signal,
+    });
+    expect(observed).toMatchObject({
+      error: { code: "cancelled" },
+      ok: false,
+    });
+    expect(runner.invocations).toEqual([]);
+  });
+
+  it("prepares a GitHub-source add mutation for SSH transport", async () => {
+    const runner = scriptedTransport();
+    const process = fixtureProcess(runner);
+    const observed = await process.observeInventory({
+      signal: new AbortController().signal,
+    });
+    if (!observed.ok) throw new Error("fixture observation failed");
+
+    const prepared = await process.prepareMutation({
+      freshness: "fresh",
+      intent: {
+        names: ["added-skill"],
+        scope: "project",
+        source: {
+          source: "owner/repository",
+          sourceType: "github",
+        },
+        type: "add",
+      },
+      inventory: observed.value,
+      inventoryId: "inventory-ssh-1",
+    });
+    expect(prepared.ok).toBe(true);
+  });
+
+  it("propagates a malformed project inventory payload", async () => {
+    const process = fixtureProcess(
+      scriptedTransport((request) =>
+        inventoryResponse(request, { projectJson: "not json" }),
+      ),
+    );
+
+    const observed = await process.observeInventory({
+      signal: new AbortController().signal,
+    });
+    expect(observed.ok).toBe(false);
+    if (observed.ok) throw new Error("expected failure");
+    expect(observed.error.effects).toBe("none");
+  });
+
+  it("propagates a malformed global inventory payload", async () => {
+    const process = fixtureProcess(
+      scriptedTransport((request) =>
+        inventoryResponse(request, { globalJson: "not json" }),
+      ),
+    );
+
+    const observed = await process.observeInventory({
+      signal: new AbortController().signal,
+    });
+    expect(observed.ok).toBe(false);
+    if (observed.ok) throw new Error("expected failure");
+    expect(observed.error.effects).toBe("none");
+  });
+
+  it("returns the mutation plan failure unchanged", async () => {
+    const process = fixtureProcess(scriptedTransport());
+
+    const prepared = await process.prepareMutation({
+      freshness: "fresh",
+      intent: {
+        names: [],
+        scope: "project",
+        type: "remove",
+      },
+      inventory: {
+        cliVersion: "1.5.23",
+        entries: [],
+        observedAt: "2026-08-22T10:00:00.000Z",
+        schemaVersion: 1,
+      },
+      inventoryId: "inventory-ssh-1",
+    });
+    expect(prepared.ok).toBe(false);
+  });
+});
