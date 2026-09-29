@@ -319,10 +319,16 @@ export function validateSkillTree(input: StudioTreeInput): StudioValidation {
       directories.add(path);
       continue;
     }
-    if (entry.size > limits.maxFileBytes || entry.bytes === undefined) {
+    if (
+      entry.bytes === undefined ||
+      !Number.isSafeInteger(entry.size) ||
+      entry.size < 0 ||
+      entry.size !== entry.bytes.byteLength ||
+      entry.bytes.byteLength > limits.maxFileBytes
+    ) {
       sink.add({
         code: "file_too_large",
-        message: `File exceeds ${limits.maxFileBytes} bytes or could not be bounded.`,
+        message: `File exceeds ${limits.maxFileBytes} bytes or its bounded size is invalid.`,
         path,
         severity: "error",
       });
@@ -330,7 +336,7 @@ export function validateSkillTree(input: StudioTreeInput): StudioValidation {
     }
     regularFiles.set(path, entry);
     summary.fileCount += 1;
-    summary.totalBytes += entry.size;
+    summary.totalBytes += entry.bytes.byteLength;
   }
 
   if (summary.fileCount > limits.maxFilesPerSkill) {
