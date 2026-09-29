@@ -1191,6 +1191,30 @@
       "notes": [
         "local-skills-process.ts: timeout arm ~501, stderr oversize ~536-555, pre-spawn cancel ~330, post-abort close resolution"
       ]
+    },
+    {
+      "id": "SDF-046",
+      "title": "Cover update restart blocked/cancelled arms",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 460,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "requestRestart returns blocked without calling restartAndInstall while restart guard reasons are active",
+        "requestRestart returns cancelled without calling restartAndInstall when shutdown preparation throws",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "dependsOn": [],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "deferred-update-controller.ts ~229-231 guard-blocked arm + ~240-242 prepareRestart failure arm"
+      ]
     }
   ]
 }
