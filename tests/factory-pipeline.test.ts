@@ -1,6 +1,6 @@
 import { execFile, spawn } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -526,12 +526,14 @@ describe("factory pipeline", () => {
         'const fs=require("fs");' +
         'process.on("SIGTERM",()=>{});' +
         `fs.writeFileSync(${JSON.stringify(ready)},"yes");` +
-        `setTimeout(()=>fs.writeFileSync(${JSON.stringify(marker)},"late"),8000);` +
+        `setTimeout(()=>fs.writeFileSync(${JSON.stringify(marker)},"late"),9000);` +
         "setTimeout(()=>{},30000);";
       const gate =
         'const{spawn}=require("child_process");' +
         `spawn(process.execPath,["-e",${JSON.stringify(descendant)}],{stdio:"ignore"}).unref();` +
         "setTimeout(()=>{},60000);";
+      // The 3s timeout sits past even a slow descendant boot under coverage
+      // so the TERM trap is installed before cancellation fires.
       await writeFile(
         backlogPath,
         `${JSON.stringify({
@@ -539,7 +541,7 @@ describe("factory pipeline", () => {
           gateCommands: {
             lifecycle: {
               argv: [process.execPath, "-e", gate],
-              timeoutMs: 1_200,
+              timeoutMs: 3_000,
             },
           },
           items: [item("SDF-014", { state: "reviewing" })],
@@ -557,16 +559,20 @@ describe("factory pipeline", () => {
         const code = await new Promise<number | null>((resolve) => child.once("exit", resolve));
         const elapsed = Date.now() - startedAt;
         expect(code).toBe(1);
-        // SIGTERM lands ~1.2s after the gate starts; the CLI must not exit
+        // SIGTERM lands ~3s after the gate starts; the CLI must not exit
         // before the 5s escalation window plus drain completes. A resolve at
-        // leader close would return in well under 4s.
-        expect(elapsed).toBeGreaterThan(5_500);
+        // leader close would return in well under 6s.
+        expect(elapsed).toBeGreaterThan(7_000);
         expect(existsSync(ready)).toBe(true);
         expect((await readBacklogFile()).items[0].state).toBe("failed");
         const ledger = await readLedger(join(root, "rt"), "SDF-014");
         expect(ledger?.attempts.at(-1)).toMatchObject({ ok: false, passed: false });
-        // Past the descendant's +8s deadline: the killed group wrote nothing.
-        await new Promise((resolve) => setTimeout(resolve, 2_500));
+        // Past the descendant's +9s deadline measured from its own
+        // readiness rendezvous: the killed group wrote nothing.
+        const deadline = statSync(ready).mtimeMs + 9_000 + 250;
+        await new Promise((resolve) =>
+          setTimeout(resolve, Math.max(0, deadline - Date.now())),
+        );
         expect(existsSync(marker)).toBe(false);
       } finally {
         if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");

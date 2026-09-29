@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -104,25 +104,28 @@ describe("runGate cancellation semantics", () => {
         'const fs=require("fs");' +
         'process.on("SIGTERM",()=>{});' +
         `fs.writeFileSync(${JSON.stringify(ready)},"yes");` +
-        `setTimeout(()=>fs.writeFileSync(${JSON.stringify(marker)},"late"),2000);` +
+        `setTimeout(()=>fs.writeFileSync(${JSON.stringify(marker)},"late"),5000);` +
         "setTimeout(()=>{},30000);";
       const gate =
         'const{spawn}=require("child_process");' +
         `spawn(process.execPath,["-e",${JSON.stringify(descendant)}],{stdio:"ignore"}).unref();` +
         "setTimeout(()=>{},60000);";
       try {
+        // timeoutMs sits past even a slow descendant boot so the TERM trap is
+        // installed before cancellation — the trap, not a race, is what the
+        // SIGKILL escalation has to beat.
         const result = await runGate(
           { argv: [process.execPath, "-e", gate], name: "resistant" },
           {
             cwd: dir,
             escalationMs: 400,
             logPath: join(dir, "gate.log"),
-            timeoutMs: 1_500,
+            timeoutMs: 3_000,
           },
         );
-        // The leader's close lands right after the SIGTERM (~1.5s); the
+        // The leader's close lands right after the SIGTERM (~3s); the
         // resolved duration must reflect the group drain, not the close.
-        expect(result.durationMs).toBeGreaterThanOrEqual(1_800);
+        expect(result.durationMs).toBeGreaterThanOrEqual(3_300);
         expect(result).toMatchObject({
           drained: true,
           ok: false,
@@ -131,8 +134,10 @@ describe("runGate cancellation semantics", () => {
         // The descendant installed its trap and published readiness before
         // the timeout fired — this is not a startup race.
         expect(existsSync(ready)).toBe(true);
-        // Past the descendant's +2s write deadline: nothing landed.
-        await sleep(1_000);
+        // Wait past the descendant's scheduled write, measured from the
+        // readiness rendezvous rather than an assumed start time.
+        const deadline = statSync(ready).mtimeMs + 5_000 + 250;
+        await sleep(Math.max(0, deadline - Date.now()));
         expect(existsSync(marker)).toBe(false);
       } finally {
         rmSync(dir, { force: true, recursive: true });
