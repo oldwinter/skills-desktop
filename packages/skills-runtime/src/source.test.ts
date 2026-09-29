@@ -74,7 +74,7 @@ describe("describeSource", () => {
       ref: null,
     });
     expectDescriptor(
-      "https://github.com/vercel-labs/skills/tree/release/skills",
+      "https://github.com/vercel-labs/skills/tree/release",
       {
         family: "github",
         locality: "portable",
@@ -88,7 +88,7 @@ describe("describeSource", () => {
       mutability: "mutable",
       ref: null,
     });
-    expectDescriptor("https://gitlab.com/group/project/-/tree/v2/skills", {
+    expectDescriptor("https://gitlab.com/group/project/-/tree/v2", {
       family: "gitlab",
       locality: "portable",
       mutability: "mutable",
@@ -213,10 +213,13 @@ describe("describeSource", () => {
       "https://user:secret@github.com/vercel-labs/skills",
       "https://token@github.com/vercel-labs/skills",
       "ssh://git:secret@git.example.com/team/skills.git",
+      "ssh://git@git.example.com/team/skills.git?unexpected=1",
       "https://github.com/vercel-labs",
       "https://github.com/vercel-labs/skills/pull/1",
+      "https://github.com/vercel-labs/skills/tree/release/skills",
       "https://github.com/vercel-labs/skills?ref=main",
       "https://gitlab.com/onlygroup",
+      "https://gitlab.com/group/project/-/tree/v2/skills",
       "https://skills.sh/search?q=vercel",
       "https://example.com/index#main",
       "github:vercel-labs/skills",

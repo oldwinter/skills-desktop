@@ -100,6 +100,8 @@ export type StudioFinding = z.infer<typeof studioFindingSchema>;
 export type StudioValidation = z.infer<typeof studioValidationSchema>;
 
 const decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: false });
+const encoder = new TextEncoder();
+const MAX_PREVIEW_QUOTE_DEPTH = 64;
 
 function decodeUtf8(bytes: Uint8Array): string | undefined {
   try {
@@ -257,7 +259,6 @@ export function validateSkillTree(input: StudioTreeInput): StudioValidation {
   for (const entry of input.entries) {
     const path = entry.path;
     const segments = path.split("/");
-    if (segments.some((segment) => ignored.has(segment))) continue;
     if (segments.some((segment) => segment === "..")) {
       sink.add({
         code: "path_traversal",
@@ -267,6 +268,7 @@ export function validateSkillTree(input: StudioTreeInput): StudioValidation {
       });
       continue;
     }
+    if (segments.some((segment) => ignored.has(segment))) continue;
     if (entry.kind === "symlink") {
       sink.add({
         code: "symlink",
@@ -305,10 +307,13 @@ export function validateSkillTree(input: StudioTreeInput): StudioValidation {
     }
     const lowered = path.toLowerCase();
     const prior = seenLowercase.get(lowered);
-    if (prior !== undefined && prior !== path) {
+    if (prior !== undefined) {
       sink.add({
         code: "case_conflict",
-        message: "Path differs from another entry only by letter case.",
+        message:
+          prior === path
+            ? "Path is repeated in the observed Skill tree."
+            : "Path differs from another entry only by letter case.",
         path,
         severity: "error",
       });
@@ -632,6 +637,7 @@ interface BlockBudget {
 function parseBlocks(
   lines: readonly string[],
   budget: BlockBudget,
+  quoteDepth = 0,
 ): StudioPreviewBlock[] {
   const blocks: StudioPreviewBlock[] = [];
   const push = (block: StudioPreviewBlock): boolean => {
@@ -694,8 +700,20 @@ function parseBlocks(
         quoted.push((lines[index] ?? "").replace(/^>\s?/, ""));
         index += 1;
       }
-      const children = parseBlocks(quoted, budget);
-      if (!push({ children, kind: "quote" })) return blocks;
+      if (quoteDepth >= MAX_PREVIEW_QUOTE_DEPTH) {
+        budget.truncated = true;
+        if (
+          !push({
+            children: parseInlines(quoted.join(" ")),
+            kind: "paragraph",
+          })
+        ) {
+          return blocks;
+        }
+      } else {
+        const children = parseBlocks(quoted, budget, quoteDepth + 1);
+        if (!push({ children, kind: "quote" })) return blocks;
+      }
       continue;
     }
     const bullet = BULLET.exec(line);
@@ -750,10 +768,22 @@ export function stripSkillFrontmatter(text: string): string {
 }
 
 export function renderStudioPreview(markdown: string): StudioPreview {
-  const bounded = markdown.slice(
-    0,
-    STUDIO_VALIDATOR_PROFILE.limits.maxMarkdownBytes,
-  );
+  const encoded = encoder.encode(markdown);
+  let bounded = markdown;
+  let inputTruncated = false;
+  if (encoded.byteLength > STUDIO_VALIDATOR_PROFILE.limits.maxMarkdownBytes) {
+    inputTruncated = true;
+    let end = STUDIO_VALIDATOR_PROFILE.limits.maxMarkdownBytes;
+    while (end > 0) {
+      try {
+        bounded = decoder.decode(encoded.subarray(0, end));
+        break;
+      } catch {
+        end -= 1;
+      }
+    }
+    if (end === 0) bounded = "";
+  }
   const budget: BlockBudget = {
     remaining: STUDIO_VALIDATOR_PROFILE.limits.maxPreviewBlocks,
     truncated: false,
@@ -765,6 +795,6 @@ export function renderStudioPreview(markdown: string): StudioPreview {
   return {
     blocks,
     profileVersion: STUDIO_VALIDATOR_PROFILE.version,
-    truncated: budget.truncated || bounded.length < markdown.length,
+    truncated: budget.truncated || inputTruncated,
   };
 }

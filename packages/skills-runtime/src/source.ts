@@ -209,7 +209,9 @@ function describeHttpUrl(
     }
     if (marker === "tree") {
       const [ref] = rest;
-      if (ref === undefined) return unsupported("GitHub tree URLs need a ref.");
+      if (ref === undefined || rest.length !== 1) {
+        return unsupported("GitHub tree URLs need one unambiguous ref.");
+      }
       return descriptor("github", original, ref, mutabilityFor(ref));
     }
     if (marker !== undefined) {
@@ -241,7 +243,9 @@ function describeHttpUrl(
       }
       if (marker === "tree") {
         const ref = segments[dash + 2];
-        if (ref === undefined) return unsupported("GitLab tree URLs need a ref.");
+        if (ref === undefined || segments.length !== dash + 3) {
+          return unsupported("GitLab tree URLs need one unambiguous ref.");
+        }
         return descriptor("gitlab", original, ref, mutabilityFor(ref));
       }
       return unsupported("This GitLab URL form is not supported.");
@@ -313,7 +317,13 @@ export function describeSource(
   }
   if (/^ssh:\/\//i.test(base)) {
     const url = parseUrl(base);
-    if (url === undefined || url.password !== "" || !/\.git$/i.test(url.pathname)) {
+    if (
+      url === undefined ||
+      url.password !== "" ||
+      url.search !== "" ||
+      url.hash !== "" ||
+      !/\.git$/i.test(url.pathname)
+    ) {
       return unsupported("SSH Git sources must end in .git and carry no password.");
     }
     return descriptor("git", source, fragmentRef, mutabilityFor(fragmentRef));
