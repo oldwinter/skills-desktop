@@ -507,6 +507,110 @@ else process.exitCode = 2;
     }
   });
 
+  it("terminates a child that exceeds its time limit", async () => {
+    const runner = createSpawnProcessRunner({ platform: process.platform });
+
+    const failure = await runner
+      .run({
+        args: ["-e", "setInterval(() => undefined, 1000)"],
+        cwd: process.cwd(),
+        env: { PATH: process.env.PATH ?? "" },
+        executable: process.execPath,
+        maxOutputBytes: 1_024,
+        shell: false,
+        signal: new AbortController().signal,
+        timeoutMs: 100,
+        windowsHide: true,
+      })
+      .catch((error: unknown) => error);
+
+    expect(failure).toMatchObject({
+      disposition: "timed-out",
+      message: "Process invocation exceeded its time limit.",
+      started: true,
+    });
+  });
+
+  it("rejects a child whose stderr exceeds the byte limit", async () => {
+    const runner = createSpawnProcessRunner({ platform: process.platform });
+
+    const failure = await runner
+      .run({
+        args: [
+          "-e",
+          'process.stderr.write("x".repeat(8 * 1024)); setInterval(() => undefined, 1000);',
+        ],
+        cwd: process.cwd(),
+        env: { PATH: process.env.PATH ?? "" },
+        executable: process.execPath,
+        maxOutputBytes: 1_024,
+        shell: false,
+        signal: new AbortController().signal,
+        timeoutMs: 10_000,
+        windowsHide: true,
+      })
+      .catch((error: unknown) => error);
+
+    expect(failure).toMatchObject({
+      disposition: "failed",
+      message: "Process output exceeded its byte limit.",
+      started: true,
+      termination: "known",
+    });
+  });
+
+  it("rejects an invocation that is cancelled before spawn", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const runner = createSpawnProcessRunner({ platform: process.platform });
+
+    const failure = await runner
+      .run({
+        args: ["-e", "process.exit(0)"],
+        cwd: process.cwd(),
+        env: { PATH: process.env.PATH ?? "" },
+        executable: process.execPath,
+        maxOutputBytes: 1_024,
+        shell: false,
+        signal: controller.signal,
+        timeoutMs: 10_000,
+        windowsHide: true,
+      })
+      .catch((error: unknown) => error);
+
+    expect(failure).toMatchObject({
+      disposition: "cancelled",
+      message: "Process invocation was cancelled before spawn.",
+      started: false,
+    });
+  });
+
+  it("resolves a running child that closes after abort-driven termination", async () => {
+    const controller = new AbortController();
+    const runner = createSpawnProcessRunner({ platform: process.platform });
+
+    const pending = runner.run({
+      args: ["-e", "setInterval(() => undefined, 1000)"],
+      cwd: process.cwd(),
+      env: { PATH: process.env.PATH ?? "" },
+      executable: process.execPath,
+      maxOutputBytes: 1_024,
+      shell: false,
+      signal: controller.signal,
+      timeoutMs: 10_000,
+      windowsHide: true,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    controller.abort();
+
+    await expect(pending).resolves.toMatchObject({
+      stderr: "",
+      stdout: "",
+    });
+    const result = await pending;
+    expect(result.exitCode === null || result.exitCode !== 0).toBe(true);
+  });
+
   it("rejects file-backed stdout above the configured byte limit", async () => {
     const runner = createSpawnProcessRunner({ platform: process.platform });
 

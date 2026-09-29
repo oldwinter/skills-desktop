@@ -1165,6 +1165,32 @@
       "notes": [
         "StudioView.tsx: Inlines/Blocks switch arms 124-211 plus onError arms at 233/311"
       ]
+    },
+    {
+      "id": "SDF-045",
+      "title": "Cover spawn runner timeout, stderr-limit, and abort boundary arms",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 450,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "a child exceeding timeoutMs resolves a timed-out ProcessBoundaryError with started=true",
+        "stderr output above maxOutputBytes resolves the byte-limit ProcessBoundaryError",
+        "a pre-aborted invocation rejects cancelled/started=false without spawning",
+        "an abort during a running child terminates the tree and resolves its close result",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "dependsOn": [],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "local-skills-process.ts: timeout arm ~501, stderr oversize ~536-555, pre-spawn cancel ~330, post-abort close resolution"
+      ]
     }
   ]
 }
