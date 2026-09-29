@@ -7575,3 +7575,110 @@ describe("DesktopCapabilities mutation conflict coordination", () => {
     await expect(reconcile).resolves.toMatchObject({ ok: true });
   });
 });
+
+describe("DesktopCapabilities observation lifecycle edges", () => {
+  const observationCancelled = {
+    error: {
+      code: "cancelled" as const,
+      effects: "none" as const,
+      message: "Inventory observation was cancelled.",
+      phase: "observe" as const,
+      retryable: true,
+    },
+    ok: false as const,
+  };
+
+  it("returns the in-flight observation promise for a duplicate refresh", async () => {
+    let releaseObservation!: () => void;
+    let observationStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      observationStarted = resolve;
+    });
+    const observeInventory = vi.fn(async () => {
+      observationStarted();
+      await new Promise<void>((resolve) => {
+        releaseObservation = resolve;
+      });
+      return { ok: true as const, value: freshInventory };
+    });
+    const capabilities = createDesktopCapabilities({
+      id: () => "observation-shared",
+      recoveryRecords: createMemoryRecoveryRecords(),
+      skillsTargets: targetsWith({
+        ...mutationNotExercised,
+        observeInventory,
+      }),
+    });
+    await capabilities.initialize();
+    const session = capabilities.attach(
+      {
+        endpointId: "workspace-dedup",
+        role: "workspace",
+        sessionEpoch: "epoch-dedup",
+      },
+      () => undefined,
+    );
+
+    const first = session.request({
+      targetId: target.id,
+      type: "inventory.refresh",
+      version: 2,
+    });
+    const second = session.request({
+      targetId: target.id,
+      type: "inventory.refresh",
+      version: 2,
+    });
+    await started;
+    releaseObservation();
+
+    await expect(second).resolves.toEqual(await first);
+    expect(observeInventory).toHaveBeenCalledTimes(1);
+  });
+
+  it("aborts an in-flight observation when the owning endpoint tears down", async () => {
+    let observationStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      observationStarted = resolve;
+    });
+    const capabilities = createDesktopCapabilities({
+      id: () => "observation-aborted",
+      recoveryRecords: createMemoryRecoveryRecords(),
+      skillsTargets: targetsWith({
+        ...mutationNotExercised,
+        async observeInventory({ signal }) {
+          observationStarted();
+          return await new Promise((resolve) => {
+            signal.addEventListener(
+              "abort",
+              () => resolve(observationCancelled),
+              { once: true },
+            );
+          });
+        },
+      }),
+    });
+    await capabilities.initialize();
+    const session = capabilities.attach(
+      {
+        endpointId: "workspace-observe-teardown",
+        role: "workspace",
+        sessionEpoch: "epoch-observe-teardown",
+      },
+      () => undefined,
+    );
+
+    const pending = session.request({
+      targetId: target.id,
+      type: "inventory.refresh",
+      version: 2,
+    });
+    await started;
+    session.teardown();
+
+    await expect(pending).resolves.toMatchObject({
+      error: { code: "cancelled" },
+      ok: false,
+    });
+  });
+});

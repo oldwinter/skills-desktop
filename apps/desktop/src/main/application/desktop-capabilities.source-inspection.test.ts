@@ -538,3 +538,50 @@ describe("DesktopCapabilities Source Inspection contract (ADR 0015)", () => {
     });
   });
 });
+
+describe("DesktopCapabilities source inspection teardown", () => {
+  it("aborts an in-flight inspection when the owning endpoint tears down", async () => {
+    let inspectionStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      inspectionStarted = resolve;
+    });
+    const fixture = await createFixture({
+      ids: ["refresh-1", "inventory-1", "inspect-1"],
+      async inspect({ signal }) {
+        inspectionStarted();
+        return await new Promise((resolve) => {
+          signal.addEventListener(
+            "abort",
+            () =>
+              resolve({
+                error: {
+                  code: "cancelled",
+                  effects: "none",
+                  message: "Source inspection was cancelled.",
+                  phase: "inspect",
+                  retryable: true,
+                },
+                ok: false,
+              }),
+            { once: true },
+          );
+        });
+      },
+    });
+    await fixture.refresh();
+
+    const pending = fixture.workspace.request({
+      source: "vercel-labs/skills",
+      targetId: target.id,
+      type: "source.inspect",
+      version: 2,
+    });
+    await started;
+    fixture.workspace.teardown();
+
+    await expect(pending).resolves.toMatchObject({
+      error: { code: "cancelled" },
+      ok: false,
+    });
+  });
+});

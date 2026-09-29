@@ -1037,6 +1037,31 @@
       "notes": [
         "desktop-capabilities.ts ~4422-4493: both mutation_conflict arms — reconcile's activeObservation arm and refresh's activeMutation arm; seeded reconciliation-required guard + gated observeInventory on the skills-process fake"
       ]
+    },
+    {
+      "id": "SDF-040",
+      "title": "Cover observation dedup and endpoint-teardown aborts",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 400,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "a duplicate inventory.refresh returns the in-flight observation promise (single observeInventory call, identical result)",
+        "teardown of the owning workspace endpoint aborts an in-flight inventory observation which resolves cancelled",
+        "teardown of the owning workspace endpoint aborts an in-flight source inspection which resolves cancelled",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "dependsOn": [],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "desktop-capabilities.ts ~4495 dedup return, ~4526 observation teardown abort, ~4537 inspection teardown abort; dead branch 4380-4381 (inspectedTargetId always equals target.id) noted as unreachable"
+      ]
     }
   ]
 }
