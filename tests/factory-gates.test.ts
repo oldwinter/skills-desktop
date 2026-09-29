@@ -92,6 +92,54 @@ describe("runGate cancellation semantics", () => {
     },
   );
 
+  it.runIf(process.platform !== "win32")(
+    "escalates to SIGKILL when a descendant ignores SIGTERM",
+    async () => {
+      const dir = tempDir();
+      const marker = join(dir, "MARKER");
+      const ready = join(dir, "DESC_READY");
+      // The descendant traps SIGTERM, proves readiness BEFORE any signal can
+      // land, then schedules a late write only SIGKILL can prevent.
+      const descendant =
+        'const fs=require("fs");' +
+        'process.on("SIGTERM",()=>{});' +
+        `fs.writeFileSync(${JSON.stringify(ready)},"yes");` +
+        `setTimeout(()=>fs.writeFileSync(${JSON.stringify(marker)},"late"),2000);` +
+        "setTimeout(()=>{},30000);";
+      const gate =
+        'const{spawn}=require("child_process");' +
+        `spawn(process.execPath,["-e",${JSON.stringify(descendant)}],{stdio:"ignore"}).unref();` +
+        "setTimeout(()=>{},60000);";
+      try {
+        const result = await runGate(
+          { argv: [process.execPath, "-e", gate], name: "resistant" },
+          {
+            cwd: dir,
+            escalationMs: 400,
+            logPath: join(dir, "gate.log"),
+            timeoutMs: 1_500,
+          },
+        );
+        // The leader's close lands right after the SIGTERM (~1.5s); the
+        // resolved duration must reflect the group drain, not the close.
+        expect(result.durationMs).toBeGreaterThanOrEqual(1_800);
+        expect(result).toMatchObject({
+          drained: true,
+          ok: false,
+          timedOut: true,
+        });
+        // The descendant installed its trap and published readiness before
+        // the timeout fired — this is not a startup race.
+        expect(existsSync(ready)).toBe(true);
+        // Past the descendant's +2s write deadline: nothing landed.
+        await sleep(1_000);
+        expect(existsSync(marker)).toBe(false);
+      } finally {
+        rmSync(dir, { force: true, recursive: true });
+      }
+    },
+  );
+
   // interruptActiveGate is process-lifetime (a signaled parent exits); keep
   // this last so the flag cannot leak into the other cases.
   it.runIf(process.platform !== "win32")(

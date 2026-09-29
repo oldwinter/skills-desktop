@@ -30,12 +30,21 @@ function gateExecutable(executable) {
 
 // Runs one gate as an argument-array child process. Output is streamed to a
 // per-gate log inside the attempt evidence directory; no shell is involved.
-export function runGate(gate, { cwd, logPath, timeoutMs }) {
+// On cancellation the gate does not resolve at the leader's close: the
+// detached group is polled until empty (escalating to SIGKILL after
+// `escalationMs`), so a descendant that ignores the first signal cannot
+// outlive the factory process.
+export function runGate(gate, { cwd, escalationMs = 5_000, logPath, timeoutMs }) {
   const startedAt = Date.now();
   const [executable, ...args] = gate.argv;
   return new Promise((resolve) => {
     const log = createWriteStream(logPath, { flags: "w" });
     let timedOut = false;
+    let closed = null;
+    let capReached = false;
+    let drained = false;
+    let terminating = null;
+    const timers = new Set();
     const child = spawn(gateExecutable(executable), args, {
       cwd,
       // A POSIX gate runs as its own process-group leader so timeout
@@ -58,24 +67,98 @@ export function runGate(gate, { cwd, logPath, timeoutMs }) {
         }
       }
     };
+    // Probes only the group this gate created: ESRCH means the last member
+    // exited or was reaped after reparenting.
+    const groupAlive = () => {
+      if (child.pid === undefined) return false;
+      try {
+        process.kill(process.platform === "win32" ? child.pid : -child.pid, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    const finish = () => {
+      if (closed === null) return;
+      if (terminating !== null && !drained && !capReached) return;
+      for (const timer of timers) {
+        clearTimeout(timer);
+        clearInterval(timer);
+      }
+      activeGate = null;
+      log.end(() =>
+        resolve({
+          drained: terminating === null ? null : drained,
+          durationMs: Date.now() - startedAt,
+          exitCode: closed.code,
+          interrupted: interruptedBy,
+          logPath,
+          name: gate.name,
+          ok: closed.code === 0 && !timedOut && interruptedBy === null,
+          signal: closed.signal,
+          timedOut,
+        }),
+      );
+    };
+    const beginTermination = (signal) => {
+      signalTree(signal);
+      if (terminating !== null) return;
+      terminating = signal;
+      // Ref'd handles hold the event loop until the group is empty; the
+      // leader's `close` alone proves nothing about descendants.
+      timers.add(
+        setTimeout(() => {
+          if (!drained) {
+            log.write(
+              `gate group survived ${signal}; escalating to SIGKILL\n`,
+            );
+            signalTree("SIGKILL");
+          }
+        }, escalationMs),
+      );
+      // Bound the drain so a wedged probe cannot hang the factory forever;
+      // the result records drained=false when the cap fires first.
+      timers.add(
+        setTimeout(() => {
+          if (!drained) {
+            log.write("gate group drain cap reached before the group emptied\n");
+            capReached = true;
+          }
+          finish();
+        }, escalationMs + 2_000),
+      );
+      timers.add(
+        setInterval(() => {
+          if (!groupAlive()) {
+            drained = true;
+            finish();
+          }
+        }, 50),
+      );
+      // Covers a signal that lands after the leader already closed and the
+      // group drained on its own: resolve without waiting a poll tick.
+      if (!groupAlive()) drained = true;
+      finish();
+    };
     const timer = setTimeout(() => {
       timedOut = true;
-      signalTree("SIGTERM");
-      setTimeout(() => signalTree("SIGKILL"), 5_000).unref();
+      beginTermination("SIGTERM");
     }, timeoutMs);
+    timers.add(timer);
     // Registered for the CLI's signal handlers: a forwarded signal reaches
     // the whole group, with the same SIGKILL escalation as the timeout path.
-    activeGate = (forwarded) => {
-      signalTree(forwarded);
-      setTimeout(() => signalTree("SIGKILL"), 5_000).unref();
-    };
+    activeGate = (forwarded) => beginTermination(forwarded);
     child.stdout.on("data", (chunk) => log.write(chunk));
     child.stderr.on("data", (chunk) => log.write(chunk));
     child.once("error", (error) => {
       activeGate = null;
-      clearTimeout(timer);
+      for (const timer of timers) {
+        clearTimeout(timer);
+        clearInterval(timer);
+      }
       log.end(`spawn error: ${error.message}\n`, () =>
         resolve({
+          drained: terminating === null ? null : drained,
           durationMs: Date.now() - startedAt,
           exitCode: null,
           interrupted: interruptedBy,
@@ -88,20 +171,9 @@ export function runGate(gate, { cwd, logPath, timeoutMs }) {
       );
     });
     child.once("close", (code, signal) => {
-      activeGate = null;
-      clearTimeout(timer);
-      log.end(() =>
-        resolve({
-          durationMs: Date.now() - startedAt,
-          exitCode: code,
-          interrupted: interruptedBy,
-          logPath,
-          name: gate.name,
-          ok: code === 0 && !timedOut && interruptedBy === null,
-          signal,
-          timedOut,
-        }),
-      );
+      closed = { code, signal };
+      if (terminating !== null && groupAlive() === false) drained = true;
+      finish();
     });
   });
 }

@@ -513,4 +513,65 @@ describe("factory pipeline", () => {
       await signalCase("SIGTERM", 143);
     },
   );
+
+  it.runIf(process.platform !== "win32")(
+    "waits out the escalation window when a descendant ignores SIGTERM",
+    async () => {
+      const marker = join(root, "MARKER");
+      const ready = join(root, "DESC_READY");
+      // The descendant traps SIGTERM, proves readiness before cancellation,
+      // then schedules a write past the 5s SIGKILL grace window — only a
+      // completed escalation prevents it.
+      const descendant =
+        'const fs=require("fs");' +
+        'process.on("SIGTERM",()=>{});' +
+        `fs.writeFileSync(${JSON.stringify(ready)},"yes");` +
+        `setTimeout(()=>fs.writeFileSync(${JSON.stringify(marker)},"late"),8000);` +
+        "setTimeout(()=>{},30000);";
+      const gate =
+        'const{spawn}=require("child_process");' +
+        `spawn(process.execPath,["-e",${JSON.stringify(descendant)}],{stdio:"ignore"}).unref();` +
+        "setTimeout(()=>{},60000);";
+      await writeFile(
+        backlogPath,
+        `${JSON.stringify({
+          defaults: { gates: ["lifecycle"] },
+          gateCommands: {
+            lifecycle: {
+              argv: [process.execPath, "-e", gate],
+              timeoutMs: 1_200,
+            },
+          },
+          items: [item("SDF-014", { state: "reviewing" })],
+          schemaVersion: 1,
+        })}\n`,
+        "utf8",
+      );
+      const factoryPath = fileURLToPath(new URL("../scripts/factory/factory.mjs", import.meta.url));
+      const startedAt = Date.now();
+      const child = spawn(process.execPath, [factoryPath, "verify", "SDF-014"], {
+        env,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      try {
+        const code = await new Promise<number | null>((resolve) => child.once("exit", resolve));
+        const elapsed = Date.now() - startedAt;
+        expect(code).toBe(1);
+        // SIGTERM lands ~1.2s after the gate starts; the CLI must not exit
+        // before the 5s escalation window plus drain completes. A resolve at
+        // leader close would return in well under 4s.
+        expect(elapsed).toBeGreaterThan(5_500);
+        expect(existsSync(ready)).toBe(true);
+        expect((await readBacklogFile()).items[0].state).toBe("failed");
+        const ledger = await readLedger(join(root, "rt"), "SDF-014");
+        expect(ledger?.attempts.at(-1)).toMatchObject({ ok: false, passed: false });
+        // Past the descendant's +8s deadline: the killed group wrote nothing.
+        await new Promise((resolve) => setTimeout(resolve, 2_500));
+        expect(existsSync(marker)).toBe(false);
+      } finally {
+        if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+      }
+    },
+    30_000,
+  );
 });

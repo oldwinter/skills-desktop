@@ -1495,6 +1495,35 @@
       "notes": [
         "recovery-records.ts had 123 uncovered statements concentrated in the per-store loaders' failure arms; the sweep is parametrized over document/marker filenames and uses a delegating fileSystem that faults a single read path"
       ]
+    },
+    {
+      "id": "SDF-057",
+      "title": "Drain the gate process group before verify resolves on cancellation",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 570,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "a cancelled gate does not resolve at the leader's close while its detached group still has members",
+        "SIGKILL escalation fires after the grace window and the gate resolves only once the owned group is empty",
+        "a SIGTERM-resistant descendant cannot outlive the factory or write after cancellation",
+        "the group probe targets only the owned gate process group and the drain is bounded by a hard cap",
+        "ordinary pass, timeout, signal-forward, and timeout-with-zero-exit behavior are preserved",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "dependsOn": [
+        "SDF-054"
+      ],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "root replay evidence (probe_skills_command_lifecycle.py on stash 65fd0f10, six cases): term_resistant_descendant now holds 6562ms with ready=true, no delayed marker, item failed; timeout/sigterm/sigint/positive/zero-exit all correct; escalationMs option added for deterministic regression tests"
+      ]
     }
   ]
 }
