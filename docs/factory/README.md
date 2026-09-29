@@ -67,9 +67,13 @@ success for a failed attempt.
 
 ## Stop
 
-There is no daemon: every command is a one-shot Node process. `Ctrl-C` during
-`verify` kills the running gate's process tree; the item is left in
-`verifying` with a partial attempt log and can be retried. Deleting
+There is no daemon: every command is a one-shot Node process. `SIGINT` or
+`SIGTERM` during `verify` is forwarded to the running gate's detached process
+group (with `SIGKILL` escalation if the group does not exit), so gate
+descendants cannot outlive the cancellation. The interrupted attempt is
+recorded in the ledger and `progress.jsonl`, the item lands in `failed` — a
+plain `verify` retries it — and the CLI exits `130`/`143`. A second signal,
+or a signal while no gate runs, exits immediately. Deleting
 `.codex/runtime/devin-factory/` removes only volatile evidence — the queue
 state lives in `docs/factory/backlog.json` and survives.
 
