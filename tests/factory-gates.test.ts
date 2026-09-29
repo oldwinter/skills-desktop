@@ -1,10 +1,13 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
-import { runGate } from "../scripts/factory/gates.mjs";
+import {
+  interruptActiveGate,
+  runGate,
+} from "../scripts/factory/gates.mjs";
 
 // Gates spawn real child processes with real timers; keep the default 5s
 // ceiling from masking the 400ms probe timeouts under coverage load.
@@ -78,15 +81,57 @@ describe("runGate cancellation semantics", () => {
         );
         expect(result).toMatchObject({ ok: false, timedOut: true });
 
-        // Past the descendant's scheduled write: nothing landed late.
+        // Past the descendant's scheduled write: nothing landed late. The
+        // marker deadline is the leak witness; probing the published pid is
+        // racy (zombie reaping, pid reuse under coverage load).
         await sleep(1_400);
         expect(existsSync(marker)).toBe(false);
+      } finally {
+        rmSync(dir, { force: true, recursive: true });
+      }
+    },
+  );
 
-        // When the descendant got far enough to publish its PID, the exact
-        // PID is dead — killed with the gate's process group.
-        if (existsSync(pidFile)) {
-          const pid = Number(readFileSync(pidFile, "utf8"));
-          expect(() => process.kill(pid, 0)).toThrow(/ESRCH/);
+  // interruptActiveGate is process-lifetime (a signaled parent exits); keep
+  // this last so the flag cannot leak into the other cases.
+  it.runIf(process.platform !== "win32")(
+    "forwards an external signal to the gate's process group",
+    async () => {
+      const dir = tempDir();
+      const marker = join(dir, "MARKER");
+      const pidFile = join(dir, "descendant.pid");
+      const descendant =
+        'const fs=require("fs");' +
+        `fs.writeFileSync(${JSON.stringify(pidFile)},String(process.pid));` +
+        `setTimeout(()=>fs.writeFileSync(${JSON.stringify(marker)},"late"),800);` +
+        "setTimeout(()=>{},30000);";
+      const gate =
+        'const{spawn}=require("child_process");' +
+        `const d=spawn(process.execPath,["-e",${JSON.stringify(descendant)}],{stdio:"ignore"});` +
+        "d.unref();" +
+        "setTimeout(()=>{},60000);";
+      try {
+        const pending = runGate(
+          { argv: [process.execPath, "-e", gate], name: "forward" },
+          { cwd: dir, logPath: join(dir, "gate.log"), timeoutMs: 30_000 },
+        );
+        try {
+          await vi.waitFor(() => expect(existsSync(pidFile)).toBe(true), {
+            interval: 25,
+            timeout: 15_000,
+          });
+          expect(interruptActiveGate("SIGTERM")).toBe(true);
+          const result = await pending;
+          expect(result).toMatchObject({
+            interrupted: "SIGTERM",
+            ok: false,
+            timedOut: false,
+          });
+          await sleep(1_200);
+          expect(existsSync(marker)).toBe(false);
+        } finally {
+          // Reap the gate group if an assertion fired before the interrupt.
+          if (interruptActiveGate("SIGKILL")) await pending;
         }
       } finally {
         rmSync(dir, { force: true, recursive: true });

@@ -1,9 +1,10 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -442,4 +443,74 @@ describe("factory pipeline", () => {
     expect(bogus.code).toBe(2);
     expect(bogus.lines.join("\n")).toContain("unknown command");
   });
+
+  // Drives the real CLI as a child process: the signal is delivered by the
+  // OS to the factory PID, exercising the full parent-signal path.
+  async function signalCase(signal: "SIGINT" | "SIGTERM", exitCode: number) {
+    const marker = join(root, "MARKER");
+    const pidFile = join(root, "descendant.pid");
+    const gateStarted = join(root, "GATE_STARTED");
+    const descendant =
+      'const fs=require("fs");' +
+      `fs.writeFileSync(${JSON.stringify(pidFile)},String(process.pid));` +
+      `setTimeout(()=>fs.writeFileSync(${JSON.stringify(marker)},"late"),800);` +
+      "setTimeout(()=>{},30000);";
+    const gate =
+      'const fs=require("fs");const{spawn}=require("child_process");' +
+      `fs.writeFileSync(${JSON.stringify(gateStarted)},"1");` +
+      `spawn(process.execPath,["-e",${JSON.stringify(descendant)}],{stdio:"ignore"}).unref();` +
+      "setTimeout(()=>{},60000);";
+    await writeBacklogFile(
+      backlogWith({ lifecycle: [process.execPath, "-e", gate] }, [
+        item("SDF-013", { state: "reviewing" }),
+      ]),
+    );
+    const factoryPath = fileURLToPath(new URL("../scripts/factory/factory.mjs", import.meta.url));
+    const child = spawn(process.execPath, [factoryPath, "verify", "SDF-013"], {
+      env,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let output = "";
+    child.stdout!.on("data", (chunk) => (output += chunk));
+    child.stderr!.on("data", (chunk) => (output += chunk));
+    try {
+      await vi.waitFor(() => expect(existsSync(gateStarted)).toBe(true), {
+        interval: 25,
+        timeout: 15_000,
+      });
+      child.kill(signal);
+      const code = await new Promise<number | null>((resolve) => child.once("exit", resolve));
+      expect(code).toBe(exitCode);
+      expect(output).toContain(`interrupted by ${signal}`);
+      expect((await readBacklogFile()).items[0].state).toBe("failed");
+      const ledger = await readLedger(join(root, "rt"), "SDF-013");
+      expect(ledger?.attempts.at(-1)).toMatchObject({
+        interrupted: signal,
+        ok: false,
+        passed: false,
+      });
+      // The delayed marker is the leak witness: the descendant was scheduled
+      // to write at +800ms, so absence past the deadline proves the group
+      // died. A pid-liveness probe is racy (zombie reaping, pid reuse under
+      // coverage load) and adds nothing beyond this behavioral contract.
+      await new Promise((resolve) => setTimeout(resolve, 1_200));
+      expect(existsSync(marker)).toBe(false);
+    } finally {
+      if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+    }
+  }
+
+  it.runIf(process.platform !== "win32")(
+    "forwards SIGINT to the gate group and fails the item instead of leaking",
+    async () => {
+      await signalCase("SIGINT", 130);
+    },
+  );
+
+  it.runIf(process.platform !== "win32")(
+    "forwards SIGTERM to the gate group and fails the item instead of leaking",
+    async () => {
+      await signalCase("SIGTERM", 143);
+    },
+  );
 });

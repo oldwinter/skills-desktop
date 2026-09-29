@@ -12,7 +12,11 @@ import {
   transitionItem,
   writeBacklog,
 } from "./backlog.mjs";
-import { runGatePlan } from "./gates.mjs";
+import {
+  gateInterruptSignal,
+  interruptActiveGate,
+  runGatePlan,
+} from "./gates.mjs";
 import {
   appendProgress,
   attemptDirectory,
@@ -320,7 +324,8 @@ async function cmdVerify(ctx, out, options) {
   );
   const startedAt = Date.now();
   const outcome = await runGatePlan(selected, { attemptDir, cwd: ctx.cwd });
-  const passed = outcome.ok && complete;
+  const interrupted = gateInterruptSignal();
+  const passed = outcome.ok && complete && interrupted === null;
   const to = passed ? "verified" : "failed";
   const source = await sourceDigest(ctx.cwd, ctx.backlogPath);
   item.state = to;
@@ -332,6 +337,7 @@ async function cmdVerify(ctx, out, options) {
     durationMs: Date.now() - startedAt,
     gates: selected.map((gate) => gate.name),
     head,
+    interrupted,
     itemDigest: itemDigest(item),
     missing,
     n: attempt,
@@ -351,6 +357,7 @@ async function cmdVerify(ctx, out, options) {
     event: "verify-end",
     gates: outcome.results.map(({ durationMs, name, ok }) => ({ durationMs, name, ok })),
     head,
+    interrupted,
     item: item.id,
     missing,
     state: to,
@@ -358,8 +365,12 @@ async function cmdVerify(ctx, out, options) {
   for (const result of outcome.results) {
     out(
       `  ${result.ok ? "pass" : "FAIL"} ${result.name} ` +
-        `${result.durationMs}ms exit=${result.exitCode ?? "spawn"}${result.timedOut ? " timed-out" : ""} log=${result.logPath}`,
+        `${result.durationMs}ms exit=${result.exitCode ?? "spawn"}${result.timedOut ? " timed-out" : ""}` +
+        `${result.interrupted === null || result.interrupted === undefined ? "" : ` interrupted-by-${result.interrupted}`} log=${result.logPath}`,
     );
+  }
+  if (interrupted !== null) {
+    out(`  interrupted by ${interrupted}: gate group terminated, attempt recorded as failed`);
   }
   if (outcome.ok && !complete) {
     out(
@@ -368,6 +379,9 @@ async function cmdVerify(ctx, out, options) {
     );
   }
   out(`${item.id}: verifying -> ${to}`);
+  if (interrupted !== null) {
+    return 128 + (interrupted === "SIGINT" ? 2 : 15);
+  }
   return passed ? 0 : 1;
 }
 
@@ -589,6 +603,21 @@ export async function runFactory(argv, env = process.env) {
   const options = parseArgs(argv);
   const lines = [];
   const out = (line) => lines.push(line);
+  // Forward parent signals to the in-flight gate's process group so Ctrl-C
+  // or SIGTERM cannot orphan detached gate descendants. A second signal, or
+  // a signal while no gate runs, exits with the conventional signal code.
+  let interrupted = null;
+  const onSignal = (signal) => () => {
+    const forced = interrupted !== null;
+    interrupted ??= signal;
+    if (forced || !interruptActiveGate(signal)) {
+      process.exit(128 + (signal === "SIGINT" ? 2 : 15));
+    }
+  };
+  const onSigint = onSignal("SIGINT");
+  const onSigterm = onSignal("SIGTERM");
+  process.on("SIGINT", onSigint);
+  process.on("SIGTERM", onSigterm);
   let code;
   try {
     if (options.command === undefined || options.command === "help" || options.command === "--help") {
@@ -620,6 +649,9 @@ export async function runFactory(argv, env = process.env) {
   } catch (error) {
     out(`factory: ${error.message}`);
     return { code: 2, lines };
+  } finally {
+    process.off("SIGINT", onSigint);
+    process.off("SIGTERM", onSigterm);
   }
   return { code, lines };
 }

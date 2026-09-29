@@ -5,6 +5,23 @@ import { join } from "node:path";
 
 const DEFAULT_GATE_TIMEOUT_MS = 15 * 60 * 1000;
 
+// The single in-flight gate and the signal that interrupted it, so the CLI
+// can forward SIGINT/SIGTERM to the gate's process group instead of leaving
+// a detached group orphaned.
+let activeGate = null;
+let interruptedBy = null;
+
+export function interruptActiveGate(signal) {
+  interruptedBy ??= signal;
+  if (activeGate === null) return false;
+  activeGate(signal);
+  return true;
+}
+
+export function gateInterruptSignal() {
+  return interruptedBy;
+}
+
 function gateExecutable(executable) {
   // npm is a .cmd shim on Windows; POSIX resolves its shebang directly.
   if (executable === "npm" && process.platform === "win32") return "npm.cmd";
@@ -46,14 +63,22 @@ export function runGate(gate, { cwd, logPath, timeoutMs }) {
       signalTree("SIGTERM");
       setTimeout(() => signalTree("SIGKILL"), 5_000).unref();
     }, timeoutMs);
+    // Registered for the CLI's signal handlers: a forwarded signal reaches
+    // the whole group, with the same SIGKILL escalation as the timeout path.
+    activeGate = (forwarded) => {
+      signalTree(forwarded);
+      setTimeout(() => signalTree("SIGKILL"), 5_000).unref();
+    };
     child.stdout.on("data", (chunk) => log.write(chunk));
     child.stderr.on("data", (chunk) => log.write(chunk));
     child.once("error", (error) => {
+      activeGate = null;
       clearTimeout(timer);
       log.end(`spawn error: ${error.message}\n`, () =>
         resolve({
           durationMs: Date.now() - startedAt,
           exitCode: null,
+          interrupted: interruptedBy,
           logPath,
           name: gate.name,
           ok: false,
@@ -63,14 +88,16 @@ export function runGate(gate, { cwd, logPath, timeoutMs }) {
       );
     });
     child.once("close", (code, signal) => {
+      activeGate = null;
       clearTimeout(timer);
       log.end(() =>
         resolve({
           durationMs: Date.now() - startedAt,
           exitCode: code,
+          interrupted: interruptedBy,
           logPath,
           name: gate.name,
-          ok: code === 0 && !timedOut,
+          ok: code === 0 && !timedOut && interruptedBy === null,
           signal,
           timedOut,
         }),

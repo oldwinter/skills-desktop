@@ -1408,6 +1408,37 @@
       "notes": [
         "skills-process.ts: 322 unbound, 334 empty inventoryId, 341 invalid intent, 361 empty harness set, 393 empty names, 404 absent names, 569/583/606 observedMutationEffects source-match arms; resolveBoundHarnessSubset normalize arm (507) unreachable (harnessIds min 1 + resolved entries are always valid aliases) - noted dead"
       ]
+    },
+    {
+      "id": "SDF-054",
+      "title": "Forward factory SIGINT/SIGTERM to the active gate process group",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 540,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "SIGINT and SIGTERM delivered to the factory process are forwarded to the in-flight gate's detached process group",
+        "gate descendants cannot write after cancellation (no delayed marker)",
+        "an interrupted verify records the attempt (ledger + progress) and transitions the item to failed, never stuck verifying",
+        "verify exits 130 on SIGINT and 143 on SIGTERM after recording",
+        "a second signal or a signal with no active gate exits with the conventional code",
+        "ordinary gate success, timeout termination, and timeout-with-zero-exit behavior are preserved",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "dependsOn": [
+        "SDF-051"
+      ],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "gates.mjs: activeGate slot + interruptedBy flag, interruptActiveGate forwards to the group with SIGKILL escalation; runGate ok now requires no interruption; factory.mjs installs per-invocation SIGINT/SIGTERM handlers in runFactory (removed in finally), cmdVerify persists interrupted into attempts + progress and returns the signal exit code; regression tests: forwarded-signal unit case in tests/factory-gates.test.ts plus real-CLI subprocess SIGINT/SIGTERM cases in tests/factory-pipeline.test.ts",
+        "reported by the coordinator mailbox as P1: runner SIGINT/SIGTERM leak despite the SDF-051 timeout fix"
+      ]
     }
   ]
 }
