@@ -121,6 +121,15 @@ describe("well-known export profile", () => {
       error: { code: "invalid_frontmatter" },
       ok: false,
     });
+    for (const duplicate of [
+      "---\nname: x\nname: y\ndescription: ok\n---\n",
+      "---\nname: x\ndescription: first\ndescription: second\n---\n",
+    ]) {
+      expect(readSkillFrontmatter(text(duplicate))).toMatchObject({
+        error: { code: "invalid_frontmatter" },
+        ok: false,
+      });
+    }
     expect(readSkillFrontmatter(new Uint8Array([0xff, 0xfe, 0x2d]))).toMatchObject({
       error: { code: "invalid_frontmatter", message: "SKILL.md is not valid UTF-8." },
       ok: false,

@@ -234,7 +234,19 @@ export function readSkillFrontmatter(
     if (match === null) continue;
     const [, key, value] = match;
     if (key === undefined || value === undefined) continue;
-    if (!fields.has(key)) fields.set(key, unquote(value));
+    if (fields.has(key)) {
+      return {
+        error: {
+          code: "invalid_frontmatter",
+          effects: "none",
+          message: "SKILL.md frontmatter keys must be unique.",
+          phase: "export",
+          retryable: false,
+        },
+        ok: false,
+      };
+    }
+    fields.set(key, unquote(value));
   }
   const name = fields.get("name") ?? "";
   const description = fields.get("description") ?? "";

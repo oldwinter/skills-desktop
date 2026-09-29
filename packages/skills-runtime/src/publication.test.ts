@@ -26,6 +26,7 @@ describe("sanitizePublicationRemote (ADR 0020)", () => {
     ["ssh://git@github.com/acme/skills.git", "ssh", "github.com"],
     ["ssh://git.example.com:2222/team/skills.git", "ssh", "git.example.com"],
     ["git@github.com:acme/skills.git", "ssh", "github.com"],
+    ["git@github.com:acme/repo..git", "ssh", "github.com"],
   ])("accepts %s as %s", (input, kind, host) => {
     expect(sanitizePublicationRemote(input)).toEqual({
       ok: true,
@@ -62,6 +63,8 @@ describe("sanitizePublicationRemote (ADR 0020)", () => {
     ["acme/skills", "shorthand"],
     ["git@github.com:/acme/skills.git", "scp absolute path"],
     ["git@github.com:acme/../x.git", "scp traversal"],
+    ["git@github.com:acme/./skills.git", "scp dot segment"],
+    ["git@github.com:acme//skills.git", "scp empty segment"],
     ["ssh://git@github.com/acme/skills.git?x", "ssh query"],
   ])("refuses %s (%s)", (input) => {
     expect(sanitizePublicationRemote(input)).toMatchObject({
@@ -215,6 +218,18 @@ describe("PublicationPlanV1", () => {
     ).toThrow();
     expect(() =>
       sealPublicationPlan({ ...body, ref: "refs/tags/v1" } as never, sha256Hex),
+    ).toThrow();
+    expect(() =>
+      sealPublicationPlan(
+        { ...body, branch: "feature/other", ref: "refs/heads/main" },
+        sha256Hex,
+      ),
+    ).toThrow();
+    expect(() =>
+      sealPublicationPlan(
+        { ...body, branch: "-option", ref: "refs/heads/-option" },
+        sha256Hex,
+      ),
     ).toThrow();
   });
 });

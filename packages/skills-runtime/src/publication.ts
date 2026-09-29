@@ -91,7 +91,10 @@ export function sanitizePublicationRemote(
   const scpLike = SCP_LIKE.exec(input);
   if (scpLike !== null) {
     const [, user, host, path] = scpLike;
-    if (!hostIsValid(host!) || path!.includes("..") || path!.startsWith("/")) {
+    const invalidPath = path!
+      .split("/")
+      .some((segment) => segment === "" || segment === "." || segment === "..");
+    if (!hostIsValid(host!) || invalidPath) {
       return unsupported(
         "remote_unsupported",
         "SSH remote host or path is not supported.",
@@ -289,7 +292,7 @@ const managedFileSchema = z
   })
   .strict();
 
-const publicationPlanBodySchema = z
+const publicationPlanBodyObjectSchema = z
   .object({
     base: publicationBaseSchema,
     branch: z.string().min(1).max(PUBLICATION_MAX_BRANCH_LENGTH),
@@ -308,9 +311,29 @@ const publicationPlanBodySchema = z
   })
   .strict();
 
-export const publicationPlanV1Schema = publicationPlanBodySchema
+const publicationBranchMatchesRef = (plan: {
+  readonly branch: string;
+  readonly ref: string;
+}) => {
+  const branch = validatePublicationBranch(plan.branch);
+  return branch.ok && branch.value.ref === plan.ref;
+};
+
+const publicationPlanBodySchema = publicationPlanBodyObjectSchema.refine(
+  publicationBranchMatchesRef,
+  {
+    message: "Publication branch and ref must be one canonical binding.",
+    path: ["ref"],
+  },
+);
+
+export const publicationPlanV1Schema = publicationPlanBodyObjectSchema
   .extend({ planDigest: digestSchema })
-  .strict();
+  .strict()
+  .refine(publicationBranchMatchesRef, {
+    message: "Publication branch and ref must be one canonical binding.",
+    path: ["ref"],
+  });
 
 export type PublicationPlanBody = z.infer<typeof publicationPlanBodySchema>;
 export type PublicationPlanV1 = z.infer<typeof publicationPlanV1Schema>;

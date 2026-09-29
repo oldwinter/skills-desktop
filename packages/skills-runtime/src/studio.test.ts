@@ -159,6 +159,34 @@ describe("validateSkillTree (ADR 0018)", () => {
     ).toEqual(["path_invalid", "case_conflict"]);
   });
 
+  it("rejects duplicate exact paths and directory/file collisions", () => {
+    expect(
+      codes([
+        file("SKILL.md", SKILL_MD),
+        file("docs/guide.md", "# First\n"),
+        file("docs/guide.md", "# Second\n"),
+      ]),
+    ).toContain("case_conflict");
+    expect(
+      codes([
+        file("SKILL.md", SKILL_MD),
+        { kind: "directory", path: "docs", size: 0 },
+        file("docs", "not a directory"),
+        file("docs/guide.md", "# Guide\n"),
+      ]),
+    ).toContain("case_conflict");
+  });
+
+  it("reports traversal before applying ignored-entry filtering", () => {
+    expect(
+      codes([
+        file("SKILL.md", SKILL_MD),
+        file("docs/guide.md", "# Guide\n"),
+        file("../node_modules/escape.md", "escape"),
+      ]),
+    ).toContain("path_traversal");
+  });
+
   it("checks Markdown links against the observed tree", () => {
     const validation = validateSkillTree({
       directoryName: "demo-skill",
@@ -309,6 +337,28 @@ echo hi
     expect(preview.blocks).toHaveLength(
       STUDIO_VALIDATOR_PROFILE.limits.maxPreviewBlocks,
     );
+    expect(preview.truncated).toBe(true);
+  });
+
+  it("bounds preview input by UTF-8 bytes", () => {
+    const preview = renderStudioPreview(
+      "😀".repeat(STUDIO_VALIDATOR_PROFILE.limits.maxMarkdownBytes),
+    );
+    expect(preview.truncated).toBe(true);
+    const [paragraph] = preview.blocks;
+    expect(paragraph?.kind).toBe("paragraph");
+    if (paragraph?.kind !== "paragraph") throw new Error("expected paragraph");
+    const text = paragraph.children
+      .map((inline) => (inline.kind === "text" ? inline.text : ""))
+      .join("");
+    expect(encoder.encode(text).byteLength).toBeLessThanOrEqual(
+      STUDIO_VALIDATOR_PROFILE.limits.maxMarkdownBytes,
+    );
+  });
+
+  it("bounds deeply nested blockquote recursion", () => {
+    const preview = renderStudioPreview(`${">".repeat(20_000)} deep`);
+    expect(studioPreviewSchema.safeParse(preview).success).toBe(true);
     expect(preview.truncated).toBe(true);
   });
 
