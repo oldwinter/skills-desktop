@@ -106,6 +106,19 @@ describe("validateSkillTree (ADR 0018)", () => {
     expect(codes(many)).toContain("too_many_files");
   });
 
+  it("rejects file size metadata that does not match the bounded bytes", () => {
+    const bytes = encoder.encode("payload");
+    for (const size of [1, -1, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
+      expect(
+        codes([
+          file("SKILL.md", SKILL_MD),
+          file("docs/guide.md", "# Guide\n"),
+          { bytes, kind: "file", path: "assets/payload.bin", size },
+        ]),
+      ).toEqual(["file_too_large"]);
+    }
+  });
+
   it("requires SKILL.md with agreeing frontmatter", () => {
     expect(codes([file("README.md", "# nope\n")])).toEqual([
       "skill_md_missing",
