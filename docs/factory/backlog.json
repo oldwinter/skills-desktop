@@ -1379,6 +1379,35 @@
       "notes": [
         "local-skills-targets.ts arms: 118 UUID guard, 73 connectionReference whitespace, 83 harnessIds, 55-59 canonicalize failure, 235 target_not_found, 250 inspect propagation"
       ]
+    },
+    {
+      "id": "SDF-053",
+      "title": "Cover prepareMutationPlan validation and observedMutationEffects arms",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 530,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "preparation without a bound Target returns mutation_ineligible",
+        "an empty inventoryId returns stale_inventory",
+        "a schema-invalid intent returns invalid_intent",
+        "a Target with an empty harness set returns mutation_ineligible",
+        "update-all with no scope-matching entries returns mutation_ineligible",
+        "removing Skills absent from the Fresh Inventory returns mutation_ineligible",
+        "an add whose declared source mismatches is not-observed; matching source is verified; update on matching entries is content-unverified",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "dependsOn": [],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "skills-process.ts: 322 unbound, 334 empty inventoryId, 341 invalid intent, 361 empty harness set, 393 empty names, 404 absent names, 569/583/606 observedMutationEffects source-match arms; resolveBoundHarnessSubset normalize arm (507) unreachable (harnessIds min 1 + resolved entries are always valid aliases) - noted dead"
+      ]
     }
   ]
 }

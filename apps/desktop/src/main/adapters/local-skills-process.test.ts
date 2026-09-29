@@ -2515,3 +2515,164 @@ describe("Local SkillsProcess observation and confirmation edges", () => {
     });
   });
 });
+
+describe("Local SkillsProcess mutation failure edges", () => {
+  const clock = () => new Date("2026-08-22T06:00:00.000Z");
+  const entry = {
+    agents: ["codex"],
+    contentFingerprint: { status: "unknown" },
+    declaredSource: { source: "acme/skills", sourceType: "github" },
+    extensions: {},
+    name: "shared-skill",
+    path: "/workspace/.agents/skills/shared-skill",
+    revision: { status: "unknown" },
+    scope: "project",
+    sourceUrl: null,
+  } as const;
+  const inventory: Inventory = {
+    cliVersion: CLI_VERSION,
+    entries: [entry],
+    observedAt: "2026-08-22T06:00:00.000Z",
+    schemaVersion: 1,
+  };
+  const binding = {
+    generation: 1,
+    harnessIds: ["codex"],
+    targetId: "00000000-0000-4000-8000-000000000001",
+  };
+  const addIntent: MutationIntent = {
+    names: ["shared-skill"],
+    scope: "project",
+    source: { source: "acme/skills", sourceType: "github" },
+    type: "add",
+  };
+
+  it("rejects preparation without a bound Target", () => {
+    expect(
+      prepareMutationPlan({
+        clock,
+        input: {
+          freshness: "fresh",
+          intent: addIntent,
+          inventory,
+          inventoryId: "inv-1",
+        },
+      }),
+    ).toMatchObject({ error: { code: "mutation_ineligible" }, ok: false });
+  });
+
+  it("rejects an empty Inventory id as stale", () => {
+    expect(
+      prepareMutationPlan({
+        binding,
+        clock,
+        input: {
+          freshness: "fresh",
+          intent: addIntent,
+          inventory,
+          inventoryId: "",
+        },
+      }),
+    ).toMatchObject({ error: { code: "stale_inventory" }, ok: false });
+  });
+
+  it("rejects a schema-invalid intent", () => {
+    expect(
+      prepareMutationPlan({
+        binding,
+        clock,
+        input: {
+          freshness: "fresh",
+          intent: {
+            names: [],
+            scope: "project",
+            source: { source: "acme/skills", sourceType: "github" },
+            type: "add",
+          },
+          inventory,
+          inventoryId: "inv-1",
+        },
+      }),
+    ).toMatchObject({ error: { code: "invalid_intent" }, ok: false });
+  });
+
+  it("rejects a Target with an empty harness set", () => {
+    expect(
+      prepareMutationPlan({
+        binding: { ...binding, harnessIds: [] },
+        clock,
+        input: {
+          freshness: "fresh",
+          intent: addIntent,
+          inventory,
+          inventoryId: "inv-1",
+        },
+      }),
+    ).toMatchObject({ error: { code: "mutation_ineligible" }, ok: false });
+  });
+
+  it("rejects update-all when nothing matches the scope", () => {
+    expect(
+      prepareMutationPlan({
+        binding,
+        clock,
+        input: {
+          freshness: "fresh",
+          intent: { scope: "global", type: "update-all" },
+          inventory: { ...inventory, entries: [] },
+          inventoryId: "inv-1",
+        },
+      }),
+    ).toMatchObject({ error: { code: "mutation_ineligible" }, ok: false });
+  });
+
+  it("rejects removal of Skills absent from the Fresh Inventory", () => {
+    expect(
+      prepareMutationPlan({
+        binding,
+        clock,
+        input: {
+          freshness: "fresh",
+          intent: {
+            names: ["ghost-skill"],
+            scope: "project",
+            type: "remove",
+          },
+          inventory,
+          inventoryId: "inv-1",
+        },
+      }),
+    ).toMatchObject({ error: { code: "mutation_ineligible" }, ok: false });
+  });
+
+  it("reports an add as not-observed when the declared source mismatches", () => {
+    expect(
+      observedMutationEffects(
+        {
+          names: ["shared-skill"],
+          scope: "project",
+          source: { source: "other/repo", sourceType: "github" },
+          type: "add",
+        },
+        inventory,
+        ["codex"],
+      ),
+    ).toMatchObject({ status: "not-observed" });
+  });
+
+  it("reports an add as verified when the declared source matches", () => {
+    expect(
+      observedMutationEffects(addIntent, inventory, ["codex"]),
+    ).toMatchObject({ status: "verified" });
+  });
+
+  it("reports updates on matching entries as content-unverified", () => {
+    expect(
+      observedMutationEffects(
+        { names: ["shared-skill"], scope: "project", type: "update" },
+        inventory,
+        ["codex"],
+      ),
+    ).toMatchObject({ status: "content-unverified" });
+  });
+});
