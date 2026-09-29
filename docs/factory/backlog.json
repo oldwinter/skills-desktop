@@ -1351,6 +1351,34 @@
         "requested via orchestration message msg_b39845777b25",
         "Root audit: child.kill(SIGNAL) reached only the gate PID; reproduced descendant survival + late MARKER write at +800ms after a 400ms timeout (probe evidence in .codex/runtime audit dirs). Fix: detached process-group leader on POSIX + process.kill(-pid) tree signal, mirroring local-skills-process.ts; Windows keeps child.kill (no POSIX group semantics). timedOut latch already prevented TERM-trap->exit0 passes - verified, kept."
       ]
+    },
+    {
+      "id": "SDF-052",
+      "title": "Cover SkillsTargets draft/open failure edges",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 520,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "non-UUID initialTarget.id throws at catalog construction",
+        "ssh draft with whitespace in connectionReference is rejected invalid_request",
+        "draft harnessIds that fail normalization are rejected invalid_request",
+        "local draft whose canonicalizeLocalWorkspace rejects is invalid_request",
+        "open on an unknown targetId returns target_not_found",
+        "open on an ssh target propagates a failed binding inspection",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "dependsOn": [],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "local-skills-targets.ts arms: 118 UUID guard, 73 connectionReference whitespace, 83 harnessIds, 55-59 canonicalize failure, 235 target_not_found, 250 inspect propagation"
+      ]
     }
   ]
 }

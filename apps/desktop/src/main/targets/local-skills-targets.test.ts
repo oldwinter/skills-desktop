@@ -544,3 +544,116 @@ describe("Local SkillsTargets mutation guards", () => {
     });
   });
 });
+
+
+describe("Local SkillsTargets draft and open failure edges", () => {
+  const catalogWith = (sshAccess?: {
+    confirm: (...args: unknown[]) => unknown;
+    inspect: (...args: unknown[]) => unknown;
+    pendingChallenge: (...args: unknown[]) => unknown;
+  }) =>
+    createSkillsTargetsCatalog({
+      id: () => "00000000-0000-4000-8000-000000000099",
+      initialTarget: localTargetDefinition,
+      processFor: () => process,
+      ...(sshAccess === undefined ? {} : { sshAccess: sshAccess as never }),
+    });
+  it("requires an application-generated UUID for the initial Target", () => {
+    expect(() =>
+      createSkillsTargetsCatalog({
+        id: () => "00000000-0000-4000-8000-000000000099",
+        initialTarget: { ...localTargetDefinition, id: "not-a-uuid" },
+        processFor: () => process,
+      }),
+    ).toThrow(/UUID/);
+  });
+
+  it("rejects an SSH draft whose connection reference carries whitespace", async () => {
+    const catalog = catalogWith();
+    await expect(
+      catalog.proposeCreate({
+        connectionReference: "bad host",
+        harnessIds: ["codex"],
+        kind: "ssh",
+        label: "Build host",
+        workspace: "/srv/project",
+      }),
+    ).resolves.toMatchObject({
+      error: { code: "invalid_request" },
+      ok: false,
+    });
+  });
+
+  it("rejects a draft whose harness ids do not normalize", async () => {
+    const catalog = catalogWith();
+    await expect(
+      catalog.proposeCreate({
+        connectionReference: null,
+        harnessIds: ["not-a-harness"],
+        kind: "local",
+        label: "Local",
+        workspace: "/work/alpha",
+      }),
+    ).resolves.toMatchObject({
+      error: { code: "invalid_request" },
+      ok: false,
+    });
+  });
+
+  it("rejects a Local draft when workspace canonicalization fails", async () => {
+    const catalog = createSkillsTargetsCatalog({
+      canonicalizeLocalWorkspace: async () => {
+        throw new Error("unresolvable");
+      },
+      id: () => "00000000-0000-4000-8000-000000000099",
+      initialTarget: localTargetDefinition,
+      processFor: () => process,
+    });
+    await expect(
+      catalog.proposeCreate({
+        connectionReference: null,
+        harnessIds: ["codex"],
+        kind: "local",
+        label: "Broken",
+        workspace: "/work/broken",
+      }),
+    ).resolves.toMatchObject({
+      error: { code: "invalid_request" },
+      ok: false,
+    });
+  });
+
+  it("reports an unknown Target id on open", async () => {
+    const catalog = catalogWith();
+    await expect(
+      catalog.open("00000000-0000-4000-8000-00000000dead"),
+    ).resolves.toMatchObject({
+      error: { code: "target_not_found" },
+      ok: false,
+    });
+  });
+
+  it("propagates a failed SSH binding inspection on open", async () => {
+    const catalog = catalogWith({
+      confirm: async () => ({ ok: false }),
+      inspect: async () => ({
+        error: {
+          code: "remote_unreachable" as const,
+          effects: "none" as const,
+          message: "Host does not answer.",
+          phase: "open",
+          retryable: true,
+        },
+        ok: false as const,
+      }),
+      pendingChallenge: async () => null,
+    });
+    catalog.replaceDefinitions([localTargetDefinition, sshTargetDefinition]);
+    await expect(
+      catalog.open(sshTargetDefinition.id),
+    ).resolves.toMatchObject({
+      error: { code: "remote_unreachable" },
+      ok: false,
+    });
+  });
+});
