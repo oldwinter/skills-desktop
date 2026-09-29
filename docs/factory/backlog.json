@@ -1439,6 +1439,35 @@
         "gates.mjs: activeGate slot + interruptedBy flag, interruptActiveGate forwards to the group with SIGKILL escalation; runGate ok now requires no interruption; factory.mjs installs per-invocation SIGINT/SIGTERM handlers in runFactory (removed in finally), cmdVerify persists interrupted into attempts + progress and returns the signal exit code; regression tests: forwarded-signal unit case in tests/factory-gates.test.ts plus real-CLI subprocess SIGINT/SIGTERM cases in tests/factory-pipeline.test.ts",
         "reported by the coordinator mailbox as P1: runner SIGINT/SIGTERM leak despite the SDF-051 timeout fix"
       ]
+    },
+    {
+      "id": "SDF-055",
+      "title": "Cover the release-integrity CLI option/output/dispatch surface",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 550,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "parseReleaseIntegrityOptions rejects unknown, missing, flag-shaped, control-character, and duplicate arguments",
+        "releaseContext maps CI options to the release context fields",
+        "emitReleaseOutputs writes single-line and heredoc outputs, skips writes without GITHUB_OUTPUT, and rejects CR bytes and delimiter collisions",
+        "readReleaseJson wraps parse/read failures with the caller's message",
+        "runReleaseIntegrityCommand prints usage for help flags, rejects unknown commands, and dispatches + prints JSON results",
+        "releaseIntegrityUsage lists registered commands sorted",
+        "validate-tag verifies matching package versions, emits release-tag output, and fails closed on version divergence or unreadable package files",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "dependsOn": [],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "release-integrity-cli.mjs was the largest uncovered file in the coverage surface (67% stmts / 61% funcs); tests exercise the pure option parser, injectable output emitter, command dispatch, and validate-tag end to end against temp package fixtures"
+      ]
     }
   ]
 }
