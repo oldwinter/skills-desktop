@@ -7682,3 +7682,74 @@ describe("DesktopCapabilities observation lifecycle edges", () => {
     });
   });
 });
+
+describe("DesktopCapabilities lifecycle idempotence", () => {
+  const unusedProcess: SkillsProcess = {
+    ...mutationNotExercised,
+    async observeInventory() {
+      return { ok: true as const, value: freshInventory };
+    },
+  };
+
+  it("rejects mutation.reconcile when no reconciliation is required", async () => {
+    const capabilities = createDesktopCapabilities({
+      id: () => "reconcile-none",
+      recoveryRecords: createMemoryRecoveryRecords(),
+      skillsTargets: targetsWith(unusedProcess),
+    });
+    await capabilities.initialize();
+    const session = capabilities.attach(
+      {
+        endpointId: "workspace-no-guard",
+        role: "workspace",
+        sessionEpoch: "epoch-no-guard",
+      },
+      () => undefined,
+    );
+
+    await expect(
+      session.request({
+        targetId: target.id,
+        type: "mutation.reconcile",
+        version: 2,
+      }),
+    ).resolves.toMatchObject({
+      error: { code: "reconciliation_required" },
+      ok: false,
+    });
+  });
+
+  it("restores recovery records once when initialize is called twice", async () => {
+    let restores = 0;
+    const records = createMemoryRecoveryRecords();
+    const capabilities = createDesktopCapabilities({
+      id: () => "double-init",
+      recoveryRecords: {
+        commit: (change) => records.commit(change),
+        restore: () => {
+          restores += 1;
+          return records.restore();
+        },
+      },
+      skillsTargets: targetsWith(unusedProcess),
+    });
+
+    await capabilities.initialize();
+    await capabilities.initialize();
+    expect(restores).toBe(1);
+  });
+
+  it("returns the same shutdown promise for repeated shutdown calls", async () => {
+    const capabilities = createDesktopCapabilities({
+      id: () => "double-shutdown",
+      recoveryRecords: createMemoryRecoveryRecords(),
+      skillsTargets: targetsWith(unusedProcess),
+    });
+    await capabilities.initialize();
+
+    const first = capabilities.shutdown();
+    const second = capabilities.shutdown();
+    expect(second).toBe(first);
+    await expect(first).resolves.toBeUndefined();
+  });
+});

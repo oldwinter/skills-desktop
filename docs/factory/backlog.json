@@ -1062,6 +1062,31 @@
       "notes": [
         "desktop-capabilities.ts ~4495 dedup return, ~4526 observation teardown abort, ~4537 inspection teardown abort; dead branch 4380-4381 (inspectedTargetId always equals target.id) noted as unreachable"
       ]
+    },
+    {
+      "id": "SDF-041",
+      "title": "Cover lifecycle idempotence and reconcile guard without a pending mutation",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 410,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "mutation.reconcile without a reconciliation-required phase returns reconciliation_required",
+        "initialize() twice restores recovery records exactly once",
+        "shutdown() twice returns the same promise and resolves cleanly",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "dependsOn": [],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "desktop-capabilities.ts ~4424 reconciliation_required return, ~4593 double-initialize early return, ~4902 shutdownPromise reuse"
+      ]
     }
   ]
 }
