@@ -397,6 +397,14 @@ export function TargetsView({
                 <button aria-pressed={true} type="button">
                   {t("common.local")}
                 </button>
+                <button
+                  aria-pressed={false}
+                  disabled
+                  title={t("targets.editor.kindSshNextTitle")}
+                  type="button"
+                >
+                  {t("targets.editor.kindSshNext")}
+                </button>
               </div>
             )}
           </fieldset>

@@ -387,6 +387,8 @@ export const zhCN: Readonly<Record<keyof typeof en, string>> = {
     "SSH · 未在 V1 开放，不能作为可保存的 Target Definition。",
   "targets.editor.kind": "Target 类型",
   "targets.editor.kindSsh": "类型：SSH · 未在 V1 开放",
+  "targets.editor.kindSshNext": "SSH · 后续范围",
+  "targets.editor.kindSshNextTitle": "SSH · 后续范围 · V1 Local-only 未开放",
   "targets.editor.displayLabel": "显示名称",
   "targets.editor.workspace": "规范化工作区路径",
   "targets.editor.connectionReference": "OpenSSH 连接引用",
