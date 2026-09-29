@@ -1693,6 +1693,24 @@
       ],
       "notes": "All commands exercised against real fixture trees; no network or publication side effects.",
       "order": 63
+    },
+    {
+      "id": "SDF-064",
+      "title": "Cover composition-root default provider lambdas",
+      "kind": "verification",
+      "priority": "p2",
+      "state": "delivered",
+      "order": 64,
+      "acceptance": [
+        "composition-root.test.ts captures and invokes the composed default providers: ssh access clock, preference systemLocaleTag, git publisher clock, capabilities clock/id, per-target process clock/id, and update restartSafety delegation",
+        "composition-root.ts reaches 100% statement/branch/function/line coverage in focused measurement"
+      ],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": "Extends the existing mock-based composition test; no product behavior changes."
     }
   ]
 }
