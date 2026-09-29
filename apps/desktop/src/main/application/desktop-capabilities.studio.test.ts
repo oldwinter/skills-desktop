@@ -365,4 +365,146 @@ describe("DesktopCapabilities Studio contract (ADR 0018)", () => {
       "protected-process-active",
     );
   });
+
+  it("refuses validation without a host while drafts stay local", async () => {
+    const fixture = await createFixture({
+      ids: [],
+      studio: { drafts: createMemoryStudioDraftRecords() },
+    });
+    expect(
+      await fixture.workspace.request({
+        grantId: "grant-1",
+        type: "studio.validate",
+        version: 2,
+      }),
+    ).toMatchObject({ error: { code: "studio_unavailable" }, ok: false });
+  });
+
+  it("propagates a failed tree read through studio.open", async () => {
+    const studioHost = host();
+    studioHost.readTree = async () => ({
+      error: {
+        code: "process_failed" as const,
+        effects: "none" as const,
+        message: "The folder could not be read.",
+        phase: "studio",
+        retryable: true,
+      },
+      ok: false,
+    });
+    const fixture = await createFixture({
+      ids: ["op-1"],
+      studio: { drafts: createMemoryStudioDraftRecords(), host: studioHost },
+    });
+    expect(await fixture.workspace.request(open)).toMatchObject({
+      error: { code: "process_failed" },
+      ok: false,
+    });
+    expect((await studioOf(fixture.workspace))?.grants).toEqual([]);
+  });
+
+  it("replaces the earlier grant when the same folder is opened twice", async () => {
+    const fixture = await createFixture({
+      ids: ["op-1", "grant-1", "op-2", "grant-2"],
+      studio: { drafts: createMemoryStudioDraftRecords(), host: host() },
+    });
+    await fixture.workspace.request(open);
+    expect(await fixture.workspace.request(open)).toEqual({
+      ok: true,
+      value: { operationId: "op-2" },
+    });
+    expect(
+      (await studioOf(fixture.workspace))?.grants?.map(({ id }) => id),
+    ).toEqual(["grant-2"]);
+  });
+
+  it("refuses draft operations for unknown draft ids", async () => {
+    const fixture = await createFixture({
+      ids: [],
+      studio: { drafts: createMemoryStudioDraftRecords(), host: host() },
+    });
+    for (const request of [
+      { draftId: "missing", type: "studio.preview" },
+      { draftId: "missing", expectedRevision: 1, type: "studio.draft.delete" },
+      { draftId: "missing", type: "studio.export" },
+    ] as const) {
+      expect(
+        await fixture.workspace.request({ ...request, version: 2 }),
+      ).toMatchObject({ error: { code: "studio_draft_invalid" }, ok: false });
+    }
+  });
+
+  it("rejects validation when the grant is released mid-read", async () => {
+    const studioHost = host();
+    const fixture = await createFixture({
+      ids: ["op-1", "grant-1", "op-2", "op-3"],
+      studio: { drafts: createMemoryStudioDraftRecords(), host: studioHost },
+    });
+    await fixture.workspace.request(open);
+    let gateRead!: (
+      result: Awaited<ReturnType<StudioHost["readTree"]>>,
+    ) => void;
+    studioHost.readTree = () =>
+      new Promise<Awaited<ReturnType<StudioHost["readTree"]>>>((resolve) => {
+        gateRead = resolve;
+      });
+
+    const pending = fixture.workspace.request({
+      grantId: "grant-1",
+      type: "studio.validate",
+      version: 2,
+    });
+    await vi.waitFor(() => expect(gateRead).toBeDefined());
+    expect(
+      await fixture.workspace.request({
+        grantId: "grant-1",
+        type: "studio.release",
+        version: 2,
+      }),
+    ).toEqual({ ok: true, value: { operationId: "op-3" } });
+    gateRead({ ok: true, value: tree() });
+    expect(await pending).toMatchObject({
+      error: { code: "studio_grant_invalid" },
+      ok: false,
+    });
+    expect((await studioOf(fixture.workspace))?.grants).toEqual([]);
+  });
+
+  it("keeps the draft queue alive after a store rejection", async () => {
+    const drafts = createMemoryStudioDraftRecords();
+    const innerPut = drafts.put.bind(drafts);
+    let failPut = false;
+    drafts.put = ((record, expectedRevision) =>
+      failPut
+        ? Promise.reject(new Error("disk gone"))
+        : innerPut(record, expectedRevision)) as StudioDraftRecords["put"];
+    const fixture = await createFixture({
+      ids: ["draft-1", "op-1", "op-2"],
+      studio: { drafts, host: host() },
+    });
+    await fixture.workspace.request({ type: "studio.draft.create", version: 2 });
+    failPut = true;
+    await expect(
+      fixture.workspace.request({
+        draftId: "draft-1",
+        expectedRevision: 1,
+        skillMd: SKILL_MD,
+        type: "studio.draft.save",
+        version: 2,
+      }),
+    ).rejects.toThrow("disk gone");
+    failPut = false;
+    expect(
+      await fixture.workspace.request({
+        draftId: "draft-1",
+        expectedRevision: 1,
+        skillMd: SKILL_MD,
+        type: "studio.draft.save",
+        version: 2,
+      }),
+    ).toEqual({ ok: true, value: { operationId: "op-2" } });
+    expect((await studioOf(fixture.workspace))?.drafts).toMatchObject([
+      { id: "draft-1", revision: 2 },
+    ]);
+  });
 });

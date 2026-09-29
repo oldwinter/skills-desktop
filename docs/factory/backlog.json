@@ -1266,6 +1266,34 @@
       "notes": [
         "skillpack.ts strict reader + codec digest arms; serialize >1MiB arm (line 270) unreachable by construction (all package fields schema-bounded) - noted dead"
       ]
+    },
+    {
+      "id": "SDF-049",
+      "title": "Cover Studio grant/draft guard edges",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 490,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "studio.validate without a host returns studio_unavailable",
+        "a failed host.readTree propagates its error through studio.open and no grant is retained",
+        "re-opening the same folder replaces the earlier grant",
+        "studio.preview / studio.draft.delete / studio.export on an unknown draftId return studio_draft_invalid",
+        "studio.validate on a grant released mid-read returns studio_grant_invalid",
+        "a rejecting draft-store put propagates the throw yet the draft queue stays alive for the next operation",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "dependsOn": [],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "application/studio.ts guard tails: no-host validate, readTree failure, grant dedup on re-open, missing-draft guards, mid-observe release, draftQueue catch tail; saveDraft >128KiB text arm unreachable (request schema caps skillMd at STUDIO_MAX_DRAFT_TEXT_LENGTH) - noted dead"
+      ]
     }
   ]
 }
