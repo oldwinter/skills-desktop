@@ -3138,3 +3138,189 @@ describe("RecoveryRecords Collection Acknowledgement contract", () => {
     });
   });
 });
+
+describe("RecoveryRecords store load failure arms", () => {
+  function readFaultingFileSystem(name: string): RecoveryFileSystem {
+    const delegate = createNodeRecoveryFileSystem();
+    const denied = Object.assign(new Error("read denied"), {
+      code: "EACCES",
+    });
+    return {
+      ...delegate,
+      readFile(path, encoding) {
+        if (path.endsWith(`/${name}`)) return Promise.reject(denied);
+        return delegate.readFile(path, encoding);
+      },
+    };
+  }
+
+  it.each([
+    ["inventory-snapshots.json", "inventorySnapshots"],
+    ["mutation-guards.json", "mutationGuards"],
+    ["target-definitions.json", "targetDefinitions"],
+    ["known_hosts", "hostTrustRecords"],
+    ["collection-acknowledgements.json", "collectionAcknowledgements"],
+    ["imported-packages.json", "importedPackages"],
+    ["publication-guard.json", "publicationGuard"],
+  ])(
+    "fails closed as corrupt_store when the %s read fails",
+    async (name, store) => {
+      const directory = await temporaryDirectory();
+      await expect(
+        createJsonRecoveryRecords({
+          directory,
+          fileSystem: readFaultingFileSystem(name),
+          id: () => "read-fault",
+        }).restore(),
+      ).resolves.toMatchObject({
+        failures: [{ code: "corrupt_store", store }],
+      });
+    },
+  );
+
+  it.each([
+    [
+      "mutation-guards.failure.json",
+      {
+        failure: "migration_failed",
+        kind: "mutation-guards-failure",
+        schemaVersion: 1,
+      },
+      "mutationGuards",
+      "migration_failed",
+    ],
+    [
+      "target-definitions.failure.json",
+      {
+        failure: "migration_failed",
+        kind: "target-definitions-failure",
+        schemaVersion: 1,
+      },
+      "targetDefinitions",
+      "migration_failed",
+    ],
+    [
+      "host-trust.failure.json",
+      {
+        failure: "corrupt_store",
+        kind: "host-trust-failure",
+        schemaVersion: 1,
+      },
+      "hostTrustRecords",
+      "corrupt_store",
+    ],
+  ])(
+    "surfaces the durable %s marker failure code",
+    async (markerName, marker, store, code) => {
+      const directory = await temporaryDirectory();
+      await writeFile(
+        join(directory, markerName),
+        JSON.stringify(marker),
+        "utf8",
+      );
+      await expect(
+        createJsonRecoveryRecords({
+          directory,
+          id: () => "probe",
+        }).restore(),
+      ).resolves.toMatchObject({ failures: [{ code, store }] });
+    },
+  );
+
+  it.each([
+    ["mutation-guards.failure.json", "mutationGuards"],
+    ["target-definitions.failure.json", "targetDefinitions"],
+    ["host-trust.failure.json", "hostTrustRecords"],
+  ])(
+    "treats a malformed %s marker as corrupt_store",
+    async (markerName, store) => {
+      const directory = await temporaryDirectory();
+      await writeFile(join(directory, markerName), "not json", "utf8");
+      await expect(
+        createJsonRecoveryRecords({
+          directory,
+          id: () => "probe",
+        }).restore(),
+      ).resolves.toMatchObject({
+        failures: [{ code: "corrupt_store", store }],
+      });
+    },
+  );
+
+  it.each([
+    ["mutation-guards.failure.json", "mutationGuards"],
+    ["target-definitions.failure.json", "targetDefinitions"],
+    ["host-trust.failure.json", "hostTrustRecords"],
+  ])(
+    "fails closed as corrupt_store when the %s marker read errors",
+    async (markerName, store) => {
+      const directory = await temporaryDirectory();
+      await expect(
+        createJsonRecoveryRecords({
+          directory,
+          fileSystem: readFaultingFileSystem(markerName),
+          id: () => "marker-fault",
+        }).restore(),
+      ).resolves.toMatchObject({
+        failures: [{ code: "corrupt_store", store }],
+      });
+    },
+  );
+
+  it.each([
+    [
+      "collection-acknowledgements.json",
+      "collectionAcknowledgements",
+      "collection-acknowledgements.quarantine-corrupt-collections.json",
+    ],
+    [
+      "publication-guard.json",
+      "publicationGuard",
+      "publication-guard.quarantine-corrupt-publication.json",
+    ],
+  ])(
+    "quarantines a malformed %s document and reports corrupt_store",
+    async (name, store, quarantineName) => {
+      const directory = await temporaryDirectory();
+      await writeFile(join(directory, name), "{ not json", "utf8");
+      await expect(
+        createJsonRecoveryRecords({
+          directory,
+          id: () => quarantineName.includes("collections")
+            ? "corrupt-collections"
+            : "corrupt-publication",
+        }).restore(),
+      ).resolves.toMatchObject({
+        failures: [{ code: "corrupt_store", store }],
+      });
+      expect(await readdir(directory)).toContain(quarantineName);
+    },
+  );
+
+  it.each([
+    ["collection-acknowledgements.json", "collectionAcknowledgements"],
+    ["publication-guard.json", "publicationGuard"],
+  ])(
+    "refuses a %s document written by a newer schema without overwriting it",
+    async (name, store) => {
+      const directory = await temporaryDirectory();
+      const document = { kind: "probe", records: [], schemaVersion: 999 };
+      await writeFile(
+        join(directory, name),
+        JSON.stringify(document),
+        "utf8",
+      );
+      await expect(
+        createJsonRecoveryRecords({
+          directory,
+          id: () => "probe",
+        }).restore(),
+      ).resolves.toMatchObject({
+        failures: [{ code: "unsupported_schema", store }],
+      });
+      expect(JSON.parse(await readFile(join(directory, name), "utf8"))).toEqual(
+        document,
+      );
+    },
+  );
+});

@@ -1468,6 +1468,33 @@
       "notes": [
         "release-integrity-cli.mjs was the largest uncovered file in the coverage surface (67% stmts / 61% funcs); tests exercise the pure option parser, injectable output emitter, command dispatch, and validate-tag end to end against temp package fixtures"
       ]
+    },
+    {
+      "id": "SDF-056",
+      "title": "Cover recovery-records store load failure arms",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 560,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "a non-ENOENT read failure on any of the seven store documents reports corrupt_store for that store",
+        "a valid durable failure marker surfaces its recorded code for mutationGuards, targetDefinitions, and hostTrustRecords",
+        "a malformed or unreadable failure marker reports corrupt_store",
+        "malformed collection-acknowledgements and publication-guard documents are quarantined and report corrupt_store",
+        "a collection or publication document from a newer schema reports unsupported_schema without being overwritten",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "dependsOn": [],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "recovery-records.ts had 123 uncovered statements concentrated in the per-store loaders' failure arms; the sweep is parametrized over document/marker filenames and uses a delegating fileSystem that faults a single read path"
+      ]
     }
   ]
 }
