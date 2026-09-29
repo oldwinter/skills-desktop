@@ -1583,6 +1583,36 @@
         "InventoryApp.tsx residual arms after SDF-043: resync/focus/menu/boot-retry/prepare/handoff/reconcile/refresh/escape/harness/empty-state branches; guards unreachable through the UI (disabled controls, dead ref placeholders, focus-race timing) are noted rather than forced",
         "same commit hardens two latent signal-test races surfaced by the SDF-059 attempt-2 coverage failure: signalCase now rendezvous on the descendant's pidFile instead of the gate-start file (the group signal could land between STARTED and spawn under load), and the unit timeout gate widens to 1500ms/2000ms/2200ms margins for the same spawn-gap class"
       ]
+    },
+    {
+      "id": "SDF-060",
+      "title": "Cover local-skills-process boundary failure arms: resolvers, capture prep, observation/inspection errors, and mutation-boundary dispositions",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 600,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "resolveWindowsNpxCommand PATH-absent, injected-exists resolution, and quoted/empty entry filters are covered",
+        "resolvePosixNpxCommand HOME-absent, readdir-failure, PATH-dir, and managed/fallback-dir arms are covered",
+        "stdout capture preparation failure rejects with a boundary error",
+        "observeInventory covers version-check failure, dialect mismatch, nonzero observation exit, and per-scope parse failures",
+        "inspectSource covers dialect-failure mapping, invoke-boundary throw dispositions, nonzero exit, parse failure, and pre-aborted signal",
+        "executeConfirmed covers missing/digest-mismatched/expired confirmation, boundary-throw dispositions, pre-aborted cancel, and plan eviction on re-prepare",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "dependsOn": [
+        "SDF-011"
+      ],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "local-skills-process.ts residual map after SDF-011: ~74.7% branches under focused coverage; injectable failure arms remain in npx resolvers, spawn capture prep, verifyDialect/observeInventory, inspectSource, and executeConfirmed; posix npx resolution needs the real ~/.nvm-style directory scan only for arms injectable through the environment + isExecutable seams"
+      ]
     }
   ]
 }
