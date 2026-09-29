@@ -1139,6 +1139,32 @@
       "notes": [
         "InventoryApp.tsx onPrepared ~1804-1810 (comparison->inventory preparedMutationContext handoff, entry point of the SDF-037 native-focus flow) + candidate checkbox uncheck arm ~1629"
       ]
+    },
+    {
+      "id": "SDF-044",
+      "title": "Cover StudioView preview node kinds and control error arms",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 440,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "the structured preview renders heading/paragraph/code-block/ordered+unordered list/quote/rule and strong/emphasis/code inline nodes",
+        "unknown inline and block kinds render null without emitting markup",
+        "a failing grant control (validate) surfaces its error via the alert region",
+        "a failing draft control (preview) surfaces its error via the alert region",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "dependsOn": [],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "StudioView.tsx: Inlines/Blocks switch arms 124-211 plus onError arms at 233/311"
+      ]
     }
   ]
 }

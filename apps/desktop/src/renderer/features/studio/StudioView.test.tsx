@@ -755,3 +755,140 @@ describe("StudioView (ADR 0018)", () => {
     expect(screen.getByTestId("studio-editor-textarea")).not.toBeDisabled();
   });
 });
+
+describe("StudioView preview renderer coverage", () => {
+  it("renders every preview node kind and falls through unknown kinds inertly", () => {
+    const { container } = render(
+      <StudioView
+        client={bridge()}
+        studio={state({
+          drafts: [draft],
+          preview: {
+            draftId: "draft-1",
+            preview: {
+              blocks: [
+                {
+                  children: [
+                    {
+                      children: [{ kind: "text", text: "Bold head" }],
+                      kind: "strong",
+                    },
+                  ],
+                  kind: "heading",
+                  level: 2,
+                },
+                {
+                  children: [
+                    { kind: "code", text: "literal()" },
+                    {
+                      children: [{ kind: "text", text: "emphasised" }],
+                      kind: "emphasis",
+                    },
+                    { kind: "unknown-inline", text: "dropped" } as never,
+                  ],
+                  kind: "paragraph",
+                },
+                {
+                  kind: "code",
+                  language: "ts",
+                  text: "const x = 1;",
+                },
+                {
+                  items: [[{ kind: "text", text: "first" }]],
+                  kind: "list",
+                  ordered: true,
+                },
+                {
+                  items: [[{ kind: "text", text: "second" }]],
+                  kind: "list",
+                  ordered: false,
+                },
+                {
+                  children: [
+                    {
+                      children: [{ kind: "text", text: "quoted" }],
+                      kind: "paragraph",
+                    },
+                  ],
+                  kind: "quote",
+                },
+                { kind: "rule" },
+                { kind: "unknown-block" } as never,
+              ],
+              profileVersion: 1,
+              truncated: false,
+            },
+            renderedAt: "2026-09-15T10:06:00.000Z",
+            revision: 3,
+          },
+        })}
+      />,
+    );
+
+    const preview = screen.getByTestId("studio-preview");
+    expect(preview.querySelector("h2 strong")).toHaveTextContent("Bold head");
+    expect(preview.querySelector("p code")).toHaveTextContent("literal()");
+    expect(preview.querySelector("p em")).toHaveTextContent("emphasised");
+    expect(preview).not.toHaveTextContent("dropped");
+    const codeBlock = preview.querySelector("pre code");
+    expect(codeBlock).toHaveTextContent("const x = 1;");
+    expect(codeBlock?.parentElement).toHaveAttribute("data-language", "ts");
+    expect(preview.querySelector("ol li")).toHaveTextContent("first");
+    expect(preview.querySelector("ul li")).toHaveTextContent("second");
+    expect(preview.querySelector("blockquote p")).toHaveTextContent("quoted");
+    expect(preview.querySelector("hr")).not.toBeNull();
+    expect(container.querySelectorAll("a, img, script, iframe")).toHaveLength(
+      0,
+    );
+  });
+});
+
+describe("StudioView error and session guards", () => {
+  it("surfaces a failed Grant control request next to the list", async () => {
+    const validateStudioGrant = vi.fn(async () => ({
+      error: {
+        code: "internal_error" as const,
+        effects: "none" as const,
+        message: "grant validation broke",
+        phase: "validate" as const,
+        retryable: true,
+      },
+      ok: false as const,
+    }));
+    render(
+      <StudioView
+        client={bridge({ validateStudioGrant })}
+        studio={state({ grants: [grant] })}
+      />,
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Validate again" }),
+    );
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "grant validation broke",
+    );
+  });
+
+  it("surfaces a failed Draft control request next to the editor", async () => {
+    const previewStudioDraft = vi.fn(async () => ({
+      error: {
+        code: "internal_error" as const,
+        effects: "none" as const,
+        message: "preview pipeline broke",
+        phase: "preview" as const,
+        retryable: true,
+      },
+      ok: false as const,
+    }));
+    render(
+      <StudioView
+        client={bridge({ previewStudioDraft })}
+        studio={state({ drafts: [draft] })}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Preview" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "preview pipeline broke",
+    );
+  });
+});
