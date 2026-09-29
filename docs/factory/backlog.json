@@ -1087,6 +1087,33 @@
       "notes": [
         "desktop-capabilities.ts ~4424 reconciliation_required return, ~4593 double-initialize early return, ~4902 shutdownPromise reuse"
       ]
+    },
+    {
+      "id": "SDF-042",
+      "title": "Sweep Electron IPC failure arms across all inbound channels",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 420,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "every inbound ipcMain.handle channel returns unauthorized on an attachment-epoch mismatch",
+        "a rejecting session.request maps to internal_error on every workspace channel and both review decision channels",
+        "about-update channels map valid requests with failing updaters to internal_error and malformed requests to invalid_request",
+        "menu:get returns internal_error when the projection is absent or throws, invalid_request on extra args",
+        "notifyMenuCommand refuses wrong-role, stale, destroyed, throwing-send, and out-of-contract owners",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "dependsOn": [],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "electron-ipc.ts: ~20 authorizationFailure() arms + ~20 internalFailure() catch arms + aboutFailure/menuFailure arms + notifyMenuCommand return-false edges (1014-1024)"
+      ]
     }
   ]
 }

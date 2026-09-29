@@ -1863,3 +1863,279 @@ describe("Electron IPC sender authorization", () => {
     expect(session.teardown).toHaveBeenCalledTimes(2);
   });
 });
+
+describe("Electron IPC failure arms", () => {
+  const workspaceUrl = "skills-desktop://workspace/index.html";
+  const reviewUrl = "skills-desktop://review/index.html";
+
+  function failureHarness(options?: { menu?: { current(): unknown } }) {
+    let nextEpoch = 1;
+    const session = {
+      request: vi.fn(async () => ({
+        ok: true,
+        value: { operationId: "operation-1" },
+      })),
+      snapshot: vi.fn(async () => ({ bogus: "snapshot" })),
+      teardown: vi.fn(),
+    };
+    const handlers = new Map<
+      string,
+      (event: never, ...args: unknown[]) => unknown
+    >();
+    const ipcMain = {
+      handle(
+        channel: string,
+        handler: (event: never, ...args: unknown[]) => unknown,
+      ) {
+        handlers.set(channel, handler);
+      },
+      removeHandler: vi.fn(),
+    };
+    const updates = {
+      exportDiagnostics: vi.fn(async () => {
+        throw new Error("export failed");
+      }),
+      getSnapshot: vi.fn(() => {
+        throw new Error("snapshot failed");
+      }),
+      requestCheck: vi.fn(async () => {
+        throw new Error("check failed");
+      }),
+      requestRestart: vi.fn(async () => {
+        throw new Error("restart failed");
+      }),
+      subscribe: vi.fn(() => () => undefined),
+    };
+    const registration = registerDesktopIpc({
+      capabilities: { attach: vi.fn(() => session) } as never,
+      ipcMain: ipcMain as never,
+      menu: options?.menu as never,
+      newEpoch: vi.fn(() => `epoch-${nextEpoch++}`),
+      updates,
+    });
+    const workspaceWebContents = {
+      id: 17,
+      isDestroyed: vi.fn(() => false),
+      mainFrame: { url: workspaceUrl },
+      send: vi.fn(),
+    };
+    const workspaceAttachment = registration.attach(
+      workspaceWebContents as never,
+      "workspace",
+      workspaceUrl,
+    );
+    const reviewWebContents = {
+      id: 21,
+      isDestroyed: vi.fn(() => false),
+      mainFrame: { url: reviewUrl },
+      send: vi.fn(),
+    };
+    const reviewAttachment = registration.attach(
+      reviewWebContents as never,
+      "review",
+      reviewUrl,
+      "review-1",
+    );
+    return {
+      handlers,
+      registration,
+      reviewAttachment,
+      reviewEvent: {
+        sender: reviewWebContents,
+        senderFrame: reviewWebContents.mainFrame,
+      },
+      reviewWebContents,
+      session,
+      updates,
+      workspaceAttachment,
+      workspaceEvent: {
+        sender: workspaceWebContents,
+        senderFrame: workspaceWebContents.mainFrame,
+      },
+      workspaceWebContents,
+    };
+  }
+
+  it("rejects every inbound channel on an attachment-epoch mismatch", async () => {
+    const fixture = failureHarness();
+    expect(fixture.workspaceAttachment?.attachmentEpoch).toBe("epoch-1");
+    expect(fixture.reviewAttachment?.attachmentEpoch).toBe("epoch-3");
+
+    for (const [channel, handler] of fixture.handlers) {
+      await expect(
+        handler(fixture.workspaceEvent as never, "stale-epoch", {}),
+      ).resolves.toMatchObject({ error: { code: "unauthorized" }, ok: false });
+    }
+    expect(fixture.session.request).not.toHaveBeenCalled();
+  });
+
+  it("maps a session failure to internal_error on every workspace channel", async () => {
+    const fixture = failureHarness();
+    fixture.session.request.mockRejectedValue(new Error("bridge gone"));
+
+    const workspaceChannels = [...fixture.handlers.keys()].filter((channel) =>
+      channel.startsWith("workspace:"),
+    );
+    for (const channel of workspaceChannels) {
+      await expect(
+        fixture.handlers.get(channel)!(
+          fixture.workspaceEvent as never,
+          fixture.workspaceAttachment!.attachmentEpoch,
+          "arg-1",
+          "arg-2",
+        ),
+      ).resolves.toMatchObject({ error: { code: "internal_error" }, ok: false });
+    }
+
+    for (const channel of ["review:decision:approve", "review:decision:reject"]) {
+      await expect(
+        fixture.handlers.get(channel)!(
+          fixture.reviewEvent as never,
+          fixture.reviewAttachment!.attachmentEpoch,
+        ),
+      ).resolves.toMatchObject({ error: { code: "internal_error" }, ok: false });
+    }
+    await expect(
+      fixture.handlers.get("review:snapshot:get")!(
+        fixture.reviewEvent as never,
+        fixture.reviewAttachment!.attachmentEpoch,
+      ),
+    ).resolves.toMatchObject({
+      error: { code: "internal_error" },
+      ok: false,
+    });
+  });
+
+  it("maps about-update failures to invalid_request or internal_error", async () => {
+    const fixture = failureHarness();
+    const event = fixture.workspaceEvent as never;
+    const epoch = fixture.workspaceAttachment!.attachmentEpoch;
+
+    await expect(
+      fixture.handlers.get("about:update:check")!(event, epoch, {
+        type: "update.check",
+        version: 1,
+      }),
+    ).resolves.toMatchObject({ error: { code: "internal_error" }, ok: false });
+    await expect(
+      fixture.handlers.get("about:update:check")!(event, epoch, {}),
+    ).resolves.toMatchObject({ error: { code: "invalid_request" }, ok: false });
+
+    await expect(
+      fixture.handlers.get("about:update:restart")!(event, epoch, {
+        candidateId: "00000000-0000-4000-8000-000000000099",
+        type: "update.restart",
+        version: 1,
+      }),
+    ).resolves.toMatchObject({ error: { code: "internal_error" }, ok: false });
+    await expect(
+      fixture.handlers.get("about:release-diagnostics:export")!(
+        event,
+        epoch,
+        { type: "release-diagnostics.export", version: 1 },
+      ),
+    ).resolves.toMatchObject({ error: { code: "internal_error" }, ok: false });
+    await expect(
+      fixture.handlers.get("about:update:snapshot:get")!(event, epoch),
+    ).resolves.toMatchObject({ error: { code: "internal_error" }, ok: false });
+    await expect(
+      fixture.handlers.get("about:update:snapshot:get")!(
+        event,
+        epoch,
+        "extra",
+      ),
+    ).resolves.toMatchObject({ error: { code: "invalid_request" }, ok: false });
+  });
+
+  it("reports menu failures when the projection is missing or throws", async () => {
+    const withoutMenu = failureHarness();
+    await expect(
+      withoutMenu.handlers.get("menu:application:get")!(
+        withoutMenu.workspaceEvent as never,
+        withoutMenu.workspaceAttachment!.attachmentEpoch,
+      ),
+    ).resolves.toMatchObject({ error: { code: "internal_error" }, ok: false });
+    await expect(
+      withoutMenu.handlers.get("menu:application:get")!(
+        withoutMenu.workspaceEvent as never,
+        withoutMenu.workspaceAttachment!.attachmentEpoch,
+        "extra",
+      ),
+    ).resolves.toMatchObject({ error: { code: "invalid_request" }, ok: false });
+
+    const throwingMenu = failureHarness({
+      menu: {
+        current() {
+          throw new Error("menu read failed");
+        },
+      },
+    });
+    await expect(
+      throwingMenu.handlers.get("menu:application:get")!(
+        throwingMenu.workspaceEvent as never,
+        throwingMenu.workspaceAttachment!.attachmentEpoch,
+      ),
+    ).resolves.toMatchObject({ error: { code: "internal_error" }, ok: false });
+  });
+
+  it("rejects menu relays for stale, foreign, destroyed, or throwing endpoints", () => {
+    const fixture = failureHarness();
+    const owner = fixture.workspaceAttachment!;
+    const reviewOwner = fixture.reviewAttachment!;
+
+    expect(
+      fixture.registration.notifyMenuCommand("inventory.refresh", owner),
+    ).toBe(true);
+    expect(
+      fixture.workspaceWebContents.send,
+    ).toHaveBeenCalledWith("menu:command", {
+      command: "inventory.refresh",
+      schemaVersion: 1,
+    });
+
+    // Wrong-role owner is not relayed.
+    expect(
+      fixture.registration.notifyMenuCommand("inventory.refresh", reviewOwner),
+    ).toBe(false);
+
+    // A stale attachment (detached by a later attach) is not relayed.
+    fixture.registration.attach(
+      { id: 17, isDestroyed: () => false, mainFrame: { url: workspaceUrl }, send: vi.fn() } as never,
+      "workspace",
+      workspaceUrl,
+    );
+    expect(
+      fixture.registration.notifyMenuCommand("inventory.refresh", owner),
+    ).toBe(false);
+
+    // A destroyed surface is not relayed.
+    const fresh = failureHarness();
+    fresh.workspaceWebContents.isDestroyed.mockReturnValue(true);
+    expect(
+      fresh.registration.notifyMenuCommand(
+        "inventory.refresh",
+        fresh.workspaceAttachment!,
+      ),
+    ).toBe(false);
+
+    // A throwing send surface is reported as not relayed.
+    const throwing = failureHarness();
+    throwing.workspaceWebContents.send.mockImplementation(() => {
+      throw new Error("frame gone");
+    });
+    expect(
+      throwing.registration.notifyMenuCommand(
+        "inventory.refresh",
+        throwing.workspaceAttachment!,
+      ),
+    ).toBe(false);
+
+    // An out-of-contract command is not relayed.
+    expect(
+      fixture.registration.notifyMenuCommand(
+        "not-a-command" as never,
+        fixture.workspaceAttachment!,
+      ),
+    ).toBe(false);
+  });
+});
