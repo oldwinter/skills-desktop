@@ -1215,6 +1215,31 @@
       "notes": [
         "deferred-update-controller.ts ~229-231 guard-blocked arm + ~240-242 prepareRestart failure arm"
       ]
+    },
+    {
+      "id": "SDF-047",
+      "title": "Cover SSH executeConfirmed expiry and busy guards",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 470,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "executeConfirmed returns confirmation_expired when the Prepared Mutation's expiresAt has passed and never reaches the transport",
+        "executeConfirmed returns mutation_conflict while an observation is in flight",
+        "the gated observation completes after the conflicted execute is rejected",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "dependsOn": [],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "ssh-skills-process.ts ~538-542 confirmation_expired, ~545-549 observing/mutating conflict; wireHarnessId arm at 566 unreachable (prepare guards it first) — noted dead"
+      ]
     }
   ]
 }

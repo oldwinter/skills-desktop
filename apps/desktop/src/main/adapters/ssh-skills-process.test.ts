@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   decodeWireFrames,
@@ -1531,5 +1531,117 @@ describe("SSH SkillsProcess boundary edges", () => {
       },
       ok: false,
     });
+  });
+});
+
+describe("SSH SkillsProcess executeConfirmed guards", () => {
+  it("refuses a confirmed mutation after the Prepared Mutation expires", async () => {
+    const runner = scriptedTransport();
+    let now = new Date("2026-08-22T10:00:00.000Z");
+    let nextId = 0;
+    const skillsProcess = createSshSkillsProcess({
+      binding,
+      clock: () => now,
+      id: () => `request-${++nextId}`,
+      runner,
+    });
+    const observed = await skillsProcess.observeInventory({
+      signal: new AbortController().signal,
+    });
+    if (!observed.ok) throw new Error("fixture observation failed");
+    const prepared = await skillsProcess.prepareMutation({
+      freshness: "fresh",
+      intent: {
+        names: ["project-skill"],
+        scope: "project",
+        type: "remove",
+      },
+      inventory: observed.value,
+      inventoryId: "inventory-ssh-expiry",
+    });
+    if (!prepared.ok) throw new Error("fixture preparation failed");
+
+    now = new Date("2026-08-22T10:10:00.000Z");
+    await expect(
+      skillsProcess.executeConfirmed({
+        confirmation: {
+          digest: prepared.value.digest,
+          preparedMutationId: prepared.value.id,
+        },
+        signal: new AbortController().signal,
+      }),
+    ).resolves.toMatchObject({
+      error: { code: "confirmation_expired" },
+      ok: false,
+    });
+    // Only the observation reached the transport; prepare is local.
+    expect(runner.invocations).toHaveLength(1);
+  });
+
+  it("refuses a confirmed mutation while an observation is in flight", async () => {
+    let releaseObserve!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      releaseObserve = resolve;
+    });
+    const inner = scriptedTransport();
+    let observations = 0;
+    const runner: SshTransportRunner & {
+      readonly invocations: SshTransportInvocation[];
+    } = {
+      invocations: inner.invocations,
+      async run(invocation) {
+        const decoded = decodeWireFrames(invocation.input);
+        const first = decoded.ok ? decoded.value[0] : undefined;
+        if (
+          first?.type === "request" &&
+          first.operation === "observe" &&
+          ++observations === 2
+        ) {
+          await gate;
+        }
+        return inner.run(invocation);
+      },
+    };
+    let nextId = 0;
+    const skillsProcess = createSshSkillsProcess({
+      binding,
+      clock: () => new Date("2026-08-22T10:00:00.000Z"),
+      id: () => `request-${++nextId}`,
+      runner,
+    });
+    const observed = await skillsProcess.observeInventory({
+      signal: new AbortController().signal,
+    });
+    if (!observed.ok) throw new Error("fixture observation failed");
+    const prepared = await skillsProcess.prepareMutation({
+      freshness: "fresh",
+      intent: {
+        names: ["project-skill"],
+        scope: "project",
+        type: "remove",
+      },
+      inventory: observed.value,
+      inventoryId: "inventory-ssh-conflict",
+    });
+    if (!prepared.ok) throw new Error("fixture preparation failed");
+
+    const pending = skillsProcess.observeInventory({
+      signal: new AbortController().signal,
+    });
+    await vi.waitFor(() => expect(observations).toBe(2));
+    await expect(
+      skillsProcess.executeConfirmed({
+        confirmation: {
+          digest: prepared.value.digest,
+          preparedMutationId: prepared.value.id,
+        },
+        signal: new AbortController().signal,
+      }),
+    ).resolves.toMatchObject({
+      error: { code: "mutation_conflict" },
+      ok: false,
+    });
+    releaseObserve();
+    await expect(pending).resolves.toMatchObject({ ok: true });
   });
 });
