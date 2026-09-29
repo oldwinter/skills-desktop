@@ -21,14 +21,30 @@ export function runGate(gate, { cwd, logPath, timeoutMs }) {
     let timedOut = false;
     const child = spawn(gateExecutable(executable), args, {
       cwd,
+      // A POSIX gate runs as its own process-group leader so timeout
+      // termination reaches descendants, not just the gate PID.
+      detached: process.platform !== "win32",
       env: process.env,
       shell: false,
       stdio: ["ignore", "pipe", "pipe"],
     });
+    const signalTree = (signal) => {
+      if (child.pid === undefined) return;
+      try {
+        if (process.platform === "win32") child.kill(signal);
+        else process.kill(-child.pid, signal);
+      } catch (error) {
+        // ESRCH means the group is already gone; anything else is recorded
+        // so a failed signal cannot crash the factory mid-run.
+        if (error.code !== "ESRCH") {
+          log.write(`gate termination signal failed: ${error.message}\n`);
+        }
+      }
+    };
     const timer = setTimeout(() => {
       timedOut = true;
-      child.kill("SIGTERM");
-      setTimeout(() => child.kill("SIGKILL"), 5_000).unref();
+      signalTree("SIGTERM");
+      setTimeout(() => signalTree("SIGKILL"), 5_000).unref();
     }, timeoutMs);
     child.stdout.on("data", (chunk) => log.write(chunk));
     child.stderr.on("data", (chunk) => log.write(chunk));

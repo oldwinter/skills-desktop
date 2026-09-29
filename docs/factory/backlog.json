@@ -1324,6 +1324,33 @@
       "notes": [
         "publication.ts arms: 244 restoreGuard-while-running, 256/309 host IO errors, 348 empty export, 370 prepare failure, 417 guarded approve, 498/573 guard-commit failures, 504 discard busy; planRef throw at 117 unreachable (schema pins refs/heads/*) - noted dead; harness gains failCommitAt counter"
       ]
+    },
+    {
+      "id": "SDF-051",
+      "title": "Kill gate process groups on timeout (descendant-leak fix)",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 510,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "a timed-out gate's descendant is dead (exact-PID ESRCH) and its scheduled late write never lands",
+        "a gate trapping SIGTERM to exit 0 still resolves ok:false with timedOut:true",
+        "a clean exit-0 gate still passes (positive control)",
+        "non-ESRCH signal failures are logged to the gate log instead of crashing the factory",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "dependsOn": [],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "requested via orchestration message msg_b39845777b25",
+        "Root audit: child.kill(SIGNAL) reached only the gate PID; reproduced descendant survival + late MARKER write at +800ms after a 400ms timeout (probe evidence in .codex/runtime audit dirs). Fix: detached process-group leader on POSIX + process.kill(-pid) tree signal, mirroring local-skills-process.ts; Windows keeps child.kill (no POSIX group semantics). timedOut latch already prevented TERM-trap->exit0 passes - verified, kept."
+      ]
     }
   ]
 }
