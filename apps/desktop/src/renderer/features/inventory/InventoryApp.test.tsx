@@ -1388,6 +1388,75 @@ describe("Local Target Inventory shell", () => {
     ).toBeInTheDocument();
   });
 
+  it("drops an unchecked listed Skill from the prepared selection", async () => {
+    const descriptor = {
+      family: "github" as const,
+      locality: "portable" as const,
+      mutability: "mutable" as const,
+      ref: null,
+      schemaVersion: 1 as const,
+      source: "vercel-labs/skills",
+    };
+    const inspectedSnapshot: WorkspaceSnapshot = {
+      ...snapshot,
+      eventSequence: 1,
+      sourceInspection: {
+        activeOperationId: null,
+        inspection: {
+          candidates: [
+            {
+              description: "Helps users discover skills.",
+              group: null,
+              name: "find-skills",
+            },
+            {
+              description: "Reviews pull requests.",
+              group: "review",
+              name: "code-review",
+            },
+          ],
+          descriptor,
+          digest: "a".repeat(64),
+          inspectedAt: "2026-08-21T10:00:30.000Z",
+          inspectionId: "inspection-1",
+          targetGeneration: snapshot.target.generation,
+          targetId: snapshot.target.id,
+        },
+        lastError: null,
+        phase: "ready",
+      },
+      stateRevision: 2,
+    };
+    const prepareMutation = vi.fn(async () => ({
+      ok: true as const,
+      value: { operationId: "prepared-add" },
+    }));
+    render(
+      <InventoryApp
+        client={{ ...clientFor(inspectedSnapshot), prepareMutation }}
+      />,
+    );
+
+    fireEvent.change(
+      await screen.findByRole("textbox", { name: "Source" }),
+      { target: { value: "vercel-labs/skills" } },
+    );
+    const listing = await screen.findByTestId("source-inspection");
+    const codeReview = within(listing).getByRole("checkbox", {
+      name: /code-review/,
+    });
+    fireEvent.click(codeReview);
+    fireEvent.click(codeReview);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Prepare add of selected Skills" }),
+    );
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Select at least one listed Skill.",
+    );
+    expect(prepareMutation).not.toHaveBeenCalled();
+  });
+
   it("surfaces inspection failures next to the source field and discloses a planned source's mutability (#201)", async () => {
     const inspectSource = vi.fn(async () => ({
       error: {
@@ -3187,6 +3256,105 @@ describe("Local Target Inventory shell", () => {
         "00000000-0000-4000-8000-00000000000a",
         "00000000-0000-4000-8000-000000000001",
       ),
+    );
+  });
+
+  it("hands a comparison Prepare off to the destination Target inventory review", async () => {
+    const rightTarget = {
+      connectionReference: null,
+      ...targetV4Metadata,
+      generation: 2,
+      id: "00000000-0000-4000-8000-00000000000a",
+      kind: "local" as const,
+      label: "Other device",
+      workspace: "/work/other",
+      workspaceLabel: "other",
+    };
+    const targetStates = [
+      {
+        deletionBlocked: false,
+        inventory: snapshot.inventory,
+        mutation: snapshot.mutation,
+        target: {
+          ...snapshot.target,
+          connectionReference: null,
+          workspace: "/work/skills-desktop",
+        },
+      },
+      {
+        deletionBlocked: false,
+        inventory: {
+          ...snapshot.inventory,
+          entries: [],
+          freshness: "fresh" as const,
+        },
+        mutation: reviewableSnapshot.mutation,
+        target: rightTarget,
+      },
+    ];
+    const comparison = {
+      id: "comparison-prepared",
+      leftFreshness: "fresh" as const,
+      leftTargetId: "00000000-0000-4000-8000-000000000001",
+      rightFreshness: "fresh" as const,
+      rightTargetId: "00000000-0000-4000-8000-00000000000a",
+      rows: [
+        {
+          dimensions: {
+            contentFingerprint: "unknown" as const,
+            declaredSource: "matched" as const,
+            presence: "left-only" as const,
+            revision: "unknown" as const,
+          },
+          key: "Case-Sensitive-Skill",
+          left: {
+            entries: snapshot.inventory.entries,
+            freshness: "fresh" as const,
+            harnessAvailability: "available" as const,
+          },
+          right: {
+            entries: [],
+            freshness: "fresh" as const,
+            harnessAvailability: "absent" as const,
+          },
+          summary: "missing" as const,
+        },
+      ],
+    };
+    const prepareComparison = vi.fn(async () => ({
+      ok: true as const,
+      value: { operationId: "prepared-comparison-1" },
+    }));
+    const client = {
+      ...clientFor({ ...snapshot, comparison, targets: targetStates }),
+      prepareComparison,
+    };
+    render(<InventoryApp client={client} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Comparison" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Case-Sensitive-Skill" }),
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Prepare for Right" }),
+    );
+
+    await waitFor(() =>
+      expect(prepareComparison).toHaveBeenCalledWith(
+        "comparison-prepared",
+        "Case-Sensitive-Skill",
+        "00000000-0000-4000-8000-00000000000a",
+      ),
+    );
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("heading", { name: "Comparison" }),
+      ).not.toBeInTheDocument(),
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Open Trusted Review" }),
+      ).toBeEnabled(),
     );
   });
 

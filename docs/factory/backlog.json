@@ -1114,6 +1114,31 @@
       "notes": [
         "electron-ipc.ts: ~20 authorizationFailure() arms + ~20 internalFailure() catch arms + aboutFailure/menuFailure arms + notifyMenuCommand return-false edges (1014-1024)"
       ]
+    },
+    {
+      "id": "SDF-043",
+      "title": "Cover comparison-to-inventory prepare handoff and listed-skill uncheck",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 430,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "Prepare for Right calls prepareComparison with (comparisonId, rowKey, destinationTargetId)",
+        "after onPrepared the view returns to inventory with the destination Target armed and Open Trusted Review enabled",
+        "unchecking a listed candidate removes it from the prepared selection (Prepare stays blocked on empty selection)",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "dependsOn": [],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "InventoryApp.tsx onPrepared ~1804-1810 (comparison->inventory preparedMutationContext handoff, entry point of the SDF-037 native-focus flow) + candidate checkbox uncheck arm ~1629"
+      ]
     }
   ]
 }
