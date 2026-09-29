@@ -92,9 +92,29 @@ describe("releaseContext", () => {
 
 describe("emitReleaseOutputs", () => {
   it("writes nothing when GITHUB_OUTPUT is unset", async () => {
+    // CI runners always export GITHUB_OUTPUT; delete it so the unset path
+    // is exercised rather than the runner's real output file.
+    vi.stubEnv("GITHUB_OUTPUT", undefined);
     const append = vi.fn();
     await emitReleaseOutputs({ one: "1" }, { append, outputPath: undefined });
     expect(append).not.toHaveBeenCalled();
+  });
+
+  it("appends to an inherited GITHUB_OUTPUT path", async () => {
+    const root = await makeTempDir();
+    const outputPath = join(root, "github-output.txt");
+    vi.stubEnv("GITHUB_OUTPUT", outputPath);
+    const calls: Array<readonly [string, string]> = [];
+    await emitReleaseOutputs(
+      { "release-tag": "v1.2.3" },
+      {
+        append: async (path, text) => {
+          calls.push([path, text]);
+        },
+        outputPath: undefined,
+      },
+    );
+    expect(calls).toEqual([[outputPath, "release-tag=v1.2.3\n"]]);
   });
 
   it("appends single-line values and multiline heredocs", async () => {

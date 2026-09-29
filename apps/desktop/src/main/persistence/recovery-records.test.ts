@@ -1,6 +1,6 @@
 import { mkdir, mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -3148,7 +3148,7 @@ describe("RecoveryRecords store load failure arms", () => {
     return {
       ...delegate,
       readFile(path, encoding) {
-        if (path.endsWith(`/${name}`)) return Promise.reject(denied);
+        if (basename(path) === name) return Promise.reject(denied);
         return delegate.readFile(path, encoding);
       },
     };

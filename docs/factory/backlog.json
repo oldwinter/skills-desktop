@@ -1524,6 +1524,35 @@
       "notes": [
         "root replay evidence (probe_skills_command_lifecycle.py on stash 65fd0f10, six cases): term_resistant_descendant now holds 6562ms with ready=true, no delayed marker, item failed; timeout/sigterm/sigint/positive/zero-exit all correct; escalationMs option added for deterministic regression tests"
       ]
+    },
+    {
+      "id": "SDF-058",
+      "title": "Fix hosted-CI test environment leaks: inherited GITHUB_OUTPUT and Windows path fault matcher",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 580,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "release-integrity-cli.test.ts does not inherit the runner's GITHUB_OUTPUT when asserting the unset path",
+        "an inherited GITHUB_OUTPUT path is exercised through a private temp file",
+        "recovery-records.test.ts read-fault injection matches store filenames on any platform path separator",
+        "existing behavioral assertions are unchanged",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "dependsOn": [
+        "SDF-055",
+        "SDF-056"
+      ],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "hosted failures at daf0745 (run 36510442072): release-integrity-cli.test.ts expected no GITHUB_OUTPUT append while the runner env was inherited; recovery-records.test.ts read-fault cases expected corrupt_store on Windows where endsWith('/') never matches"
+      ]
     }
   ]
 }
