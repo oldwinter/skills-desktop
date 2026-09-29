@@ -12,7 +12,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi, afterEach } from "vitest";
 
 import {
   candidateArtifactPlan,
@@ -37,6 +37,7 @@ import {
   verifyGitHubDraftRelease,
   verifyGitHubPreviewRelease,
 } from "../scripts/release/release-integrity.mjs";
+import { runReleaseIntegrityCommand } from "../scripts/release/release-integrity-cli.mjs";
 
 const releaseContext = {
   repository: "oldwinter/skills-desktop",
@@ -2593,6 +2594,596 @@ describe("release integrity evidence pipeline failure arms", () => {
       await expect(assemble(fixture, root)).rejects.toThrow(
         "Release evidence artifact digest is invalid.",
       );
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+});
+
+describe("release integrity commands end-to-end", () => {
+  const contextArgv = () => [
+    "--repository",
+    releaseContext.repository,
+    "--source-commit",
+    releaseContext.sourceCommit,
+    "--workflow-event",
+    releaseContext.workflowEvent,
+    "--workflow-name",
+    releaseContext.workflowName,
+    "--workflow-run-attempt",
+    releaseContext.workflowRunAttempt,
+    "--workflow-run-id",
+    releaseContext.workflowRunId,
+  ];
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  async function stageOutputSink(root: string) {
+    const outputPath = join(root, "github-output.txt");
+    vi.stubEnv("GITHUB_OUTPUT", outputPath);
+    return outputPath;
+  }
+
+  async function writeOne(root: string, lockfileSha256: string) {
+    const candidateRoot = join(root, "candidates");
+    await mkdir(candidateRoot);
+    const version = "0.1.0";
+    const artifacts = candidateArtifactPlan({
+      architecture: "arm64",
+      platform: "darwin",
+      version,
+    }).map((artifact) => {
+      const bytes = artifact.fileName;
+      return {
+        ...artifact,
+        bytes,
+        sha256: sha256(bytes),
+        sizeBytes: Buffer.byteLength(bytes),
+      };
+    });
+    const manifest = createCandidateManifest({
+      architecture: "arm64",
+      artifacts: artifacts.map(({ bytes: _bytes, ...artifact }) => artifact),
+      buildInputs: {
+        electronVersion: "44.0.0",
+        forgeVersion: "7.11.2",
+        lockfileSha256,
+        nodeVersion: "24.19.0",
+        remoteBootstrapDigest: "d".repeat(64),
+        remoteBootstrapProtocolVersion: 1,
+      },
+      buildOutputs: [
+        "electron-main",
+        "workspace-preload",
+        "review-preload",
+        "workspace-renderer",
+        "review-renderer",
+        "remote-bootstrap",
+      ].map((entry, index) => ({
+        entry,
+        sha256: String(index + 1).repeat(64),
+      })),
+      platform: "darwin",
+      source: {
+        commit: releaseContext.sourceCommit,
+        repository: releaseContext.repository,
+      },
+      version,
+      workflow: {
+        event: releaseContext.workflowEvent,
+        name: releaseContext.workflowName,
+        runAttempt: releaseContext.workflowRunAttempt,
+        runId: releaseContext.workflowRunId,
+      },
+    });
+    const manifestBytes = serializeCandidateManifest(manifest);
+    const digest = sha256(manifestBytes);
+    const directory = join(
+      candidateRoot,
+      `skills-desktop-${version}-darwin-arm64`,
+    );
+    await mkdir(directory);
+    await writeFile(join(directory, "candidate-manifest-v1.json"), manifestBytes);
+    await writeFile(
+      join(directory, "candidate-manifest-v1.sha256"),
+      `${digest}  candidate-manifest-v1.json\n`,
+    );
+    for (const artifact of artifacts) {
+      await writeFile(join(directory, artifact.fileName), artifact.bytes);
+    }
+    return { candidateRoot, directory, manifestDigest: digest };
+  }
+
+  it("identify emits the candidate directory and manifest digest", async () => {
+    const root = await mkdtemp(join(tmpdir(), "skills-cli-identify-"));
+    try {
+      const { packageLockPath, sha256: lockfileSha256 } =
+        await writePackageLock(root);
+      const { candidateRoot, directory, manifestDigest } = await writeOne(
+        root,
+        lockfileSha256,
+      );
+      const outputPath = await stageOutputSink(root);
+      const output: string[] = [];
+
+      const result = await runReleaseIntegrityCommand(
+        [
+          "identify",
+          "--architecture",
+          "arm64",
+          "--candidate-root",
+          candidateRoot,
+          "--package-lock",
+          packageLockPath,
+          "--platform",
+          "darwin",
+          ...contextArgv(),
+        ],
+        { writeOutput: (value) => output.push(value) },
+      );
+
+      expect(result).toMatchObject({
+        architecture: "arm64",
+        candidateDirectory: directory,
+        manifestDigest,
+        platform: "darwin",
+        version: "0.1.0",
+      });
+      expect(output.join("")).toContain('"manifestDigest"');
+      expect(await readFile(outputPath, "utf8")).toContain(
+        `manifest-digest=${manifestDigest}`,
+      );
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+
+  it("subjects writes the subject evidence file and emits the set digest", async () => {
+    const root = await mkdtemp(join(tmpdir(), "skills-cli-subjects-"));
+    try {
+      const { packageLockPath, sha256: lockfileSha256 } =
+        await writePackageLock(root);
+      const candidateRoot = await writeCandidateSet(root, lockfileSha256);
+      const outputPath = join(root, "subjects.json");
+
+      const result = await runReleaseIntegrityCommand(
+        [
+          "subjects",
+          "--candidate-root",
+          candidateRoot,
+          "--output-path",
+          outputPath,
+          "--package-lock",
+          packageLockPath,
+          ...contextArgv(),
+        ],
+        { writeOutput: () => {} },
+      );
+
+      const subjects = JSON.parse(await readFile(outputPath, "utf8"));
+      expect(subjects.subjects).toHaveLength(9);
+      expect(result.candidateSetDigest).toMatch(/^[a-f0-9]{64}$/);
+      expect(subjects.candidateSetDigest).toBe(result.candidateSetDigest);
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+
+  it("generate produces the evidence root and emits its paths", async () => {
+    const root = await mkdtemp(join(tmpdir(), "skills-cli-generate-"));
+    try {
+      const { packageLockPath, sha256: lockfileSha256 } =
+        await writePackageLock(root);
+      const candidateRoot = await writeCandidateSet(root, lockfileSha256);
+      const outputRoot = join(root, "evidence");
+      const emitted = await stageOutputSink(root);
+
+      const result = await runReleaseIntegrityCommand(
+        [
+          "generate",
+          "--candidate-root",
+          candidateRoot,
+          "--created-at",
+          "2026-08-22T08:00:00.000Z",
+          "--output-root",
+          outputRoot,
+          "--package-lock",
+          packageLockPath,
+          ...contextArgv(),
+        ],
+        { writeOutput: () => {} },
+      );
+
+      expect(result.version).toBe("0.1.0");
+      const emittedText = await readFile(emitted, "utf8");
+      expect(emittedText).toContain("sbom-path=");
+      expect(emittedText).toContain("subject-paths<<");
+      expect(
+        await stat(join(outputRoot, "candidate-provenance-v1.json")),
+      ).toBeTruthy();
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+
+  async function sealedCliEvidence(root: string) {
+    const { packageLockPath, sha256: lockfileSha256 } =
+      await writePackageLock(root);
+    const candidateRoot = await writeCandidateSet(root, lockfileSha256);
+    const evidenceRoot = join(root, "evidence");
+    const generated = await generateReleaseEvidence({
+      candidateRoot,
+      createdAt: "2026-08-22T08:00:00.000Z",
+      expected: releaseContext,
+      outputRoot: evidenceRoot,
+      packageLockPath,
+    });
+    const bundleRoot = join(root, "bundles");
+    await mkdir(bundleRoot);
+    const bundles = {
+      candidateIdentity: join(bundleRoot, "identity.json"),
+      provenance: join(bundleRoot, "provenance.json"),
+      sbom: join(bundleRoot, "sbom.json"),
+    };
+    for (const [kind, path] of Object.entries(bundles)) {
+      await writeFile(path, `${JSON.stringify({ kind })}\n`);
+    }
+    const finalized = await finalizeReleaseEvidence({
+      attestationBundles: bundles,
+      evidenceRoot,
+      expectedCandidateSetDigest: generated.candidateSetDigest,
+    });
+    return {
+      bundles,
+      candidateRoot,
+      evidenceRoot,
+      finalized,
+      generated,
+      packageLockPath,
+    };
+  }
+
+  it("finalize seals attestation bundles and emits the evidence digests", async () => {
+    const root = await mkdtemp(join(tmpdir(), "skills-cli-finalize-"));
+    try {
+      const { packageLockPath, sha256: lockfileSha256 } =
+        await writePackageLock(root);
+      const candidateRoot = await writeCandidateSet(root, lockfileSha256);
+      const evidenceRoot = join(root, "evidence");
+      const generated = await generateReleaseEvidence({
+        candidateRoot,
+        createdAt: "2026-08-22T08:00:00.000Z",
+        expected: releaseContext,
+        outputRoot: evidenceRoot,
+        packageLockPath,
+      });
+      const bundleRoot = join(root, "bundles");
+      await mkdir(bundleRoot);
+      const bundles = {
+        candidateIdentity: join(bundleRoot, "identity.json"),
+        provenance: join(bundleRoot, "provenance.json"),
+        sbom: join(bundleRoot, "sbom.json"),
+      };
+      for (const [kind, path] of Object.entries(bundles)) {
+        await writeFile(path, `${JSON.stringify({ kind })}\n`);
+      }
+      const emitted = await stageOutputSink(root);
+
+      const result = await runReleaseIntegrityCommand(
+        [
+          "finalize",
+          "--candidate-identity-bundle",
+          bundles.candidateIdentity,
+          "--candidate-set-digest",
+          generated.candidateSetDigest,
+          "--evidence-root",
+          evidenceRoot,
+          "--provenance-bundle",
+          bundles.provenance,
+          "--sbom-bundle",
+          bundles.sbom,
+        ],
+        { writeOutput: () => {} },
+      );
+
+      expect(result.evidenceSetDigest).toMatch(/^[a-f0-9]{64}$/);
+      const emittedText = await readFile(emitted, "utf8");
+      expect(emittedText).toContain(
+        `evidence-set-digest=${result.evidenceSetDigest}`,
+      );
+      expect(
+        await stat(join(evidenceRoot, "candidate-evidence-v1.json")),
+      ).toBeTruthy();
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+
+  it("assemble produces the verified draft payload", async () => {
+    const root = await mkdtemp(join(tmpdir(), "skills-cli-assemble-"));
+    try {
+      const fixture = await sealedCliEvidence(root);
+      const outputRoot = join(root, "verified-draft");
+
+      const result = await runReleaseIntegrityCommand(
+        [
+          "assemble",
+          "--candidate-root",
+          fixture.candidateRoot,
+          "--evidence-artifact-digest",
+          fixture.finalized.evidenceArtifactDigest,
+          "--evidence-root",
+          fixture.evidenceRoot,
+          "--evidence-set-digest",
+          fixture.finalized.evidenceSetDigest,
+          "--output-root",
+          outputRoot,
+          "--package-lock",
+          fixture.packageLockPath,
+          "--signer-workflow",
+          "oldwinter/skills-desktop/.github/workflows/release-candidates.yml",
+          "--source-ref",
+          "refs/heads/main",
+          "--verified-at",
+          "2026-08-22T08:05:00.000Z",
+          ...contextArgv(),
+        ],
+        { writeOutput: () => {} },
+      );
+
+      expect(result.payloadDigest).toMatch(/^[a-f0-9]{64}$/);
+      expect(
+        await stat(join(outputRoot, "verification-receipt-v1.json")),
+      ).toBeTruthy();
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+
+  it("verify-attestation validates a signed statement against subjects", async () => {
+    const root = await mkdtemp(join(tmpdir(), "skills-cli-attest-"));
+    try {
+      const predicateType = "https://example.test/predicate";
+      const resultJson = join(root, "result.json");
+      const subjectsJson = join(root, "subjects.json");
+      const predicateJson = join(root, "predicate.json");
+      await writeFile(
+        resultJson,
+        JSON.stringify([
+          {
+            verificationResult: {
+              statement: {
+                predicate: { kind: "expected" },
+                predicateType,
+                subject: [
+                  { digest: { sha256: "e".repeat(64) }, name: "pkg/a.dmg" },
+                ],
+              },
+            },
+          },
+        ]),
+      );
+      await writeFile(
+        subjectsJson,
+        JSON.stringify({
+          subjects: [{ fileName: "a.dmg", sha256: "e".repeat(64) }],
+        }),
+      );
+      await writeFile(predicateJson, JSON.stringify({ kind: "expected" }));
+
+      const result = await runReleaseIntegrityCommand(
+        [
+          "verify-attestation",
+          "--expected-predicate",
+          predicateJson,
+          "--predicate-type",
+          predicateType,
+          "--result-json",
+          resultJson,
+          "--subjects-json",
+          subjectsJson,
+        ],
+        { writeOutput: () => {} },
+      );
+
+      expect(result).toEqual({ predicateType, subjectCount: 1 });
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+
+  it("notes writes release notes and emits the release identity", async () => {
+    const root = await mkdtemp(join(tmpdir(), "skills-cli-notes-"));
+    try {
+      const outputPath = join(root, "notes.md");
+      const emitted = await stageOutputSink(root);
+
+      const result = await runReleaseIntegrityCommand(
+        [
+          "notes",
+          "--candidate-set-digest",
+          "1".repeat(64),
+          "--evidence-set-digest",
+          "2".repeat(64),
+          "--output-path",
+          outputPath,
+          "--payload-digest",
+          "3".repeat(64),
+          "--repository",
+          releaseContext.repository,
+          "--source-commit",
+          releaseContext.sourceCommit,
+          "--source-ref",
+          "refs/heads/main",
+          "--version",
+          "0.1.0",
+          "--workflow-run-url",
+          `https://github.com/${releaseContext.repository}/actions/runs/777`,
+        ],
+        { writeOutput: () => {} },
+      );
+
+      const notes = await readFile(outputPath, "utf8");
+      expect(notes).toContain("UNSIGNED DEVELOPER PREVIEW");
+      expect(result.tag).toBe(`preview-v0.1.0-${releaseContext.sourceCommit}`);
+      const emittedText = await readFile(emitted, "utf8");
+      expect(emittedText).toContain(`release-tag=${result.tag}`);
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+
+  async function githubReleaseFixture(root: string) {
+    const payloadRoot = join(root, "payload");
+    await mkdir(payloadRoot);
+    await writeFile(join(payloadRoot, "a.dmg"), "candidate-bytes");
+    const digest = sha256("candidate-bytes");
+    const payloadDigest = sha256(`${digest} *a.dmg\n`);
+    const expected = {
+      candidateSetDigest: "1".repeat(64),
+      evidenceSetDigest: "2".repeat(64),
+      payloadDigest,
+      repository: releaseContext.repository,
+      sourceCommit: releaseContext.sourceCommit,
+      sourceRef: "refs/heads/main",
+      version: "0.1.0",
+      workflowRunUrl: `https://github.com/${releaseContext.repository}/actions/runs/777`,
+    };
+    const tag = previewReleaseTag(expected);
+    const release = {
+      assets: [
+        {
+          digest: `sha256:${digest}`,
+          name: "a.dmg",
+          size: Buffer.byteLength("candidate-bytes"),
+          state: "uploaded",
+        },
+      ],
+      body: createPreviewReleaseNotes(expected),
+      draft: true,
+      html_url: `https://github.com/${releaseContext.repository}/releases/tag/candidate`,
+      name: previewReleaseName(expected),
+      prerelease: true,
+      published_at: null,
+      tag_name: tag,
+      target_commitish: releaseContext.sourceCommit,
+    };
+    const releaseListJson = join(root, "releases.json");
+    await writeFile(releaseListJson, JSON.stringify([release]));
+    return { expected, payloadDigest, payloadRoot, release, releaseListJson };
+  }
+
+  const verifyArgv = (
+    fixture: Awaited<ReturnType<typeof githubReleaseFixture>>,
+  ) => [
+    "--candidate-set-digest",
+    fixture.expected.candidateSetDigest,
+    "--evidence-set-digest",
+    fixture.expected.evidenceSetDigest,
+    "--payload-digest",
+    fixture.expected.payloadDigest,
+    "--payload-root",
+    fixture.payloadRoot,
+    "--release-list-json",
+    fixture.releaseListJson,
+    "--repository",
+    releaseContext.repository,
+    "--source-commit",
+    releaseContext.sourceCommit,
+    "--source-ref",
+    "refs/heads/main",
+    "--version",
+    "0.1.0",
+    "--workflow-run-url",
+    fixture.expected.workflowRunUrl,
+  ];
+
+  it("verify-release returns draft state for the matching private draft", async () => {
+    const root = await mkdtemp(join(tmpdir(), "skills-cli-verify-"));
+    try {
+      const fixture = await githubReleaseFixture(root);
+      const emitted = await stageOutputSink(root);
+
+      const result = await runReleaseIntegrityCommand(
+        ["verify-release", ...verifyArgv(fixture)],
+        { writeOutput: () => {} },
+      );
+
+      expect(result.state).toBe("draft");
+      const emittedText = await readFile(emitted, "utf8");
+      expect(emittedText).toContain("draft-state=draft");
+      expect(emittedText).toContain(`draft-tag=${result.tag}`);
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+
+  it("verify-release fails when no release matches the computed tag", async () => {
+    const root = await mkdtemp(join(tmpdir(), "skills-cli-verify-"));
+    try {
+      const fixture = await githubReleaseFixture(root);
+      await writeFile(
+        fixture.releaseListJson,
+        JSON.stringify([{ ...fixture.release, tag_name: "other-tag" }]),
+      );
+
+      await expect(
+        runReleaseIntegrityCommand(
+          ["verify-release", ...verifyArgv(fixture)],
+          { writeOutput: () => {} },
+        ),
+      ).rejects.toThrow("GitHub draft release is missing or duplicated.");
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+
+  it("verify-preview-release returns preview state for the public preview", async () => {
+    const root = await mkdtemp(join(tmpdir(), "skills-cli-verify-"));
+    try {
+      const fixture = await githubReleaseFixture(root);
+      await writeFile(
+        fixture.releaseListJson,
+        JSON.stringify([
+          { ...fixture.release, draft: false, published_at: "2026-09-29T00:00:00Z" },
+        ]),
+      );
+      const emitted = await stageOutputSink(root);
+
+      const result = await runReleaseIntegrityCommand(
+        ["verify-preview-release", ...verifyArgv(fixture)],
+        { writeOutput: () => {} },
+      );
+
+      expect(result.state).toBe("preview");
+      expect(await readFile(emitted, "utf8")).toContain("preview-state=preview");
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+
+  it("preflight-draft returns the payload digest and asset count", async () => {
+    const root = await mkdtemp(join(tmpdir(), "skills-cli-preflight-"));
+    try {
+      const payloadRoot = join(root, "payload");
+      await mkdir(payloadRoot);
+      await writeFile(join(payloadRoot, "a.dmg"), "candidate-bytes");
+      const payloadDigest = sha256(`${sha256("candidate-bytes")} *a.dmg\n`);
+
+      const result = await runReleaseIntegrityCommand(
+        [
+          "preflight-draft",
+          "--payload-digest",
+          payloadDigest,
+          "--payload-root",
+          payloadRoot,
+        ],
+        { writeOutput: () => {} },
+      );
+
+      expect(result).toEqual({ assetCount: 1, payloadDigest });
     } finally {
       await rm(root, { force: true, recursive: true });
     }

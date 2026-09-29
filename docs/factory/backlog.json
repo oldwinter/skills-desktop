@@ -1673,6 +1673,26 @@
         "release-integrity.mjs residual after SDF-061: evidence pipeline arms (createSpdxDocument lock shape, finalizeReleaseEvidence bundle/provenance/file-set guards, verifyReleaseEvidence + parseEvidenceIndex index/digest/byte checks, assembleVerifiedDraft receipt + payload assembly); lines 312/391 (uncaught readFile ENOENT, artifact isFile) and 477-480 (globally-unique artifact names, unreachable by construction since names embed platform-arch) noted as constrained",
         "extends tests/release-integrity.test.ts reusing writeCandidateSet/writePackageLock/generateReleaseEvidence happy-path fixtures with per-test mutation"
       ]
+    },
+    {
+      "id": "SDF-063",
+      "title": "Exercise all release-integrity CLI command handlers end-to-end",
+      "kind": "verification",
+      "priority": "p2",
+      "state": "delivered",
+      "acceptance": [
+        "tests/release-integrity.test.ts drives runReleaseIntegrityCommand end-to-end for identify, subjects, generate, finalize, assemble, verify-attestation, notes, verify-release, verify-preview-release, and preflight-draft using real on-disk candidate/evidence/payload fixtures",
+        "GitHub release verification covers both the matching-release success paths and the missing/duplicate-release rejection",
+        "GITHUB_OUTPUT emission is captured via a private stubbed file and asserted",
+        "release-integrity-cli.mjs coverage improves materially (>=90% statements)"
+      ],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": "All commands exercised against real fixture trees; no network or publication side effects.",
+      "order": 63
     }
   ]
 }
