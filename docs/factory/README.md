@@ -70,10 +70,12 @@ success for a failed attempt.
 There is no daemon: every command is a one-shot Node process. `SIGINT` or
 `SIGTERM` during `verify` is forwarded to the running gate's detached process
 group (with `SIGKILL` escalation if the group does not exit), so gate
-descendants cannot outlive the cancellation. The interrupted attempt is
-recorded in the ledger and `progress.jsonl`, the item lands in `failed` — a
-plain `verify` retries it — and the CLI exits `130`/`143`. A second signal,
-or a signal while no gate runs, exits immediately. Deleting
+descendants cannot outlive the cancellation — the command does not report
+the attempt finished until the group is confirmed empty, including when the
+gate leader itself has already exited. The interrupted attempt is recorded
+in the ledger and `progress.jsonl`, the item lands in `failed` — a plain
+`verify` retries it — and the CLI exits `130`/`143`. A second signal, or a
+signal while no gate runs, exits immediately. Deleting
 `.codex/runtime/devin-factory/` removes only volatile evidence — the queue
 state lives in `docs/factory/backlog.json` and survives.
 
