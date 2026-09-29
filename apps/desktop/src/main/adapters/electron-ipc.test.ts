@@ -527,6 +527,196 @@ describe("Electron IPC sender authorization", () => {
     });
   });
 
+  it("forwards package, publication, and studio intents as closed versioned requests", async () => {
+    const handlers = new Map<
+      string,
+      (event: never, ...args: unknown[]) => unknown
+    >();
+    const ipcMain = {
+      handle(
+        channel: string,
+        handler: (event: never, ...args: unknown[]) => unknown,
+      ) {
+        handlers.set(channel, handler);
+      },
+      removeHandler: vi.fn(),
+    };
+    const session = {
+      request: vi.fn(async () => ({
+        ok: true as const,
+        value: { operationId: "operation-9" },
+      })),
+      snapshot: vi.fn(),
+      teardown: vi.fn(),
+    };
+    const capabilities = {
+      attach: vi.fn(() => session),
+      initialize: vi.fn(async () => undefined),
+    };
+    const registration = registerDesktopIpc({
+      capabilities: capabilities as never,
+      ipcMain: ipcMain as never,
+      newEpoch: () => "epoch-1",
+      updates: {
+        exportDiagnostics: vi.fn(async () => "cancelled" as const),
+        getSnapshot: vi.fn(),
+        requestCheck: vi.fn(async () => undefined),
+        requestRestart: vi.fn(async () => "stale" as const),
+        subscribe: vi.fn(() => () => undefined),
+      },
+    });
+    const mainFrame = { url: "skills-desktop://workspace/index.html" };
+    const webContents = {
+      id: 17,
+      isDestroyed: () => false,
+      mainFrame,
+      send: vi.fn(),
+    };
+    registration.attach(webContents as never, "workspace", mainFrame.url);
+    const authorizedEvent = { sender: webContents, senderFrame: mainFrame };
+    const hostileEvent = {
+      sender: webContents,
+      senderFrame: { url: "skills-desktop://review/index.html" },
+    };
+
+    const cases: Array<{
+      readonly args: readonly unknown[];
+      readonly channel: string;
+      readonly forwarded: Record<string, unknown>;
+    }> = [
+      {
+        args: [],
+        channel: "workspace:package:import",
+        forwarded: { type: "package.import" },
+      },
+      {
+        args: [],
+        channel: "workspace:publication:choose-source",
+        forwarded: { type: "publication.choose-source" },
+      },
+      {
+        args: [],
+        channel: "workspace:publication:export",
+        forwarded: { type: "publication.export" },
+      },
+      {
+        args: ["origin", "skills-desktop/publication"],
+        channel: "workspace:publication:prepare",
+        forwarded: {
+          branch: "skills-desktop/publication",
+          remote: "origin",
+          type: "publication.prepare",
+        },
+      },
+      {
+        args: ["plan-1"],
+        channel: "workspace:publication:review-request",
+        forwarded: { planId: "plan-1", type: "publication.review.request" },
+      },
+      {
+        args: ["plan-2"],
+        channel: "workspace:publication:discard",
+        forwarded: { planId: "plan-2", type: "publication.discard" },
+      },
+      {
+        args: [],
+        channel: "workspace:publication:reconcile",
+        forwarded: { type: "publication.reconcile" },
+      },
+      {
+        args: [],
+        channel: "workspace:studio:open",
+        forwarded: { type: "studio.open" },
+      },
+      {
+        args: ["grant-1"],
+        channel: "workspace:studio:release",
+        forwarded: { grantId: "grant-1", type: "studio.release" },
+      },
+      {
+        args: ["grant-2"],
+        channel: "workspace:studio:validate",
+        forwarded: { grantId: "grant-2", type: "studio.validate" },
+      },
+      {
+        args: ["grant-3"],
+        channel: "workspace:studio:draft-create",
+        forwarded: { grantId: "grant-3", type: "studio.draft.create" },
+      },
+      {
+        args: [],
+        channel: "workspace:studio:draft-create",
+        forwarded: { type: "studio.draft.create" },
+      },
+      {
+        args: ["draft-1", 4, "# Skill\n"],
+        channel: "workspace:studio:draft-save",
+        forwarded: {
+          draftId: "draft-1",
+          expectedRevision: 4,
+          skillMd: "# Skill\n",
+          type: "studio.draft.save",
+        },
+      },
+      {
+        args: ["draft-2", 7],
+        channel: "workspace:studio:draft-delete",
+        forwarded: {
+          draftId: "draft-2",
+          expectedRevision: 7,
+          type: "studio.draft.delete",
+        },
+      },
+      {
+        args: ["draft-3"],
+        channel: "workspace:studio:preview",
+        forwarded: { draftId: "draft-3", type: "studio.preview" },
+      },
+      {
+        args: ["draft-4"],
+        channel: "workspace:studio:export",
+        forwarded: { draftId: "draft-4", type: "studio.export" },
+      },
+    ];
+
+    for (const { args, channel, forwarded } of cases) {
+      await expect(
+        handlers.get(channel)!(authorizedEvent as never, "epoch-1", ...args),
+      ).resolves.toEqual({ ok: true, value: { operationId: "operation-9" } });
+      expect(session.request).toHaveBeenLastCalledWith({
+        ...forwarded,
+        version: 2,
+      });
+    }
+
+    await expect(
+      handlers.get("workspace:publication:export")!(
+        hostileEvent as never,
+        "epoch-1",
+      ),
+    ).resolves.toMatchObject({ error: { code: "unauthorized" }, ok: false });
+    await expect(
+      handlers.get("workspace:studio:draft-save")!(
+        hostileEvent as never,
+        "epoch-1",
+        "draft-1",
+        4,
+        "# Skill\n",
+      ),
+    ).resolves.toMatchObject({ error: { code: "unauthorized" }, ok: false });
+
+    session.request.mockRejectedValueOnce(new Error("session crashed"));
+    await expect(
+      handlers.get("workspace:studio:open")!(
+        authorizedEvent as never,
+        "epoch-1",
+      ),
+    ).resolves.toMatchObject({
+      error: { code: "internal_error", phase: "ipc" },
+      ok: false,
+    });
+  });
+
   it("rejects queued workspace and review invokes from a prior attachment epoch", async () => {
     const handlers = new Map<
       string,
@@ -989,6 +1179,23 @@ describe("Electron IPC sender authorization", () => {
       "about:update:snapshot-changed",
       expect.anything(),
     );
+
+    // A malformed push is dropped at the schema boundary, never relayed.
+    workspaceContents.send.mockClear();
+    publishUpdate?.({ garbage: true } as never);
+    publishUpdate?.({ ...aboutSnapshot, schemaVersion: 99 } as never);
+    expect(workspaceContents.send).not.toHaveBeenCalledWith(
+      "about:update:snapshot-changed",
+      expect.anything(),
+    );
+
+    // A disposed renderer is skipped on the next broadcast.
+    workspaceContents.isDestroyed = () => true;
+    publishUpdate?.(aboutSnapshot);
+    expect(workspaceContents.send).not.toHaveBeenCalledWith(
+      "about:update:snapshot-changed",
+      expect.anything(),
+    );
   });
 
   it("reads the main-owned menu for the workspace only and relays commands to the exact owner", async () => {
@@ -1112,5 +1319,823 @@ describe("Electron IPC sender authorization", () => {
 
     registration.dispose();
     expect(ipcMain.removeHandler).toHaveBeenCalledWith("menu:application:get");
+  });
+
+  it("forwards cancel, comparison, target, and mutation intents as closed versioned requests", async () => {
+    const handlers = new Map<
+      string,
+      (event: never, ...args: unknown[]) => unknown
+    >();
+    const ipcMain = {
+      handle(
+        channel: string,
+        handler: (event: never, ...args: unknown[]) => unknown,
+      ) {
+        handlers.set(channel, handler);
+      },
+      removeHandler: vi.fn(),
+    };
+    const session = {
+      request: vi.fn(async () => ({
+        ok: true as const,
+        value: { operationId: "operation-3" },
+      })),
+      snapshot: vi.fn(),
+      teardown: vi.fn(),
+    };
+    const registration = registerDesktopIpc({
+      capabilities: { attach: vi.fn(() => session) } as never,
+      ipcMain: ipcMain as never,
+      newEpoch: () => "epoch-1",
+      updates: {
+        exportDiagnostics: vi.fn(async () => "cancelled" as const),
+        getSnapshot: vi.fn(),
+        requestCheck: vi.fn(async () => undefined),
+        requestRestart: vi.fn(async () => "stale" as const),
+        subscribe: vi.fn(() => () => undefined),
+      },
+    });
+    const mainFrame = { url: "skills-desktop://workspace/index.html" };
+    const webContents = {
+      id: 31,
+      isDestroyed: () => false,
+      mainFrame,
+      send: vi.fn(),
+    };
+    registration.attach(webContents as never, "workspace", mainFrame.url);
+    const authorizedEvent = { sender: webContents, senderFrame: mainFrame };
+
+    const cases: Array<{
+      readonly args: readonly unknown[];
+      readonly channel: string;
+      readonly forwarded: Record<string, unknown>;
+    }> = [
+      {
+        args: ["operation-1"],
+        channel: "workspace:inventory:cancel",
+        forwarded: {
+          operationId: "operation-1",
+          type: "inventory.cancel",
+        },
+      },
+      {
+        args: ["comparison-1", "row-1", "00000000-0000-4000-8000-000000000002"],
+        channel: "workspace:comparison:prepare",
+        forwarded: {
+          comparisonId: "comparison-1",
+          destinationTargetId: "00000000-0000-4000-8000-000000000002",
+          rowKey: "row-1",
+          type: "comparison.prepare",
+        },
+      },
+      {
+        args: [
+          "00000000-0000-4000-8000-000000000001",
+          { label: "Renamed" },
+        ],
+        channel: "workspace:target:update",
+        forwarded: {
+          definition: { label: "Renamed" },
+          targetId: "00000000-0000-4000-8000-000000000001",
+          type: "target.update",
+        },
+      },
+      {
+        args: ["00000000-0000-4000-8000-000000000001"],
+        channel: "workspace:target:delete",
+        forwarded: {
+          targetId: "00000000-0000-4000-8000-000000000001",
+          type: "target.delete",
+        },
+      },
+      {
+        args: [
+          "00000000-0000-4000-8000-000000000001",
+          { names: ["find-skills"], operation: "add" },
+        ],
+        channel: "workspace:mutation:prepare",
+        forwarded: {
+          intent: { names: ["find-skills"], operation: "add" },
+          targetId: "00000000-0000-4000-8000-000000000001",
+          type: "mutation.prepare",
+        },
+      },
+      {
+        args: ["00000000-0000-4000-8000-000000000001"],
+        channel: "workspace:mutation:reconcile",
+        forwarded: {
+          targetId: "00000000-0000-4000-8000-000000000001",
+          type: "mutation.reconcile",
+        },
+      },
+    ];
+
+    for (const { args, channel, forwarded } of cases) {
+      await expect(
+        handlers.get(channel)!(authorizedEvent as never, "epoch-1", ...args),
+      ).resolves.toEqual({ ok: true, value: { operationId: "operation-3" } });
+      expect(session.request).toHaveBeenLastCalledWith({
+        ...forwarded,
+        version: 2,
+      });
+    }
+
+    await expect(
+      handlers.get("workspace:mutation:reconcile")!(
+        {
+          sender: webContents,
+          senderFrame: { url: "skills-desktop://review/index.html" },
+        } as never,
+        "epoch-1",
+        "00000000-0000-4000-8000-000000000001",
+      ),
+    ).resolves.toMatchObject({ error: { code: "unauthorized" }, ok: false });
+  });
+
+  it("serves snapshot and decisions to the review role only", async () => {
+    const handlers = new Map<
+      string,
+      (event: never, ...args: unknown[]) => unknown
+    >();
+    const ipcMain = {
+      handle(
+        channel: string,
+        handler: (event: never, ...args: unknown[]) => unknown,
+      ) {
+        handlers.set(channel, handler);
+      },
+      removeHandler: vi.fn(),
+    };
+    const reviewSnapshot = {
+      schemaVersion: 2,
+      status: "unavailable",
+    } as const;
+    const session = {
+      request: vi.fn(async () => ({
+        ok: true as const,
+        value: { operationId: "op-review" },
+      })),
+      snapshot: vi.fn(async () => reviewSnapshot),
+      teardown: vi.fn(),
+    };
+    const registration = registerDesktopIpc({
+      capabilities: { attach: vi.fn(() => session) } as never,
+      ipcMain: ipcMain as never,
+      newEpoch: () => "epoch-1",
+      updates: {
+        exportDiagnostics: vi.fn(async () => "cancelled" as const),
+        getSnapshot: vi.fn(),
+        requestCheck: vi.fn(async () => undefined),
+        requestRestart: vi.fn(async () => "stale" as const),
+        subscribe: vi.fn(() => () => undefined),
+      },
+    });
+    const reviewFrame = { url: "skills-desktop://review/index.html" };
+    const reviewContents = {
+      id: 41,
+      isDestroyed: () => false,
+      mainFrame: reviewFrame,
+      send: vi.fn(),
+    };
+    const attachment = registration.attach(
+      reviewContents as never,
+      "review",
+      reviewFrame.url,
+      "review-9",
+    );
+    const reviewEvent = { sender: reviewContents, senderFrame: reviewFrame };
+
+    await expect(
+      handlers.get("review:snapshot:get")!(
+        reviewEvent as never,
+        attachment!.attachmentEpoch,
+      ),
+    ).resolves.toEqual({ ok: true, value: reviewSnapshot });
+
+    for (const channel of [
+      "review:decision:approve",
+      "review:decision:reject",
+    ]) {
+      await expect(
+        handlers.get(channel)!(
+          reviewEvent as never,
+          attachment!.attachmentEpoch,
+        ),
+      ).resolves.toEqual({ ok: true, value: { operationId: "op-review" } });
+    }
+    expect(session.request).toHaveBeenNthCalledWith(1, {
+      decision: "approve",
+      type: "review.decide",
+      version: 2,
+    });
+    expect(session.request).toHaveBeenNthCalledWith(2, {
+      decision: "reject",
+      type: "review.decide",
+      version: 2,
+    });
+
+    // A workspace-role frame cannot read or decide a review.
+    const workspaceFrame = { url: "skills-desktop://workspace/index.html" };
+    const workspaceContents = {
+      id: 42,
+      isDestroyed: () => false,
+      mainFrame: workspaceFrame,
+      send: vi.fn(),
+    };
+    const workspaceAttachment = registration.attach(
+      workspaceContents as never,
+      "workspace",
+      workspaceFrame.url,
+    );
+    const workspaceEvent = {
+      sender: workspaceContents,
+      senderFrame: workspaceFrame,
+    };
+    await expect(
+      handlers.get("review:snapshot:get")!(
+        workspaceEvent as never,
+        workspaceAttachment!.attachmentEpoch,
+      ),
+    ).resolves.toMatchObject({ error: { code: "unauthorized" }, ok: false });
+    await expect(
+      handlers.get("review:decision:approve")!(
+        workspaceEvent as never,
+        workspaceAttachment!.attachmentEpoch,
+      ),
+    ).resolves.toMatchObject({ error: { code: "unauthorized" }, ok: false });
+    expect(session.request).toHaveBeenCalledTimes(2);
+
+    // A review-role frame with a stale epoch is rejected.
+    await expect(
+      handlers.get("review:snapshot:get")!(
+        reviewEvent as never,
+        "epoch-999",
+      ),
+    ).resolves.toMatchObject({ error: { code: "unauthorized" }, ok: false });
+  });
+
+  it("bounds review snapshot and decision failures to internal_error", async () => {
+    const handlers = new Map<
+      string,
+      (event: never, ...args: unknown[]) => unknown
+    >();
+    const ipcMain = {
+      handle(
+        channel: string,
+        handler: (event: never, ...args: unknown[]) => unknown,
+      ) {
+        handlers.set(channel, handler);
+      },
+      removeHandler: vi.fn(),
+    };
+    const session = {
+      request: vi.fn(async () => {
+        throw new Error("session crashed");
+      }),
+      snapshot: vi.fn(async () => {
+        throw new Error("snapshot crashed");
+      }),
+      teardown: vi.fn(),
+    };
+    const registration = registerDesktopIpc({
+      capabilities: { attach: vi.fn(() => session) } as never,
+      ipcMain: ipcMain as never,
+      newEpoch: () => "epoch-1",
+      updates: {
+        exportDiagnostics: vi.fn(async () => "cancelled" as const),
+        getSnapshot: vi.fn(),
+        requestCheck: vi.fn(async () => undefined),
+        requestRestart: vi.fn(async () => "stale" as const),
+        subscribe: vi.fn(() => () => undefined),
+      },
+    });
+    const reviewFrame = { url: "skills-desktop://review/index.html" };
+    const reviewContents = {
+      id: 51,
+      isDestroyed: () => false,
+      mainFrame: reviewFrame,
+      send: vi.fn(),
+    };
+    const attachment = registration.attach(
+      reviewContents as never,
+      "review",
+      reviewFrame.url,
+      "review-x",
+    );
+    const reviewEvent = {
+      sender: reviewContents,
+      senderFrame: reviewFrame,
+    };
+
+    await expect(
+      handlers.get("review:snapshot:get")!(
+        reviewEvent as never,
+        attachment!.attachmentEpoch,
+      ),
+    ).resolves.toMatchObject({
+      error: { code: "internal_error", phase: "ipc" },
+      ok: false,
+    });
+    for (const channel of [
+      "review:decision:approve",
+      "review:decision:reject",
+    ]) {
+      await expect(
+        handlers.get(channel)!(
+          reviewEvent as never,
+          attachment!.attachmentEpoch,
+        ),
+      ).resolves.toMatchObject({
+        error: { code: "internal_error", phase: "ipc" },
+        ok: false,
+      });
+    }
+  });
+
+  it("returns bounded About failures for hostile frames, bad requests, and update crashes", async () => {
+    const handlers = new Map<
+      string,
+      (event: never, ...args: unknown[]) => unknown
+    >();
+    const ipcMain = {
+      handle(
+        channel: string,
+        handler: (event: never, ...args: unknown[]) => unknown,
+      ) {
+        handlers.set(channel, handler);
+      },
+      removeHandler: vi.fn(),
+    };
+    const updates = {
+      exportDiagnostics: vi.fn(async () => "saved" as const),
+      getSnapshot: vi.fn(() => {
+        throw new Error("update store crashed");
+      }),
+      requestCheck: vi.fn(async () => undefined),
+      requestRestart: vi.fn(async () => "stale" as const),
+      subscribe: vi.fn(() => () => undefined),
+    };
+    const registration = registerDesktopIpc({
+      capabilities: {
+        attach: vi.fn(() => ({
+          request: vi.fn(),
+          snapshot: vi.fn(),
+          teardown: vi.fn(),
+        })),
+      } as never,
+      ipcMain: ipcMain as never,
+      newEpoch: () => "epoch-1",
+      updates,
+    });
+    const mainFrame = { url: "skills-desktop://workspace/index.html" };
+    const webContents = {
+      id: 51,
+      isDestroyed: () => false,
+      mainFrame,
+      send: vi.fn(),
+    };
+    registration.attach(webContents as never, "workspace", mainFrame.url);
+    const authorizedEvent = { sender: webContents, senderFrame: mainFrame };
+    const hostileEvent = {
+      sender: webContents,
+      senderFrame: { url: "skills-desktop://review/index.html" },
+    };
+
+    await expect(
+      handlers.get("about:update:snapshot:get")!(
+        hostileEvent as never,
+        "epoch-1",
+      ),
+    ).resolves.toMatchObject({ error: { code: "unauthorized" }, ok: false });
+    await expect(
+      handlers.get("about:update:snapshot:get")!(
+        authorizedEvent as never,
+        "epoch-1",
+        "extra",
+      ),
+    ).resolves.toMatchObject({
+      error: { code: "invalid_request" },
+      ok: false,
+    });
+    await expect(
+      handlers.get("about:update:snapshot:get")!(
+        authorizedEvent as never,
+        "epoch-1",
+      ),
+    ).resolves.toMatchObject({
+      error: { code: "internal_error" },
+      ok: false,
+    });
+
+    await expect(
+      handlers.get("about:release-diagnostics:export")!(
+        authorizedEvent as never,
+        "epoch-1",
+        { type: "release-diagnostics.export", version: 1 },
+      ),
+    ).resolves.toEqual({ ok: true, value: { status: "saved" } });
+    await expect(
+      handlers.get("about:release-diagnostics:export")!(
+        authorizedEvent as never,
+        "epoch-1",
+        { type: "wrong" },
+      ),
+    ).resolves.toMatchObject({
+      error: { code: "invalid_request" },
+      ok: false,
+    });
+    updates.exportDiagnostics.mockRejectedValueOnce(new Error("disk full"));
+    await expect(
+      handlers.get("about:release-diagnostics:export")!(
+        authorizedEvent as never,
+        "epoch-1",
+        { type: "release-diagnostics.export", version: 1 },
+      ),
+    ).resolves.toMatchObject({
+      error: { code: "internal_error" },
+      ok: false,
+    });
+  });
+
+  it("reports internal_error for the menu when no provider is configured", async () => {
+    const handlers = new Map<
+      string,
+      (event: never, ...args: unknown[]) => unknown
+    >();
+    const ipcMain = {
+      handle(
+        channel: string,
+        handler: (event: never, ...args: unknown[]) => unknown,
+      ) {
+        handlers.set(channel, handler);
+      },
+      removeHandler: vi.fn(),
+    };
+    const registration = registerDesktopIpc({
+      capabilities: {
+        attach: vi.fn(() => ({
+          request: vi.fn(),
+          snapshot: vi.fn(),
+          teardown: vi.fn(),
+        })),
+      } as never,
+      ipcMain: ipcMain as never,
+      newEpoch: () => "epoch-1",
+      updates: {
+        exportDiagnostics: vi.fn(async () => "cancelled" as const),
+        getSnapshot: vi.fn(),
+        requestCheck: vi.fn(async () => undefined),
+        requestRestart: vi.fn(async () => "stale" as const),
+        subscribe: vi.fn(() => () => undefined),
+      },
+    });
+    const mainFrame = { url: "skills-desktop://workspace/index.html" };
+    const webContents = {
+      id: 61,
+      isDestroyed: () => false,
+      mainFrame,
+      send: vi.fn(),
+    };
+    registration.attach(webContents as never, "workspace", mainFrame.url);
+    await expect(
+      handlers.get("menu:application:get")!(
+        { sender: webContents, senderFrame: mainFrame } as never,
+        "epoch-1",
+      ),
+    ).resolves.toMatchObject({
+      error: { code: "internal_error" },
+      ok: false,
+    });
+  });
+
+  it("tears down the session when attach lands on a destroyed webContents", () => {
+    const session = {
+      request: vi.fn(),
+      snapshot: vi.fn(),
+      teardown: vi.fn(),
+    };
+    const ipcMain = {
+      handle: vi.fn(),
+      removeHandler: vi.fn(),
+    };
+    const registration = registerDesktopIpc({
+      capabilities: { attach: vi.fn(() => session) } as never,
+      ipcMain: ipcMain as never,
+      newEpoch: () => "epoch-1",
+      updates: {
+        exportDiagnostics: vi.fn(async () => "cancelled" as const),
+        getSnapshot: vi.fn(),
+        requestCheck: vi.fn(async () => undefined),
+        requestRestart: vi.fn(async () => "stale" as const),
+        subscribe: vi.fn(() => () => undefined),
+      },
+    });
+    const destroyed = {
+      id: 71,
+      isDestroyed: () => true,
+      send: vi.fn(),
+    };
+    expect(
+      registration.attach(
+        destroyed as never,
+        "workspace",
+        "skills-desktop://workspace/index.html",
+      ),
+    ).toBeUndefined();
+    expect(session.teardown).toHaveBeenCalledTimes(1);
+    expect(destroyed.send).not.toHaveBeenCalled();
+
+    // A send failure during epoch delivery also detaches cleanly.
+    const throwing = {
+      id: 72,
+      isDestroyed: () => false,
+      send: vi.fn(() => {
+        throw new Error("frame gone");
+      }),
+    };
+    expect(
+      registration.attach(
+        throwing as never,
+        "workspace",
+        "skills-desktop://workspace/index.html",
+      ),
+    ).toBeUndefined();
+    expect(session.teardown).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("Electron IPC failure arms", () => {
+  const workspaceUrl = "skills-desktop://workspace/index.html";
+  const reviewUrl = "skills-desktop://review/index.html";
+
+  function failureHarness(options?: { menu?: { current(): unknown } }) {
+    let nextEpoch = 1;
+    const session = {
+      request: vi.fn(async () => ({
+        ok: true,
+        value: { operationId: "operation-1" },
+      })),
+      snapshot: vi.fn(async () => ({ bogus: "snapshot" })),
+      teardown: vi.fn(),
+    };
+    const handlers = new Map<
+      string,
+      (event: never, ...args: unknown[]) => unknown
+    >();
+    const ipcMain = {
+      handle(
+        channel: string,
+        handler: (event: never, ...args: unknown[]) => unknown,
+      ) {
+        handlers.set(channel, handler);
+      },
+      removeHandler: vi.fn(),
+    };
+    const updates = {
+      exportDiagnostics: vi.fn(async () => {
+        throw new Error("export failed");
+      }),
+      getSnapshot: vi.fn(() => {
+        throw new Error("snapshot failed");
+      }),
+      requestCheck: vi.fn(async () => {
+        throw new Error("check failed");
+      }),
+      requestRestart: vi.fn(async () => {
+        throw new Error("restart failed");
+      }),
+      subscribe: vi.fn(() => () => undefined),
+    };
+    const registration = registerDesktopIpc({
+      capabilities: { attach: vi.fn(() => session) } as never,
+      ipcMain: ipcMain as never,
+      menu: options?.menu as never,
+      newEpoch: vi.fn(() => `epoch-${nextEpoch++}`),
+      updates,
+    });
+    const workspaceWebContents = {
+      id: 17,
+      isDestroyed: vi.fn(() => false),
+      mainFrame: { url: workspaceUrl },
+      send: vi.fn(),
+    };
+    const workspaceAttachment = registration.attach(
+      workspaceWebContents as never,
+      "workspace",
+      workspaceUrl,
+    );
+    const reviewWebContents = {
+      id: 21,
+      isDestroyed: vi.fn(() => false),
+      mainFrame: { url: reviewUrl },
+      send: vi.fn(),
+    };
+    const reviewAttachment = registration.attach(
+      reviewWebContents as never,
+      "review",
+      reviewUrl,
+      "review-1",
+    );
+    return {
+      handlers,
+      registration,
+      reviewAttachment,
+      reviewEvent: {
+        sender: reviewWebContents,
+        senderFrame: reviewWebContents.mainFrame,
+      },
+      reviewWebContents,
+      session,
+      updates,
+      workspaceAttachment,
+      workspaceEvent: {
+        sender: workspaceWebContents,
+        senderFrame: workspaceWebContents.mainFrame,
+      },
+      workspaceWebContents,
+    };
+  }
+
+  it("rejects every inbound channel on an attachment-epoch mismatch", async () => {
+    const fixture = failureHarness();
+    expect(fixture.workspaceAttachment?.attachmentEpoch).toBe("epoch-1");
+    expect(fixture.reviewAttachment?.attachmentEpoch).toBe("epoch-3");
+
+    for (const [channel, handler] of fixture.handlers) {
+      await expect(
+        handler(fixture.workspaceEvent as never, "stale-epoch", {}),
+      ).resolves.toMatchObject({ error: { code: "unauthorized" }, ok: false });
+    }
+    expect(fixture.session.request).not.toHaveBeenCalled();
+  });
+
+  it("maps a session failure to internal_error on every workspace channel", async () => {
+    const fixture = failureHarness();
+    fixture.session.request.mockRejectedValue(new Error("bridge gone"));
+
+    const workspaceChannels = [...fixture.handlers.keys()].filter((channel) =>
+      channel.startsWith("workspace:"),
+    );
+    for (const channel of workspaceChannels) {
+      await expect(
+        fixture.handlers.get(channel)!(
+          fixture.workspaceEvent as never,
+          fixture.workspaceAttachment!.attachmentEpoch,
+          "arg-1",
+          "arg-2",
+        ),
+      ).resolves.toMatchObject({ error: { code: "internal_error" }, ok: false });
+    }
+
+    for (const channel of ["review:decision:approve", "review:decision:reject"]) {
+      await expect(
+        fixture.handlers.get(channel)!(
+          fixture.reviewEvent as never,
+          fixture.reviewAttachment!.attachmentEpoch,
+        ),
+      ).resolves.toMatchObject({ error: { code: "internal_error" }, ok: false });
+    }
+    await expect(
+      fixture.handlers.get("review:snapshot:get")!(
+        fixture.reviewEvent as never,
+        fixture.reviewAttachment!.attachmentEpoch,
+      ),
+    ).resolves.toMatchObject({
+      error: { code: "internal_error" },
+      ok: false,
+    });
+  });
+
+  it("maps about-update failures to invalid_request or internal_error", async () => {
+    const fixture = failureHarness();
+    const event = fixture.workspaceEvent as never;
+    const epoch = fixture.workspaceAttachment!.attachmentEpoch;
+
+    await expect(
+      fixture.handlers.get("about:update:check")!(event, epoch, {
+        type: "update.check",
+        version: 1,
+      }),
+    ).resolves.toMatchObject({ error: { code: "internal_error" }, ok: false });
+    await expect(
+      fixture.handlers.get("about:update:check")!(event, epoch, {}),
+    ).resolves.toMatchObject({ error: { code: "invalid_request" }, ok: false });
+
+    await expect(
+      fixture.handlers.get("about:update:restart")!(event, epoch, {
+        candidateId: "00000000-0000-4000-8000-000000000099",
+        type: "update.restart",
+        version: 1,
+      }),
+    ).resolves.toMatchObject({ error: { code: "internal_error" }, ok: false });
+    await expect(
+      fixture.handlers.get("about:release-diagnostics:export")!(
+        event,
+        epoch,
+        { type: "release-diagnostics.export", version: 1 },
+      ),
+    ).resolves.toMatchObject({ error: { code: "internal_error" }, ok: false });
+    await expect(
+      fixture.handlers.get("about:update:snapshot:get")!(event, epoch),
+    ).resolves.toMatchObject({ error: { code: "internal_error" }, ok: false });
+    await expect(
+      fixture.handlers.get("about:update:snapshot:get")!(
+        event,
+        epoch,
+        "extra",
+      ),
+    ).resolves.toMatchObject({ error: { code: "invalid_request" }, ok: false });
+  });
+
+  it("reports menu failures when the projection is missing or throws", async () => {
+    const withoutMenu = failureHarness();
+    await expect(
+      withoutMenu.handlers.get("menu:application:get")!(
+        withoutMenu.workspaceEvent as never,
+        withoutMenu.workspaceAttachment!.attachmentEpoch,
+      ),
+    ).resolves.toMatchObject({ error: { code: "internal_error" }, ok: false });
+    await expect(
+      withoutMenu.handlers.get("menu:application:get")!(
+        withoutMenu.workspaceEvent as never,
+        withoutMenu.workspaceAttachment!.attachmentEpoch,
+        "extra",
+      ),
+    ).resolves.toMatchObject({ error: { code: "invalid_request" }, ok: false });
+
+    const throwingMenu = failureHarness({
+      menu: {
+        current() {
+          throw new Error("menu read failed");
+        },
+      },
+    });
+    await expect(
+      throwingMenu.handlers.get("menu:application:get")!(
+        throwingMenu.workspaceEvent as never,
+        throwingMenu.workspaceAttachment!.attachmentEpoch,
+      ),
+    ).resolves.toMatchObject({ error: { code: "internal_error" }, ok: false });
+  });
+
+  it("rejects menu relays for stale, foreign, destroyed, or throwing endpoints", () => {
+    const fixture = failureHarness();
+    const owner = fixture.workspaceAttachment!;
+    const reviewOwner = fixture.reviewAttachment!;
+
+    expect(
+      fixture.registration.notifyMenuCommand("inventory.refresh", owner),
+    ).toBe(true);
+    expect(
+      fixture.workspaceWebContents.send,
+    ).toHaveBeenCalledWith("menu:command", {
+      command: "inventory.refresh",
+      schemaVersion: 1,
+    });
+
+    // Wrong-role owner is not relayed.
+    expect(
+      fixture.registration.notifyMenuCommand("inventory.refresh", reviewOwner),
+    ).toBe(false);
+
+    // A stale attachment (detached by a later attach) is not relayed.
+    fixture.registration.attach(
+      { id: 17, isDestroyed: () => false, mainFrame: { url: workspaceUrl }, send: vi.fn() } as never,
+      "workspace",
+      workspaceUrl,
+    );
+    expect(
+      fixture.registration.notifyMenuCommand("inventory.refresh", owner),
+    ).toBe(false);
+
+    // A destroyed surface is not relayed.
+    const fresh = failureHarness();
+    fresh.workspaceWebContents.isDestroyed.mockReturnValue(true);
+    expect(
+      fresh.registration.notifyMenuCommand(
+        "inventory.refresh",
+        fresh.workspaceAttachment!,
+      ),
+    ).toBe(false);
+
+    // A throwing send surface is reported as not relayed.
+    const throwing = failureHarness();
+    throwing.workspaceWebContents.send.mockImplementation(() => {
+      throw new Error("frame gone");
+    });
+    expect(
+      throwing.registration.notifyMenuCommand(
+        "inventory.refresh",
+        throwing.workspaceAttachment!,
+      ),
+    ).toBe(false);
+
+    // An out-of-contract command is not relayed.
+    expect(
+      fixture.registration.notifyMenuCommand(
+        "not-a-command" as never,
+        fixture.workspaceAttachment!,
+      ),
+    ).toBe(false);
   });
 });

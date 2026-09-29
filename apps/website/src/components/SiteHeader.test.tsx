@@ -63,4 +63,28 @@ describe("SiteHeader narrow menu", () => {
     fireEvent.click(within(panel).getByRole("link", { name: COPY.zh.nav.compare }));
     expect(screen.queryByRole("list", { name: COPY.zh.nav.menu })).not.toBeInTheDocument();
   });
+
+  it("closes when the pointer presses outside the menu", () => {
+    render(<SiteHeader copy={COPY.en} onToggleLocale={vi.fn()} />);
+
+    const menuButton = screen.getByRole("button", { name: COPY.en.nav.menu });
+    fireEvent.click(menuButton);
+    expect(menuButton).toHaveAttribute("aria-expanded", "true");
+
+    fireEvent.mouseDown(document.body);
+    expect(menuButton).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("list", { name: COPY.en.nav.menu })).not.toBeInTheDocument();
+  });
+
+  it("stays open when the pointer presses inside the menu panel", () => {
+    render(<SiteHeader copy={COPY.en} onToggleLocale={vi.fn()} />);
+
+    const menuButton = screen.getByRole("button", { name: COPY.en.nav.menu });
+    fireEvent.click(menuButton);
+    const panel = screen.getByRole("list", { name: COPY.en.nav.menu });
+
+    fireEvent.mouseDown(panel);
+    expect(menuButton).toHaveAttribute("aria-expanded", "true");
+    expect(panel).toBeInTheDocument();
+  });
 });

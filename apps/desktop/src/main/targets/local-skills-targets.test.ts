@@ -3,6 +3,7 @@ import { normalize } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import type { SkillsProcess } from "../adapters/local-skills-process.js";
+import type { TargetDefinition } from "../../contracts/workspace.js";
 import {
   createLocalSkillsTargets,
   createSkillsTargetsCatalog,
@@ -294,6 +295,365 @@ describe("Local SkillsTargets identity", () => {
         },
         status: "binding-changed",
       },
+    });
+  });
+});
+
+const sshTargetDefinition: TargetDefinition = {
+  connectionReference: "build-host",
+  dialectId: "skills-1.5.23",
+  executionBindingDigest: "a".repeat(64),
+  generation: 4,
+  harnessIds: ["codex"],
+  id: "00000000-0000-4000-8000-000000000031",
+  kind: "ssh" as const,
+  label: "Build host",
+  registryDigest:
+    "sha256:36d0c792e0480a13818d890e1dccc93e3b29a4ea44af78091e80db8a3e9181de",
+  registryVersion: 1,
+  workspace: "/srv/project",
+  workspaceLabel: "project",
+};
+
+const localTargetDefinition: TargetDefinition = {
+  connectionReference: null,
+  dialectId: "skills-1.5.23",
+  executionBindingDigest: null,
+  generation: 1,
+  harnessIds: ["codex"],
+  id: "00000000-0000-4000-8000-000000000001",
+  kind: "local" as const,
+  label: "This device",
+  registryDigest:
+    "sha256:36d0c792e0480a13818d890e1dccc93e3b29a4ea44af78091e80db8a3e9181de",
+  registryVersion: 1,
+  workspace: "/work/alpha",
+  workspaceLabel: "alpha",
+};
+
+describe("Local SkillsTargets mutation guards", () => {
+  const catalogWith = (sshAccess?: {
+    confirm: (...args: unknown[]) => unknown;
+    pendingChallenge: (...args: unknown[]) => unknown;
+  }) =>
+    createSkillsTargetsCatalog({
+      id: () => "00000000-0000-4000-8000-000000000099",
+      initialTarget: localTargetDefinition,
+      processFor: () => process,
+      ...(sshAccess === undefined ? {} : { sshAccess: sshAccess as never }),
+    });
+
+  it("deletes an existing Target and reports a missing one honestly", async () => {
+    const catalog = createSkillsTargetsCatalog({
+      id: () => "00000000-0000-4000-8000-000000000099",
+      initialTarget: localTargetDefinition,
+      processFor: () => process,
+    });
+    catalog.replaceDefinitions([localTargetDefinition, sshTargetDefinition]);
+
+    const deleted = await catalog.proposeDelete(sshTargetDefinition.id);
+    expect(deleted).toMatchObject({
+      ok: true,
+      value: {
+        definitions: [{ id: localTargetDefinition.id }],
+        executionChanged: true,
+        target: { id: sshTargetDefinition.id },
+      },
+    });
+
+    expect(
+      catalog.proposeDelete("00000000-0000-4000-8000-000000000042"),
+    ).toMatchObject({
+      error: { code: "target_not_found", phase: "target" },
+      ok: false,
+    });
+    await expect(
+      catalog.proposeUpdate("00000000-0000-4000-8000-000000000042", {
+        connectionReference: null,
+        harnessIds: ["codex"],
+        kind: "local",
+        label: "Missing",
+        workspace: "/work/none",
+      }),
+    ).resolves.toMatchObject({
+      error: { code: "target_not_found", phase: "target" },
+      ok: false,
+    });
+  });
+
+  it("rejects host-trust proposals that no longer match the Target", async () => {
+    const challenge = { id: "challenge-1", targetGeneration: 4 };
+    const catalog = catalogWith({
+      confirm: async () => ({ ok: true, value: { bindingDigest: "c".repeat(64) } }),
+      pendingChallenge: (targetId) =>
+        targetId === sshTargetDefinition.id ? challenge : undefined,
+    });
+    catalog.replaceDefinitions([localTargetDefinition, sshTargetDefinition]);
+
+    // Unknown Target id.
+    expect(
+      catalog.proposeHostTrust(
+        "00000000-0000-4000-8000-000000000042",
+        "challenge-1",
+      ),
+    ).toMatchObject({
+      error: { code: "host_trust_invalid", phase: "trust" },
+      ok: false,
+    });
+    // Local Target: no SSH challenge can apply.
+    expect(
+      catalog.proposeHostTrust(localTargetDefinition.id, "challenge-1"),
+    ).toMatchObject({
+      error: { code: "host_trust_invalid", phase: "trust" },
+      ok: false,
+    });
+    // Wrong challenge id.
+    expect(
+      catalog.proposeHostTrust(sshTargetDefinition.id, "challenge-other"),
+    ).toMatchObject({
+      error: { code: "host_trust_invalid", phase: "trust" },
+      ok: false,
+    });
+    // Challenge pinned to a stale generation.
+    catalog.replaceDefinitions([
+      localTargetDefinition,
+      { ...sshTargetDefinition, generation: 9 },
+    ]);
+    expect(
+      catalog.proposeHostTrust(sshTargetDefinition.id, "challenge-1"),
+    ).toMatchObject({
+      error: { code: "host_trust_invalid", phase: "trust" },
+      ok: false,
+    });
+    // No pending challenge at all.
+    expect(
+      catalog.proposeHostTrust(
+        "00000000-0000-4000-8000-000000000043",
+        "challenge-1",
+      ),
+    ).toMatchObject({
+      error: { code: "host_trust_invalid", phase: "trust" },
+      ok: false,
+    });
+
+    // A matching challenge proposes exactly one generation bump.
+    catalog.replaceDefinitions([localTargetDefinition, sshTargetDefinition]);
+    const proposed = await catalog.proposeHostTrust(
+      sshTargetDefinition.id,
+      "challenge-1",
+    );
+    expect(proposed).toMatchObject({
+      ok: true,
+      value: { target: { generation: 5, id: sshTargetDefinition.id } },
+    });
+  });
+
+  it("commits host trust only when the review still matches, binding the digest", async () => {
+    const challenge = { id: "challenge-1", targetGeneration: 4 };
+    const catalog = catalogWith({
+      confirm: async () => ({
+        ok: true,
+        value: { bindingDigest: "c".repeat(64) },
+      }),
+      pendingChallenge: (targetId) =>
+        targetId === sshTargetDefinition.id ? challenge : undefined,
+    });
+    catalog.replaceDefinitions([localTargetDefinition, sshTargetDefinition]);
+
+    // Unknown Target.
+    await expect(
+      catalog.commitHostTrust(
+        "00000000-0000-4000-8000-000000000042",
+        "challenge-1",
+        4,
+      ),
+    ).resolves.toMatchObject({
+      error: { code: "target_not_found", phase: "trust" },
+      ok: false,
+    });
+    // Local Target has no SSH trust surface.
+    await expect(
+      catalog.commitHostTrust(localTargetDefinition.id, "challenge-1", 1),
+    ).resolves.toMatchObject({
+      error: { code: "target_unavailable", phase: "trust" },
+      ok: false,
+    });
+    // Generation drifted since the review was taken.
+    await expect(
+      catalog.commitHostTrust(sshTargetDefinition.id, "challenge-1", 99),
+    ).resolves.toMatchObject({
+      error: { code: "host_trust_invalid", phase: "trust" },
+      ok: false,
+    });
+
+    const committed = await catalog.commitHostTrust(
+      sshTargetDefinition.id,
+      "challenge-1",
+      4,
+    );
+    expect(committed).toMatchObject({
+      ok: true,
+      value: {
+        executionChanged: true,
+        target: {
+          executionBindingDigest: "c".repeat(64),
+          generation: 5,
+          id: sshTargetDefinition.id,
+        },
+      },
+    });
+    if (!committed.ok) throw new Error("commit expected");
+    expect(
+      committed.value.definitions.find(({ id }) => id === sshTargetDefinition.id)
+        ?.executionBindingDigest,
+    ).toBe("c".repeat(64));
+  });
+
+  it("propagates a failed confirm and reports host trust unavailable without SSH access", async () => {
+    const failing = {
+      confirm: async () => ({
+        error: { code: "host_trust_invalid", phase: "trust" },
+        ok: false,
+      }),
+      pendingChallenge: () => ({ id: "challenge-1", targetGeneration: 4 }),
+    };
+    const failingCatalog = catalogWith(failing);
+    failingCatalog.replaceDefinitions([
+      localTargetDefinition,
+      sshTargetDefinition,
+    ]);
+    await expect(
+      failingCatalog.commitHostTrust(
+        sshTargetDefinition.id,
+        "challenge-1",
+        4,
+      ),
+    ).resolves.toMatchObject({
+      error: { code: "host_trust_invalid" },
+      ok: false,
+    });
+
+    // A Local-only catalog has no sshAccess at all.
+    const localOnly = catalogWith();
+    localOnly.replaceDefinitions([localTargetDefinition, sshTargetDefinition]);
+    await expect(
+      localOnly.commitHostTrust(sshTargetDefinition.id, "challenge-1", 4),
+    ).resolves.toMatchObject({
+      error: { code: "target_unavailable", phase: "trust" },
+      ok: false,
+    });
+  });
+});
+
+
+describe("Local SkillsTargets draft and open failure edges", () => {
+  const catalogWith = (sshAccess?: {
+    confirm: (...args: unknown[]) => unknown;
+    inspect: (...args: unknown[]) => unknown;
+    pendingChallenge: (...args: unknown[]) => unknown;
+  }) =>
+    createSkillsTargetsCatalog({
+      id: () => "00000000-0000-4000-8000-000000000099",
+      initialTarget: localTargetDefinition,
+      processFor: () => process,
+      ...(sshAccess === undefined ? {} : { sshAccess: sshAccess as never }),
+    });
+  it("requires an application-generated UUID for the initial Target", () => {
+    expect(() =>
+      createSkillsTargetsCatalog({
+        id: () => "00000000-0000-4000-8000-000000000099",
+        initialTarget: { ...localTargetDefinition, id: "not-a-uuid" },
+        processFor: () => process,
+      }),
+    ).toThrow(/UUID/);
+  });
+
+  it("rejects an SSH draft whose connection reference carries whitespace", async () => {
+    const catalog = catalogWith();
+    await expect(
+      catalog.proposeCreate({
+        connectionReference: "bad host",
+        harnessIds: ["codex"],
+        kind: "ssh",
+        label: "Build host",
+        workspace: "/srv/project",
+      }),
+    ).resolves.toMatchObject({
+      error: { code: "invalid_request" },
+      ok: false,
+    });
+  });
+
+  it("rejects a draft whose harness ids do not normalize", async () => {
+    const catalog = catalogWith();
+    await expect(
+      catalog.proposeCreate({
+        connectionReference: null,
+        harnessIds: ["not-a-harness"],
+        kind: "local",
+        label: "Local",
+        workspace: "/work/alpha",
+      }),
+    ).resolves.toMatchObject({
+      error: { code: "invalid_request" },
+      ok: false,
+    });
+  });
+
+  it("rejects a Local draft when workspace canonicalization fails", async () => {
+    const catalog = createSkillsTargetsCatalog({
+      canonicalizeLocalWorkspace: async () => {
+        throw new Error("unresolvable");
+      },
+      id: () => "00000000-0000-4000-8000-000000000099",
+      initialTarget: localTargetDefinition,
+      processFor: () => process,
+    });
+    await expect(
+      catalog.proposeCreate({
+        connectionReference: null,
+        harnessIds: ["codex"],
+        kind: "local",
+        label: "Broken",
+        workspace: "/work/broken",
+      }),
+    ).resolves.toMatchObject({
+      error: { code: "invalid_request" },
+      ok: false,
+    });
+  });
+
+  it("reports an unknown Target id on open", async () => {
+    const catalog = catalogWith();
+    await expect(
+      catalog.open("00000000-0000-4000-8000-00000000dead"),
+    ).resolves.toMatchObject({
+      error: { code: "target_not_found" },
+      ok: false,
+    });
+  });
+
+  it("propagates a failed SSH binding inspection on open", async () => {
+    const catalog = catalogWith({
+      confirm: async () => ({ ok: false }),
+      inspect: async () => ({
+        error: {
+          code: "remote_unreachable" as const,
+          effects: "none" as const,
+          message: "Host does not answer.",
+          phase: "open",
+          retryable: true,
+        },
+        ok: false as const,
+      }),
+      pendingChallenge: async () => null,
+    });
+    catalog.replaceDefinitions([localTargetDefinition, sshTargetDefinition]);
+    await expect(
+      catalog.open(sshTargetDefinition.id),
+    ).resolves.toMatchObject({
+      error: { code: "remote_unreachable" },
+      ok: false,
     });
   });
 });

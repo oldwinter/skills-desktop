@@ -406,4 +406,202 @@ describe("About surface", () => {
       document.getElementById("about-restart-unavailable-reason"),
     ).toHaveTextContent("Mutation active");
   });
+
+  it("renders the update-available and error automatic states", async () => {
+    const available: AboutUpdateSnapshot = {
+      application: {
+        architecture: "x64",
+        platform: "win32",
+        version: "0.1.0",
+      },
+      candidate: null,
+      lastCheckAt: "2026-08-22T06:00:00.000Z",
+      nextAutomaticCheckAt: "2026-08-23T06:00:00.000Z",
+      policy: { channel: "stable", mode: "automatic" },
+      restart: {
+        guardReasons: [],
+        immediateRestartAvailable: false,
+        kind: "none",
+      },
+      schemaVersion: 2,
+      state: { kind: "update-available" },
+    };
+    render(<AboutView client={clientFor(available)} />);
+    expect(
+      await screen.findByRole("heading", { name: "Update available" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Downloading the update")).toBeInTheDocument();
+    cleanup();
+
+    const failed: AboutUpdateSnapshot = {
+      ...available,
+      state: {
+        error: {
+          code: "check_failed",
+          message: "The update check could not be completed.",
+          retryable: true,
+        },
+        kind: "error",
+      },
+    };
+    render(<AboutView client={clientFor(failed)} />);
+    expect(
+      await screen.findByRole("heading", { name: "Update check failed" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("The update check could not be completed."),
+    ).toBeInTheDocument();
+  });
+
+  it("renders the up-to-date state and no status copy for manual or unavailable", async () => {
+    const automatic: AboutUpdateSnapshot = {
+      application: {
+        architecture: "arm64",
+        platform: "darwin",
+        version: "0.1.0",
+      },
+      candidate: null,
+      lastCheckAt: "2026-08-22T06:00:00.000Z",
+      nextAutomaticCheckAt: "2026-08-23T06:00:00.000Z",
+      policy: { channel: "stable", mode: "automatic" },
+      restart: {
+        guardReasons: [],
+        immediateRestartAvailable: false,
+        kind: "none",
+      },
+      schemaVersion: 2,
+      state: { kind: "up-to-date" },
+    };
+    render(<AboutView client={clientFor(automatic)} />);
+    expect(
+      await screen.findByRole("heading", { name: "Up to date" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("This is the latest available stable version."),
+    ).toBeInTheDocument();
+    cleanup();
+
+    for (const kind of ["manual", "unavailable"] as const) {
+      render(
+        <AboutView
+          client={clientFor({ ...automatic, state: { kind } })}
+        />,
+      );
+      await screen.findByRole("heading", { name: "About" });
+      const heading = document.getElementById("update-status-heading");
+      expect(heading).toBeInTheDocument();
+      expect(heading?.textContent).toBe("");
+      cleanup();
+    }
+  });
+
+  it("surfaces check, restart, export, and initial-load failures as alerts", async () => {
+    const failure = {
+      code: "internal_error" as const,
+      effects: "none" as const,
+      message: "Update service unavailable.",
+      phase: "update",
+      retryable: true,
+    };
+    const client: AboutBridge = {
+      async exportDiagnostics() {
+        return { error: failure, ok: false };
+      },
+      async getSnapshot() {
+        return { error: failure, ok: false };
+      },
+      async requestCheck() {
+        return { error: failure, ok: false };
+      },
+      async requestRestart() {
+        return { error: failure, ok: false };
+      },
+      subscribe() {
+        return () => undefined;
+      },
+    };
+    render(<AboutView client={client} />);
+    // The failed initial snapshot surfaces the error banner.
+    expect(await screen.findAllByRole("alert")).not.toHaveLength(0);
+    expect(screen.getAllByRole("alert")[0]).toHaveTextContent(
+      "Update service unavailable.",
+    );
+    cleanup();
+
+    // A failed check or export surfaces the same bounded error.
+    const automatic: AboutUpdateSnapshot = {
+      application: {
+        architecture: "x64",
+        platform: "win32",
+        version: "0.1.0",
+      },
+      candidate: null,
+      lastCheckAt: null,
+      nextAutomaticCheckAt: null,
+      policy: { channel: "stable", mode: "automatic" },
+      restart: {
+        guardReasons: [],
+        immediateRestartAvailable: false,
+        kind: "none",
+      },
+      schemaVersion: 2,
+      state: { kind: "idle" },
+    };
+    const failingCheck: AboutBridge = {
+      ...client,
+      async getSnapshot() {
+        return { ok: true as const, value: automatic };
+      },
+    };
+    render(<AboutView client={failingCheck} />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Check for updates" }),
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "Update service unavailable.",
+      ),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Export release diagnostics" }),
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "Update service unavailable.",
+      ),
+    );
+    cleanup();
+
+    // A failed restart on an unblocked candidate surfaces the error too.
+    const restartable: AboutUpdateSnapshot = {
+      ...automatic,
+      candidate: {
+        architecture: "x64",
+        id: "00000000-0000-4000-8000-000000000025",
+        platform: "win32",
+        version: "0.2.0",
+      },
+      restart: {
+        guardReasons: [],
+        immediateRestartAvailable: true,
+        kind: "deferred",
+      },
+      state: { kind: "update-downloaded" },
+    };
+    const failingRestart: AboutBridge = {
+      ...client,
+      async getSnapshot() {
+        return { ok: true as const, value: restartable };
+      },
+    };
+    render(<AboutView client={failingRestart} />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Restart to update" }),
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "Update service unavailable.",
+      ),
+    );
+  });
 });

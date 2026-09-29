@@ -9,6 +9,7 @@ import {
   symlink,
   writeFile,
 } from "node:fs/promises";
+import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -78,6 +79,52 @@ describe("readStudioTree (ADR 0018)", () => {
       ok: false,
     });
   });
+
+  it("labels out-of-bounds files by size without reading their bytes", async () => {
+    const root = await scratch();
+    const big = Buffer.alloc(4 * 1_024 * 1_024 + 1, 0x42);
+    await writeFile(join(root, "huge.bin"), big);
+    const tree = await readStudioTree(root);
+    expect(tree.ok).toBe(true);
+    if (!tree.ok) return;
+    const entry = tree.value.find(({ path }) => path === "huge.bin");
+    expect(entry).toMatchObject({ kind: "file" });
+    // Out-of-bounds files are reported by size only; bytes stay unread.
+    expect(entry?.bytes).toBeUndefined();
+  });
+
+  it("labels a special file without following it", async () => {
+    // AF_UNIX socket files are the only portable special file; Windows
+    // runners deny listen() on a filesystem path outright.
+    if (process.platform === "win32") return;
+    const root = await scratch();
+    const server = createServer();
+    try {
+      await new Promise<void>((resolve, reject) => {
+        server.once("error", reject);
+        server.listen(join(root, "daemon.sock"), resolve);
+      });
+      const tree = await readStudioTree(root);
+      expect(tree.ok).toBe(true);
+      if (!tree.ok) return;
+      expect(
+        tree.value.find(({ path }) => path === "daemon.sock"),
+      ).toMatchObject({ kind: "special" });
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+
+  it("stops listing once the entry bound is reached", async () => {
+    const root = await scratch();
+    for (let index = 0; index < 300; index += 1) {
+      await writeFile(join(root, `f${String(index).padStart(3, "0")}.txt`), "x");
+    }
+    const tree = await readStudioTree(root);
+    expect(tree.ok).toBe(true);
+    if (!tree.ok) return;
+    expect(tree.value.length).toBeLessThanOrEqual(257);
+  });
 });
 
 describe("exportStudioSkill (ADR 0018)", () => {
@@ -125,6 +172,25 @@ describe("exportStudioSkill (ADR 0018)", () => {
     expect(await readdir(parent)).toEqual([]);
   });
 
+  it("fails closed mid-export and leaves no partial Skill behind", async () => {
+    const parent = await scratch();
+    const conflicting = [
+      { bytes: encoder.encode("top"), path: "a" },
+      // "a/b.md" cannot be created once "a" exists as a file.
+      { bytes: encoder.encode("nested"), path: "a/b.md" },
+    ];
+    const result = await exportStudioSkill(parent, "demo", conflicting);
+    expect(result).toMatchObject({
+      error: {
+        code: "studio_export_failed",
+        message: expect.stringContaining("no partial Skill"),
+      },
+      ok: false,
+    });
+    // Only pre-existing children remain; the private temp tree is removed.
+    expect(await readdir(parent)).toEqual([]);
+  });
+
   it("removes only its own temporary tree when the parent is not writable", async () => {
     // Directory mode bits do not block writes for root, and Windows ignores
     // them entirely, so the read-only parent cannot be simulated there.
@@ -167,5 +233,16 @@ describe("createNodeStudioHost", () => {
     expect(showOpenDialog.mock.calls[1]?.[0]).toMatchObject({
       properties: ["openDirectory", "dontAddToRecent", "createDirectory"],
     });
+  });
+
+  it("returns cancelled when the picked path cannot be canonicalized", async () => {
+    const root = await scratch();
+    const showOpenDialog = vi.fn().mockResolvedValue({
+      canceled: false,
+      filePaths: [join(root, "vanished")],
+    });
+    const host = createNodeStudioHost({ dialog: { showOpenDialog } });
+    expect(await host.chooseSkillFolder()).toEqual({ status: "cancelled" });
+    expect(await host.chooseExportParent()).toEqual({ status: "cancelled" });
   });
 });

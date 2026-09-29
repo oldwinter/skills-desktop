@@ -16,6 +16,9 @@ type TargetBinding = {
 const fixture = vi.hoisted(() => ({
   capabilitiesOptions: undefined as
     | {
+        readonly externalBrowser?: {
+          readonly openExternal: (url: string) => Promise<void>;
+        };
         readonly onReviewRequested?: unknown;
         readonly platform?: unknown;
         readonly skillsTargets: { readonly primaryTarget: unknown };
@@ -23,6 +26,15 @@ const fixture = vi.hoisted(() => ({
       }
     | undefined,
   home: "",
+  preferencesOptions: undefined as
+    | { readonly systemLocaleTag?: () => string }
+    | undefined,
+  publisherOptions: undefined as
+    | { readonly clock?: () => Date }
+    | undefined,
+  sshAccessOptions: undefined as
+    | { readonly clock?: () => Date }
+    | undefined,
   skillsTargetsOptions: undefined as
     | {
         readonly processFor: (binding: TargetBinding) => unknown;
@@ -47,11 +59,16 @@ const factories = vi.hoisted(() => ({
     options,
   })),
   createOpenSshHostKeyProbe: vi.fn(() => ({ scan: vi.fn() })),
-  createOpenSshTargetAccess: vi.fn(() => ({
-    confirm: vi.fn(),
-    inspect: vi.fn(),
-    pendingChallenge: vi.fn(),
-  })),
+  createOpenSshTargetAccess: vi.fn((options: unknown) => {
+    fixture.sshAccessOptions = options as {
+      readonly clock?: () => Date;
+    };
+    return {
+      confirm: vi.fn(),
+      inspect: vi.fn(),
+      pendingChallenge: vi.fn(),
+    };
+  }),
   createOpenSshToolRunner: vi.fn(() => ({ run: vi.fn() })),
   createSshSkillsProcess: vi.fn((options: unknown) => ({
     kind: "ssh-process",
@@ -64,16 +81,36 @@ const factories = vi.hoisted(() => ({
 const getPath = vi.hoisted(() =>
   vi.fn((name: string) => (name === "home" ? fixture.home : fixture.userData)),
 );
+const shellOpenExternal = vi.hoisted(() => vi.fn(async () => undefined));
 
 vi.mock("electron", () => ({
-  app: { getPath },
+  app: { getLocale: () => "en-US", getPath },
   autoUpdater: {},
   dialog: {},
+  shell: { openExternal: shellOpenExternal },
 }));
 
 vi.mock("./adapters/local-skills-process.js", () => ({
   createLocalSkillsProcess: factories.createLocalSkillsProcess,
   createSpawnProcessRunner: factories.createSpawnProcessRunner,
+}));
+
+vi.mock("./application/preferences.js", () => ({
+  createPreferenceAuthority: vi.fn(
+    (options: { readonly systemLocaleTag?: () => string }) => {
+      fixture.preferencesOptions = options;
+      return { kind: "preferences" };
+    },
+  ),
+}));
+
+vi.mock("./git/git-publisher.js", () => ({
+  createSystemGitPublisher: vi.fn(
+    (options: { readonly clock?: () => Date }) => {
+      fixture.publisherOptions = options;
+      return { kind: "git-publisher" };
+    },
+  ),
 }));
 
 vi.mock("./adapters/ssh-skills-process.js", () => ({
@@ -150,6 +187,7 @@ describe("desktop composition workspace selection", () => {
   afterEach(() => {
     vi.restoreAllMocks();
     getPath.mockClear();
+    shellOpenExternal.mockClear();
     fixture.capabilitiesOptions = undefined;
     fixture.skillsTargetsOptions = undefined;
     fixture.updateOptions = undefined;
@@ -328,6 +366,115 @@ describe("desktop composition workspace selection", () => {
         app: expect.any(Object),
         restartSafety: expect.any(Function),
       });
+    } finally {
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("delegates composed default providers to platform sources", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "skills-desktop-defaults-"));
+    fixture.home = join(directory, "unused-home");
+    fixture.userData = join(directory, "user-data");
+    process.env.SKILLS_DESKTOP_WORKSPACE = directory;
+
+    try {
+      await createCompositionRoot();
+
+      expect(fixture.preferencesOptions?.systemLocaleTag?.()).toBe("en-US");
+      expect(fixture.sshAccessOptions?.clock?.()).toBeInstanceOf(Date);
+      expect(fixture.publisherOptions?.clock?.()).toBeInstanceOf(Date);
+      expect(fixture.capabilitiesOptions).toBeDefined();
+
+      const capabilitiesClock = (
+        fixture.capabilitiesOptions as unknown as {
+          readonly clock?: () => Date;
+          readonly id?: () => string;
+        }
+      );
+      expect(capabilitiesClock.clock?.()).toBeInstanceOf(Date);
+      expect(capabilitiesClock.id?.()).toMatch(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+      );
+
+      const targetOptions = fixture.skillsTargetsOptions;
+      const localProcess = targetOptions?.processFor({
+        generation: 1,
+        harnessIds: ["codex"],
+        kind: "local",
+        targetId: "00000000-0000-4000-8000-000000000001",
+        workspace: await realpath(directory),
+      }) as {
+        readonly options: {
+          readonly clock?: () => Date;
+          readonly id?: () => string;
+        };
+      };
+      expect(localProcess.options.clock?.()).toBeInstanceOf(Date);
+      expect(localProcess.options.id?.()).toMatch(/^[0-9a-f-]{36}$/);
+
+      const sshProcess = targetOptions?.processFor({
+        generation: 3,
+        harnessIds: ["codex"],
+        kind: "ssh",
+        ssh: { connectionReference: "build-host" },
+        targetId: "00000000-0000-4000-8000-000000000002",
+        workspace: "/srv/project",
+      }) as {
+        readonly options: {
+          readonly clock?: () => Date;
+          readonly id?: () => string;
+        };
+      };
+      expect(sshProcess.options.clock?.()).toBeInstanceOf(Date);
+      expect(sshProcess.options.id?.()).toMatch(/^[0-9a-f-]{36}$/);
+
+      const restartSafety = (
+        fixture.updateOptions as unknown as {
+          readonly restartSafety?: () => { readonly guardReasons: string[] };
+        }
+      ).restartSafety;
+      expect(restartSafety?.()).toEqual({ guardReasons: [] });
+    } finally {
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("opens only a canonical skills.sh URL through the process-edge allowlist", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "skills-desktop-browser-"));
+    fixture.home = join(directory, "unused-home");
+    fixture.userData = join(directory, "user-data");
+    process.env.SKILLS_DESKTOP_WORKSPACE = directory;
+
+    try {
+      await createCompositionRoot();
+      const openExternal = fixture.capabilitiesOptions?.externalBrowser
+        ?.openExternal;
+      expect(openExternal).toBeTypeOf("function");
+
+      await openExternal!("https://skills.sh/vercel-labs/skills");
+      expect(shellOpenExternal).toHaveBeenCalledWith(
+        "https://skills.sh/vercel-labs/skills",
+        { activate: true },
+      );
+      await openExternal!(
+        "https://skills.sh/vercel-labs/skills/find-skills",
+      );
+      expect(shellOpenExternal).toHaveBeenLastCalledWith(
+        "https://skills.sh/vercel-labs/skills/find-skills",
+        { activate: true },
+      );
+
+      for (const refused of [
+        "https://evil.example/vercel-labs/skills",
+        "http://skills.sh/vercel-labs/skills",
+        "https://skills.sh",
+        "https://user:pw@skills.sh/vercel-labs/skills",
+        "https://skills.sh/vercel-labs/skills?x=1",
+        "not a url",
+      ]) {
+        await expect(openExternal!(refused)).rejects.toThrow();
+      }
+      expect(shellOpenExternal).toHaveBeenCalledTimes(2);
     } finally {
       await rm(directory, { force: true, recursive: true });
     }

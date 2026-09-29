@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { Inventory } from "@skills-desktop/skills-runtime";
 
+import { createNodeWellKnownCodec } from "../adapters/node-well-known-codec.js";
 import {
   createJsonRecoveryRecords,
   createMemoryRecoveryRecords,
@@ -561,6 +562,248 @@ describe("DesktopCapabilities inventory role-session contract", () => {
       mutationGuards: [{ targetId: target.id }],
       targetDefinitions: [{ id: target.id }],
     });
+  });
+
+  it("projects a restore error when the Inventory evidence store failed", async () => {
+    const records = createMemoryRecoveryRecords();
+    const capabilities = createDesktopCapabilities({
+      id: () => "operation-restore-failure",
+      recoveryRecords: {
+        commit: (change) => records.commit(change),
+        async restore() {
+          const restored = await records.restore();
+          return {
+            ...restored,
+            failures: [
+              ...restored.failures,
+              { code: "corrupt_store", store: "inventorySnapshots" },
+            ],
+          };
+        },
+      },
+      skillsTargets: targetsWith({
+        ...mutationNotExercised,
+        async observeInventory() {
+          return { ok: true as const, value: freshInventory };
+        },
+      }),
+    });
+    await capabilities.initialize();
+    const workspace = capabilities.attach(
+      {
+        endpointId: "workspace-restore-failure",
+        role: "workspace",
+        sessionEpoch: "epoch-restore-failure",
+      },
+      () => undefined,
+    );
+    await expect(workspace.snapshot()).resolves.toMatchObject({
+      inventory: {
+        lastError: {
+          code: "process_failed",
+          message: "Saved Inventory evidence could not be restored.",
+        },
+        phase: "error",
+      },
+    });
+    expect(capabilities.restartSafety().guardReasons).not.toContain(
+      "recovery-uncertain",
+    );
+  });
+
+  it("marks recovery uncertain when a legacy Snapshot remap cannot commit", async () => {
+    const legacyTargetId = `local-codex-${createHash("sha256")
+      .update("/work/skills-desktop")
+      .digest("hex")
+      .slice(0, 24)}`;
+    const records = createMemoryRecoveryRecords(
+      [
+        {
+          cliVersion: freshInventory.cliVersion,
+          entries: [],
+          generation: 1,
+          observedAt: "2026-08-21T09:00:00.000Z",
+          targetId: legacyTargetId,
+        },
+      ],
+    );
+    const capabilities = createDesktopCapabilities({
+      id: () => "operation-remap-failure",
+      recoveryRecords: {
+        async commit(change) {
+          return change.type === "target.remap"
+            ? {
+                error: {
+                  code: "persist_failed" as const,
+                  effects: "possible" as const,
+                  message: "The remap could not be persisted.",
+                  phase: "restore" as const,
+                  retryable: true,
+                },
+                ok: false as const,
+              }
+            : records.commit(change);
+        },
+        restore: () => records.restore(),
+      },
+      skillsTargets: createSkillsTargetsCatalog({
+        id: () => "00000000-0000-4000-8000-000000000010",
+        initialTarget: target,
+        legacyIdFor: () => legacyTargetId,
+        processFor: () => ({
+          ...mutationNotExercised,
+          async observeInventory() {
+            return { ok: true as const, value: freshInventory };
+          },
+        }),
+      }),
+    });
+    await capabilities.initialize();
+    const workspace = capabilities.attach(
+      {
+        endpointId: "workspace-remap-failure",
+        role: "workspace",
+        sessionEpoch: "epoch-remap-failure",
+      },
+      () => undefined,
+    );
+    await expect(workspace.snapshot()).resolves.toMatchObject({
+      inventory: {
+        lastError: {
+          code: "process_failed",
+          message:
+            "Saved Target or recovery authority could not be restored.",
+        },
+        phase: "error",
+      },
+    });
+    expect(capabilities.restartSafety().guardReasons).toContain(
+      "recovery-uncertain",
+    );
+  });
+
+  it("marks recovery uncertain when the workspace repair cannot commit", async () => {
+    const records = createMemoryRecoveryRecords(
+      [],
+      [],
+      [
+        {
+          connectionReference: null,
+          generation: 1,
+          harnessIds: target.harnessIds,
+          id: target.id,
+          kind: "local",
+          label: target.label,
+          workspace: "/",
+        },
+      ],
+    );
+    const capabilities = createDesktopCapabilities({
+      id: () => "operation-repair-failure",
+      recoveryRecords: {
+        async commit(change) {
+          return change.type === "targets.replace"
+            ? {
+                error: {
+                  code: "persist_failed" as const,
+                  effects: "possible" as const,
+                  message: "The repair could not be persisted.",
+                  phase: "restore" as const,
+                  retryable: true,
+                },
+                ok: false as const,
+              }
+            : records.commit(change);
+        },
+        restore: () => records.restore(),
+      },
+      skillsTargets: createLocalSkillsTargets({
+        id: () => target.id,
+        processFor: () => ({
+          ...mutationNotExercised,
+          async observeInventory() {
+            return { ok: true, value: freshInventory };
+          },
+        }),
+        workspace: target.workspace,
+      }),
+    });
+
+    await capabilities.initialize();
+    const session = capabilities.attach(
+      {
+        endpointId: "workspace-repair-failure",
+        role: "workspace",
+        sessionEpoch: "epoch-repair-failure",
+      },
+      () => undefined,
+    );
+
+    await expect(session.snapshot()).resolves.toMatchObject({
+      inventory: {
+        lastError: {
+          code: "process_failed",
+          message:
+            "Saved Target or recovery authority could not be restored.",
+        },
+        phase: "error",
+      },
+    });
+    expect(capabilities.restartSafety().guardReasons).toContain(
+      "recovery-uncertain",
+    );
+  });
+
+  it("marks recovery uncertain when the durable Target write cannot commit", async () => {
+    const records = createMemoryRecoveryRecords();
+    const capabilities = createDesktopCapabilities({
+      id: () => "operation-targets-failure",
+      recoveryRecords: {
+        async commit(change) {
+          return change.type === "targets.replace"
+            ? {
+                error: {
+                  code: "persist_failed" as const,
+                  effects: "possible" as const,
+                  message: "The Target Definition could not be persisted.",
+                  phase: "restore" as const,
+                  retryable: true,
+                },
+                ok: false as const,
+              }
+            : records.commit(change);
+        },
+        restore: () => records.restore(),
+      },
+      skillsTargets: targetsWith({
+        ...mutationNotExercised,
+        async observeInventory() {
+          return { ok: true as const, value: freshInventory };
+        },
+      }),
+    });
+    await capabilities.initialize();
+    const workspace = capabilities.attach(
+      {
+        endpointId: "workspace-targets-failure",
+        role: "workspace",
+        sessionEpoch: "epoch-targets-failure",
+      },
+      () => undefined,
+    );
+    await expect(workspace.snapshot()).resolves.toMatchObject({
+      inventory: {
+        lastError: {
+          code: "process_failed",
+          message:
+            "Saved Target or recovery authority could not be restored.",
+        },
+        phase: "error",
+      },
+    });
+    expect(capabilities.restartSafety().guardReasons).toContain(
+      "recovery-uncertain",
+    );
   });
 
   it("keeps the last complete Inventory as stale when a later refresh fails", async () => {
@@ -5562,6 +5805,50 @@ describe("DesktopCapabilities Official Collection contract", () => {
     });
   });
 
+  it("prunes a restored acknowledgement that no longer matches the catalog", async () => {
+    const records = createMemoryRecoveryRecords(
+      [],
+      [],
+      [],
+      [],
+      [
+        {
+          acknowledgedAt: "2026-08-21T09:00:00.000Z",
+          collectionId: "skills-desktop-starter",
+          kind: "release",
+          manifestDigest: `sha256:${"0".repeat(64)}`,
+          releaseNumber: 1,
+        },
+      ],
+    );
+    const capabilities = createDesktopCapabilities({
+      id: () => "unused",
+      officialCollectionCatalog: validCatalog,
+      recoveryRecords: records,
+      skillsTargets: targetsWith({
+        ...mutationNotExercised,
+        async observeInventory() {
+          return { ok: true, value: freshInventory };
+        },
+      }),
+    });
+    await capabilities.initialize();
+    const workspace = capabilities.attach(
+      {
+        endpointId: "workspace-ack-prune",
+        role: "workspace",
+        sessionEpoch: "ack-prune-epoch",
+      },
+      () => undefined,
+    );
+
+    await expect(workspace.snapshot()).resolves.toMatchObject({
+      collections: { acknowledgements: [] },
+    });
+    const restored = await records.restore();
+    expect(restored.collectionAcknowledgements).toEqual([]);
+  });
+
   it("workspace teardown rejects its owned Collection review and discards the plan", async () => {
     const reviewedSource = {
       revision: "0123456789abcdef0123456789abcdef01234567",
@@ -6986,5 +7273,483 @@ describe("DesktopCapabilities Official Collection contract", () => {
       target.id,
       secondTarget.id,
     ]);
+  });
+});
+
+describe("DesktopCapabilities publication review teardown", () => {
+  const encoder = new TextEncoder();
+  const publicationFixture = () => ({
+    codec: createNodeWellKnownCodec(),
+    host: {
+      async chooseExportDestination() {
+        return { status: "cancelled" as const };
+      },
+      async chooseSourceFolder() {
+        return {
+          label: "Source",
+          path: "/source",
+          status: "picked" as const,
+        };
+      },
+      async readSourceFolder() {
+        return {
+          ok: true as const,
+          value: [
+            {
+              files: [
+                {
+                  bytes: encoder.encode(
+                    "---\nname: demo\ndescription: Demo skill.\n---\n\n# Demo\n",
+                  ),
+                  path: "SKILL.md",
+                },
+              ],
+              name: "demo",
+            },
+          ],
+        };
+      },
+      async writeExport() {
+        return { ok: true as const, value: undefined };
+      },
+    },
+    publisher: {
+      async discard() {},
+      async prepare() {
+        return {
+          ok: true as const,
+          value: {
+            base: { commit: "b".repeat(40), kind: "commit" as const },
+            candidateCommit: "c".repeat(40),
+            files: [
+              {
+                digest: `sha256:${"d".repeat(64)}` as const,
+                path: ".well-known/agent-skills/index.json",
+              },
+            ],
+            root: "/tmp/owned-root",
+          },
+        };
+      },
+      async push() {
+        return {
+          ok: true as const,
+          value: {
+            observed: "c".repeat(40),
+            pushExitCode: 0,
+            status: "published" as const,
+          },
+        };
+      },
+      async readback() {
+        return { observed: "c".repeat(40), status: "published" as const };
+      },
+    },
+  });
+
+  const plannedReview = async () => {
+    let nextId = 0;
+    const capabilities = createDesktopCapabilities({
+      id: () => `pub-op-${(nextId += 1)}`,
+      publication: publicationFixture(),
+      recoveryRecords: createMemoryRecoveryRecords(),
+      skillsTargets: targetsWith({
+        ...mutationNotExercised,
+        async observeInventory() {
+          return { ok: true, value: freshInventory };
+        },
+      }),
+    });
+    await capabilities.initialize();
+    const workspace = capabilities.attach(
+      {
+        endpointId: "publication-owner",
+        role: "workspace",
+        sessionEpoch: "publication-epoch",
+      },
+      () => undefined,
+    );
+    await workspace.request({
+      type: "publication.choose-source",
+      version: 2,
+    });
+    const prepared = await workspace.request({
+      branch: "main",
+      remote: "https://github.com/vercel-labs/skills",
+      type: "publication.prepare",
+      version: 2,
+    });
+    if (!prepared.ok)
+      throw new Error(`publication.prepare failed: ${JSON.stringify(prepared.error)}`);
+    const snapshot = await workspace.snapshot();
+    if (!("publication" in snapshot) || snapshot.publication?.plan === undefined || snapshot.publication.plan === null) {
+      throw new Error("expected a prepared plan");
+    }
+    const requested = await workspace.request({
+      planId: snapshot.publication.plan.id,
+      type: "publication.review.request",
+      version: 2,
+    });
+    if (!requested.ok) throw new Error("publication.review.request failed");
+    return {
+      capabilities,
+      reviewId: requested.value.operationId,
+      workspace,
+    };
+  };
+
+  it("rejects a pending publication review when its owning workspace leaves", async () => {
+    const { capabilities, reviewId, workspace } = await plannedReview();
+    workspace.teardown();
+    const review = capabilities.attach(
+      {
+        endpointId: "publication-review-reader",
+        reviewId,
+        role: "review",
+        sessionEpoch: "publication-review-epoch",
+      },
+      () => undefined,
+    );
+    await expect(review.snapshot()).resolves.toMatchObject({
+      decision: "reject",
+      status: "settled",
+    });
+  });
+
+  it("rejects a pending publication review when its review window leaves", async () => {
+    const { capabilities, reviewId } = await plannedReview();
+    const opener = capabilities.attach(
+      {
+        endpointId: "publication-review-window",
+        reviewId,
+        role: "review",
+        sessionEpoch: "publication-window-epoch",
+      },
+      () => undefined,
+    );
+    opener.teardown();
+    const reader = capabilities.attach(
+      {
+        endpointId: "publication-review-reader-2",
+        reviewId,
+        role: "review",
+        sessionEpoch: "publication-reader-epoch",
+      },
+      () => undefined,
+    );
+    await expect(reader.snapshot()).resolves.toMatchObject({
+      decision: "reject",
+      status: "settled",
+    });
+  });
+});
+
+describe("DesktopCapabilities mutation conflict coordination", () => {
+  const uncertainGuard = {
+    deadline: "2026-08-20T11:10:00.000Z",
+    effects: "possible" as const,
+    generation: 1,
+    operationId: "prior-mutation",
+    phase: "reconciliation-required" as const,
+    targetId: target.id,
+  };
+  const persistedTarget = {
+    connectionReference: null,
+    generation: target.generation,
+    harnessIds: target.harnessIds,
+    id: target.id,
+    kind: target.kind,
+    label: target.label,
+    workspace: target.workspace,
+  };
+
+  it("refuses mutation.reconcile while an inventory observation is in flight", async () => {
+    let releaseObservation!: () => void;
+    const blocked = new Promise<void>((resolve) => {
+      releaseObservation = resolve;
+    });
+    let observationStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      observationStarted = resolve;
+    });
+    const records = createMemoryRecoveryRecords(
+      [],
+      [uncertainGuard],
+      [persistedTarget],
+    );
+    const capabilities = createDesktopCapabilities({
+      id: () => "reconcile-during-observe",
+      recoveryRecords: records,
+      skillsTargets: targetsWith({
+        ...mutationNotExercised,
+        async observeInventory() {
+          observationStarted();
+          await blocked;
+          return { ok: true as const, value: freshInventory };
+        },
+      }),
+    });
+    await capabilities.initialize();
+    const session = capabilities.attach(
+      {
+        endpointId: "workspace-reconcile-race",
+        role: "workspace",
+        sessionEpoch: "epoch-reconcile-race",
+      },
+      () => undefined,
+    );
+
+    const refresh = session.request({
+      targetId: target.id,
+      type: "inventory.refresh",
+      version: 2,
+    });
+    await started;
+    await expect(
+      session.request({
+        targetId: target.id,
+        type: "mutation.reconcile",
+        version: 2,
+      }),
+    ).resolves.toMatchObject({
+      error: { code: "mutation_conflict", phase: "coordinate" },
+      ok: false,
+    });
+    releaseObservation();
+    await expect(refresh).resolves.toMatchObject({ ok: true });
+  });
+
+  it("refuses inventory.refresh while a mutation reconciliation is in flight", async () => {
+    let releaseReconcile!: () => void;
+    const blocked = new Promise<void>((resolve) => {
+      releaseReconcile = resolve;
+    });
+    let reconcileStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      reconcileStarted = resolve;
+    });
+    const records = createMemoryRecoveryRecords(
+      [],
+      [uncertainGuard],
+      [persistedTarget],
+    );
+    const capabilities = createDesktopCapabilities({
+      id: () => "reconcile-blocks-refresh",
+      recoveryRecords: records,
+      skillsTargets: targetsWith({
+        ...mutationNotExercised,
+        async observeInventory() {
+          reconcileStarted();
+          await blocked;
+          return { ok: true as const, value: freshInventory };
+        },
+      }),
+    });
+    await capabilities.initialize();
+    const session = capabilities.attach(
+      {
+        endpointId: "workspace-refresh-race",
+        role: "workspace",
+        sessionEpoch: "epoch-refresh-race",
+      },
+      () => undefined,
+    );
+
+    const reconcile = session.request({
+      targetId: target.id,
+      type: "mutation.reconcile",
+      version: 2,
+    });
+    await started;
+    await expect(
+      session.request({
+        targetId: target.id,
+        type: "inventory.refresh",
+        version: 2,
+      }),
+    ).resolves.toMatchObject({
+      error: { code: "mutation_conflict", phase: "coordinate" },
+      ok: false,
+    });
+    releaseReconcile();
+    await expect(reconcile).resolves.toMatchObject({ ok: true });
+  });
+});
+
+describe("DesktopCapabilities observation lifecycle edges", () => {
+  const observationCancelled = {
+    error: {
+      code: "cancelled" as const,
+      effects: "none" as const,
+      message: "Inventory observation was cancelled.",
+      phase: "observe" as const,
+      retryable: true,
+    },
+    ok: false as const,
+  };
+
+  it("returns the in-flight observation promise for a duplicate refresh", async () => {
+    let releaseObservation!: () => void;
+    let observationStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      observationStarted = resolve;
+    });
+    const observeInventory = vi.fn(async () => {
+      observationStarted();
+      await new Promise<void>((resolve) => {
+        releaseObservation = resolve;
+      });
+      return { ok: true as const, value: freshInventory };
+    });
+    const capabilities = createDesktopCapabilities({
+      id: () => "observation-shared",
+      recoveryRecords: createMemoryRecoveryRecords(),
+      skillsTargets: targetsWith({
+        ...mutationNotExercised,
+        observeInventory,
+      }),
+    });
+    await capabilities.initialize();
+    const session = capabilities.attach(
+      {
+        endpointId: "workspace-dedup",
+        role: "workspace",
+        sessionEpoch: "epoch-dedup",
+      },
+      () => undefined,
+    );
+
+    const first = session.request({
+      targetId: target.id,
+      type: "inventory.refresh",
+      version: 2,
+    });
+    const second = session.request({
+      targetId: target.id,
+      type: "inventory.refresh",
+      version: 2,
+    });
+    await started;
+    releaseObservation();
+
+    await expect(second).resolves.toEqual(await first);
+    expect(observeInventory).toHaveBeenCalledTimes(1);
+  });
+
+  it("aborts an in-flight observation when the owning endpoint tears down", async () => {
+    let observationStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      observationStarted = resolve;
+    });
+    const capabilities = createDesktopCapabilities({
+      id: () => "observation-aborted",
+      recoveryRecords: createMemoryRecoveryRecords(),
+      skillsTargets: targetsWith({
+        ...mutationNotExercised,
+        async observeInventory({ signal }) {
+          observationStarted();
+          return await new Promise((resolve) => {
+            signal.addEventListener(
+              "abort",
+              () => resolve(observationCancelled),
+              { once: true },
+            );
+          });
+        },
+      }),
+    });
+    await capabilities.initialize();
+    const session = capabilities.attach(
+      {
+        endpointId: "workspace-observe-teardown",
+        role: "workspace",
+        sessionEpoch: "epoch-observe-teardown",
+      },
+      () => undefined,
+    );
+
+    const pending = session.request({
+      targetId: target.id,
+      type: "inventory.refresh",
+      version: 2,
+    });
+    await started;
+    session.teardown();
+
+    await expect(pending).resolves.toMatchObject({
+      error: { code: "cancelled" },
+      ok: false,
+    });
+  });
+});
+
+describe("DesktopCapabilities lifecycle idempotence", () => {
+  const unusedProcess: SkillsProcess = {
+    ...mutationNotExercised,
+    async observeInventory() {
+      return { ok: true as const, value: freshInventory };
+    },
+  };
+
+  it("rejects mutation.reconcile when no reconciliation is required", async () => {
+    const capabilities = createDesktopCapabilities({
+      id: () => "reconcile-none",
+      recoveryRecords: createMemoryRecoveryRecords(),
+      skillsTargets: targetsWith(unusedProcess),
+    });
+    await capabilities.initialize();
+    const session = capabilities.attach(
+      {
+        endpointId: "workspace-no-guard",
+        role: "workspace",
+        sessionEpoch: "epoch-no-guard",
+      },
+      () => undefined,
+    );
+
+    await expect(
+      session.request({
+        targetId: target.id,
+        type: "mutation.reconcile",
+        version: 2,
+      }),
+    ).resolves.toMatchObject({
+      error: { code: "reconciliation_required" },
+      ok: false,
+    });
+  });
+
+  it("restores recovery records once when initialize is called twice", async () => {
+    let restores = 0;
+    const records = createMemoryRecoveryRecords();
+    const capabilities = createDesktopCapabilities({
+      id: () => "double-init",
+      recoveryRecords: {
+        commit: (change) => records.commit(change),
+        restore: () => {
+          restores += 1;
+          return records.restore();
+        },
+      },
+      skillsTargets: targetsWith(unusedProcess),
+    });
+
+    await capabilities.initialize();
+    await capabilities.initialize();
+    expect(restores).toBe(1);
+  });
+
+  it("returns the same shutdown promise for repeated shutdown calls", async () => {
+    const capabilities = createDesktopCapabilities({
+      id: () => "double-shutdown",
+      recoveryRecords: createMemoryRecoveryRecords(),
+      skillsTargets: targetsWith(unusedProcess),
+    });
+    await capabilities.initialize();
+
+    const first = capabilities.shutdown();
+    const second = capabilities.shutdown();
+    expect(second).toBe(first);
+    await expect(first).resolves.toBeUndefined();
   });
 });

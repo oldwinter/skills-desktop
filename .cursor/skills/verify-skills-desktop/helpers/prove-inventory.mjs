@@ -32,7 +32,7 @@ await runProof({
       "drive.mjs",
       [
         "wait",
-        `document.body.textContent.includes("1 matching skill") && document.body.textContent.includes("1 shown")`,
+        `document.body.textContent.includes("1 matching skill") && document.body.textContent.includes("1 of 2 shown")`,
         "filtered inventory",
       ],
     ],

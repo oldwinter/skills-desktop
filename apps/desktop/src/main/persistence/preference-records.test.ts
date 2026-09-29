@@ -1,4 +1,12 @@
-import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -89,6 +97,47 @@ describe("createJsonPreferenceRecords", () => {
     expect(await records.load()).toEqual({ status: "absent" });
   });
 
+  it("quarantines a path that is not a small regular file", async () => {
+    const directory = await scratch();
+    const path = join(directory, "preferences.json");
+    let counter = 0;
+    const records = createJsonPreferenceRecords({
+      id: () => `q${(counter += 1)}`,
+      path,
+    });
+
+    // A directory at the record path is quarantined, not read.
+    await mkdir(path);
+    expect(await records.load()).toMatchObject({
+      reason: expect.stringContaining("not a small regular file"),
+      status: "quarantined",
+    });
+    expect(await readdir(directory)).toEqual(["preferences.json.corrupt.q1"]);
+
+    // An oversized regular file is quarantined before parsing.
+    await writeFile(path, Buffer.alloc(4_097, 0x20));
+    expect(await records.load()).toMatchObject({
+      reason: expect.stringContaining("not a small regular file"),
+      status: "quarantined",
+    });
+    expect((await readdir(directory)).sort()).toEqual([
+      "preferences.json.corrupt.q1",
+      "preferences.json.corrupt.q2",
+    ]);
+  });
+
+  it("rejects saves when the file identity is invalid", async () => {
+    const directory = await scratch();
+    const records = createJsonPreferenceRecords({
+      id: () => "../escape",
+      path: join(directory, "preferences.json"),
+    });
+    await expect(
+      records.save({ appearance: "dark", localePreference: "system" }),
+    ).rejects.toThrow("Preference file identity is invalid.");
+    expect(await readdir(directory)).toEqual([]);
+  });
+
   it("rejects an invalid stored value at save time", async () => {
     const directory = await scratch();
     const records = createJsonPreferenceRecords({
@@ -102,5 +151,57 @@ describe("createJsonPreferenceRecords", () => {
       } as never),
     ).rejects.toThrow();
     expect(await readdir(directory)).toEqual([]);
+  });
+
+  it("quarantines a regular file that cannot be read", async () => {
+    // Permission bits cannot simulate an unreadable file for root or on
+    // Windows, where chmod does not produce EACCES on readFile.
+    if (process.platform === "win32" || process.getuid?.() === 0) return;
+    const directory = await scratch();
+    const path = join(directory, "preferences.json");
+    await writeFile(path, JSON.stringify({ schemaVersion: 1 }), "utf8");
+    await chmod(path, 0o000);
+    try {
+      const records = createJsonPreferenceRecords({
+        id: () => "q1",
+        path,
+      });
+      await expect(records.load()).resolves.toMatchObject({
+        reason: expect.stringContaining("unreadable"),
+        status: "quarantined",
+      });
+      expect(await readdir(directory)).toEqual([
+        "preferences.json.corrupt.q1",
+      ]);
+    } finally {
+      // The file may have been renamed into quarantine; rm tolerates the rest.
+      await chmod(path, 0o600).catch(() => undefined);
+    }
+  });
+
+  it("reports quarantined-with-warning when the invalid file cannot move", async () => {
+    // Directory mode bits do not block rename for root, and Windows ignores
+    // them entirely, so the read-only directory cannot be simulated there.
+    if (process.platform === "win32" || process.getuid?.() === 0) return;
+    const directory = await scratch();
+    const path = join(directory, "preferences.json");
+    await writeFile(path, "{ not json", "utf8");
+    await chmod(directory, 0o500);
+    try {
+      const records = createJsonPreferenceRecords({
+        id: () => "w",
+        path,
+      });
+      await expect(records.load()).resolves.toMatchObject({
+        reason: expect.stringContaining("could not be quarantined"),
+        status: "quarantined",
+      });
+      // The invalid file was left in place rather than destroyed.
+      await expect(readdir(directory)).resolves.toEqual([
+        "preferences.json",
+      ]);
+    } finally {
+      await chmod(directory, 0o700);
+    }
   });
 });

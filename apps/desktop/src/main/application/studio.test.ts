@@ -1,9 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { StudioTreeEntry } from "@skills-desktop/skills-runtime";
+import {
+  STUDIO_MAX_DRAFT_TEXT_LENGTH,
+  type StudioTreeEntry,
+} from "@skills-desktop/skills-runtime";
 
 import { publicStudioStateSchema } from "../../contracts/workspace.js";
-import { createMemoryStudioDraftRecords } from "../persistence/studio-draft-records.js";
+import {
+  createMemoryStudioDraftRecords,
+  type StudioDraftRecords,
+} from "../persistence/studio-draft-records.js";
 import type { FolderPick } from "./publication.js";
 import {
   createStudioCoordinator,
@@ -49,19 +55,19 @@ function fakeHost(overrides: Partial<StudioHost> = {}) {
   return host;
 }
 
-function harness(host?: StudioHost) {
+function harness(host?: StudioHost, drafts?: StudioDraftRecords) {
   let ids = 0;
   let now = Date.parse("2026-09-15T10:00:00.000Z");
   const onChange = vi.fn();
-  const drafts = createMemoryStudioDraftRecords();
+  const records = drafts ?? createMemoryStudioDraftRecords();
   const studio = createStudioCoordinator({
     clock: () => new Date((now += 1_000)),
-    drafts,
+    drafts: records,
     ...(host === undefined ? {} : { host }),
     id: () => `id-${(ids += 1)}`,
     onChange,
   });
-  return { drafts, onChange, studio };
+  return { drafts: records, onChange, studio };
 }
 
 describe("createStudioCoordinator (ADR 0018)", () => {
@@ -251,6 +257,75 @@ describe("createStudioCoordinator (ADR 0018)", () => {
     expect(studio.state().lastError?.code).toBe("studio_export_failed");
   });
 
+  it("treats a cancelled export pick as a no-op without host writes", async () => {
+    const host = fakeHost();
+    const { studio } = harness(host);
+    await studio.createDraft("w1");
+    const draft = studio.state().drafts[0]!;
+    await studio.saveDraft(draft.id, 1, SKILL_MD);
+
+    const cancelled = await studio.exportDraft(draft.id);
+    expect(cancelled).toMatchObject({ ok: true });
+    expect(host.chooseExportParent).toHaveBeenCalledOnce();
+    expect(host.exportSkill).not.toHaveBeenCalled();
+    expect(studio.state().lastExport).toBeNull();
+    expect(studio.state().lastError).toBeNull();
+  });
+
+  it("rejects draft text over the bounded length before touching records", async () => {
+    const { studio } = harness();
+    await studio.createDraft("w1");
+    const draft = studio.state().drafts[0]!;
+    const huge = `${"x".repeat(128 * 1_024 + 1)}`;
+    expect(
+      await studio.saveDraft(draft.id, 1, huge),
+    ).toMatchObject({
+      error: { code: "studio_draft_invalid" },
+      ok: false,
+    });
+    // The draft keeps its original text; nothing was persisted.
+    expect(
+      studio.state().drafts.find(({ id }) => id === draft.id)?.skillMd,
+    ).toBe(draft.skillMd);
+  });
+
+  it("surfaces a failed records put without advancing the draft revision", async () => {
+    const memory = createMemoryStudioDraftRecords();
+    // createDraft (expectedRevision null) succeeds; the revision-bumping
+    // saveDraft put fails, so the in-memory draft must stay at revision 1.
+    const failingPut = vi.fn(
+      async (
+        record: Parameters<StudioDraftRecords["put"]>[0],
+        expectedRevision: number | null,
+      ) =>
+        expectedRevision === null
+          ? memory.put(record, expectedRevision)
+          : {
+              error: {
+                code: "persist_failed" as const,
+                effects: "none" as const,
+                message: "disk full",
+                phase: "persist" as const,
+                retryable: true,
+              },
+              ok: false as const,
+            },
+    );
+    const { studio } = harness(fakeHost(), {
+      ...memory,
+      put: failingPut,
+    });
+    await studio.createDraft("w1");
+    const draft = studio.state().drafts[0]!;
+
+    const saved = await studio.saveDraft(draft.id, 1, "# updated\n");
+    expect(saved).toMatchObject({ ok: false });
+    expect(studio.state().lastError?.message).toBe("disk full");
+    expect(
+      studio.state().drafts.find(({ id }) => id === draft.id)?.revision,
+    ).toBe(1);
+  });
+
   it("serializes host-backed steps and clears grants on shutdown", async () => {
     let release!: (pick: FolderPick) => void;
     const host = fakeHost({
@@ -398,6 +473,105 @@ describe("createStudioCoordinator (ADR 0018)", () => {
     expect(studio.state().drafts).toMatchObject([
       { id: "restored", revision: 4 },
     ]);
+  });
+
+  it("fails closed when a granted folder has no readable SKILL.md", async () => {
+    const host = fakeHost({
+      readTree: vi.fn(async () => ({
+        ok: true as const,
+        value: [file("README.md", "# no skill here\n")],
+      })),
+    });
+    host.picks.push({
+      label: "demo",
+      path: "/secret/demo",
+      status: "picked",
+    });
+    const { studio } = harness(host);
+    await studio.initialize();
+    await studio.open("w1");
+    const grant = studio.state().grants[0]!;
+    expect(await studio.createDraft("w1", grant.id)).toMatchObject({
+      error: { code: "studio_validation_failed" },
+      ok: false,
+    });
+    expect(studio.state().drafts).toHaveLength(0);
+  });
+
+  it("fails closed when a granted SKILL.md is not valid UTF-8", async () => {
+    const bad: StudioTreeEntry = {
+      bytes: new Uint8Array([0xff, 0xfe, 0xfa]),
+      kind: "file",
+      path: "SKILL.md",
+      size: 3,
+    };
+    const host = fakeHost({
+      readTree: vi.fn(async () => ({ ok: true as const, value: [bad] })),
+    });
+    host.picks.push({
+      label: "demo",
+      path: "/secret/demo",
+      status: "picked",
+    });
+    const { studio } = harness(host);
+    await studio.initialize();
+    await studio.open("w1");
+    const grant = studio.state().grants[0]!;
+    expect(await studio.createDraft("w1", grant.id)).toMatchObject({
+      error: { code: "studio_validation_failed" },
+      ok: false,
+    });
+  });
+
+  it("rejects a granted SKILL.md above the Draft text limit", async () => {
+    const host = fakeHost({
+      readTree: vi.fn(async () => ({
+        ok: true as const,
+        value: [
+          file(
+            "SKILL.md",
+            `---\nname: demo\ndescription: d.\n---\n\n${"x".repeat(STUDIO_MAX_DRAFT_TEXT_LENGTH + 1)}`,
+          ),
+        ],
+      })),
+    });
+    host.picks.push({
+      label: "demo",
+      path: "/secret/demo",
+      status: "picked",
+    });
+    const { studio } = harness(host);
+    await studio.initialize();
+    await studio.open("w1");
+    const grant = studio.state().grants[0]!;
+    expect(await studio.createDraft("w1", grant.id)).toMatchObject({
+      error: { code: "studio_draft_invalid" },
+      ok: false,
+    });
+    expect(studio.state().drafts).toHaveLength(0);
+  });
+
+  it("surfaces a failed put inside createDraft without adding a Draft", async () => {
+    const memory = createMemoryStudioDraftRecords();
+    const stored = {
+      code: "persist_failed" as const,
+      effects: "none" as const,
+      message: "The draft could not be persisted.",
+      phase: "studio" as const,
+      retryable: true,
+    };
+    const drafts: StudioDraftRecords = {
+      ...memory,
+      put: vi.fn(async () => ({ error: stored, ok: false as const })),
+    };
+    const { studio } = harness(undefined, drafts);
+    await studio.initialize();
+    expect(await studio.createDraft("w1")).toMatchObject({
+      error: { code: "persist_failed" },
+      ok: false,
+    });
+    expect(studio.state().drafts).toHaveLength(0);
+    expect(studio.state().lastError?.code).toBe("persist_failed");
   });
 });
 

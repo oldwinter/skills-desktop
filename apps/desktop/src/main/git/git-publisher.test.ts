@@ -538,4 +538,285 @@ describe("createSystemGitPublisher (ADR 0020)", () => {
     ).toBe("fatal: https://<redacted>@example.com/x.git denied");
     expect(redactGitStderr("x".repeat(2_000))).toHaveLength(512);
   });
+
+  it("rejects an empty export without creating a workspace", async () => {
+    const { publisher, ws } = publisherWith(() => undefined);
+    expect(
+      await publisher.prepare({
+        files: [],
+        ref,
+        remote,
+        treeDigest: `sha256:${"d".repeat(64)}`,
+      }),
+    ).toMatchObject({
+      error: { code: "publication_invalid", phase: "validate" },
+      ok: false,
+    });
+    expect(ws.created).toEqual([]);
+  });
+
+  it("aborts a cancelled prepare through GitUnavailableError and cleans the root", async () => {
+    const { publisher, ws } = publisherWith(() => undefined);
+    const controller = new AbortController();
+    controller.abort();
+    const result = await publisher.prepare({
+      files,
+      ref,
+      remote,
+      signal: controller.signal,
+      treeDigest: `sha256:${"d".repeat(64)}`,
+    });
+    expect(result).toMatchObject({
+      error: { code: "git_unavailable", phase: "prepare" },
+      ok: false,
+    });
+    if (!result.ok) expect(result.error.message).toContain("cancelled");
+    expect(ws.removed).toEqual(["/owned/root-1"]);
+  });
+
+  it("cleans the root when git init fails", async () => {
+    const { publisher, ws } = publisherWith((sub) =>
+      sub === "init" ? { exitCode: 1, stderr: "no git dir", stdout: "" } : undefined,
+    );
+    expect(
+      await publisher.prepare({
+        files,
+        ref,
+        remote,
+        treeDigest: `sha256:${"d".repeat(64)}`,
+      }),
+    ).toMatchObject({ error: { code: "git_unavailable" }, ok: false });
+    expect(ws.removed).toEqual(["/owned/root-1"]);
+  });
+
+  it("cleans the root when an unborn remote cannot start an empty index", async () => {
+    const { publisher, ws } = publisherWith((sub) => {
+      if (sub === "ls-remote")
+        return { exitCode: 2, stderr: "", stdout: "" };
+      if (sub === "read-tree")
+        return { exitCode: 1, stderr: "bad index", stdout: "" };
+      return undefined;
+    });
+    expect(
+      await publisher.prepare({
+        files,
+        ref,
+        remote,
+        treeDigest: `sha256:${"d".repeat(64)}`,
+      }),
+    ).toMatchObject({ error: { code: "git_unavailable" }, ok: false });
+    expect(ws.removed).toEqual(["/owned/root-1"]);
+  });
+
+  it("maps a failed fetch to remote_unreachable and cleans the root", async () => {
+    const { publisher, ws } = publisherWith((sub) => {
+      if (sub === "ls-remote")
+        return { exitCode: 0, stderr: "", stdout: `${BASE}\t${ref}\n` };
+      if (sub === "fetch")
+        return { exitCode: 1, stderr: "could not fetch", stdout: "" };
+      return undefined;
+    });
+    expect(
+      await publisher.prepare({
+        files,
+        ref,
+        remote,
+        treeDigest: `sha256:${"d".repeat(64)}`,
+      }),
+    ).toMatchObject({
+      error: { code: "remote_unreachable", retryable: true },
+      ok: false,
+    });
+    expect(ws.removed).toEqual(["/owned/root-1"]);
+  });
+
+  it("cleans the root when the fetched base tree cannot be read", async () => {
+    const { publisher, ws } = publisherWith((sub) => {
+      if (sub === "ls-remote")
+        return { exitCode: 0, stderr: "", stdout: `${BASE}\t${ref}\n` };
+      if (sub === "read-tree")
+        return { exitCode: 1, stderr: "corrupt tree", stdout: "" };
+      return undefined;
+    });
+    expect(
+      await publisher.prepare({
+        files,
+        ref,
+        remote,
+        treeDigest: `sha256:${"d".repeat(64)}`,
+      }),
+    ).toMatchObject({ error: { code: "git_unavailable" }, ok: false });
+    expect(ws.removed).toEqual(["/owned/root-1"]);
+  });
+
+  it("cleans the root when clearing previously managed paths fails", async () => {
+    const { publisher, ws } = publisherWith((sub, args) => {
+      if (sub === "ls-remote")
+        return { exitCode: 0, stderr: "", stdout: `${BASE}\t${ref}\n` };
+      if (sub === "ls-files")
+        return {
+          exitCode: 0,
+          stderr: "",
+          stdout: ".well-known/agent-skills/stale/SKILL.md\0",
+        };
+      if (sub === "update-index" && args.includes("--force-remove"))
+        return { exitCode: 1, stderr: "index locked", stdout: "" };
+      return undefined;
+    });
+    expect(
+      await publisher.prepare({
+        files,
+        ref,
+        remote,
+        treeDigest: `sha256:${"d".repeat(64)}`,
+      }),
+    ).toMatchObject({ error: { code: "git_unavailable" }, ok: false });
+    expect(ws.removed).toEqual(["/owned/root-1"]);
+  });
+
+  it("cleans the root when plumbing steps return malformed or failed results", async () => {
+    const cases: {
+      readonly message: string;
+      readonly script: Script;
+    }[] = [
+      {
+        message: "store a managed file",
+        script: (sub) => {
+          if (sub === "ls-remote")
+            return { exitCode: 2, stderr: "", stdout: "" };
+          if (sub === "hash-object")
+            return { exitCode: 0, stderr: "", stdout: "not-a-sha\n" };
+          return undefined;
+        },
+      },
+      {
+        message: "index a managed file",
+        script: (sub, args) => {
+          if (sub === "ls-remote")
+            return { exitCode: 2, stderr: "", stdout: "" };
+          if (sub === "update-index" && args.includes("--add"))
+            return { exitCode: 1, stderr: "cacheinfo rejected", stdout: "" };
+          return undefined;
+        },
+      },
+      {
+        message: "write the candidate tree",
+        script: (sub) => {
+          if (sub === "ls-remote")
+            return { exitCode: 2, stderr: "", stdout: "" };
+          if (sub === "write-tree")
+            return { exitCode: 0, stderr: "", stdout: "not-a-tree\n" };
+          return undefined;
+        },
+      },
+      {
+        message: "create the candidate commit",
+        script: (sub) => {
+          if (sub === "ls-remote")
+            return { exitCode: 2, stderr: "", stdout: "" };
+          if (sub === "commit-tree")
+            return { exitCode: 1, stderr: "empty ident", stdout: "" };
+          return undefined;
+        },
+      },
+    ];
+    for (const { message, script } of cases) {
+      const { publisher, ws } = publisherWith(script);
+      const result = await publisher.prepare({
+        files,
+        ref,
+        remote,
+        treeDigest: `sha256:${"d".repeat(64)}`,
+      });
+      expect(result).toMatchObject({
+        error: { code: "git_unavailable" },
+        ok: false,
+      });
+      if (!result.ok) expect(result.error.message).toContain(message);
+      expect(ws.removed).toEqual(["/owned/root-1"]);
+    }
+  });
+
+  it("discard removes the prepared root", async () => {
+    const { publisher, ws } = publisherWith((sub) =>
+      sub === "ls-remote" ? { exitCode: 2, stderr: "", stdout: "" } : undefined,
+    );
+    const prepared = await publisher.prepare({
+      files,
+      ref,
+      remote,
+      treeDigest: `sha256:${"d".repeat(64)}`,
+    });
+    if (!prepared.ok) throw new Error("prepare failed");
+    await publisher.discard(prepared.value);
+    expect(ws.removed).toEqual([prepared.value.root]);
+  });
+
+  it("push revalidates files and refuses an unreadable remote or a cancelled run", async () => {
+    const okRemote = (sub: string) =>
+      sub === "ls-remote"
+        ? { exitCode: 2 as const, stderr: "", stdout: "" }
+        : undefined;
+    const { publisher } = publisherWith(okRemote);
+    const prepared = await publisher.prepare({
+      files,
+      ref,
+      remote,
+      treeDigest: `sha256:${"d".repeat(64)}`,
+    });
+    if (!prepared.ok) throw new Error("prepare failed");
+
+    expect(
+      await publisher.push({
+        files: [{ bytes: new Uint8Array([1]), path: "../escape.txt" }],
+        prepared: prepared.value,
+        ref,
+        remote,
+      }),
+    ).toMatchObject({ error: { code: "publication_invalid" }, ok: false });
+
+    const failingPush = publisherWith((sub) =>
+      sub === "ls-remote"
+        ? { exitCode: 128, stderr: "down", stdout: "" }
+        : undefined,
+    );
+    expect(
+      await failingPush.publisher.push({
+        files,
+        prepared: prepared.value,
+        ref,
+        remote,
+      }),
+    ).toMatchObject({
+      error: { code: "remote_unreachable", retryable: true },
+      ok: false,
+    });
+
+    const controller = new AbortController();
+    controller.abort();
+    expect(
+      await publisher.push({
+        files,
+        prepared: prepared.value,
+        ref,
+        remote,
+        signal: controller.signal,
+      }),
+    ).toMatchObject({ error: { code: "git_unavailable" }, ok: false });
+  });
+
+  it("readback reports uncertain and removes its root when the runner throws", async () => {
+    const { publisher, ws } = publisherWith(() => {
+      throw new Error("spawn git ENOENT");
+    });
+    expect(
+      await publisher.readback({
+        base: { kind: "unborn" },
+        candidateCommit: CANDIDATE,
+        ref,
+        remote,
+      }),
+    ).toEqual({ observed: undefined, status: "uncertain" });
+    expect(ws.removed).toEqual(["/owned/root-1"]);
+  });
 });

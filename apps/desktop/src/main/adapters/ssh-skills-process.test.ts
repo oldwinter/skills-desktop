@@ -1,11 +1,14 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   decodeWireFrames,
   describeSource,
   encodeWireFrame,
+  encodeWireFramePayload,
+  MAX_WIRE_FRAME_BYTES,
   WIRE_PROTOCOL_VERSION,
   type WireFrame,
+  type WireRequest,
 } from "@skills-desktop/skills-runtime";
 import {
   REMOTE_BOOTSTRAP_COMMAND,
@@ -951,5 +954,818 @@ describe("SSH SkillsProcess observation contract", () => {
       error: { code: "cancelled", effects: "none" },
       ok: false,
     });
+  });
+});
+
+describe("SSH SkillsProcess boundary edges", () => {
+  const processWith = (
+    runner: SshTransportRunner,
+    overrides: Partial<typeof binding> = {},
+    clock = () => new Date("2026-08-22T10:00:00.000Z"),
+  ) => {
+    let nextId = 0;
+    return createSshSkillsProcess({
+      binding: { ...binding, ...overrides },
+      clock,
+      id: () => `request-${++nextId}`,
+      runner,
+    });
+  };
+
+  const helloFrame = (digest = REMOTE_BOOTSTRAP_DIGEST) =>
+    encodeWireFrame({
+      bootstrapDigest: digest,
+      protocolVersion: WIRE_PROTOCOL_VERSION,
+      type: "hello",
+    });
+  const inventoryFrame = (requestId: string) =>
+    encodeWireFrame({
+      cliVersion: "1.5.23",
+      globalJson,
+      projectJson,
+      protocolVersion: WIRE_PROTOCOL_VERSION,
+      requestId,
+      type: "inventory",
+    });
+  const mutationFrame = (requestId: string) =>
+    encodeWireFrame({
+      cliVersion: "1.5.23",
+      globalJson,
+      process: { cleanup: "confirmed" as const, disposition: "completed" as const, exitCode: 0 },
+      projectJson: "[]",
+      protocolVersion: WIRE_PROTOCOL_VERSION,
+      requestId,
+      type: "mutation-result",
+    });
+
+  /** Runner that serves inventory normally and lets each case script the mutation exchange. */
+  const mutationScripted = (
+    onMutation: (
+      request: WireRequest,
+      invocation: SshTransportInvocation,
+    ) => Promise<{ exitCode: number; stdout: Uint8Array }> | { exitCode: number; stdout: Uint8Array },
+    invocations: SshTransportInvocation[] = [],
+  ): SshTransportRunner => ({
+    async run(invocation) {
+      invocations.push(invocation);
+      const decoded = decodeWireFrames(invocation.input);
+      if (!decoded.ok || decoded.value.length !== 1) throw new Error("bad frame");
+      const request = decoded.value[0]!;
+      if (request.type === "request" && request.operation === "mutate") {
+        const outcome = await onMutation(request, invocation);
+        return { stderrBytes: 0, ...outcome };
+      }
+      return {
+        exitCode: 0,
+        stderrBytes: 0,
+        stdout: concat(
+          helloFrame(),
+          inventoryFrame(
+            request.type === "request" ? request.requestId : "bad",
+          ),
+        ),
+      };
+    },
+  });
+
+  async function observedAndPrepared(
+    runner: SshTransportRunner,
+    overrides: Partial<typeof binding> = {},
+    clock?: () => Date,
+  ) {
+    const skillsProcess = processWith(runner, overrides, clock);
+    const observed = await skillsProcess.observeInventory({
+      signal: new AbortController().signal,
+    });
+    if (!observed.ok) throw new Error("fixture observation failed");
+    const prepared = await skillsProcess.prepareMutation({
+      freshness: "fresh",
+      intent: { names: ["project-skill"], scope: "project", type: "remove" },
+      inventory: observed.value,
+      inventoryId: "inventory-ssh",
+    });
+    if (!prepared.ok) throw new Error("fixture preparation failed");
+    return { prepared: prepared.value, skillsProcess };
+  }
+
+  it("classifies every source descriptor branch before opening SSH", async () => {
+    const skillsProcess = processWith(scriptedTransport());
+    expect(
+      await skillsProcess.inspectSource({
+        descriptor: { family: "github" } as never,
+        signal: new AbortController().signal,
+      }),
+    ).toMatchObject({
+      error: { message: "The Source Descriptor is not supported." },
+      ok: false,
+    });
+    expect(
+      await skillsProcess.inspectSource({
+        descriptor: {
+          family: "local-directory",
+          locality: "local-only",
+          mutability: "mutable",
+          ref: null,
+          schemaVersion: 1,
+          source: "/opt/vendor/skills",
+        },
+        signal: new AbortController().signal,
+      }),
+    ).toMatchObject({
+      error: {
+        message:
+          "Desktop-local directories and archives cannot be inspected on an SSH Target.",
+      },
+      ok: false,
+    });
+  });
+
+  it("rejects unknown, mismatched, and expired confirmations distinctly", async () => {
+    const runner = scriptedTransport();
+    const { prepared, skillsProcess } = await observedAndPrepared(runner);
+    expect(
+      await skillsProcess.executeConfirmed({
+        confirmation: { digest: "f".repeat(64), preparedMutationId: "nope" },
+        signal: new AbortController().signal,
+      }),
+    ).toMatchObject({ error: { code: "confirmation_invalid" }, ok: false });
+    expect(
+      await skillsProcess.executeConfirmed({
+        confirmation: {
+          digest: "f".repeat(64),
+          preparedMutationId: prepared.id,
+        },
+        signal: new AbortController().signal,
+      }),
+    ).toMatchObject({
+      error: {
+        code: "confirmation_invalid",
+        message: "The mutation confirmation does not match the Prepared Mutation.",
+      },
+      ok: false,
+    });
+    // The mismatched attempt consumed the plan: the honest digest now reads unavailable.
+    expect(
+      await skillsProcess.executeConfirmed({
+        confirmation: {
+          digest: prepared.digest,
+          preparedMutationId: prepared.id,
+        },
+        signal: new AbortController().signal,
+      }),
+    ).toMatchObject({ error: { code: "confirmation_invalid" }, ok: false });
+  });
+
+  it("rejects an expired plan", async () => {
+    let now = new Date("2026-08-22T10:00:00.000Z");
+    const { prepared, skillsProcess } = await observedAndPrepared(
+      scriptedTransport(),
+      {},
+      () => now,
+    );
+    now = new Date(Date.parse(prepared.expiresAt) + 1);
+    expect(
+      await skillsProcess.executeConfirmed({
+        confirmation: {
+          digest: prepared.digest,
+          preparedMutationId: prepared.id,
+        },
+        signal: new AbortController().signal,
+      }),
+    ).toMatchObject({ error: { code: "confirmation_expired" }, ok: false });
+  });
+
+  it("returns not-observed without spawning when already cancelled", async () => {
+    const invocations: SshTransportInvocation[] = [];
+    const runner = mutationScripted(async () => {
+      throw new Error("must not spawn");
+    }, invocations);
+    const { prepared, skillsProcess } = await observedAndPrepared(runner);
+    const before = invocations.length;
+    const controller = new AbortController();
+    controller.abort();
+    expect(
+      await skillsProcess.executeConfirmed({
+        confirmation: {
+          digest: prepared.digest,
+          preparedMutationId: prepared.id,
+        },
+        signal: controller.signal,
+      }),
+    ).toMatchObject({
+      ok: true,
+      value: {
+        effects: { status: "not-observed" },
+        inventory: null,
+        process: { disposition: "cancelled", exitCode: null, termination: "known" },
+      },
+    });
+    expect(invocations).toHaveLength(before);
+  });
+
+  it("reports mutation_conflict while a mutation is in flight", async () => {
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const runner = mutationScripted(async (request) => {
+      await gate;
+      return {
+        exitCode: 0,
+        stdout: concat(helloFrame(), mutationFrame(request.requestId)),
+      };
+    });
+    const { prepared, skillsProcess } = await observedAndPrepared(runner);
+    const inFlight = skillsProcess.executeConfirmed({
+      confirmation: {
+        digest: prepared.digest,
+        preparedMutationId: prepared.id,
+      },
+      signal: new AbortController().signal,
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(
+      await skillsProcess.observeInventory({
+        signal: new AbortController().signal,
+      }),
+    ).toMatchObject({ error: { code: "mutation_conflict" }, ok: false });
+    release?.();
+    await inFlight;
+  });
+
+  it("maps mutation wire failures to uncertain outcomes honestly", async () => {
+    const cases: {
+      readonly expected: {
+        readonly disposition: string;
+        readonly effects?: string;
+        readonly termination?: string;
+      };
+      readonly respond: (
+        request: WireRequest,
+      ) => Promise<{ exitCode: number; stdout: Uint8Array } | never>;
+    }[] = [
+      {
+        expected: { disposition: "timed-out" },
+        respond: async () => {
+          throw new SshTransportBoundaryError("timeout", "timed-out");
+        },
+      },
+      {
+        expected: { disposition: "cancelled" },
+        respond: async () => {
+          throw new SshTransportBoundaryError("cancelled", "cancelled");
+        },
+      },
+      {
+        expected: { disposition: "failed" },
+        respond: async () => {
+          throw new Error("transport exploded");
+        },
+      },
+      {
+        expected: { disposition: "failed" },
+        respond: async (request) => ({
+          exitCode: 0,
+          stdout: helloFrame(),
+        }),
+      },
+      {
+        expected: { disposition: "failed" },
+        respond: async (request) => ({
+          exitCode: 0,
+          stdout: concat(
+            helloFrame("0".repeat(64)),
+            mutationFrame(request.requestId),
+          ),
+        }),
+      },
+      {
+        expected: { disposition: "failed" },
+        respond: async (request) => ({
+          exitCode: 0,
+          stdout: concat(
+            helloFrame(),
+            // Deliberately off-dialect: encodable only through the raw payload path.
+            encodeWireFramePayload(
+              {
+                cliVersion: "9.9.9",
+                globalJson,
+                process: {
+                  cleanup: "confirmed",
+                  disposition: "completed",
+                  exitCode: 0,
+                },
+                projectJson: "[]",
+                protocolVersion: WIRE_PROTOCOL_VERSION,
+                requestId: request.requestId,
+                type: "mutation-result",
+              },
+              MAX_WIRE_FRAME_BYTES,
+            ),
+          ),
+        }),
+      },
+      {
+        expected: { disposition: "failed" },
+        respond: async (request) => ({
+          exitCode: 0,
+          stdout: concat(helloFrame(), mutationFrame("wrong-request-id")),
+        }),
+      },
+      {
+        expected: { disposition: "failed" },
+        respond: async (request) => ({
+          exitCode: 3,
+          stdout: concat(helloFrame(), mutationFrame(request.requestId)),
+        }),
+      },
+      {
+        expected: { disposition: "completed", effects: "possible", termination: "known" },
+        respond: async (request) => ({
+          exitCode: 0,
+          stdout: concat(
+            helloFrame(),
+            encodeWireFrame({
+              cliVersion: "1.5.23",
+              globalJson: "not-json{",
+              process: { cleanup: "confirmed" as const, disposition: "completed" as const, exitCode: 0 },
+              projectJson: "[]",
+              protocolVersion: WIRE_PROTOCOL_VERSION,
+              requestId: request.requestId,
+              type: "mutation-result",
+            }),
+          ),
+        }),
+      },
+    ];
+    for (const { expected, respond } of cases) {
+      const { prepared, skillsProcess } = await observedAndPrepared(
+        mutationScripted(respond),
+      );
+      const executed = await skillsProcess.executeConfirmed({
+        confirmation: {
+          digest: prepared.digest,
+          preparedMutationId: prepared.id,
+        },
+        signal: new AbortController().signal,
+      });
+      expect(executed).toMatchObject({
+        ok: true,
+        value: {
+          effects: { status: expected.effects ?? "possible" },
+          inventory: null,
+          process: {
+            disposition: expected.disposition,
+            termination: expected.termination ?? "unknown",
+          },
+        },
+      });
+    }
+  });
+
+  it("maps remote failure frames and protocol violations during observation", async () => {
+    const observeWith = (
+      respond: (request: WireRequest) => Uint8Array,
+      exitCode = 0,
+    ): SshTransportRunner => ({
+      async run(invocation) {
+        const decoded = decodeWireFrames(invocation.input);
+        if (!decoded.ok || decoded.value.length !== 1) throw new Error("bad frame");
+        const request = decoded.value[0]!;
+        if (request.type !== "request") throw new Error("expected request frame");
+        return { exitCode, stderrBytes: 0, stdout: respond(request) };
+      },
+    });
+
+    // Remote-declared failure frames map onto honest phase-aware codes.
+    for (const [code, phase, expectedCode] of [
+      ["remote_runtime_unavailable", "observe", "remote_runtime_unavailable"],
+      ["remote_protocol_violation", "observe", "remote_protocol_violation"],
+      ["output_limit_exceeded", "version", "process_failed"],
+      ["output_limit_exceeded", "observe", "inventory_too_large"],
+      ["remote_operation_failed", "version", "process_failed"],
+    ] as const) {
+      const skillsProcess = processWith(
+        observeWith((request) =>
+          concat(
+            helloFrame(),
+            encodeWireFrame({
+              code,
+              message: "remote said no",
+              phase,
+              protocolVersion: WIRE_PROTOCOL_VERSION,
+              requestId: request.requestId,
+              type: "failure",
+            }),
+          ),
+        ),
+      );
+      expect(
+        await skillsProcess.observeInventory({
+          signal: new AbortController().signal,
+        }),
+      ).toMatchObject({ error: { code: expectedCode }, ok: false });
+    }
+
+    // A failure frame that does not belong to this request is a violation.
+    const mismatched = processWith(
+      observeWith((request) =>
+        concat(
+          helloFrame(),
+          encodeWireFrame({
+            code: "remote_operation_failed",
+            message: "foreign failure",
+            phase: "observe",
+            protocolVersion: WIRE_PROTOCOL_VERSION,
+            requestId: "not-the-request",
+            type: "failure",
+          }),
+        ),
+      ),
+    );
+    expect(
+      await mismatched.observeInventory({
+        signal: new AbortController().signal,
+      }),
+    ).toMatchObject({
+      error: { code: "remote_protocol_violation" },
+      ok: false,
+    });
+
+    // Garbage bytes, bootstrap mismatch, wrong response shape, exit-127, and
+    // nonzero exit after complete frames each classify distinctly.
+    const garbage = processWith(observeWith(() => new Uint8Array([1, 2, 3])));
+    expect(
+      await garbage.observeInventory({ signal: new AbortController().signal }),
+    ).toMatchObject({
+      error: { code: "remote_protocol_violation" },
+      ok: false,
+    });
+
+    const wrongDigest = processWith(
+      observeWith((request) =>
+        concat(helloFrame("0".repeat(64)), inventoryFrame(request.requestId)),
+      ),
+    );
+    expect(
+      await wrongDigest.observeInventory({
+        signal: new AbortController().signal,
+      }),
+    ).toMatchObject({
+      error: { code: "remote_protocol_mismatch" },
+      ok: false,
+    });
+
+    const wrongType = processWith(
+      observeWith((request) =>
+        concat(helloFrame(), mutationFrame(request.requestId)),
+      ),
+    );
+    expect(
+      await wrongType.observeInventory({ signal: new AbortController().signal }),
+    ).toMatchObject({
+      error: { code: "remote_protocol_violation" },
+      ok: false,
+    });
+
+    const bootstrapless = processWith(
+      observeWith(() => new Uint8Array(), 127),
+    );
+    expect(
+      await bootstrapless.observeInventory({
+        signal: new AbortController().signal,
+      }),
+    ).toMatchObject({
+      error: { code: "remote_runtime_unavailable" },
+      ok: false,
+    });
+
+    const lost = processWith(
+      observeWith(
+        (request) => concat(helloFrame(), inventoryFrame(request.requestId)),
+        255,
+      ),
+    );
+    expect(
+      await lost.observeInventory({ signal: new AbortController().signal }),
+    ).toMatchObject({ error: { code: "transport_lost" }, ok: false });
+
+    // A transport throw without cancellation maps to transport_failed.
+    const throwing = processWith({
+      async run() {
+        throw new SshTransportBoundaryError("connection died", "failed");
+      },
+    });
+    expect(
+      await throwing.observeInventory({ signal: new AbortController().signal }),
+    ).toMatchObject({ error: { code: "transport_failed" }, ok: false });
+
+    // Abort published after the transport returns still reports cancelled.
+    const controller = new AbortController();
+    const postAbort = processWith(
+      observeWith((request) => {
+        controller.abort();
+        return concat(helloFrame(), inventoryFrame(request.requestId));
+      }),
+    );
+    expect(
+      await postAbort.observeInventory({ signal: controller.signal }),
+    ).toMatchObject({ error: { code: "cancelled" }, ok: false });
+  });
+
+  it("fails closed for multi-harness bindings across every operation", async () => {
+    const multi = { harnessIds: ["Codex", "Claude"], harness: undefined };
+    const skillsProcess = processWith(scriptedTransport(), multi);
+    expect(
+      await skillsProcess.observeInventory({
+        signal: new AbortController().signal,
+      }),
+    ).toMatchObject({
+      error: { code: "remote_protocol_violation", phase: "wire" },
+      ok: false,
+    });
+    expect(
+      await skillsProcess.prepareMutation({
+        freshness: "fresh",
+        intent: { names: ["x"], scope: "project", type: "remove" },
+        inventory: {
+          cliVersion: "1.5.23",
+          entries: [],
+          observedAt: "2026-08-22T10:00:00.000Z",
+          schemaVersion: 1,
+        },
+        inventoryId: "i",
+      }),
+    ).toMatchObject({ error: { code: "mutation_ineligible" }, ok: false });
+  });
+
+  it("refuses inspected sources that cannot cross the SSH transport", async () => {
+    const descriptor = describeSource("vercel-labs/skills");
+    if (!descriptor.ok) throw new Error("fixture descriptor failed");
+    const skillsProcess = processWith(scriptedTransport());
+    expect(
+      await skillsProcess.prepareMutation({
+        freshness: "fresh",
+        intent: {
+          names: ["find-skills"],
+          scope: "project",
+          source: {
+            descriptor: descriptor.value,
+            inspection: { digest: "a".repeat(64), id: "inspection-1" },
+            sourceType: "inspected",
+          },
+          type: "add",
+        },
+        inventory: {
+          cliVersion: "1.5.23",
+          entries: [],
+          observedAt: "2026-08-22T10:00:00.000Z",
+          schemaVersion: 1,
+        },
+        inventoryId: "i",
+      }),
+    ).toMatchObject({
+      error: {
+        code: "mutation_ineligible",
+        message: "Inspected sources cannot cross the SSH transport yet.",
+      },
+      ok: false,
+    });
+  });
+});
+
+describe("SSH SkillsProcess executeConfirmed guards", () => {
+  it("refuses a confirmed mutation after the Prepared Mutation expires", async () => {
+    const runner = scriptedTransport();
+    let now = new Date("2026-08-22T10:00:00.000Z");
+    let nextId = 0;
+    const skillsProcess = createSshSkillsProcess({
+      binding,
+      clock: () => now,
+      id: () => `request-${++nextId}`,
+      runner,
+    });
+    const observed = await skillsProcess.observeInventory({
+      signal: new AbortController().signal,
+    });
+    if (!observed.ok) throw new Error("fixture observation failed");
+    const prepared = await skillsProcess.prepareMutation({
+      freshness: "fresh",
+      intent: {
+        names: ["project-skill"],
+        scope: "project",
+        type: "remove",
+      },
+      inventory: observed.value,
+      inventoryId: "inventory-ssh-expiry",
+    });
+    if (!prepared.ok) throw new Error("fixture preparation failed");
+
+    now = new Date("2026-08-22T10:10:00.000Z");
+    await expect(
+      skillsProcess.executeConfirmed({
+        confirmation: {
+          digest: prepared.value.digest,
+          preparedMutationId: prepared.value.id,
+        },
+        signal: new AbortController().signal,
+      }),
+    ).resolves.toMatchObject({
+      error: { code: "confirmation_expired" },
+      ok: false,
+    });
+    // Only the observation reached the transport; prepare is local.
+    expect(runner.invocations).toHaveLength(1);
+  });
+
+  it("refuses a confirmed mutation while an observation is in flight", async () => {
+    let releaseObserve!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      releaseObserve = resolve;
+    });
+    const inner = scriptedTransport();
+    let observations = 0;
+    const runner: SshTransportRunner & {
+      readonly invocations: SshTransportInvocation[];
+    } = {
+      invocations: inner.invocations,
+      async run(invocation) {
+        const decoded = decodeWireFrames(invocation.input);
+        const first = decoded.ok ? decoded.value[0] : undefined;
+        if (
+          first?.type === "request" &&
+          first.operation === "observe" &&
+          ++observations === 2
+        ) {
+          await gate;
+        }
+        return inner.run(invocation);
+      },
+    };
+    let nextId = 0;
+    const skillsProcess = createSshSkillsProcess({
+      binding,
+      clock: () => new Date("2026-08-22T10:00:00.000Z"),
+      id: () => `request-${++nextId}`,
+      runner,
+    });
+    const observed = await skillsProcess.observeInventory({
+      signal: new AbortController().signal,
+    });
+    if (!observed.ok) throw new Error("fixture observation failed");
+    const prepared = await skillsProcess.prepareMutation({
+      freshness: "fresh",
+      intent: {
+        names: ["project-skill"],
+        scope: "project",
+        type: "remove",
+      },
+      inventory: observed.value,
+      inventoryId: "inventory-ssh-conflict",
+    });
+    if (!prepared.ok) throw new Error("fixture preparation failed");
+
+    const pending = skillsProcess.observeInventory({
+      signal: new AbortController().signal,
+    });
+    await vi.waitFor(() => expect(observations).toBe(2));
+    await expect(
+      skillsProcess.executeConfirmed({
+        confirmation: {
+          digest: prepared.value.digest,
+          preparedMutationId: prepared.value.id,
+        },
+        signal: new AbortController().signal,
+      }),
+    ).resolves.toMatchObject({
+      error: { code: "mutation_conflict" },
+      ok: false,
+    });
+    releaseObserve();
+    await expect(pending).resolves.toMatchObject({ ok: true });
+  });
+});
+
+describe("SSH inventory passthrough failures", () => {
+  function inventoryResponse(request: WireFrame, overrides: {
+    readonly globalJson?: string;
+    readonly projectJson?: string;
+  }) {
+    return concat(
+      encodeWireFrame({
+        bootstrapDigest: REMOTE_BOOTSTRAP_DIGEST,
+        protocolVersion: WIRE_PROTOCOL_VERSION,
+        type: "hello",
+      }),
+      encodeWireFrame({
+        cliVersion: "1.5.23",
+        globalJson: overrides.globalJson ?? globalJson,
+        projectJson: overrides.projectJson ?? projectJson,
+        protocolVersion: WIRE_PROTOCOL_VERSION,
+        requestId: request.type === "request" ? request.requestId : "bad",
+        type: "inventory",
+      }),
+    );
+  }
+
+  function fixtureProcess(runner: SshTransportRunner) {
+    return createSshSkillsProcess({
+      binding,
+      clock: () => new Date("2026-08-22T10:00:00.000Z"),
+      id: () => "request-passthrough",
+      runner,
+    });
+  }
+
+  it("returns cancelled without spawning when observation is aborted", async () => {
+    const runner = scriptedTransport();
+    const process = fixtureProcess(runner);
+    const controller = new AbortController();
+    controller.abort();
+
+    const observed = await process.observeInventory({
+      signal: controller.signal,
+    });
+    expect(observed).toMatchObject({
+      error: { code: "cancelled" },
+      ok: false,
+    });
+    expect(runner.invocations).toEqual([]);
+  });
+
+  it("prepares a GitHub-source add mutation for SSH transport", async () => {
+    const runner = scriptedTransport();
+    const process = fixtureProcess(runner);
+    const observed = await process.observeInventory({
+      signal: new AbortController().signal,
+    });
+    if (!observed.ok) throw new Error("fixture observation failed");
+
+    const prepared = await process.prepareMutation({
+      freshness: "fresh",
+      intent: {
+        names: ["added-skill"],
+        scope: "project",
+        source: {
+          source: "owner/repository",
+          sourceType: "github",
+        },
+        type: "add",
+      },
+      inventory: observed.value,
+      inventoryId: "inventory-ssh-1",
+    });
+    expect(prepared.ok).toBe(true);
+  });
+
+  it("propagates a malformed project inventory payload", async () => {
+    const process = fixtureProcess(
+      scriptedTransport((request) =>
+        inventoryResponse(request, { projectJson: "not json" }),
+      ),
+    );
+
+    const observed = await process.observeInventory({
+      signal: new AbortController().signal,
+    });
+    expect(observed.ok).toBe(false);
+    if (observed.ok) throw new Error("expected failure");
+    expect(observed.error.effects).toBe("none");
+  });
+
+  it("propagates a malformed global inventory payload", async () => {
+    const process = fixtureProcess(
+      scriptedTransport((request) =>
+        inventoryResponse(request, { globalJson: "not json" }),
+      ),
+    );
+
+    const observed = await process.observeInventory({
+      signal: new AbortController().signal,
+    });
+    expect(observed.ok).toBe(false);
+    if (observed.ok) throw new Error("expected failure");
+    expect(observed.error.effects).toBe("none");
+  });
+
+  it("returns the mutation plan failure unchanged", async () => {
+    const process = fixtureProcess(scriptedTransport());
+
+    const prepared = await process.prepareMutation({
+      freshness: "fresh",
+      intent: {
+        names: [],
+        scope: "project",
+        type: "remove",
+      },
+      inventory: {
+        cliVersion: "1.5.23",
+        entries: [],
+        observedAt: "2026-08-22T10:00:00.000Z",
+        schemaVersion: 1,
+      },
+      inventoryId: "inventory-ssh-1",
+    });
+    expect(prepared.ok).toBe(false);
   });
 });

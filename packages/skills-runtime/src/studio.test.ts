@@ -104,6 +104,34 @@ describe("validateSkillTree (ADR 0018)", () => {
       many.push(file(`assets/a${index}.txt`, "x"));
     }
     expect(codes(many)).toContain("too_many_files");
+
+    const big = STUDIO_VALIDATOR_PROFILE.limits.maxFileBytes;
+    const oversized: StudioTreeEntry[] = [
+      file("SKILL.md", SKILL_MD),
+      file("docs/guide.md", "x"),
+    ];
+    for (let index = 0; index < 9; index += 1) {
+      oversized.push({
+        bytes: new Uint8Array(1),
+        kind: "file",
+        path: `assets/blob-${index}.bin`,
+        size: big,
+      });
+    }
+    expect(codes(oversized)).toContain("skill_too_large");
+
+    expect(
+      codes([
+        file("SKILL.md", SKILL_MD),
+        file("docs/guide.md", "x"),
+        file(
+          "docs/big.md",
+          new Uint8Array(
+            STUDIO_VALIDATOR_PROFILE.limits.maxMarkdownBytes + 1,
+          ),
+        ),
+      ]),
+    ).toContain("file_too_large");
   });
 
   it("requires SKILL.md with agreeing frontmatter", () => {
@@ -133,6 +161,23 @@ describe("validateSkillTree (ADR 0018)", () => {
         "other-dir",
       ),
     ).toEqual(["name_mismatch"]);
+    expect(
+      codes([
+        file(
+          "SKILL.md",
+          SKILL_MD.replace(
+            "description: Demonstrates Studio validation.",
+            'description: " "',
+          ),
+        ),
+      ]),
+    ).toContain("description_invalid");
+    expect(
+      codes([
+        file("SKILL.md", SKILL_MD),
+        file("docs/guide.md", new Uint8Array([0xff, 0xfe, 0x2d])),
+      ]),
+    ).toEqual(["not_utf8"]);
   });
 
   it("rejects invalid paths and case conflicts", () => {
@@ -297,6 +342,55 @@ echo hi
       STUDIO_VALIDATOR_PROFILE.limits.maxPreviewBlocks,
     );
     expect(preview.truncated).toBe(true);
+  });
+
+  it("ends a paragraph on each block terminator without swallowing it", () => {
+    const terminators = [
+      ["```", "const code = 1;", "```"],
+      ["## next heading"],
+      ["---"],
+      ["> quoted"],
+      ["- bullet"],
+      ["1. ordered"],
+    ];
+    for (const terminator of terminators) {
+      const preview = renderStudioPreview(
+        ["paragraph line one", "paragraph line two", ...terminator].join("\n"),
+      );
+      expect(preview.truncated).toBe(false);
+      expect(preview.blocks[0]).toEqual({
+        children: [
+          { kind: "text", text: "paragraph line one paragraph line two" },
+        ],
+        kind: "paragraph",
+      });
+      expect(preview.blocks).toHaveLength(2);
+    }
+  });
+
+  it("reports truncation when the budget ends inside a code fence", () => {
+    const headings = Array.from(
+      { length: STUDIO_VALIDATOR_PROFILE.limits.maxPreviewBlocks },
+      (_, index) => `# h${index}`,
+    );
+    const preview = renderStudioPreview(
+      [...headings, "```ts", "const x = 1;", "```"].join("\n"),
+    );
+    expect(preview.blocks).toHaveLength(
+      STUDIO_VALIDATOR_PROFILE.limits.maxPreviewBlocks,
+    );
+    expect(preview.truncated).toBe(true);
+    expect(preview.blocks.at(-1)).not.toMatchObject({ kind: "code" });
+  });
+
+  it("reports truncation when the budget ends on a list or paragraph", () => {
+    const max = STUDIO_VALIDATOR_PROFILE.limits.maxPreviewBlocks;
+    const headings = Array.from({ length: max }, (_, index) => `# h${index}`);
+    for (const tail of [["- item one", "- item two"], ["a plain paragraph"]]) {
+      const preview = renderStudioPreview([...headings, ...tail].join("\n"));
+      expect(preview.blocks).toHaveLength(max);
+      expect(preview.truncated).toBe(true);
+    }
   });
 
   it("strips only a closed frontmatter block", () => {

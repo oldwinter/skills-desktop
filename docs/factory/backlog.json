@@ -1,0 +1,1756 @@
+{
+  "schemaVersion": 1,
+  "defaults": {
+    "gates": [
+      "typecheck",
+      "lint",
+      "check:imports",
+      "check:context",
+      "test",
+      "build"
+    ]
+  },
+  "gateCommands": {
+    "typecheck": {
+      "argv": [
+        "npm",
+        "run",
+        "typecheck"
+      ],
+      "timeoutMs": 300000
+    },
+    "lint": {
+      "argv": [
+        "npm",
+        "run",
+        "lint"
+      ],
+      "timeoutMs": 300000
+    },
+    "check:imports": {
+      "argv": [
+        "npm",
+        "run",
+        "check:imports"
+      ],
+      "timeoutMs": 120000
+    },
+    "check:context": {
+      "argv": [
+        "npm",
+        "run",
+        "check:context"
+      ],
+      "timeoutMs": 120000
+    },
+    "test": {
+      "argv": [
+        "npm",
+        "test"
+      ],
+      "timeoutMs": 600000
+    },
+    "test:coverage": {
+      "argv": [
+        "npm",
+        "run",
+        "test:coverage"
+      ],
+      "timeoutMs": 900000
+    },
+    "build": {
+      "argv": [
+        "npm",
+        "run",
+        "build"
+      ],
+      "timeoutMs": 600000
+    },
+    "package:darwin": {
+      "argv": [
+        "npm",
+        "run",
+        "package:darwin"
+      ],
+      "timeoutMs": 900000
+    },
+    "packaged-ui": {
+      "argv": [
+        "node",
+        "tests/packaged-ui-qa/run.mjs"
+      ],
+      "timeoutMs": 600000
+    },
+    "prove-inventory": {
+      "argv": [
+        "node",
+        ".cursor/skills/verify-skills-desktop/helpers/prove-inventory.mjs"
+      ],
+      "timeoutMs": 300000
+    },
+    "prove-about": {
+      "argv": [
+        "node",
+        ".cursor/skills/verify-skills-desktop/helpers/prove-about.mjs"
+      ],
+      "timeoutMs": 300000
+    }
+  },
+  "items": [
+    {
+      "id": "SDF-001",
+      "title": "Symlink node in the macOS fallback-PATH fixture so dynamically linked Node (Homebrew Cellar) resolves",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 10,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "local-skills-process.test.ts 'resolves a user-installed npx outside the macOS GUI launch PATH' passes on a machine whose node binary needs its sibling lib directory",
+        "the fixture no longer copies the node binary; behavior on CI/Linux Node (self-contained binary) is unchanged",
+        "npm test is green for apps/desktop/src/main/adapters/local-skills-process.test.ts"
+      ],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test"
+      ],
+      "notes": "Baseline failure observed 2026-09-28: copyFile(process.execPath) breaks Homebrew Cellar node (@rpath libnode.dylib lookup fails outside Cellar)."
+    },
+    {
+      "id": "SDF-002",
+      "title": "Widen process-lifecycle observation budgets in timing-sensitive tests that flake under parallel load",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 20,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "ssh-transport-runner.test.ts retained-stream scenarios no longer race a 2s wall-clock budget against real spawn+terminate chains",
+        "remote-bootstrap postflight tests and the TargetsView registry test carry explicit timeouts sized for loaded CI machines",
+        "npm test passes twice in a row on this workstation without flaky timeouts"
+      ],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test"
+      ],
+      "notes": "Baseline failures observed 2026-09-28 under coverage load: boundedRunnerResult 2000ms race lost; 5000ms default testTimeout exceeded by remote-bootstrap postflight cases."
+    },
+    {
+      "id": "SDF-003",
+      "title": "Exercise the packaged darwin arm64 app through the repo's CDP proof lane in a disposable fixture",
+      "kind": "verification",
+      "state": "delivered",
+      "order": 30,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "npm run package:darwin produces apps/desktop/out/Skills Desktop-darwin-arm64/Skills Desktop.app",
+        "prove-inventory drives the packaged workspace against the stub-npx fixture and asserts the pinned skills@1.5.23 list argv",
+        "prove-about asserts the unsigned-preview About surface (Manual upgrade, version, diagnostics export)",
+        "fixture is disposable; evidence lands under .scratch/verify-skills-desktop/evidence and is not committed"
+      ],
+      "gates": [
+        "package:darwin",
+        "prove-inventory",
+        "prove-about"
+      ],
+      "notes": "Extends the Linux-only packaged lanes to this darwin-arm64 operator machine; no product change intended."
+    },
+    {
+      "id": "SDF-004",
+      "title": "Backfill coverage for the weakest-covered production module after the factory's first full coverage run",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 40,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "one module below or nearest the 80 percent coverage threshold gains behavior-focused tests",
+        "the new tests fail without the production behavior they lock in (checked by mutation spot-check or coverage delta)",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": "Pick the target from the coverage report produced during iteration; prefer boundary modules with real branch gaps."
+    },
+    {
+      "id": "SDF-005",
+      "title": "Route every publication and studio preload bridge capability through its fixed IPC channel",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 50,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "preload/workspace.test.ts asserts channel, attachment-epoch, and forwarded arguments for package.import, publication choose-source/export/prepare/review/discard/reconcile, and studio open/release/validate/draft-create/draft-save/draft-delete/preview/export",
+        "a regression in any routed channel name or argument order fails the test",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": "Coverage run showed preload/workspace.ts at 78.57% statements; uncovered 143-222 are the package/publication/studio bridge methods added for Publish and Studio views."
+    },
+    {
+      "id": "SDF-006",
+      "title": "Cover publication and studio main-process IPC handlers including authorized forwarding and bounded failures",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 60,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "electron-ipc.test.ts exercises the publicationHandler family: package:import, publication choose-source/export/prepare/review/discard/reconcile, studio open/release/validate/draft-create/draft-save/draft-delete/preview/export",
+        "each handler is asserted to reject unauthorized senders, forward the closed request type with version 2 to the session, and return the bounded internal_error on session failure",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": "Coverage run showed electron-ipc.ts at 71.23% statements; uncovered handler bodies cluster in lines 720-833 (publicationHandler family) and studio channels."
+    },
+    {
+      "id": "SDF-007",
+      "title": "Cover the uncovered StudioView user paths surfaced by the coverage report",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 70,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "StudioView.test.tsx gains tests for the uncovered user-visible paths identified by the coverage report",
+        "tests assert rendered behavior rather than implementation internals",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": "StudioView.tsx reported 74.6% statements; uncovered blocks cluster around lines 509-513 and 603-634 per the coverage table."
+    },
+    {
+      "id": "SDF-008",
+      "title": "Cover OpenSSH host-trust confirm lifecycle, resolution validation, and tool runner bounds",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 80,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "openssh-target.test.ts covers confirm() success, expiry, target drift, mid-review key change, and pendingChallenge projection",
+        "resolve failures are covered: nonzero -G exit, incomplete effective config, unsafe hostkeyalias, port-22 identity, scan failure classification",
+        "quoteOpenSshConfigValue escaping/rejection and memory trust store replace/lookup are covered",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": "openssh-target.ts reported 67.83% statements / 52.77% branches after SDF-007; SSH stays experimental scope, but the trust and resolution paths are pure interfaces behind injected runners and stores."
+    },
+    {
+      "id": "SDF-009",
+      "title": "Bind verified state to source freshness, gate plan, and complete required-gate coverage",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 90,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "deliver rejects tracked-file edits made after a passing verify even when HEAD is unchanged",
+        "deliver rejects untracked non-ignored files that appear after a passing verify",
+        "deliver rejects gate-plan edits (argv, timeouts, or item gate list) made after a passing verify",
+        "verify --gates <subset> records complete:false with the missing required gates and lands in failed instead of verified",
+        "regression tests cover failure, retry, recovery, honest partial diagnostics, and in-repo tracked backlog state churn"
+      ],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": "Root probes reproduced three false-success paths (boundary-20260928T190712.598065Z); follow-up probe confirmed the fix at 19:58Z. Backlog file is excluded from sourceDigest but bound via planDigest + itemDigest."
+    },
+    {
+      "id": "SDF-010",
+      "title": "Cover git-publisher failure matrix: plumbing exits, abort, drift guards, and readback fallback",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 100,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "git-publisher.test.ts covers prepare() failures: empty export, init/read-tree/fetch/read-tree-base/force-remove/hash-object/cacheinfo/write-tree/commit-tree nonzero or malformed exits, each cleaning up the workspace root",
+        "prepare() with an aborted signal reports git_unavailable via GitUnavailableError",
+        "push() covers invalid files, unreadable remote before push, and the abort catch path",
+        "readback() returns status uncertain and still removes its root when the runner throws",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": "git-publisher.ts at 70% branches after SDF-009 verify; uncovered lines cluster on cleanup-on-failure plumbing exits and the push/readback fallback paths (26 uncovered statement lines)."
+    },
+    {
+      "id": "SDF-011",
+      "title": "Cover local-skills-process resolver fallbacks, dialect/observation edges, and executeConfirmed guards",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 110,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "resolveWindowsNpxCommand and resolvePosixNpxCommand cover quoted/empty PATH dirs, partial tool discovery, managed nvm/fnm version dirs under HOME, and the unavailable failures",
+        "observeInventory covers --version nonzero and dialect mismatch, abort-before-start, list failures, post-list abort, and runner-throw classification",
+        "inspectSource covers abort, dialect propagation, timeout classification, and nonzero exit",
+        "executeConfirmed covers digest mismatch, expiry, mutation_conflict while an operation is active, unknown-termination effects, and postflight-failure possible effects",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": "local-skills-process.ts at 79.1% stmts / 67.1% branches after SDF-010; uncovered regions are deterministic resolver branches and injected-runner failure/abort edges, not new spawn behavior."
+    },
+    {
+      "id": "SDF-012",
+      "title": "Cover ssh-skills-process confirmation guards, wire-failure matrix, and observation error mapping",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 120,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "inspectSource covers schema-invalid, local-only, and portable descriptor branches",
+        "executeConfirmed covers unknown plan, digest mismatch consuming the plan, expiry, mutation_conflict during an in-flight operation, and pre-aborted not-observed outcome",
+        "executeConfirmed covers the wire-failure matrix: transport throws (timed-out/cancelled/failed), malformed or mismatched frames, and postflight parse failure producing possible effects",
+        "observeInventory covers conflict, transport failure, post-transport abort, protocol violations, exit-127 and transport_lost classification, remote failure-frame code mapping, and parse-error propagation",
+        "prepareMutation covers the multi-harness wire failure and the inspected-source ineligibility",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": "ssh-skills-process.ts at ~81% stmts / ~69% branches with combined adapter tests; gaps are scripted-transport edges identical in shape to SDF-011 (SSH lane stays experimental per AGENTS.md)."
+    },
+    {
+      "id": "SDF-013",
+      "title": "Create CollectionsView renderer tests covering selection, blockers, prepare, and plan review",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 130,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "empty state renders and Import/Open Inventory actions call the bridge/prop",
+        "release picker switches the inspector between official and imported origins with correct evidence fields",
+        "missing-skill selection and Prepare plan call prepareCollectionAcrossTargets with exact target/scope/selection payloads",
+        "blockers (incompatible/stale inventory/no recipe) disable prepare and selection controls",
+        "SSH targets render excluded and never enter the selection set",
+        "an existing plan renders the summary and Open Trusted Review calls requestCollectionReview with the plan id; the plan heading receives focus",
+        "failed prepare and failed import surface the returned renderer error",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": "CollectionsView.tsx had no test file (67% branches). jsdom + testing-library harness follows StudioView/ComparisonView conventions."
+    },
+    {
+      "id": "SDF-014",
+      "title": "Cover recovery host-trust store, OpenSSH public-key parsing, and preference quarantine edges",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 140,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "createRecoveryHostTrustStore round-trips lookup/replace through real memory recovery records",
+        "restore failures scoped to hostTrustRecords reject lookup and replace",
+        "a failed commit rejects replace without mutating the loaded map",
+        "parseOpenSshPublicKey accepts valid OpenSSH keys and rejects extra tokens, unknown algorithms, and non-base64 material",
+        "preference load quarantines directory paths and oversized files instead of crashing",
+        "save rejects invalid file identities",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": "recovery-host-trust.ts 66.7% branches untested; host-public-key.ts parse path uncovered; preference-records.ts 72.2% branches."
+    },
+    {
+      "id": "SDF-015",
+      "title": "Cover remaining electron-ipc handler families: mutation/target/comparison/cancel, review role, about failure branches",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 150,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "workspace:inventory:cancel, comparison:prepare, target:update, target:delete, mutation:prepare, mutation:reconcile forward closed versioned requests with exact payloads",
+        "review:snapshot:get returns the session snapshot to the review role and rejects workspace frames",
+        "review:decision:approve/reject forward {decision, type: review.decide, version: 2}",
+        "about:update:snapshot:get and about:release-diagnostics:export cover unauthorized, invalid_request, and internal_error branches",
+        "menu:application:get reports internal_error when no menu provider is configured",
+        "attach() on a destroyed webContents tears the session down and returns undefined",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": "electron-ipc.ts 75.6% branches; uncovered handler families around lines 265-370, 450-720, 925-960, 1024."
+    },
+    {
+      "id": "SDF-016",
+      "title": "Cover residual contract edges: imported-package sibling pass-through, about superRefines, preference load crash, isLocale",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 160,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "importSkillpack updates one record while leaving sibling records untouched across conflict and delta paths",
+        "sortRecords orders multiple records by package id",
+        "about schema rejects restart/guard disagreement, immediateRestartAvailable on non-deferred, v2 update-downloaded without candidate, and manual-policy restart authority",
+        "preference authority surfaces a thrown records.load() as a warning (Error message and non-Error fallback)",
+        "isLocale accepts catalog locales and rejects non-catalog strings and non-strings",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": "imported-packages.ts 72.2% branches (sibling map arm), about.ts 70% (superRefine issue paths), preferences.ts line ~70 catch, translate.ts isLocale."
+    },
+    {
+      "id": "SDF-017",
+      "title": "Cover ReviewSurface imported-package evidence and failure branches plus AboutView error/state paths",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 170,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "a pending review of an Imported Package renders origin, no-official-review, imported-at, digest, and the unpinned source label",
+        "an invalid reviewedAt renders raw instead of crashing formatReviewInstant",
+        "getReview failure renders the bounded error alert; an unavailable snapshot renders the unavailable state",
+        "AboutView surfaces failed check/restart/export and failed initial snapshot as alert banners",
+        "AboutView renders update-available and error automatic states",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": "ReviewSurface.tsx 77.1% branches (imported evidence 134-166, failure branches); AboutView.tsx 73.3% (error + state paths)."
+    },
+    {
+      "id": "SDF-018",
+      "title": "Cover node host bounds: composition openExternal allowlist, publication skill-folder matrix, studio tree kinds",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 180,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "composition-root openExternal opens only canonical skills.sh URLs via shell.openExternal and rejects non-allowlisted/credentialed/query URLs",
+        "publication host refuses unsupported archive paths, special files, oversized files, over-budget skill bytes, and too many files/skills",
+        "studio readStudioTree reports special/hardlink/oversized entries and caps entries at maxFilesPerSkill",
+        "studio folder pick returns cancelled when realpath fails",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": "composition-root.ts 20% funcs (openExternal); node-publication-host.ts 75% branches; node-studio-host.ts 76.9% branches."
+    },
+    {
+      "id": "SDF-019",
+      "title": "Fix Windows platform-contract regressions in SDF-004/011/018 tests",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 190,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "node-git-tools workspace-prefix assertion is separator-safe on win32",
+        "local-skills-process nvm PATH assertion does not split on ':'",
+        "publication-host archive-path case is platform-honest about backslash names",
+        "npm run typecheck passes and the three touched test files pass locally"
+      ],
+      "dependsOn": [],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "Reproduced on hosted windows-2025 job 109146095426 at 8f0b397"
+      ]
+    },
+    {
+      "id": "SDF-020",
+      "title": "Guard AF_UNIX socket fixtures on win32 in publication/studio host tests",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 200,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "studio special-file and publication special-file cases run on POSIX only",
+        "oversized-file and entry-cap coverage stays portable across platforms",
+        "the two touched test files pass locally"
+      ],
+      "dependsOn": [],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "windows-2025 denied listen() on filesystem sockets (EACCES) at 7c73803"
+      ]
+    },
+    {
+      "id": "SDF-021",
+      "title": "Cover persistence failure edges: quarantine-unreadable, rename-failure, invalid identity",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 210,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "update-check records rethrow non-ENOENT reads and remove the temp file when rename fails",
+        "deferred-update records surface quarantined state, pass through unsupported-schema, reject bad identities, and report unquarantinable corruption",
+        "preference records append could-not-be-quarantined when the rename fails",
+        "chmod-based cases keep the existing win32/root guards"
+      ],
+      "dependsOn": [],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "save-too-large in preference-records is schema-unreachable (bounded enums)"
+      ]
+    },
+    {
+      "id": "SDF-022",
+      "title": "Cover local-skills-targets mutation guards: delete/update not-found, host-trust propose+commit matrix",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 220,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "proposeDelete returns the filtered definitions and the removed target; unknown id fails target_not_found",
+        "proposeUpdate on an unknown id fails target_not_found",
+        "proposeHostTrust rejects missing/stale/mismatched challenges and non-ssh targets with host_trust_invalid, and bumps generation on a match",
+        "commitHostTrust covers target_not_found, target_unavailable without sshAccess, stale expectedGeneration, confirm failure propagation, and digest-binding success",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "dependsOn": [],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "local-skills-targets.ts at 78.9% branches; uncovered guards around 135, 322-357"
+      ]
+    },
+    {
+      "id": "SDF-023",
+      "title": "Cover studio coordinator failure edges: cancelled export pick, oversized draft, records.put failure",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 230,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "cancelled export pick returns ok without invoking exportSkill or touching lastExport/lastError",
+        "saveDraft rejects text over STUDIO_MAX_DRAFT_TEXT_LENGTH before touching records",
+        "a failed records.put surfaces the error and does not advance the draft revision",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "dependsOn": [],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "application/studio.ts at 78.1% branches; uncovered ~474, 503-504, 561"
+      ]
+    },
+    {
+      "id": "SDF-024",
+      "title": "Cover StudioView delete/preview/conflict-reload flow and electron-ipc review/broadcast catch edges",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 240,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "Delete Draft calls deleteStudioDraft with the acknowledged revision",
+        "Preview calls previewStudioDraft with the draft id",
+        "an externally advanced draft revision flags a conflict, disables the editor, and Reload clears it at the new revision",
+        "review snapshot/decision session crashes resolve to bounded internal_error",
+        "a malformed or disposed-endpoint update broadcast is never relayed",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "dependsOn": [],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "StudioView.tsx ~85% stmts (delete/conflict/preview edges); electron-ipc.ts catch edges at ~937/957/971"
+      ]
+    },
+    {
+      "id": "SDF-025",
+      "title": "Cover skills-runtime inventory additive-evidence limits and studio preview parser block-budget/terminator edges",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 250,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "extension field-count cap (>16) rejects with unsupported_schema",
+        "extension byte cap (>64KiB) rejects with inventory_too_large",
+        "wide shallow extension (>2048 nodes) rejects with unsupported_schema",
+        "non-array decoded output and >5000 entries reject with invalid_inventory",
+        "preview paragraph breaks on each terminator (fence, heading, rule, quote, bullet, ordered)",
+        "block-budget exhaustion inside code fence, list, and paragraph reports truncated",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "dependsOn": [],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "packages/skills-runtime/src/inventory.ts lines 120,127,139,177; studio.ts push-failure branches ~656-660,725-731"
+      ]
+    },
+    {
+      "id": "SDF-026",
+      "title": "Cover createDraft grant-derived failure edges and PublishView export action",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 260,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "createDraft from a grant with no readable SKILL.md fails closed",
+        "createDraft from a grant whose SKILL.md is not valid UTF-8 fails closed",
+        "createDraft from an oversized source SKILL.md rejects with studio_draft_invalid",
+        "a failed records.put inside createDraft surfaces the error without a new draft",
+        "clicking Export calls exportPublication through the bridge",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "dependsOn": [],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "application/studio.ts ~415-466 createDraft grant edges; PublishView.tsx:273 export onClick"
+      ]
+    },
+    {
+      "id": "SDF-027",
+      "title": "Cover PublishView prepared-plan summary, review/discard forwarding, and exporting/pushing phases",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 270,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "plan-summary renders remote, branch, candidate commit, digest, and expiry",
+        "review and discard buttons forward plan.id to the bridge",
+        "exporting phase shows the busy Exporting state and disables the action",
+        "unborn base renders its label and pushing phase shows the pushing banner",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "dependsOn": [],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "PublishView.tsx uncovered 276-282 spinner ternary + 337-378 plan-summary block"
+      ]
+    },
+    {
+      "id": "SDF-028",
+      "title": "Cover restartSafety protected-process-active while a Studio operation is in flight",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 280,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "restartSafety reports protected-process-active while a serialized Studio read is unresolved",
+        "the guard clears once the operation settles",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "dependsOn": [],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "desktop-capabilities.ts ~4884-4885 publication.busy||studio.busy guard branch"
+      ]
+    },
+    {
+      "id": "SDF-029",
+      "title": "Cover preference-records unreadable-file quarantine and AboutView up-to-date/manual/unavailable status branches",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 290,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "a file that stats as regular but fails readFile is quarantined as unreadable (POSIX-only fixture)",
+        "up-to-date automatic state renders its heading and message",
+        "manual and unavailable states under automatic policy render no status copy",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "dependsOn": [],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "preference-records.ts:101 non-ENOENT readFile -> quarantine; AboutView.tsx:40,58 statusCopy branches"
+      ]
+    },
+    {
+      "id": "SDF-030",
+      "title": "Cover capabilities restore edges: inventorySnapshots store failure and legacy target remap commit failure",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 300,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "a restored failure for the inventorySnapshots store projects an error inventory state without a prior snapshot",
+        "a failed target.remap commit marks the target authority unavailable and surfaces the remap error",
+        "restartSafety reports recovery-uncertain after the failed remap",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "dependsOn": [],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "desktop-capabilities.ts ~4730-4738 remap break, ~4800-4808 inventoryStoreFailed branch"
+      ]
+    },
+    {
+      "id": "SDF-031",
+      "title": "Cover recovery-records durable-commit guards: pending legacy migration and invalid document rejections",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 310,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "inventory.replace refuses while a legacy Snapshot is pending migration",
+        "an inventory.replace producing an invalid durable document returns persist_failed without poisoning the store",
+        "a guard.put producing an invalid durable document returns persist_failed without poisoning the store",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "dependsOn": [],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "recovery-records.ts ~2675/2710/2727 commitFailure paths"
+      ]
+    },
+    {
+      "id": "SDF-032",
+      "title": "Cover openssh jump-reference normalization and capabilities targets.replace commit failure",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 320,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "a ProxyJump reference with user@, [ipv6-brackets], and :port is normalized before -G resolution and freezing",
+        "a failed targets.replace commit leaves the authority unavailable and the recovery-uncertain restart guard set",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "dependsOn": [],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "openssh-target.ts jumpReferences ~418-426; desktop-capabilities.ts ~4664/4683-4685"
+      ]
+    },
+    {
+      "id": "SDF-033",
+      "title": "Cover publication coordinator push git_unavailable retention and reconcile guards",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 330,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "a push-time git_unavailable retains the Guard as uncertain, discards the prepared root, and returns the error with possible effects",
+        "reconcile with no Guard returns publication_invalid",
+        "reconcile with a restored Guard but no publisher returns git_unavailable",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "dependsOn": [],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "application/publication.ts ~447-456 retain-on-transport-loss; ~523/533 reconcile guards"
+      ]
+    },
+    {
+      "id": "SDF-034",
+      "title": "Cover OpenSSH tool-runner exit mapping; collection-ack pruning and repair commit-failure edges",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 340,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "createOpenSshToolRunner: nonzero exit maps to outcome and -F sshConfigPath injection (POSIX-guarded); explicit -F suppresses injection and exit-0 resolves",
+        "desktop-capabilities: stale collection acknowledgement pruned and committed as collections.acknowledgements.replace",
+        "desktop-capabilities: targets.replace commit failure during workspace repair marks recovery-uncertain and inventory phase error",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "dependsOn": [],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "openssh-target.ts 164-193 createOpenSshToolRunner; capabilities ~4620 ack-prune commit + ~4662 repair commit failure"
+      ]
+    },
+    {
+      "id": "SDF-035",
+      "title": "Cover deferred-update records failure tails and imported-packages sort ordering",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 350,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "clear() rethrows a non-ENOENT removal failure",
+        "load() rejects a directory at the record path as invalid state",
+        "save() removes its temporary file when the atomic open fails (EEXIST)",
+        "importSkillpack ordering stays deterministic across out-of-order inserts",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "dependsOn": [],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "deferred-update-records.ts 119/126/169; imported-packages.ts sortRecords comparator 64-66"
+      ]
+    },
+    {
+      "id": "SDF-036",
+      "title": "Cover Studio tree-validator summary and decode tails",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 360,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "skill_too_large fires when total authored bytes exceed the Skill budget while each file stays within the per-file bound",
+        "description_invalid fires on a blank frontmatter description",
+        "not_utf8 fires for non-SKILL.md markdown while SKILL.md decode failure stays silent",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "dependsOn": [],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "packages/skills-runtime/src/studio.ts ~325,344,396,431-437"
+      ]
+    },
+    {
+      "id": "SDF-037",
+      "title": "Fix InventoryApp native-focus test: await the post-render restore-poll schedule (Linux CI flake at run 36494744718)",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 370,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "pendingCount==1 after the phase flip is awaited via waitFor instead of asserted synchronously, matching the pattern at 2851/2897",
+        "the native-focus contract is unchanged: the restore timer must still be scheduled and drained; no assertions loosened",
+        "npm run test:coverage and npm run verify stay green; Linux CI passes on the pushed head"
+      ],
+      "dependsOn": [],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "run 36494744718 job 109171562943 @26e1600: pendingCount expected 1 got 0 at InventoryApp.test.tsx:2733. Test block identical to base 24f879f; flake = sync assert racing the passive phase-flip effect (InventoryApp.tsx:619-628) that schedules the 16ms restore poll"
+      ]
+    },
+    {
+      "id": "SDF-038",
+      "title": "Cover publication review teardown rejection in desktop capabilities",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 380,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "a pending publication review is rejected when its owning workspace endpoint tears down",
+        "a pending publication review is rejected when its review-role endpoint tears down",
+        "a later review endpoint observes status settled with decision reject",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "dependsOn": [],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "desktop-capabilities.ts ~4559 review-role teardown + ~4568-4572 workspace-owner teardown loops"
+      ]
+    },
+    {
+      "id": "SDF-039",
+      "title": "Cover mutation conflict coordination guards in desktop capabilities",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 390,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "mutation.reconcile returns mutation_conflict/phase coordinate while an inventory.refresh observation is in flight",
+        "inventory.refresh returns mutation_conflict/phase coordinate while a mutation.reconcile (activeMutation) is in flight",
+        "the in-flight requests still complete successfully after the conflicting request is rejected",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "dependsOn": [],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "desktop-capabilities.ts ~4422-4493: both mutation_conflict arms — reconcile's activeObservation arm and refresh's activeMutation arm; seeded reconciliation-required guard + gated observeInventory on the skills-process fake"
+      ]
+    },
+    {
+      "id": "SDF-040",
+      "title": "Cover observation dedup and endpoint-teardown aborts",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 400,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "a duplicate inventory.refresh returns the in-flight observation promise (single observeInventory call, identical result)",
+        "teardown of the owning workspace endpoint aborts an in-flight inventory observation which resolves cancelled",
+        "teardown of the owning workspace endpoint aborts an in-flight source inspection which resolves cancelled",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "dependsOn": [],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "desktop-capabilities.ts ~4495 dedup return, ~4526 observation teardown abort, ~4537 inspection teardown abort; dead branch 4380-4381 (inspectedTargetId always equals target.id) noted as unreachable"
+      ]
+    },
+    {
+      "id": "SDF-041",
+      "title": "Cover lifecycle idempotence and reconcile guard without a pending mutation",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 410,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "mutation.reconcile without a reconciliation-required phase returns reconciliation_required",
+        "initialize() twice restores recovery records exactly once",
+        "shutdown() twice returns the same promise and resolves cleanly",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "dependsOn": [],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "desktop-capabilities.ts ~4424 reconciliation_required return, ~4593 double-initialize early return, ~4902 shutdownPromise reuse"
+      ]
+    },
+    {
+      "id": "SDF-042",
+      "title": "Sweep Electron IPC failure arms across all inbound channels",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 420,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "every inbound ipcMain.handle channel returns unauthorized on an attachment-epoch mismatch",
+        "a rejecting session.request maps to internal_error on every workspace channel and both review decision channels",
+        "about-update channels map valid requests with failing updaters to internal_error and malformed requests to invalid_request",
+        "menu:get returns internal_error when the projection is absent or throws, invalid_request on extra args",
+        "notifyMenuCommand refuses wrong-role, stale, destroyed, throwing-send, and out-of-contract owners",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "dependsOn": [],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "electron-ipc.ts: ~20 authorizationFailure() arms + ~20 internalFailure() catch arms + aboutFailure/menuFailure arms + notifyMenuCommand return-false edges (1014-1024)"
+      ]
+    },
+    {
+      "id": "SDF-043",
+      "title": "Cover comparison-to-inventory prepare handoff and listed-skill uncheck",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 430,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "Prepare for Right calls prepareComparison with (comparisonId, rowKey, destinationTargetId)",
+        "after onPrepared the view returns to inventory with the destination Target armed and Open Trusted Review enabled",
+        "unchecking a listed candidate removes it from the prepared selection (Prepare stays blocked on empty selection)",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "dependsOn": [],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "InventoryApp.tsx onPrepared ~1804-1810 (comparison->inventory preparedMutationContext handoff, entry point of the SDF-037 native-focus flow) + candidate checkbox uncheck arm ~1629"
+      ]
+    },
+    {
+      "id": "SDF-044",
+      "title": "Cover StudioView preview node kinds and control error arms",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 440,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "the structured preview renders heading/paragraph/code-block/ordered+unordered list/quote/rule and strong/emphasis/code inline nodes",
+        "unknown inline and block kinds render null without emitting markup",
+        "a failing grant control (validate) surfaces its error via the alert region",
+        "a failing draft control (preview) surfaces its error via the alert region",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "dependsOn": [],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "StudioView.tsx: Inlines/Blocks switch arms 124-211 plus onError arms at 233/311"
+      ]
+    },
+    {
+      "id": "SDF-045",
+      "title": "Cover spawn runner timeout, stderr-limit, and abort boundary arms",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 450,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "a child exceeding timeoutMs resolves a timed-out ProcessBoundaryError with started=true",
+        "stderr output above maxOutputBytes resolves the byte-limit ProcessBoundaryError",
+        "a pre-aborted invocation rejects cancelled/started=false without spawning",
+        "an abort during a running child terminates the tree and resolves its close result",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "dependsOn": [],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "local-skills-process.ts: timeout arm ~501, stderr oversize ~536-555, pre-spawn cancel ~330, post-abort close resolution"
+      ]
+    },
+    {
+      "id": "SDF-046",
+      "title": "Cover update restart blocked/cancelled arms",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 460,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "requestRestart returns blocked without calling restartAndInstall while restart guard reasons are active",
+        "requestRestart returns cancelled without calling restartAndInstall when shutdown preparation throws",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "dependsOn": [],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "deferred-update-controller.ts ~229-231 guard-blocked arm + ~240-242 prepareRestart failure arm"
+      ]
+    },
+    {
+      "id": "SDF-047",
+      "title": "Cover SSH executeConfirmed expiry and busy guards",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 470,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "executeConfirmed returns confirmation_expired when the Prepared Mutation's expiresAt has passed and never reaches the transport",
+        "executeConfirmed returns mutation_conflict while an observation is in flight",
+        "the gated observation completes after the conflicted execute is rejected",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "dependsOn": [],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "ssh-skills-process.ts ~538-542 confirmation_expired, ~545-549 observing/mutating conflict; wireHarnessId arm at 566 unreachable (prepare guards it first) — noted dead"
+      ]
+    },
+    {
+      "id": "SDF-048",
+      "title": "Cover strict skillpack JSON-reader rejection arms",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 480,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "StrictJsonReader rejection arms are asserted by message: trailing characters, depth >16, non-string object key, missing ':', missing ',' in object and array, unescaped control character, unterminated string",
+        "literal (true/false/null), escape-skip and empty-container arms parse successfully and then fail kind validation",
+        "canonicalizeJson orders prefix-related keys by length after the shared prefix",
+        "skillpackDocumentDigest rejects a codec returning a malformed SHA-256 hex",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "dependsOn": [],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "skillpack.ts strict reader + codec digest arms; serialize >1MiB arm (line 270) unreachable by construction (all package fields schema-bounded) - noted dead"
+      ]
+    },
+    {
+      "id": "SDF-049",
+      "title": "Cover Studio grant/draft guard edges",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 490,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "studio.validate without a host returns studio_unavailable",
+        "a failed host.readTree propagates its error through studio.open and no grant is retained",
+        "re-opening the same folder replaces the earlier grant",
+        "studio.preview / studio.draft.delete / studio.export on an unknown draftId return studio_draft_invalid",
+        "studio.validate on a grant released mid-read returns studio_grant_invalid",
+        "a rejecting draft-store put propagates the throw yet the draft queue stays alive for the next operation",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "dependsOn": [],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "application/studio.ts guard tails: no-host validate, readTree failure, grant dedup on re-open, missing-draft guards, mid-observe release, draftQueue catch tail; saveDraft >128KiB text arm unreachable (request schema caps skillMd at STUDIO_MAX_DRAFT_TEXT_LENGTH) - noted dead"
+      ]
+    },
+    {
+      "id": "SDF-050",
+      "title": "Cover publication coordinator failure tails",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 500,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "chooseSource propagates a failed readSourceFolder and leaves source null",
+        "chooseSource maps an empty source folder to export_invalid",
+        "export propagates a failed writeExport and leaves export null",
+        "prepare propagates a failed publisher.prepare and leaves plan null",
+        "approve returns publication_guarded while a restored Guard is unresolved",
+        "restoreGuard is ignored and discard returns busy while a step is running",
+        "a failed Guard commit after a successful push propagates persist_failed and the push still ran",
+        "a failed Guard commit during reconcile propagates persist_failed",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "dependsOn": [],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "publication.ts arms: 244 restoreGuard-while-running, 256/309 host IO errors, 348 empty export, 370 prepare failure, 417 guarded approve, 498/573 guard-commit failures, 504 discard busy; planRef throw at 117 unreachable (schema pins refs/heads/*) - noted dead; harness gains failCommitAt counter"
+      ]
+    },
+    {
+      "id": "SDF-051",
+      "title": "Kill gate process groups on timeout (descendant-leak fix)",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 510,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "a timed-out gate's descendant is dead (exact-PID ESRCH) and its scheduled late write never lands",
+        "a gate trapping SIGTERM to exit 0 still resolves ok:false with timedOut:true",
+        "a clean exit-0 gate still passes (positive control)",
+        "non-ESRCH signal failures are logged to the gate log instead of crashing the factory",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "dependsOn": [],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "requested via orchestration message msg_b39845777b25",
+        "Root audit: child.kill(SIGNAL) reached only the gate PID; reproduced descendant survival + late MARKER write at +800ms after a 400ms timeout (probe evidence in .codex/runtime audit dirs). Fix: detached process-group leader on POSIX + process.kill(-pid) tree signal, mirroring local-skills-process.ts; Windows keeps child.kill (no POSIX group semantics). timedOut latch already prevented TERM-trap->exit0 passes - verified, kept."
+      ]
+    },
+    {
+      "id": "SDF-052",
+      "title": "Cover SkillsTargets draft/open failure edges",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 520,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "non-UUID initialTarget.id throws at catalog construction",
+        "ssh draft with whitespace in connectionReference is rejected invalid_request",
+        "draft harnessIds that fail normalization are rejected invalid_request",
+        "local draft whose canonicalizeLocalWorkspace rejects is invalid_request",
+        "open on an unknown targetId returns target_not_found",
+        "open on an ssh target propagates a failed binding inspection",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "dependsOn": [],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "local-skills-targets.ts arms: 118 UUID guard, 73 connectionReference whitespace, 83 harnessIds, 55-59 canonicalize failure, 235 target_not_found, 250 inspect propagation"
+      ]
+    },
+    {
+      "id": "SDF-053",
+      "title": "Cover prepareMutationPlan validation and observedMutationEffects arms",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 530,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "preparation without a bound Target returns mutation_ineligible",
+        "an empty inventoryId returns stale_inventory",
+        "a schema-invalid intent returns invalid_intent",
+        "a Target with an empty harness set returns mutation_ineligible",
+        "update-all with no scope-matching entries returns mutation_ineligible",
+        "removing Skills absent from the Fresh Inventory returns mutation_ineligible",
+        "an add whose declared source mismatches is not-observed; matching source is verified; update on matching entries is content-unverified",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "dependsOn": [],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "skills-process.ts: 322 unbound, 334 empty inventoryId, 341 invalid intent, 361 empty harness set, 393 empty names, 404 absent names, 569/583/606 observedMutationEffects source-match arms; resolveBoundHarnessSubset normalize arm (507) unreachable (harnessIds min 1 + resolved entries are always valid aliases) - noted dead"
+      ]
+    },
+    {
+      "id": "SDF-054",
+      "title": "Forward factory SIGINT/SIGTERM to the active gate process group",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 540,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "SIGINT and SIGTERM delivered to the factory process are forwarded to the in-flight gate's detached process group",
+        "gate descendants cannot write after cancellation (no delayed marker)",
+        "an interrupted verify records the attempt (ledger + progress) and transitions the item to failed, never stuck verifying",
+        "verify exits 130 on SIGINT and 143 on SIGTERM after recording",
+        "a second signal or a signal with no active gate exits with the conventional code",
+        "ordinary gate success, timeout termination, and timeout-with-zero-exit behavior are preserved",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "dependsOn": [
+        "SDF-051"
+      ],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "gates.mjs: activeGate slot + interruptedBy flag, interruptActiveGate forwards to the group with SIGKILL escalation; runGate ok now requires no interruption; factory.mjs installs per-invocation SIGINT/SIGTERM handlers in runFactory (removed in finally), cmdVerify persists interrupted into attempts + progress and returns the signal exit code; regression tests: forwarded-signal unit case in tests/factory-gates.test.ts plus real-CLI subprocess SIGINT/SIGTERM cases in tests/factory-pipeline.test.ts",
+        "reported by the coordinator mailbox as P1: runner SIGINT/SIGTERM leak despite the SDF-051 timeout fix"
+      ]
+    },
+    {
+      "id": "SDF-055",
+      "title": "Cover the release-integrity CLI option/output/dispatch surface",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 550,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "parseReleaseIntegrityOptions rejects unknown, missing, flag-shaped, control-character, and duplicate arguments",
+        "releaseContext maps CI options to the release context fields",
+        "emitReleaseOutputs writes single-line and heredoc outputs, skips writes without GITHUB_OUTPUT, and rejects CR bytes and delimiter collisions",
+        "readReleaseJson wraps parse/read failures with the caller's message",
+        "runReleaseIntegrityCommand prints usage for help flags, rejects unknown commands, and dispatches + prints JSON results",
+        "releaseIntegrityUsage lists registered commands sorted",
+        "validate-tag verifies matching package versions, emits release-tag output, and fails closed on version divergence or unreadable package files",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "dependsOn": [],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "release-integrity-cli.mjs was the largest uncovered file in the coverage surface (67% stmts / 61% funcs); tests exercise the pure option parser, injectable output emitter, command dispatch, and validate-tag end to end against temp package fixtures"
+      ]
+    },
+    {
+      "id": "SDF-056",
+      "title": "Cover recovery-records store load failure arms",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 560,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "a non-ENOENT read failure on any of the seven store documents reports corrupt_store for that store",
+        "a valid durable failure marker surfaces its recorded code for mutationGuards, targetDefinitions, and hostTrustRecords",
+        "a malformed or unreadable failure marker reports corrupt_store",
+        "malformed collection-acknowledgements and publication-guard documents are quarantined and report corrupt_store",
+        "a collection or publication document from a newer schema reports unsupported_schema without being overwritten",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "dependsOn": [],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "recovery-records.ts had 123 uncovered statements concentrated in the per-store loaders' failure arms; the sweep is parametrized over document/marker filenames and uses a delegating fileSystem that faults a single read path"
+      ]
+    },
+    {
+      "id": "SDF-057",
+      "title": "Drain the gate process group before verify resolves on cancellation",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 570,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "a cancelled gate does not resolve at the leader's close while its detached group still has members",
+        "SIGKILL escalation fires after the grace window and the gate resolves only once the owned group is empty",
+        "a SIGTERM-resistant descendant cannot outlive the factory or write after cancellation",
+        "the group probe targets only the owned gate process group and the drain is bounded by a hard cap",
+        "ordinary pass, timeout, signal-forward, and timeout-with-zero-exit behavior are preserved",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "dependsOn": [
+        "SDF-054"
+      ],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "root replay evidence (probe_skills_command_lifecycle.py on stash 65fd0f10, six cases): term_resistant_descendant now holds 6562ms with ready=true, no delayed marker, item failed; timeout/sigterm/sigint/positive/zero-exit all correct; escalationMs option added for deterministic regression tests"
+      ]
+    },
+    {
+      "id": "SDF-058",
+      "title": "Fix hosted-CI test environment leaks: inherited GITHUB_OUTPUT and Windows path fault matcher",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 580,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "release-integrity-cli.test.ts does not inherit the runner's GITHUB_OUTPUT when asserting the unset path",
+        "an inherited GITHUB_OUTPUT path is exercised through a private temp file",
+        "recovery-records.test.ts read-fault injection matches store filenames on any platform path separator",
+        "existing behavioral assertions are unchanged",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "dependsOn": [
+        "SDF-055",
+        "SDF-056"
+      ],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "hosted failures at daf0745 (run 36510442072): release-integrity-cli.test.ts expected no GITHUB_OUTPUT append while the runner env was inherited; recovery-records.test.ts read-fault cases expected corrupt_store on Windows where endsWith('/') never matches"
+      ]
+    },
+    {
+      "id": "SDF-059",
+      "title": "Cover the InventoryApp renderer's uncovered user-visible branches",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 590,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "subscription resync arms (out-of-order event, resync.required, stale revision, post-unmount) are exercised through the injected subscribe listener",
+        "menu navigate.* commands reach about, collections, comparison, inventory, publish, recovery, and studio views",
+        "bootstrap retry re-invokes getSnapshot after an initial failure",
+        "persistenceWarning, stale-refresh CTA, reconcile banners, cancellation-review, toolbar refresh, Escape query clear, unlinked harness badge, unknown source, empty inventory, empty inspection, and empty-comparison return all assert real rendered behavior",
+        "prepared-mutation context success and stale-generation review refusal are asserted through the bridge mocks",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "dependsOn": [
+        "SDF-043"
+      ],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "InventoryApp.tsx residual arms after SDF-043: resync/focus/menu/boot-retry/prepare/handoff/reconcile/refresh/escape/harness/empty-state branches; guards unreachable through the UI (disabled controls, dead ref placeholders, focus-race timing) are noted rather than forced",
+        "same commit hardens two latent signal-test races surfaced by the SDF-059 attempt-2 coverage failure: signalCase now rendezvous on the descendant's pidFile instead of the gate-start file (the group signal could land between STARTED and spawn under load), and the unit timeout gate widens to 1500ms/2000ms/2200ms margins for the same spawn-gap class"
+      ]
+    },
+    {
+      "id": "SDF-060",
+      "title": "Cover local-skills-process boundary failure arms: resolvers, capture prep, observation/inspection errors, and mutation-boundary dispositions",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 600,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "resolveWindowsNpxCommand PATH-absent, injected-exists resolution, and quoted/empty entry filters are covered",
+        "resolvePosixNpxCommand HOME-absent, readdir-failure, PATH-dir, and managed/fallback-dir arms are covered",
+        "stdout capture preparation failure rejects with a boundary error",
+        "observeInventory covers version-check failure, dialect mismatch, nonzero observation exit, and per-scope parse failures",
+        "inspectSource covers dialect-failure mapping, invoke-boundary throw dispositions, nonzero exit, parse failure, and pre-aborted signal",
+        "executeConfirmed covers missing/digest-mismatched/expired confirmation, boundary-throw dispositions, pre-aborted cancel, and plan eviction on re-prepare",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "dependsOn": [
+        "SDF-011"
+      ],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "local-skills-process.ts residual map after SDF-011: ~74.7% branches under focused coverage; injectable failure arms remain in npx resolvers, spawn capture prep, verifyDialect/observeInventory, inspectSource, and executeConfirmed; posix npx resolution needs the real ~/.nvm-style directory scan only for arms injectable through the environment + isExecutable seams"
+      ]
+    },
+    {
+      "id": "SDF-061",
+      "title": "Cover release-integrity candidate-package, draft-payload, attestation, and GitHub release verification arms",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 610,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "identifyCandidatePackage covers the candidate-root shape, non-regular-file entry, checksum mismatch, manifest JSON/schema/source/workflow/build-input/build-output/artifact-evidence arms, unexpected file set, artifact byte mismatch, lockfile digest mismatch, matrix identity, and directory identity",
+        "inspectCandidateSubjects covers the full four-target candidate set plus non-directory entry, missing target, and mixed-version failures",
+        "verifyDraftPayload covers digest pattern, empty/non-file payload, changed bytes, and the matching happy path",
+        "assertVerifiedAttestationResult covers result shape, statement shape, predicate-type and predicate mismatches, subject validation, and subject-set mismatches",
+        "verifyGitHubDraftRelease and verifyGitHubPreviewRelease cover input-context validation, draft/preview guards, identity mismatches, and the asset-verification arms including a consistent happy path",
+        "assertTaggedPreviewVersions covers tag-ref parsing, versions-map validation, and version divergence",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "dependsOn": [
+        "SDF-055"
+      ],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "release-integrity.mjs residual map after SDF-055: candidate-package validation, draft payload, attestation result, and GitHub release verification arms; the evidence pipeline (createSpdxDocument, evidenceFilePlan, finalizeReleaseEvidence, verifyReleaseEvidence, assembleVerifiedDraft, generateReleaseEvidence) plus two near-unreachable file-type arms (312, 391) remain for a follow-up item",
+        "new tests/release-integrity.test.ts builds digest-addressed candidate packages through a manifest mutator + artifact-content fixture builder; no production changes"
+      ]
+    },
+    {
+      "id": "SDF-062",
+      "title": "Cover release-integrity evidence-pipeline failure arms (finalize, verify, assemble)",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 620,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "finalizeReleaseEvidence covers bundle-set keys, provenance JSON/shape/digest/version failures, pre-attestation file-set mismatch, bundle non-string/non-file/empty/bad-JSON/non-object arms",
+        "generateReleaseEvidence covers the unsupported package-lock shape arm in createSpdxDocument",
+        "verifyReleaseEvidence covers file-set mismatch, evidence-index parse/shape/completeness, digest-identity, per-file byte, set-digest, artifact-digest, checksum, and manifest-evidence mismatches",
+        "assembleVerifiedDraft covers the attestation-receipt guards (keys, predicate types, signer workflow, source ref) and payload-assembly propagation",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "dependsOn": [
+        "SDF-061"
+      ],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "release-integrity.mjs residual after SDF-061: evidence pipeline arms (createSpdxDocument lock shape, finalizeReleaseEvidence bundle/provenance/file-set guards, verifyReleaseEvidence + parseEvidenceIndex index/digest/byte checks, assembleVerifiedDraft receipt + payload assembly); lines 312/391 (uncaught readFile ENOENT, artifact isFile) and 477-480 (globally-unique artifact names, unreachable by construction since names embed platform-arch) noted as constrained",
+        "extends tests/release-integrity.test.ts reusing writeCandidateSet/writePackageLock/generateReleaseEvidence happy-path fixtures with per-test mutation"
+      ]
+    },
+    {
+      "id": "SDF-063",
+      "title": "Exercise all release-integrity CLI command handlers end-to-end",
+      "kind": "verification",
+      "priority": "p2",
+      "state": "delivered",
+      "acceptance": [
+        "tests/release-integrity.test.ts drives runReleaseIntegrityCommand end-to-end for identify, subjects, generate, finalize, assemble, verify-attestation, notes, verify-release, verify-preview-release, and preflight-draft using real on-disk candidate/evidence/payload fixtures",
+        "GitHub release verification covers both the matching-release success paths and the missing/duplicate-release rejection",
+        "GITHUB_OUTPUT emission is captured via a private stubbed file and asserted",
+        "release-integrity-cli.mjs coverage improves materially (>=90% statements)"
+      ],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": "All commands exercised against real fixture trees; no network or publication side effects.",
+      "order": 63
+    },
+    {
+      "id": "SDF-064",
+      "title": "Cover composition-root default provider lambdas",
+      "kind": "verification",
+      "priority": "p2",
+      "state": "delivered",
+      "order": 64,
+      "acceptance": [
+        "composition-root.test.ts captures and invokes the composed default providers: ssh access clock, preference systemLocaleTag, git publisher clock, capabilities clock/id, per-target process clock/id, and update restartSafety delegation",
+        "composition-root.ts reaches 100% statement/branch/function/line coverage in focused measurement"
+      ],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": "Extends the existing mock-based composition test; no product behavior changes."
+    },
+    {
+      "id": "SDF-065",
+      "title": "Cover SSH transport-runner termination internals and process passthroughs",
+      "kind": "verification",
+      "priority": "p2",
+      "state": "delivered",
+      "order": 65,
+      "acceptance": [
+        "ssh-transport-runner.test.ts exercises pre-spawn abort, mid-staging abort, missing executable, stdin.end fallback, SIGTERM-resistant SIGKILL escalation, in-flight interruption guard, cancellation write failure, stdout byte-limit termination, and the three bounded Windows tree-kill arms",
+        "ssh-skills-process.test.ts covers pre-aborted observation, project/global inventory parse passthroughs, mutation-plan failure passthrough, and GitHub-source add preparation",
+        "All new tests are deterministic under coverage load (no wall-clock races on child boot)"
+      ],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": "ssh-skills-process.ts 87% -> ~92% statements; remaining arms need non-ESRCH kill failures or are unreachable via the public API (wireHarnessId is gated at prepare)."
+    },
+    {
+      "id": "SDF-066",
+      "title": "Fix Windows-host posix resolver fixtures; cover local runner termination and cancellation arms; SiteHeader pointer dismissal",
+      "kind": "code-change",
+      "priority": "p1",
+      "state": "delivered",
+      "order": 66,
+      "acceptance": [
+        "The two resolvePosixNpxCommand tests asserting POSIX path content skip on win32 hosts (Windows CI job109245775896 failures at test lines 2823/2830 are closed)",
+        "local-skills-process.test.ts covers spawn-runner timeout, mid-run stdout byte-limit termination, SIGTERM-resistant SIGKILL escalation, missing-executable mapping, and the bounded Windows tree-kill never-resolves/late-resolve arms",
+        "Observation/inspection cancellation passthroughs and prepareMutation plan-failure passthrough are covered",
+        "SiteHeader.test.tsx covers outside-pointerdown dismissal and inside-pointerdown retention",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": "Windows root cause: the posix resolver tests assert join()-built path content and a ':'-joined PATH that are only well-formed on posix hosts; the resolver is never invoked for win32 targets in production. Coverage additions are in the same file and verified locally."
+    }
+  ]
+}

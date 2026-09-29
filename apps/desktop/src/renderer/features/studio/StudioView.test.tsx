@@ -607,4 +607,288 @@ describe("StudioView (ADR 0018)", () => {
       "The Skill could not be exported.",
     );
   });
+
+  it("requests folder access and a fresh Draft through main", async () => {
+    const openStudioFolder = vi.fn(async () => ({
+      ok: true as const,
+      value: { operationId: "op-folder" },
+    }));
+    const createStudioDraft = vi.fn(async () => ({
+      ok: true as const,
+      value: { operationId: "op-draft" },
+    }));
+    render(
+      <StudioView
+        client={bridge({ createStudioDraft, openStudioFolder })}
+        studio={state()}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("studio-open-folder"));
+    await waitFor(() => expect(openStudioFolder).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByTestId("studio-new-draft"));
+    await waitFor(() => expect(createStudioDraft).toHaveBeenCalledTimes(1));
+    expect(createStudioDraft.mock.calls[0]).toHaveLength(0);
+  });
+
+  it("surfaces a rejected intent instead of failing silently", async () => {
+    const openStudioFolder = vi.fn(async () => ({
+      error: {
+        code: "internal_error" as const,
+        effects: "none" as const,
+        message: "picker broke",
+        phase: "ipc" as const,
+        retryable: true,
+      },
+      ok: false as const,
+    }));
+    render(
+      <StudioView
+        client={bridge({ openStudioFolder })}
+        studio={state()}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("studio-open-folder"));
+    await waitFor(() =>
+      expect(screen.getByRole("alert")).toHaveTextContent("picker broke"),
+    );
+  });
+
+  it("blocks folder access while another operation is running", () => {
+    const { container } = render(
+      <StudioView
+        client={bridge()}
+        studio={state({ activeOperationId: "op-running" })}
+      />,
+    );
+    expect(screen.getByTestId("studio-open-folder")).toBeDisabled();
+    expect(screen.getByTestId("studio-new-draft")).toBeDisabled();
+    expect(container.querySelector(".spin")).not.toBeNull();
+  });
+
+  it("reports quarantined Drafts without exposing their contents", () => {
+    render(
+      <StudioView
+        client={bridge()}
+        studio={state({
+          draftFailures: [
+            { draftId: "draft-bad-1", reason: "corrupt" },
+            { draftId: "draft-bad-2", reason: "newer-schema" },
+          ],
+        })}
+      />,
+    );
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "2 Drafts could not be read and were set aside.",
+    );
+    expect(screen.getByRole("status")).not.toHaveTextContent("draft-bad-1");
+  });
+
+  it("deletes the selected Draft at its acknowledged revision", async () => {
+    const deleteStudioDraft = vi.fn(async () => ({
+      ok: true as const,
+      value: { operationId: "op-del" },
+    }));
+    render(
+      <StudioView
+        client={bridge({ deleteStudioDraft })}
+        studio={state({ drafts: [draft] })}
+      />,
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Delete Draft" }),
+    );
+    await waitFor(() =>
+      expect(deleteStudioDraft).toHaveBeenCalledWith("draft-1", 3),
+    );
+  });
+
+  it("requests a Draft preview through the bridge", async () => {
+    const previewStudioDraft = vi.fn(async () => ({
+      ok: true as const,
+      value: { operationId: "op-prev" },
+    }));
+    render(
+      <StudioView
+        client={bridge({ previewStudioDraft })}
+        studio={state({ drafts: [draft] })}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Preview" }));
+    await waitFor(() =>
+      expect(previewStudioDraft).toHaveBeenCalledWith("draft-1"),
+    );
+  });
+
+  it("flags a conflict when a Draft revision advances elsewhere and reloads on demand", async () => {
+    const saveStudioDraft = vi.fn(async () => ({
+      ok: true as const,
+      value: { operationId: "op-save" },
+    }));
+    const client = bridge({ saveStudioDraft });
+    const { rerender } = render(
+      <StudioView client={client} studio={state({ drafts: [draft] })} />,
+    );
+    const textarea = screen.getByTestId("studio-editor-textarea");
+    // An edit opens the session at the acknowledged revision.
+    fireEvent.change(textarea, { target: { value: `${draft.skillMd}\nx` } });
+    expect(textarea).not.toBeDisabled();
+
+    // A newer revision lands without this session acknowledging it.
+    rerender(
+      <StudioView
+        client={client}
+        studio={state({ drafts: [{ ...draft, revision: 5 }] })}
+      />,
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "changed elsewhere",
+      ),
+    );
+    expect(textarea).toBeDisabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Reload" }));
+    await waitFor(() =>
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument(),
+    );
+    expect(screen.getByTestId("studio-draft-revision")).toHaveTextContent("5");
+    expect(screen.getByTestId("studio-editor-textarea")).not.toBeDisabled();
+  });
+});
+
+describe("StudioView preview renderer coverage", () => {
+  it("renders every preview node kind and falls through unknown kinds inertly", () => {
+    const { container } = render(
+      <StudioView
+        client={bridge()}
+        studio={state({
+          drafts: [draft],
+          preview: {
+            draftId: "draft-1",
+            preview: {
+              blocks: [
+                {
+                  children: [
+                    {
+                      children: [{ kind: "text", text: "Bold head" }],
+                      kind: "strong",
+                    },
+                  ],
+                  kind: "heading",
+                  level: 2,
+                },
+                {
+                  children: [
+                    { kind: "code", text: "literal()" },
+                    {
+                      children: [{ kind: "text", text: "emphasised" }],
+                      kind: "emphasis",
+                    },
+                    { kind: "unknown-inline", text: "dropped" } as never,
+                  ],
+                  kind: "paragraph",
+                },
+                {
+                  kind: "code",
+                  language: "ts",
+                  text: "const x = 1;",
+                },
+                {
+                  items: [[{ kind: "text", text: "first" }]],
+                  kind: "list",
+                  ordered: true,
+                },
+                {
+                  items: [[{ kind: "text", text: "second" }]],
+                  kind: "list",
+                  ordered: false,
+                },
+                {
+                  children: [
+                    {
+                      children: [{ kind: "text", text: "quoted" }],
+                      kind: "paragraph",
+                    },
+                  ],
+                  kind: "quote",
+                },
+                { kind: "rule" },
+                { kind: "unknown-block" } as never,
+              ],
+              profileVersion: 1,
+              truncated: false,
+            },
+            renderedAt: "2026-09-15T10:06:00.000Z",
+            revision: 3,
+          },
+        })}
+      />,
+    );
+
+    const preview = screen.getByTestId("studio-preview");
+    expect(preview.querySelector("h2 strong")).toHaveTextContent("Bold head");
+    expect(preview.querySelector("p code")).toHaveTextContent("literal()");
+    expect(preview.querySelector("p em")).toHaveTextContent("emphasised");
+    expect(preview).not.toHaveTextContent("dropped");
+    const codeBlock = preview.querySelector("pre code");
+    expect(codeBlock).toHaveTextContent("const x = 1;");
+    expect(codeBlock?.parentElement).toHaveAttribute("data-language", "ts");
+    expect(preview.querySelector("ol li")).toHaveTextContent("first");
+    expect(preview.querySelector("ul li")).toHaveTextContent("second");
+    expect(preview.querySelector("blockquote p")).toHaveTextContent("quoted");
+    expect(preview.querySelector("hr")).not.toBeNull();
+    expect(container.querySelectorAll("a, img, script, iframe")).toHaveLength(
+      0,
+    );
+  });
+});
+
+describe("StudioView error and session guards", () => {
+  it("surfaces a failed Grant control request next to the list", async () => {
+    const validateStudioGrant = vi.fn(async () => ({
+      error: {
+        code: "internal_error" as const,
+        effects: "none" as const,
+        message: "grant validation broke",
+        phase: "validate" as const,
+        retryable: true,
+      },
+      ok: false as const,
+    }));
+    render(
+      <StudioView
+        client={bridge({ validateStudioGrant })}
+        studio={state({ grants: [grant] })}
+      />,
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Validate again" }),
+    );
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "grant validation broke",
+    );
+  });
+
+  it("surfaces a failed Draft control request next to the editor", async () => {
+    const previewStudioDraft = vi.fn(async () => ({
+      error: {
+        code: "internal_error" as const,
+        effects: "none" as const,
+        message: "preview pipeline broke",
+        phase: "preview" as const,
+        retryable: true,
+      },
+      ok: false as const,
+    }));
+    render(
+      <StudioView
+        client={bridge({ previewStudioDraft })}
+        studio={state({ drafts: [draft] })}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Preview" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "preview pipeline broke",
+    );
+  });
 });

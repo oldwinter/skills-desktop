@@ -7,6 +7,7 @@ import {
   readdir,
   readFile,
   rm,
+  symlink,
   watch,
   writeFile,
 } from "node:fs/promises";
@@ -29,6 +30,7 @@ import {
   createLocalSkillsProcess,
   createSpawnProcessRunner,
   ProcessBoundaryError,
+  resolvePosixNpxCommand,
   resolveWindowsNpxCommand,
   type ProcessInvocation,
   type ProcessRunner,
@@ -157,7 +159,10 @@ require("node:fs").writeFileSync(${JSON.stringify(marker)}, "ran");
       );
       const bin = join(home, ".local", "bin");
       await mkdir(bin, { recursive: true });
-      await copyFile(process.execPath, join(bin, "node"));
+      // A symlink, not a copy: dynamically linked Node builds (for example a
+      // Homebrew Cellar install) resolve their shared libraries relative to
+      // the real executable, so a copied binary cannot start.
+      await symlink(process.execPath, join(bin, "node"));
       await writeCommonJsExecutable(
         bin,
         "npx",
@@ -500,6 +505,110 @@ else process.exitCode = 2;
     } finally {
       await rm(temporaryDirectory, { force: true, recursive: true });
     }
+  });
+
+  it("terminates a child that exceeds its time limit", async () => {
+    const runner = createSpawnProcessRunner({ platform: process.platform });
+
+    const failure = await runner
+      .run({
+        args: ["-e", "setInterval(() => undefined, 1000)"],
+        cwd: process.cwd(),
+        env: { PATH: process.env.PATH ?? "" },
+        executable: process.execPath,
+        maxOutputBytes: 1_024,
+        shell: false,
+        signal: new AbortController().signal,
+        timeoutMs: 100,
+        windowsHide: true,
+      })
+      .catch((error: unknown) => error);
+
+    expect(failure).toMatchObject({
+      disposition: "timed-out",
+      message: "Process invocation exceeded its time limit.",
+      started: true,
+    });
+  });
+
+  it("rejects a child whose stderr exceeds the byte limit", async () => {
+    const runner = createSpawnProcessRunner({ platform: process.platform });
+
+    const failure = await runner
+      .run({
+        args: [
+          "-e",
+          'process.stderr.write("x".repeat(8 * 1024)); setInterval(() => undefined, 1000);',
+        ],
+        cwd: process.cwd(),
+        env: { PATH: process.env.PATH ?? "" },
+        executable: process.execPath,
+        maxOutputBytes: 1_024,
+        shell: false,
+        signal: new AbortController().signal,
+        timeoutMs: 10_000,
+        windowsHide: true,
+      })
+      .catch((error: unknown) => error);
+
+    expect(failure).toMatchObject({
+      disposition: "failed",
+      message: "Process output exceeded its byte limit.",
+      started: true,
+      termination: "known",
+    });
+  });
+
+  it("rejects an invocation that is cancelled before spawn", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const runner = createSpawnProcessRunner({ platform: process.platform });
+
+    const failure = await runner
+      .run({
+        args: ["-e", "process.exit(0)"],
+        cwd: process.cwd(),
+        env: { PATH: process.env.PATH ?? "" },
+        executable: process.execPath,
+        maxOutputBytes: 1_024,
+        shell: false,
+        signal: controller.signal,
+        timeoutMs: 10_000,
+        windowsHide: true,
+      })
+      .catch((error: unknown) => error);
+
+    expect(failure).toMatchObject({
+      disposition: "cancelled",
+      message: "Process invocation was cancelled before spawn.",
+      started: false,
+    });
+  });
+
+  it("resolves a running child that closes after abort-driven termination", async () => {
+    const controller = new AbortController();
+    const runner = createSpawnProcessRunner({ platform: process.platform });
+
+    const pending = runner.run({
+      args: ["-e", "setInterval(() => undefined, 1000)"],
+      cwd: process.cwd(),
+      env: { PATH: process.env.PATH ?? "" },
+      executable: process.execPath,
+      maxOutputBytes: 1_024,
+      shell: false,
+      signal: controller.signal,
+      timeoutMs: 10_000,
+      windowsHide: true,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    controller.abort();
+
+    await expect(pending).resolves.toMatchObject({
+      stderr: "",
+      stdout: "",
+    });
+    const result = await pending;
+    expect(result.exitCode === null || result.exitCode !== 0).toBe(true);
   });
 
   it("rejects file-backed stdout above the configured byte limit", async () => {
@@ -1930,5 +2039,1558 @@ describe("Local SkillsProcess source inspection contract", () => {
     expect(
       runner.invocations.filter(({ args }) => args.at(-1) === "--list"),
     ).toHaveLength(1);
+  });
+});
+
+describe("Local SkillsProcess npx resolution fallbacks", () => {
+  it("finds node.exe and npx-cli.js under quoted Windows PATH entries", async () => {
+    const expected = new Set([
+      'C:\\Program Files\\nodejs\\node.exe',
+      'C:\\Program Files\\nodejs\\node_modules\\npm\\bin\\npx-cli.js',
+    ]);
+    const command = await resolveWindowsNpxCommand(
+      { PATH: '"C:\\Program Files\\nodejs";C:\\tools;' },
+      async (path) => expected.has(path),
+    );
+    expect(command).toEqual({
+      executable: 'C:\\Program Files\\nodejs\\node.exe',
+      npxCliPath:
+        'C:\\Program Files\\nodejs\\node_modules\\npm\\bin\\npx-cli.js',
+    });
+  });
+
+  it("fails when Windows PATH has node.exe but no npx entry point", async () => {
+    await expect(
+      resolveWindowsNpxCommand({ PATH: "C:\\tools" }, async (path) =>
+        path.endsWith("node.exe"),
+      ),
+    ).rejects.toMatchObject({
+      message: "The Windows Node.js and npx entry points are unavailable.",
+      name: "ProcessBoundaryError",
+    });
+  });
+
+  it("prefers the newest managed nvm version under HOME", async () => {
+    const home = await mkdtemp(join(tmpdir(), "skills-desktop-nvm-"));
+    const versions = join(home, ".nvm", "versions", "node");
+    for (const version of ["v20.9.0", "v22.1.0"]) {
+      await mkdir(join(versions, version, "bin"), { recursive: true });
+    }
+    const executables = new Set([
+      join(versions, "v20.9.0", "bin", "npx"),
+      join(versions, "v20.9.0", "bin", "node"),
+      join(versions, "v22.1.0", "bin", "npx"),
+      join(versions, "v22.1.0", "bin", "node"),
+    ]);
+    const command = await resolvePosixNpxCommand(
+      { HOME: home, PATH: "" },
+      "linux",
+      async (path) => executables.has(path),
+    );
+    const newestBin = join(versions, "v22.1.0", "bin");
+    expect(command.executable).toBe(join(newestBin, "npx"));
+    // The managed directory leads the PATH prefix the resolved env carries;
+    // it cannot be split on ":" because Windows drive letters contain one.
+    expect(command.path.startsWith(newestBin)).toBe(true);
+  });
+
+  it("resolves npx through a fallback directory that is not on PATH", async () => {
+    const executables = new Set([
+      join("/home/u", ".volta", "bin", "npx"),
+      join("/home/u", ".volta", "bin", "node"),
+      "/usr/bin/node",
+    ]);
+    const command = await resolvePosixNpxCommand(
+      { HOME: "/home/u", PATH: "/usr/bin" },
+      "linux",
+      async (path) => executables.has(path),
+    );
+    expect(command.executable).toBe(join("/home/u", ".volta", "bin", "npx"));
+    expect(command.path.split(":")[0]).toBe(join("/home/u", ".volta", "bin"));
+  });
+
+  it("fails when npx exists but no node executable can be found", async () => {
+    await expect(
+      resolvePosixNpxCommand(
+        { HOME: "/home/u", PATH: "/usr/bin" },
+        "linux",
+        async (path) => path === "/usr/bin/npx",
+      ),
+    ).rejects.toMatchObject({
+      message:
+        "Node.js and npx are unavailable. Install Node.js, then refresh this Target.",
+      name: "ProcessBoundaryError",
+    });
+  });
+});
+
+describe("Local SkillsProcess observation and confirmation edges", () => {
+  const binding = {
+    generation: 3,
+    harness: "Codex",
+    targetId: "00000000-0000-4000-8000-000000000001",
+  };
+
+  const processWith = (runner: ProcessRunner, clock = () => new Date("2026-08-21T10:00:00.000Z")) =>
+    createLocalSkillsProcess({
+      binding,
+      clock,
+      platform: "linux",
+      posixNpxCommand: scriptedPosixNpxCommand,
+      runner,
+      workspace: "/workspace",
+    });
+
+  const versionRunner = (versionOutcome: {
+    exitCode: number;
+    stdout: string;
+  }): ProcessRunner => ({
+    async run(invocation) {
+      const packageIndex = invocation.args.indexOf(CLI_PACKAGE);
+      const operation = invocation.args.slice(packageIndex + 1).join(" ");
+      if (operation === "--version") {
+        return { stderr: "", ...versionOutcome };
+      }
+      return { exitCode: 0, stderr: "", stdout: "[]" };
+    },
+  });
+
+  it("maps a failed version probe to a retryable process_failed", async () => {
+    const skillsProcess = processWith(
+      versionRunner({ exitCode: 1, stdout: "" }),
+    );
+    expect(
+      await skillsProcess.observeInventory({
+        signal: new AbortController().signal,
+      }),
+    ).toMatchObject({
+      error: { code: "process_failed", retryable: true },
+      ok: false,
+    });
+  });
+
+  it("maps a dialect mismatch to a non-retryable cli_incompatible", async () => {
+    const skillsProcess = processWith(
+      versionRunner({ exitCode: 0, stdout: "9.9.9\n" }),
+    );
+    expect(
+      await skillsProcess.observeInventory({
+        signal: new AbortController().signal,
+      }),
+    ).toMatchObject({
+      error: { code: "cli_incompatible", retryable: false },
+      ok: false,
+    });
+  });
+
+  it("cancels observation before spawning when the signal is already aborted", async () => {
+    const runner: ProcessRunner = {
+      async run() {
+        throw new Error("must not spawn");
+      },
+    };
+    const skillsProcess = processWith(runner);
+    const controller = new AbortController();
+    controller.abort();
+    expect(
+      await skillsProcess.observeInventory({ signal: controller.signal }),
+    ).toMatchObject({ error: { code: "cancelled" }, ok: false });
+  });
+
+  it("maps a failed inventory list to process_failed and a post-list abort to cancelled", async () => {
+    const failing = processWith({
+      async run(invocation) {
+        const packageIndex = invocation.args.indexOf(CLI_PACKAGE);
+        const operation = invocation.args.slice(packageIndex + 1).join(" ");
+        if (operation === "--version")
+          return { exitCode: 0, stderr: "", stdout: "1.5.23\n" };
+        if (operation === "list --json")
+          return { exitCode: 1, stderr: "cannot list", stdout: "" };
+        return { exitCode: 0, stderr: "", stdout: globalOutput };
+      },
+    });
+    expect(
+      await failing.observeInventory({
+        signal: new AbortController().signal,
+      }),
+    ).toMatchObject({ error: { code: "process_failed" }, ok: false });
+
+    const controller = new AbortController();
+    const aborting = processWith({
+      async run(invocation) {
+        const packageIndex = invocation.args.indexOf(CLI_PACKAGE);
+        const operation = invocation.args.slice(packageIndex + 1).join(" ");
+        if (operation === "--version")
+          return { exitCode: 0, stderr: "", stdout: "1.5.23\n" };
+        controller.abort();
+        return {
+          exitCode: 0,
+          stderr: "",
+          stdout: operation === "list --json" ? projectOutput : globalOutput,
+        };
+      },
+    });
+    expect(
+      await aborting.observeInventory({ signal: controller.signal }),
+    ).toMatchObject({ error: { code: "cancelled" }, ok: false });
+  });
+
+  it("maps a thrown runner error to process_failed when not cancelled", async () => {
+    const skillsProcess = processWith({
+      async run(invocation) {
+        const packageIndex = invocation.args.indexOf(CLI_PACKAGE);
+        const operation = invocation.args.slice(packageIndex + 1).join(" ");
+        if (operation === "--version")
+          return { exitCode: 0, stderr: "", stdout: "1.5.23\n" };
+        throw new Error("spawn exploded");
+      },
+    });
+    expect(
+      await skillsProcess.observeInventory({
+        signal: new AbortController().signal,
+      }),
+    ).toMatchObject({ error: { code: "process_failed" }, ok: false });
+  });
+
+  it("propagates dialect failure into source inspection and classifies timeouts", async () => {
+    const incompatible = processWith(
+      versionRunner({ exitCode: 0, stdout: "9.9.9\n" }),
+    );
+    const descriptor = describeSource("vercel-labs/skills");
+    if (!descriptor.ok) throw new Error("fixture descriptor failed");
+    expect(
+      await incompatible.inspectSource({
+        descriptor: descriptor.value,
+        signal: new AbortController().signal,
+      }),
+    ).toMatchObject({ error: { code: "cli_incompatible" }, ok: false });
+
+    const timedOut = processWith({
+      async run(invocation) {
+        const packageIndex = invocation.args.indexOf(CLI_PACKAGE);
+        const operation = invocation.args.slice(packageIndex + 1).join(" ");
+        if (operation === "--version")
+          return { exitCode: 0, stderr: "", stdout: "1.5.23\n" };
+        throw new ProcessBoundaryError(
+          "Source inspection exceeded its time limit.",
+          "timed-out",
+          true,
+          "known",
+        );
+      },
+    });
+    expect(
+      await timedOut.inspectSource({
+        descriptor: descriptor.value,
+        signal: new AbortController().signal,
+      }),
+    ).toMatchObject({
+      error: {
+        code: "process_failed",
+        message: "Source inspection exceeded its time limit.",
+      },
+      ok: false,
+    });
+  });
+
+  it("rejects a mismatched digest and consumes the plan", async () => {
+    const skillsProcess = processWith(scriptedRunner());
+    const observed = await skillsProcess.observeInventory({
+      signal: new AbortController().signal,
+    });
+    if (!observed.ok) throw new Error("fixture observation failed");
+    const prepared = await skillsProcess.prepareMutation({
+      freshness: "fresh",
+      intent: { names: ["project-skill"], scope: "project", type: "remove" },
+      inventory: observed.value,
+      inventoryId: "inventory-7",
+    });
+    if (!prepared.ok) throw new Error("fixture preparation failed");
+
+    expect(
+      await skillsProcess.executeConfirmed({
+        confirmation: {
+          digest: "0".repeat(64),
+          preparedMutationId: prepared.value.id,
+        },
+        signal: new AbortController().signal,
+      }),
+    ).toMatchObject({
+      error: { code: "confirmation_invalid", message: expect.stringContaining("does not match") },
+      ok: false,
+    });
+    expect(
+      await skillsProcess.executeConfirmed({
+        confirmation: {
+          digest: prepared.value.digest,
+          preparedMutationId: prepared.value.id,
+        },
+        signal: new AbortController().signal,
+      }),
+    ).toMatchObject({ error: { code: "confirmation_invalid" }, ok: false });
+  });
+
+  it("rejects an expired prepared mutation", async () => {
+    let now = new Date("2026-08-21T10:00:00.000Z");
+    const skillsProcess = processWith(scriptedRunner(), () => now);
+    const observed = await skillsProcess.observeInventory({
+      signal: new AbortController().signal,
+    });
+    if (!observed.ok) throw new Error("fixture observation failed");
+    const prepared = await skillsProcess.prepareMutation({
+      freshness: "fresh",
+      intent: { names: ["project-skill"], scope: "project", type: "remove" },
+      inventory: observed.value,
+      inventoryId: "inventory-7",
+    });
+    if (!prepared.ok) throw new Error("fixture preparation failed");
+
+    now = new Date(Date.parse(prepared.value.expiresAt) + 1);
+    expect(
+      await skillsProcess.executeConfirmed({
+        confirmation: {
+          digest: prepared.value.digest,
+          preparedMutationId: prepared.value.id,
+        },
+        signal: new AbortController().signal,
+      }),
+    ).toMatchObject({ error: { code: "confirmation_expired" }, ok: false });
+  });
+
+  it("conflicts with an in-flight observation and consumes the plan", async () => {
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let listCalls = 0;
+    const runner: ProcessRunner = {
+      async run(invocation) {
+        const packageIndex = invocation.args.indexOf(CLI_PACKAGE);
+        const operation = invocation.args.slice(packageIndex + 1).join(" ");
+        if (operation === "--version")
+          return { exitCode: 0, stderr: "", stdout: "1.5.23\n" };
+        if (operation === "list --json") {
+          if (++listCalls === 2) await gate;
+          return { exitCode: 0, stderr: "", stdout: projectOutput };
+        }
+        return { exitCode: 0, stderr: "", stdout: globalOutput };
+      },
+    };
+    const skillsProcess = processWith(runner);
+    const observed = await skillsProcess.observeInventory({
+      signal: new AbortController().signal,
+    });
+    if (!observed.ok) throw new Error("fixture observation failed");
+    const prepared = await skillsProcess.prepareMutation({
+      freshness: "fresh",
+      intent: { names: ["project-skill"], scope: "project", type: "remove" },
+      inventory: observed.value,
+      inventoryId: "inventory-7",
+    });
+    if (!prepared.ok) throw new Error("fixture preparation failed");
+
+    const inFlight = skillsProcess.observeInventory({
+      signal: new AbortController().signal,
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(
+      await skillsProcess.executeConfirmed({
+        confirmation: {
+          digest: prepared.value.digest,
+          preparedMutationId: prepared.value.id,
+        },
+        signal: new AbortController().signal,
+      }),
+    ).toMatchObject({ error: { code: "mutation_conflict" }, ok: false });
+    release?.();
+    await inFlight;
+  });
+
+  it("reports not-observed versus possible effects when termination is unknown", async () => {
+    for (const [started, status] of [
+      [false, "not-observed"],
+      [true, "possible"],
+    ] as const) {
+      const runner: ProcessRunner = {
+        async run(invocation) {
+          const packageIndex = invocation.args.indexOf(CLI_PACKAGE);
+          const operation = invocation.args.slice(packageIndex + 1).join(" ");
+          if (operation === "--version")
+            return { exitCode: 0, stderr: "", stdout: "1.5.23\n" };
+          if (operation === "list --json")
+            return { exitCode: 0, stderr: "", stdout: projectOutput };
+          if (operation === "list --global --json")
+            return { exitCode: 0, stderr: "", stdout: globalOutput };
+          if (operation.startsWith("remove "))
+            throw new ProcessBoundaryError(
+              "kill uncertainty",
+              "failed",
+              started,
+              "unknown",
+            );
+          return { exitCode: 0, stderr: "", stdout: "[]" };
+        },
+      };
+      const skillsProcess = processWith(runner);
+      const observed = await skillsProcess.observeInventory({
+        signal: new AbortController().signal,
+      });
+      if (!observed.ok) throw new Error("fixture observation failed");
+      const prepared = await skillsProcess.prepareMutation({
+        freshness: "fresh",
+        intent: {
+          names: ["project-skill"],
+          scope: "project",
+          type: "remove",
+        },
+        inventory: observed.value,
+        inventoryId: "inventory-7",
+      });
+      if (!prepared.ok) throw new Error("fixture preparation failed");
+      expect(
+        await skillsProcess.executeConfirmed({
+          confirmation: {
+            digest: prepared.value.digest,
+            preparedMutationId: prepared.value.id,
+          },
+          signal: new AbortController().signal,
+        }),
+      ).toMatchObject({
+        ok: true,
+        value: {
+          effects: { status },
+          inventory: null,
+          process: { disposition: "failed", termination: "unknown" },
+        },
+      });
+    }
+  });
+
+  it("reports possible effects when the mutation ran but postflight failed", async () => {
+    let mutated = false;
+    const runner: ProcessRunner = {
+      async run(invocation) {
+        const packageIndex = invocation.args.indexOf(CLI_PACKAGE);
+        const operation = invocation.args.slice(packageIndex + 1).join(" ");
+        if (operation === "--version")
+          return { exitCode: 0, stderr: "", stdout: "1.5.23\n" };
+        if (operation.startsWith("remove ")) {
+          mutated = true;
+          return { exitCode: 0, stderr: "", stdout: "removed" };
+        }
+        if (operation === "list --json" && mutated)
+          return { exitCode: 1, stderr: "postflight failed", stdout: "" };
+        if (operation === "list --json")
+          return { exitCode: 0, stderr: "", stdout: projectOutput };
+        return { exitCode: 0, stderr: "", stdout: globalOutput };
+      },
+    };
+    const skillsProcess = processWith(runner);
+    const observed = await skillsProcess.observeInventory({
+      signal: new AbortController().signal,
+    });
+    if (!observed.ok) throw new Error("fixture observation failed");
+    const prepared = await skillsProcess.prepareMutation({
+      freshness: "fresh",
+      intent: { names: ["project-skill"], scope: "project", type: "remove" },
+      inventory: observed.value,
+      inventoryId: "inventory-7",
+    });
+    if (!prepared.ok) throw new Error("fixture preparation failed");
+    expect(
+      await skillsProcess.executeConfirmed({
+        confirmation: {
+          digest: prepared.value.digest,
+          preparedMutationId: prepared.value.id,
+        },
+        signal: new AbortController().signal,
+      }),
+    ).toMatchObject({
+      ok: true,
+      value: {
+        effects: { status: "possible" },
+        inventory: null,
+        process: { disposition: "completed" },
+      },
+    });
+  });
+});
+
+describe("Local SkillsProcess mutation failure edges", () => {
+  const clock = () => new Date("2026-08-22T06:00:00.000Z");
+  const entry = {
+    agents: ["codex"],
+    contentFingerprint: { status: "unknown" },
+    declaredSource: { source: "acme/skills", sourceType: "github" },
+    extensions: {},
+    name: "shared-skill",
+    path: "/workspace/.agents/skills/shared-skill",
+    revision: { status: "unknown" },
+    scope: "project",
+    sourceUrl: null,
+  } as const;
+  const inventory: Inventory = {
+    cliVersion: CLI_VERSION,
+    entries: [entry],
+    observedAt: "2026-08-22T06:00:00.000Z",
+    schemaVersion: 1,
+  };
+  const binding = {
+    generation: 1,
+    harnessIds: ["codex"],
+    targetId: "00000000-0000-4000-8000-000000000001",
+  };
+  const addIntent: MutationIntent = {
+    names: ["shared-skill"],
+    scope: "project",
+    source: { source: "acme/skills", sourceType: "github" },
+    type: "add",
+  };
+
+  it("rejects preparation without a bound Target", () => {
+    expect(
+      prepareMutationPlan({
+        clock,
+        input: {
+          freshness: "fresh",
+          intent: addIntent,
+          inventory,
+          inventoryId: "inv-1",
+        },
+      }),
+    ).toMatchObject({ error: { code: "mutation_ineligible" }, ok: false });
+  });
+
+  it("rejects an empty Inventory id as stale", () => {
+    expect(
+      prepareMutationPlan({
+        binding,
+        clock,
+        input: {
+          freshness: "fresh",
+          intent: addIntent,
+          inventory,
+          inventoryId: "",
+        },
+      }),
+    ).toMatchObject({ error: { code: "stale_inventory" }, ok: false });
+  });
+
+  it("rejects a schema-invalid intent", () => {
+    expect(
+      prepareMutationPlan({
+        binding,
+        clock,
+        input: {
+          freshness: "fresh",
+          intent: {
+            names: [],
+            scope: "project",
+            source: { source: "acme/skills", sourceType: "github" },
+            type: "add",
+          },
+          inventory,
+          inventoryId: "inv-1",
+        },
+      }),
+    ).toMatchObject({ error: { code: "invalid_intent" }, ok: false });
+  });
+
+  it("rejects a Target with an empty harness set", () => {
+    expect(
+      prepareMutationPlan({
+        binding: { ...binding, harnessIds: [] },
+        clock,
+        input: {
+          freshness: "fresh",
+          intent: addIntent,
+          inventory,
+          inventoryId: "inv-1",
+        },
+      }),
+    ).toMatchObject({ error: { code: "mutation_ineligible" }, ok: false });
+  });
+
+  it("rejects update-all when nothing matches the scope", () => {
+    expect(
+      prepareMutationPlan({
+        binding,
+        clock,
+        input: {
+          freshness: "fresh",
+          intent: { scope: "global", type: "update-all" },
+          inventory: { ...inventory, entries: [] },
+          inventoryId: "inv-1",
+        },
+      }),
+    ).toMatchObject({ error: { code: "mutation_ineligible" }, ok: false });
+  });
+
+  it("rejects removal of Skills absent from the Fresh Inventory", () => {
+    expect(
+      prepareMutationPlan({
+        binding,
+        clock,
+        input: {
+          freshness: "fresh",
+          intent: {
+            names: ["ghost-skill"],
+            scope: "project",
+            type: "remove",
+          },
+          inventory,
+          inventoryId: "inv-1",
+        },
+      }),
+    ).toMatchObject({ error: { code: "mutation_ineligible" }, ok: false });
+  });
+
+  it("reports an add as not-observed when the declared source mismatches", () => {
+    expect(
+      observedMutationEffects(
+        {
+          names: ["shared-skill"],
+          scope: "project",
+          source: { source: "other/repo", sourceType: "github" },
+          type: "add",
+        },
+        inventory,
+        ["codex"],
+      ),
+    ).toMatchObject({ status: "not-observed" });
+  });
+
+  it("reports an add as verified when the declared source matches", () => {
+    expect(
+      observedMutationEffects(addIntent, inventory, ["codex"]),
+    ).toMatchObject({ status: "verified" });
+  });
+
+  it("reports updates on matching entries as content-unverified", () => {
+    expect(
+      observedMutationEffects(
+        { names: ["shared-skill"], scope: "project", type: "update" },
+        inventory,
+        ["codex"],
+      ),
+    ).toMatchObject({ status: "content-unverified" });
+  });
+});
+
+describe("Local SkillsProcess boundary failure arms", () => {
+  const boundaryFixture = (name: string) =>
+    readFileSync(
+      fileURLToPath(
+        new URL(
+          `../../../../../packages/skills-runtime/fixtures/${name}`,
+          import.meta.url,
+        ),
+      ),
+      "utf8",
+    );
+
+  const boundaryBinding = {
+    generation: 3,
+    harness: "Codex",
+    targetId: "00000000-0000-4000-8000-000000000001",
+  };
+
+  const boundaryProcess = (
+    runner: ProcessRunner,
+    overrides: Partial<Parameters<typeof createLocalSkillsProcess>[0]> = {},
+  ) =>
+    createLocalSkillsProcess({
+      binding: boundaryBinding,
+      clock: () => new Date("2026-08-21T10:00:00.000Z"),
+      id: () => "boundary-1",
+      platform: "linux",
+      posixNpxCommand: scriptedPosixNpxCommand,
+      runner,
+      workspace: "/workspace",
+      ...overrides,
+    });
+
+  type Outcome = { exitCode: number; stderr: string; stdout: string };
+  const operationsRunner = (
+    resolve: (operation: string) => Outcome,
+  ): ProcessRunner & { invocations: ProcessInvocation[] } => {
+    const invocations: ProcessInvocation[] = [];
+    return {
+      invocations,
+      async run(invocation) {
+        invocations.push(invocation);
+        const packageIndex = invocation.args.indexOf(CLI_PACKAGE);
+        return resolve(invocation.args.slice(packageIndex + 1).join(" "));
+      },
+    };
+  };
+
+  const versionedRunner = (
+    version: Outcome | (() => Outcome),
+    rest: Record<string, Outcome | (() => Outcome)> = {},
+  ) =>
+    operationsRunner((operation) => {
+      if (operation === "--version") {
+        return typeof version === "function" ? version() : version;
+      }
+      const entry = rest[operation];
+      if (entry === undefined) {
+        throw new Error(`Unexpected scripted invocation: ${operation}`);
+      }
+      return typeof entry === "function" ? entry() : entry;
+    });
+
+  const goodVersion = { exitCode: 0, stderr: "", stdout: "1.5.23\n" };
+  const mutationRunner = (mutation: (operation: string) => Outcome) =>
+    versionedRunner(goodVersion, {
+      "list --json": { exitCode: 0, stderr: "", stdout: projectOutput },
+      "list --global --json": { exitCode: 0, stderr: "", stdout: globalOutput },
+      "remove project-skill --agent codex --yes": () =>
+        mutation("remove project-skill --agent codex --yes"),
+    });
+
+  const removeIntent: MutationIntent = {
+    names: ["project-skill"],
+    scope: "project",
+    type: "remove",
+  };
+
+  async function prepareRemoval(skillsProcess: ReturnType<typeof boundaryProcess>) {
+    const observed = await skillsProcess.observeInventory({
+      signal: new AbortController().signal,
+    });
+    if (!observed.ok) throw new Error("fixture observation failed");
+    const prepared = await skillsProcess.prepareMutation({
+      freshness: "fresh",
+      intent: removeIntent,
+      inventory: observed.value,
+      inventoryId: "inventory-7",
+    });
+    if (!prepared.ok) throw new Error("fixture preparation failed");
+    return prepared.value;
+  }
+
+  it("rejects Windows npx resolution when PATH is absent", async () => {
+    await expect(
+      resolveWindowsNpxCommand({}, async () => true),
+    ).rejects.toThrow(
+      "The Windows Node.js and npx entry points are unavailable.",
+    );
+  });
+
+  it("resolves Windows endpoints from quoted and blank PATH entries across directories", async () => {
+    const existing = new Set([
+      "C:\\first\\node.exe",
+      "C:\\second\\node_modules\\npm\\bin\\npx-cli.js",
+    ]);
+
+    await expect(
+      resolveWindowsNpxCommand(
+        { PATH: '  "C:\\first"  ;;C:\\second' },
+        async (path) => existing.has(path),
+      ),
+    ).resolves.toEqual({
+      executable: "C:\\first\\node.exe",
+      npxCliPath: "C:\\second\\node_modules\\npm\\bin\\npx-cli.js",
+    });
+  });
+
+  it("rejects Posix npx resolution when neither PATH nor HOME provides the tools", async () => {
+    await expect(
+      resolvePosixNpxCommand({}, "linux", async () => false),
+    ).rejects.toThrow(
+      "Node.js and npx are unavailable. Install Node.js, then refresh this Target.",
+    );
+  });
+
+  it.skipIf(process.platform === "win32")(
+    "resolves Posix npx from the newest managed version directory when other roots fail",
+    async () => {
+    const home = await mkdtemp(join(tmpdir(), "lsd-posix-home-"));
+    try {
+      const versionsRoot = join(home, ".nvm", "versions", "node");
+      const newest = join(versionsRoot, "v20.0.0", "bin");
+      await mkdir(newest, { recursive: true });
+      await mkdir(join(versionsRoot, "v19.0.0", "bin"), { recursive: true });
+      await writeFile(join(versionsRoot, "not-a-version"), "marker", "utf8");
+      const newestBin = (name: string) => join(newest, name);
+
+      const resolved = await resolvePosixNpxCommand(
+        { HOME: home, PATH: "" },
+        "linux",
+        async (path) => path === newestBin("npx") || path === newestBin("node"),
+      );
+
+      expect(resolved.executable).toBe(newestBin("npx"));
+      expect(resolved.path.split(":")[0]).toBe(newest);
+    } finally {
+      await rm(home, { force: true, recursive: true });
+    }
+    },
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "resolves Posix npx as the bare command when a PATH directory provides both tools",
+    async () => {
+    const resolved = await resolvePosixNpxCommand(
+      { PATH: `/injected${delimiter}/other` },
+      "linux",
+      async (path) => path === "/injected/npx" || path === "/injected/node",
+    );
+
+    expect(resolved.executable).toBe("npx");
+    expect(resolved.path.split(":")).toEqual(["/injected", "/other"]);
+    },
+  );
+
+  it("rejects a run whose output capture directory cannot be prepared", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "lsd-capture-"));
+    try {
+      const blocker = join(directory, "not-a-directory");
+      await writeFile(blocker, "marker", "utf8");
+      const runner = createSpawnProcessRunner({
+        platform: "linux",
+        temporaryDirectory: join(blocker, "nested"),
+      });
+
+      await expect(
+        runner.run({
+          args: ["-e", "process.stdout.write('hi')"],
+          cwd: directory,
+          env: { PATH: process.env.PATH ?? "" },
+          executable: process.execPath,
+          maxOutputBytes: 1_024,
+          shell: false,
+          signal: new AbortController().signal,
+          timeoutMs: 5_000,
+          windowsHide: true,
+        }),
+      ).rejects.toThrow("Process output capture could not be prepared.");
+    } finally {
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("reports process_failed when the CLI version check exits nonzero", async () => {
+    const skillsProcess = boundaryProcess(
+      versionedRunner({ exitCode: 1, stderr: "nope", stdout: "" }),
+    );
+
+    await expect(
+      skillsProcess.observeInventory({ signal: new AbortController().signal }),
+    ).resolves.toMatchObject({
+      error: { code: "process_failed" },
+      ok: false,
+    });
+  });
+
+  it("reports cli_incompatible when the installed CLI dialect mismatches", async () => {
+    const skillsProcess = boundaryProcess(
+      versionedRunner({ exitCode: 0, stderr: "", stdout: "9.9.9\n" }),
+    );
+
+    await expect(
+      skillsProcess.observeInventory({ signal: new AbortController().signal }),
+    ).resolves.toMatchObject({
+      error: { code: "cli_incompatible", retryable: false },
+      ok: false,
+    });
+  });
+
+  it("reports process_failed when the CLI version invocation throws", async () => {
+    const skillsProcess = boundaryProcess(
+      versionedRunner(() => {
+        throw new Error("spawn failed");
+      }),
+    );
+
+    await expect(
+      skillsProcess.observeInventory({ signal: new AbortController().signal }),
+    ).resolves.toMatchObject({
+      error: { code: "process_failed" },
+      ok: false,
+    });
+  });
+
+  it("reports process_failed when an inventory listing exits nonzero", async () => {
+    const skillsProcess = boundaryProcess(
+      versionedRunner(goodVersion, {
+        "list --json": { exitCode: 2, stderr: "boom", stdout: "" },
+        "list --global --json": { exitCode: 0, stderr: "", stdout: globalOutput },
+      }),
+    );
+
+    await expect(
+      skillsProcess.observeInventory({ signal: new AbortController().signal }),
+    ).resolves.toMatchObject({
+      error: {
+        code: "process_failed",
+        message: "Inventory observation failed.",
+      },
+      ok: false,
+    });
+  });
+
+  it("propagates a malformed project listing", async () => {
+    const skillsProcess = boundaryProcess(
+      versionedRunner(goodVersion, {
+        "list --json": { exitCode: 0, stderr: "", stdout: "not json" },
+        "list --global --json": { exitCode: 0, stderr: "", stdout: globalOutput },
+      }),
+    );
+
+    await expect(
+      skillsProcess.observeInventory({ signal: new AbortController().signal }),
+    ).resolves.toMatchObject({
+      error: { code: "invalid_inventory" },
+      ok: false,
+    });
+  });
+
+  it("propagates a malformed global listing", async () => {
+    const skillsProcess = boundaryProcess(
+      versionedRunner(goodVersion, {
+        "list --json": { exitCode: 0, stderr: "", stdout: projectOutput },
+        "list --global --json": { exitCode: 0, stderr: "", stdout: "not json" },
+      }),
+    );
+
+    await expect(
+      skillsProcess.observeInventory({ signal: new AbortController().signal }),
+    ).resolves.toMatchObject({
+      error: { code: "invalid_inventory" },
+      ok: false,
+    });
+  });
+
+  it("cancels source inspection on a pre-aborted signal", async () => {
+    const runner = versionedRunner(goodVersion);
+    const skillsProcess = boundaryProcess(runner);
+    const controller = new AbortController();
+    controller.abort();
+    const descriptor = describeSource("vercel-labs/skills");
+    if (!descriptor.ok) throw new Error("fixture descriptor failed");
+
+    await expect(
+      skillsProcess.inspectSource({
+        descriptor: descriptor.value,
+        signal: controller.signal,
+      }),
+    ).resolves.toMatchObject({
+      error: { code: "cancelled" },
+      ok: false,
+    });
+    expect(runner.invocations).toHaveLength(0);
+  });
+
+  it("maps a dialect mismatch into source inspection without retry", async () => {
+    const skillsProcess = boundaryProcess(
+      versionedRunner({ exitCode: 0, stderr: "", stdout: "9.9.9\n" }),
+    );
+    const descriptor = describeSource("vercel-labs/skills");
+    if (!descriptor.ok) throw new Error("fixture descriptor failed");
+
+    await expect(
+      skillsProcess.inspectSource({
+        descriptor: descriptor.value,
+        signal: new AbortController().signal,
+      }),
+    ).resolves.toMatchObject({
+      error: { code: "cli_incompatible", retryable: false },
+      ok: false,
+    });
+  });
+
+  it("maps a timed-out source listing boundary into a bounded message", async () => {
+    const skillsProcess = boundaryProcess(
+      versionedRunner(goodVersion, {
+        "add vercel-labs/skills --list": () => {
+          throw new ProcessBoundaryError("timed out", "timed-out", true, "known");
+        },
+      }),
+    );
+    const descriptor = describeSource("vercel-labs/skills");
+    if (!descriptor.ok) throw new Error("fixture descriptor failed");
+
+    await expect(
+      skillsProcess.inspectSource({
+        descriptor: descriptor.value,
+        signal: new AbortController().signal,
+      }),
+    ).resolves.toMatchObject({
+      error: {
+        code: "process_failed",
+        message: "Source inspection exceeded its time limit.",
+      },
+      ok: false,
+    });
+  });
+
+  it("maps a plain source listing throw into a generic process failure", async () => {
+    const skillsProcess = boundaryProcess(
+      versionedRunner(goodVersion, {
+        "add vercel-labs/skills --list": () => {
+          throw new Error("boom");
+        },
+      }),
+    );
+    const descriptor = describeSource("vercel-labs/skills");
+    if (!descriptor.ok) throw new Error("fixture descriptor failed");
+
+    await expect(
+      skillsProcess.inspectSource({
+        descriptor: descriptor.value,
+        signal: new AbortController().signal,
+      }),
+    ).resolves.toMatchObject({
+      error: {
+        code: "process_failed",
+        message: "Source inspection failed.",
+      },
+      ok: false,
+    });
+  });
+
+  it("reports source_unavailable when the source listing exits nonzero", async () => {
+    const skillsProcess = boundaryProcess(
+      versionedRunner(goodVersion, {
+        "add vercel-labs/skills --list": {
+          exitCode: 1,
+          stderr: "not found",
+          stdout: "",
+        },
+      }),
+    );
+    const descriptor = describeSource("vercel-labs/skills");
+    if (!descriptor.ok) throw new Error("fixture descriptor failed");
+
+    await expect(
+      skillsProcess.inspectSource({
+        descriptor: descriptor.value,
+        signal: new AbortController().signal,
+      }),
+    ).resolves.toMatchObject({
+      error: { code: "source_unavailable" },
+      ok: false,
+    });
+  });
+
+  it("propagates a malformed source listing", async () => {
+    const skillsProcess = boundaryProcess(
+      versionedRunner(goodVersion, {
+        "add vercel-labs/skills --list": {
+          exitCode: 0,
+          stderr: "",
+          stdout: "no header here",
+        },
+      }),
+    );
+    const descriptor = describeSource("vercel-labs/skills");
+    if (!descriptor.ok) throw new Error("fixture descriptor failed");
+
+    await expect(
+      skillsProcess.inspectSource({
+        descriptor: descriptor.value,
+        signal: new AbortController().signal,
+      }),
+    ).resolves.toMatchObject({
+      error: { code: "source_inspection_incompatible" },
+      ok: false,
+    });
+  });
+
+  it("derives the inspection id from the content digest when no id source is provided", async () => {
+    // No `id` option: the inspection id derives from the content digest.
+    const skillsProcess = createLocalSkillsProcess({
+      binding: boundaryBinding,
+      clock: () => new Date("2026-08-21T10:00:00.000Z"),
+      platform: "linux",
+      posixNpxCommand: scriptedPosixNpxCommand,
+      runner: versionedRunner(goodVersion, {
+        "add vercel-labs/skills --list": {
+          exitCode: 0,
+          stderr: "",
+          stdout: boundaryFixture("skills-1.5.23-add-list-single.v1.txt"),
+        },
+      }),
+      workspace: "/workspace",
+    });
+    const descriptor = describeSource("vercel-labs/skills");
+    if (!descriptor.ok) throw new Error("fixture descriptor failed");
+
+    const inspected = await skillsProcess.inspectSource({
+      descriptor: descriptor.value,
+      signal: new AbortController().signal,
+    });
+
+    expect(inspected).toMatchObject({ ok: true });
+    if (!inspected.ok) throw new Error("fixture inspection failed");
+    expect(inspected.value.id).toMatch(/^[a-f0-9]{64}$/);
+  });
+
+  it("rejects an unknown prepared mutation confirmation", async () => {
+    const skillsProcess = boundaryProcess(scriptedRunner());
+
+    await expect(
+      skillsProcess.executeConfirmed({
+        confirmation: {
+          digest: "0".repeat(64),
+          preparedMutationId: "missing",
+        },
+        signal: new AbortController().signal,
+      }),
+    ).resolves.toMatchObject({
+      error: { code: "confirmation_invalid" },
+      ok: false,
+    });
+  });
+
+  it("rejects a digest-mismatched confirmation", async () => {
+    const skillsProcess = boundaryProcess(mutationRunner(() => ({
+      exitCode: 0,
+      stderr: "",
+      stdout: "removed",
+    })));
+    const prepared = await prepareRemoval(skillsProcess);
+
+    await expect(
+      skillsProcess.executeConfirmed({
+        confirmation: {
+          digest: "0".repeat(64),
+          preparedMutationId: prepared.id,
+        },
+        signal: new AbortController().signal,
+      }),
+    ).resolves.toMatchObject({
+      error: { code: "confirmation_invalid" },
+      ok: false,
+    });
+  });
+
+  it("rejects an expired prepared mutation", async () => {
+    let now = new Date("2026-08-21T10:00:00.000Z");
+    const skillsProcess = boundaryProcess(
+      mutationRunner(() => ({ exitCode: 0, stderr: "", stdout: "removed" })),
+      { clock: () => now },
+    );
+    const prepared = await prepareRemoval(skillsProcess);
+    now = new Date("2026-08-21T10:11:00.000Z");
+
+    await expect(
+      skillsProcess.executeConfirmed({
+        confirmation: {
+          digest: prepared.digest,
+          preparedMutationId: prepared.id,
+        },
+        signal: new AbortController().signal,
+      }),
+    ).resolves.toMatchObject({
+      error: { code: "confirmation_expired" },
+      ok: false,
+    });
+  });
+
+  it("evicts an earlier prepared plan when a new preparation arrives", async () => {
+    let sequence = 0;
+    const skillsProcess = boundaryProcess(
+      mutationRunner(() => ({ exitCode: 0, stderr: "", stdout: "removed" })),
+      { id: () => `prepared-${(sequence += 1)}` },
+    );
+    const first = await prepareRemoval(skillsProcess);
+    await prepareRemoval(skillsProcess);
+
+    await expect(
+      skillsProcess.executeConfirmed({
+        confirmation: {
+          digest: first.digest,
+          preparedMutationId: first.id,
+        },
+        signal: new AbortController().signal,
+      }),
+    ).resolves.toMatchObject({
+      error: { code: "confirmation_invalid" },
+      ok: false,
+    });
+  });
+
+  it("maps a timed-out mutation boundary into the process outcome and still postflights", async () => {
+    const skillsProcess = boundaryProcess(
+      mutationRunner(() => {
+        throw new ProcessBoundaryError("timed out", "timed-out", true, "known");
+      }),
+    );
+    const prepared = await prepareRemoval(skillsProcess);
+
+    const executed = await skillsProcess.executeConfirmed({
+      confirmation: {
+        digest: prepared.digest,
+        preparedMutationId: prepared.id,
+      },
+      signal: new AbortController().signal,
+    });
+
+    expect(executed).toMatchObject({
+      ok: true,
+      value: {
+        inventory: { entries: expect.any(Array) },
+        process: {
+          disposition: "timed-out",
+          exitCode: null,
+          termination: "known",
+        },
+      },
+    });
+  });
+
+  it("returns early without postflight when the boundary reports unknown termination", async () => {
+    const skillsProcess = boundaryProcess(
+      mutationRunner(() => {
+        throw new ProcessBoundaryError("lost", "failed", false, "unknown");
+      }),
+    );
+    const prepared = await prepareRemoval(skillsProcess);
+
+    const executed = await skillsProcess.executeConfirmed({
+      confirmation: {
+        digest: prepared.digest,
+        preparedMutationId: prepared.id,
+      },
+      signal: new AbortController().signal,
+    });
+
+    expect(executed).toMatchObject({
+      ok: true,
+      value: {
+        effects: { status: "not-observed" },
+        inventory: null,
+        process: {
+          disposition: "failed",
+          exitCode: null,
+          termination: "unknown",
+        },
+      },
+    });
+  });
+
+  it("cancels a confirmed mutation on a pre-aborted signal", async () => {
+    const skillsProcess = boundaryProcess(
+      mutationRunner(() => ({ exitCode: 0, stderr: "", stdout: "removed" })),
+    );
+    const prepared = await prepareRemoval(skillsProcess);
+    const controller = new AbortController();
+    controller.abort();
+
+    const executed = await skillsProcess.executeConfirmed({
+      confirmation: {
+        digest: prepared.digest,
+        preparedMutationId: prepared.id,
+      },
+      signal: controller.signal,
+    });
+
+    expect(executed).toMatchObject({
+      ok: true,
+      value: { process: { disposition: "cancelled", exitCode: null } },
+    });
+  });
+});
+
+describe("Local process runner termination internals", () => {
+  const hangInvocation = (
+    signal: AbortSignal,
+    overrides?: Partial<ProcessInvocation>,
+  ): ProcessInvocation => ({
+    args: ["-e", "setInterval(() => undefined, 1000)"],
+    cwd: process.cwd(),
+    env: { PATH: process.env.PATH ?? "" },
+    executable: process.execPath,
+    maxOutputBytes: 1_024,
+    shell: false,
+    signal,
+    timeoutMs: 10_000,
+    windowsHide: true,
+    ...overrides,
+  });
+
+  it.skipIf(process.platform === "win32")(
+    "rejects timed-out when the invocation exceeds its time limit",
+    async () => {
+      const runner = createSpawnProcessRunner({
+        cancellationGraceMs: 40,
+        platform: "linux",
+      });
+      await expect(
+        runner.run(
+          hangInvocation(new AbortController().signal, { timeoutMs: 80 }),
+        ),
+      ).rejects.toMatchObject({
+        disposition: "timed-out",
+        message: "Process invocation exceeded its time limit.",
+        started: true,
+        termination: "known",
+      });
+    },
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "rejects when live stdout capture exceeds the byte limit",
+    async () => {
+      const runner = createSpawnProcessRunner({
+        cancellationGraceMs: 40,
+        platform: "linux",
+      });
+      await expect(
+        runner.run(
+          hangInvocation(new AbortController().signal, {
+            args: [
+              "-e",
+              'process.stdout.write("x".repeat(4096)); setInterval(() => undefined, 1000)',
+            ],
+            maxOutputBytes: 64,
+          }),
+        ),
+      ).rejects.toMatchObject({
+        disposition: "failed",
+        message: "Process output exceeded its byte limit.",
+      });
+    },
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "resolves a SIGTERM-resistant child after SIGKILL escalation",
+    async () => {
+      const controller = new AbortController();
+      const runner = createSpawnProcessRunner({
+        cancellationGraceMs: 60,
+        platform: "linux",
+      });
+      const pending = runner.run(
+        hangInvocation(controller.signal, {
+          args: [
+            "-e",
+            'process.on("SIGTERM", () => {}); setInterval(() => undefined, 1000)',
+          ],
+        }),
+      );
+      controller.abort();
+      await expect(pending).resolves.toMatchObject({ exitCode: 1 });
+    },
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "maps a missing executable to an unavailable process failure",
+    async () => {
+      const runner = createSpawnProcessRunner({ platform: "linux" });
+      const directory = await mkdtemp(join(tmpdir(), "skills-run-missing-"));
+      try {
+        await expect(
+          runner.run(
+            hangInvocation(new AbortController().signal, {
+              cwd: directory,
+              executable: join(directory, "definitely-missing-binary"),
+            }),
+          ),
+        ).rejects.toMatchObject({
+          disposition: "failed",
+          message: "Process executable is unavailable.",
+          started: false,
+        });
+      } finally {
+        await rm(directory, { force: true, recursive: true });
+      }
+    },
+  );
+
+  it("fails the cancellation when Windows tree termination never resolves", async () => {
+    const controller = new AbortController();
+    let startedPid: number | undefined;
+    const runner = createSpawnProcessRunner({
+      killWindowsTree: (pid) => {
+        startedPid = pid;
+        return new Promise(() => {});
+      },
+      platform: "win32",
+      windowsTreeTerminationTimeoutMs: 40,
+    });
+    try {
+      const pending = runner.run(hangInvocation(controller.signal));
+      controller.abort();
+      await expect(pending).rejects.toMatchObject({
+        disposition: "failed",
+        message: "Process tree termination could not be confirmed.",
+        termination: "unknown",
+      });
+    } finally {
+      if (startedPid !== undefined) {
+        try {
+          process.kill(startedPid, "SIGKILL");
+        } catch {
+          // The wrapper may already have exited.
+        }
+      }
+    }
+  });
+
+  it("ignores a late Windows tree termination result after the bounded wait", async () => {
+    const controller = new AbortController();
+    const killed: number[] = [];
+    const runner = createSpawnProcessRunner({
+      async killWindowsTree(pid) {
+        killed.push(pid);
+        process.kill(pid, "SIGKILL");
+        await new Promise((resolve) => setTimeout(resolve, 150));
+      },
+      platform: "win32",
+      windowsTreeTerminationTimeoutMs: 40,
+    });
+    const pending = runner.run(hangInvocation(controller.signal));
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({
+      disposition: "failed",
+      message: "Process tree termination could not be confirmed.",
+    });
+    expect(killed).toHaveLength(1);
+  });
+});
+
+describe("Local SkillsProcess cancellation passthrough edges", () => {
+  const binding = {
+    generation: 3,
+    harness: "Codex",
+    targetId: "00000000-0000-4000-8000-000000000018",
+  };
+
+  function localProcess(runner: ProcessRunner) {
+    return createLocalSkillsProcess({
+      binding,
+      clock: () => new Date("2026-08-21T10:00:00.000Z"),
+      id: () => "edge-1",
+      platform: "linux",
+      posixNpxCommand: scriptedPosixNpxCommand,
+      runner,
+      workspace: "/workspace",
+    });
+  }
+
+  it("cancels observation when the signal aborts during listing", async () => {
+    const controller = new AbortController();
+    const runner: ProcessRunner = {
+      async run(invocation) {
+        const operation = invocation.args
+          .slice(invocation.args.indexOf(CLI_PACKAGE) + 1)
+          .join(" ");
+        if (operation === "--version") {
+          return { exitCode: 0, stderr: "", stdout: `${CLI_VERSION}\n` };
+        }
+        controller.abort();
+        if (operation === "list --json") {
+          return { exitCode: 0, stderr: "", stdout: projectOutput };
+        }
+        return { exitCode: 0, stderr: "", stdout: globalOutput };
+      },
+    };
+
+    const observed = await localProcess(runner).observeInventory({
+      signal: controller.signal,
+    });
+    expect(observed).toMatchObject({
+      error: { code: "cancelled" },
+      ok: false,
+    });
+  });
+
+  it("cancels source inspection before any spawn when aborted", async () => {
+    const runner: ProcessRunner = {
+      async run() {
+        throw new Error("must not spawn");
+      },
+    };
+    const descriptor = describeSource("vercel-labs/skills");
+    if (!descriptor.ok) throw new Error("fixture descriptor failed");
+    const controller = new AbortController();
+    controller.abort();
+
+    const inspected = await localProcess(runner).inspectSource({
+      descriptor: descriptor.value,
+      signal: controller.signal,
+    });
+    expect(inspected).toMatchObject({
+      error: { code: "cancelled" },
+      ok: false,
+    });
+  });
+
+  it("maps a cancelled dialect check during inspection to cancelled", async () => {
+    const controller = new AbortController();
+    const runner: ProcessRunner = {
+      async run() {
+        controller.abort();
+        throw new ProcessBoundaryError(
+          "Process invocation exceeded its time limit.",
+          "timed-out",
+        );
+      },
+    };
+    const descriptor = describeSource("vercel-labs/skills");
+    if (!descriptor.ok) throw new Error("fixture descriptor failed");
+
+    const inspected = await localProcess(runner).inspectSource({
+      descriptor: descriptor.value,
+      signal: controller.signal,
+    });
+    expect(inspected).toMatchObject({
+      error: { code: "cancelled" },
+      ok: false,
+    });
+  });
+
+  it("cancels source inspection when the signal aborts during listing", async () => {
+    const controller = new AbortController();
+    const runner: ProcessRunner = {
+      async run(invocation) {
+        const operation = invocation.args
+          .slice(invocation.args.indexOf(CLI_PACKAGE) + 1)
+          .join(" ");
+        if (operation === "--version") {
+          return { exitCode: 0, stderr: "", stdout: `${CLI_VERSION}\n` };
+        }
+        controller.abort();
+        return {
+          exitCode: 0,
+          stderr: "",
+          stdout: "[]",
+        };
+      },
+    };
+    const descriptor = describeSource("vercel-labs/skills");
+    if (!descriptor.ok) throw new Error("fixture descriptor failed");
+
+    const inspected = await localProcess(runner).inspectSource({
+      descriptor: descriptor.value,
+      signal: controller.signal,
+    });
+    expect(inspected).toMatchObject({
+      error: { code: "cancelled" },
+      ok: false,
+    });
+  });
+
+  it("returns the mutation plan failure unchanged", async () => {
+    const prepared = await localProcess(scriptedRunner()).prepareMutation({
+      freshness: "fresh",
+      intent: {
+        names: [],
+        scope: "project",
+        type: "remove",
+      },
+      inventory: {
+        cliVersion: CLI_VERSION,
+        entries: [],
+        observedAt: "2026-08-21T10:00:00.000Z",
+        schemaVersion: 1,
+      },
+      inventoryId: "inventory-local-1",
+    });
+    expect(prepared.ok).toBe(false);
   });
 });

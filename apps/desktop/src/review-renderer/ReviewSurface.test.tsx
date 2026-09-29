@@ -905,4 +905,164 @@ describe("Trusted Review surface", () => {
       "Publication attempted",
     );
   });
+
+  it("shows Imported Package evidence without impersonating Official review", async () => {
+    const client: ReviewBridge = {
+      async approve() {
+        return {
+          ok: true as const,
+          value: { operationId: "imported-execution" },
+        };
+      },
+      async getReview() {
+        return {
+          ok: true as const,
+          value: {
+            projection: {
+              collectionPlan: {
+                assessmentDigest: `sha256:${"b".repeat(64)}`,
+                childCommandPlan: {
+                  harness: "Codex",
+                  names: ["vendor-skill"],
+                  operation: "add" as const,
+                  preview: "skills add vendor/pack --skill vendor-skill",
+                  schemaVersion: 1 as const,
+                  scope: "project" as const,
+                  source: {
+                    source: "vendor/pack",
+                    sourceType: "github" as const,
+                  },
+                  targetId: "00000000-0000-4000-8000-000000000001",
+                  timeoutMs: 600_000,
+                },
+                childPreparedDigest: "c".repeat(64),
+                collectionId: "vendor-pack",
+                expiresAt: "2026-08-22T06:10:00.000Z",
+                id: "imported-plan",
+                inventoryDigest: `sha256:${"d".repeat(64)}`,
+                manifestDigest: `sha256:${"a".repeat(64)}`,
+                order: [
+                  {
+                    names: ["vendor-skill"],
+                    position: 1,
+                    targetId: "00000000-0000-4000-8000-000000000001",
+                  },
+                ],
+                releaseEvidence: {
+                  compatibility: {
+                    dialectId: "skills-1.5.23",
+                    harnessIds: ["codex"],
+                  },
+                  documentDigest: `sha256:${"9".repeat(64)}`,
+                  importedAt: "not-a-date",
+                  origin: "imported" as const,
+                },
+                releaseNumber: 2,
+                reviewDigest: `sha256:${"e".repeat(64)}`,
+                schemaVersion: 1 as const,
+                scope: "project" as const,
+                selections: [{ mode: "add" as const, name: "vendor-skill" }],
+                source: {
+                  repository: "vendor/pack",
+                  reviewedRevision: null,
+                },
+                targetGeneration: 1,
+                targetId: "00000000-0000-4000-8000-000000000001",
+              },
+              expiresAt: "2026-08-22T06:10:00.000Z",
+              reviewId: "imported-review",
+              target: {
+                ...targetV4Metadata,
+                generation: 1,
+                id: "00000000-0000-4000-8000-000000000001",
+                kind: "local" as const,
+                label: "This device",
+                workspace: "/work/skills-desktop",
+                workspaceLabel: "skills-desktop",
+              },
+            },
+            schemaVersion: 2 as const,
+            status: "pending" as const,
+          },
+        };
+      },
+      async reject() {
+        return {
+          ok: true as const,
+          value: { operationId: "imported-review" },
+        };
+      },
+    };
+    render(<ReviewSurface client={client} />);
+
+    expect(
+      await screen.findByRole("heading", {
+        name: "Review Imported Package",
+      }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Source (unpinned)")).toBeInTheDocument();
+    expect(screen.getByText("vendor/pack")).toBeInTheDocument();
+    expect(
+      screen.queryByText(/@[0-9a-f]{40}/),
+    ).not.toBeInTheDocument();
+    expect(screen.getByTestId("review-collection-origin")).toHaveTextContent(
+      "Imported Package",
+    );
+    expect(
+      screen.getByText("None — Imported Package, not an Official Collection"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(`sha256:${"9".repeat(64)}`),
+    ).toBeInTheDocument();
+    // An unparseable instant renders raw instead of throwing.
+    expect(screen.getByText("not-a-date")).toBeInTheDocument();
+  });
+
+  it("renders the bounded error alert when the review snapshot fails", async () => {
+    const client: ReviewBridge = {
+      async approve() {
+        return { ok: true as const, value: { operationId: "op" } };
+      },
+      async getReview() {
+        return {
+          error: {
+            code: "internal_error" as const,
+            effects: "none" as const,
+            message: "Review store crashed.",
+            phase: "ipc",
+            retryable: true,
+          },
+          ok: false as const,
+        };
+      },
+      async reject() {
+        return { ok: true as const, value: { operationId: "op" } };
+      },
+    };
+    render(<ReviewSurface client={client} />);
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Review store crashed.",
+    );
+  });
+
+  it("renders the unavailable state when no review is pending", async () => {
+    const client: ReviewBridge = {
+      async approve() {
+        return { ok: true as const, value: { operationId: "op" } };
+      },
+      async getReview() {
+        return {
+          ok: true as const,
+          value: { schemaVersion: 2 as const, status: "unavailable" as const },
+        };
+      },
+      async reject() {
+        return { ok: true as const, value: { operationId: "op" } };
+      },
+    };
+    render(<ReviewSurface client={client} />);
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "No review is available",
+    );
+  });
 });

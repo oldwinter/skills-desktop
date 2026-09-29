@@ -745,6 +745,33 @@ describe("UpdateCoordinator deferred restart and diagnostics", () => {
     expect(fixture.restartAndInstall).toHaveBeenCalledTimes(1);
   });
 
+  it("blocks an approved restart while restart guards are active", async () => {
+    const fixture = releaseFixture();
+    await downloadCandidate(fixture);
+    fixture.setGuards(["mutation-active"]);
+
+    await expect(
+      fixture.coordinator.requestRestart(candidateId),
+    ).resolves.toBe("blocked");
+    expect(fixture.restartAndInstall).not.toHaveBeenCalled();
+    expect(fixture.coordinator.getSnapshot().restart.guardReasons).toEqual([
+      "mutation-active",
+    ]);
+  });
+
+  it("cancels an approved restart when shutdown preparation fails", async () => {
+    const fixture = releaseFixture();
+    await downloadCandidate(fixture);
+    fixture.setPrepareRestart(async () => {
+      throw new Error("shutdown broke");
+    });
+
+    await expect(
+      fixture.coordinator.requestRestart(candidateId),
+    ).resolves.toBe("cancelled");
+    expect(fixture.restartAndInstall).not.toHaveBeenCalled();
+  });
+
   it("cancels an approved restart when the coordinator is disposed", async () => {
     const fixture = releaseFixture();
     await downloadCandidate(fixture);

@@ -104,6 +104,28 @@ describe("importSkillpack (ADR 0017)", () => {
     );
   });
 
+  it("keeps ordering deterministic when inserts arrive out of order", () => {
+    let records = importSkillpack({
+      document: documentFor({ id: "zeta.pack" }),
+      now,
+      records: [],
+    }).records;
+    for (const id of ["m.pack", "a.pack", "zeta2.pack", "b.pack"]) {
+      records = importSkillpack({
+        document: documentFor({ id }),
+        now,
+        records,
+      }).records;
+    }
+    expect(records.map(({ document }) => document.package.id)).toEqual([
+      "a.pack",
+      "b.pack",
+      "m.pack",
+      "zeta.pack",
+      "zeta2.pack",
+    ]);
+  });
+
   it("is idempotent for the same ID, release, and digest", () => {
     const document = documentFor();
     const first = importSkillpack({ document, now, records: [] });
@@ -190,6 +212,49 @@ describe("importSkillpack (ADR 0017)", () => {
       fromRelease: 2,
       kind: "downgrade",
       toRelease: 1,
+    });
+  });
+
+  it("updates only the matching record and keeps siblings byte-identical", () => {
+    const alpha = documentFor({ id: "alpha.pack" });
+    const beta = documentFor({ id: "team.review" });
+    // Insert out of order so sortRecords must reorder.
+    const seeded = importSkillpack({
+      document: alpha,
+      now,
+      records: importSkillpack({ document: beta, now, records: [] }).records,
+    });
+    expect(
+      seeded.records.map(({ document }) => document.package.id),
+    ).toEqual(["alpha.pack", "team.review"]);
+    const betaBefore = seeded.records[1];
+
+    // A conflict on alpha leaves beta's record untouched.
+    const alphaEdited = documentFor({
+      description: "Edited elsewhere.",
+      id: "alpha.pack",
+    });
+    const conflicted = importSkillpack({
+      document: alphaEdited,
+      now: "2026-08-22T10:00:00.000Z",
+      records: seeded.records,
+    });
+    expect(conflicted.records[1]).toBe(betaBefore);
+    expect(conflicted.records[0]?.conflicts).toHaveLength(1);
+    expect(conflicted.records[0]?.document).toEqual(alpha);
+
+    // An upgrade on alpha still leaves beta untouched.
+    const alphaTwo = documentFor({ id: "alpha.pack", release: 2 });
+    const upgraded = importSkillpack({
+      document: alphaTwo,
+      now: "2026-08-23T10:00:00.000Z",
+      records: conflicted.records,
+    });
+    expect(upgraded.records[1]).toBe(betaBefore);
+    expect(upgraded.records[0]).toMatchObject({
+      conflicts: conflicted.records[0]?.conflicts,
+      delta: { fromRelease: 1, kind: "upgrade", toRelease: 2 },
+      importedAt: "2026-08-23T10:00:00.000Z",
     });
   });
 });

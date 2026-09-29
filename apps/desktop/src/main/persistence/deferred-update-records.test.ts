@@ -1,4 +1,12 @@
-import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -115,6 +123,136 @@ describe("JSON deferred update records", () => {
 
       await expect(readFile(path, "utf8")).resolves.toBe(source);
       await expect(readdir(directory)).resolves.toEqual(["deferred-update.json"]);
+    } finally {
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("surfaces corruption it cannot quarantine", async () => {
+    // Directory mode bits do not block rename for root, and Windows ignores
+    // them entirely, so the read-only directory cannot be simulated there.
+    if (process.platform === "win32" || process.getuid?.() === 0) return;
+    const directory = await mkdtemp(join(tmpdir(), "skills-deferred-update-"));
+    const path = join(directory, "deferred-update.json");
+    try {
+      await writeFile(path, "{ not json", "utf8");
+      await chmod(directory, 0o500);
+      await expect(
+        createJsonDeferredUpdateRecords({ id: () => "q-1", path }).load(),
+      ).rejects.toThrow("could not be quarantined");
+      await expect(readFile(path, "utf8")).resolves.toBe("{ not json");
+      await expect(readdir(directory)).resolves.toEqual([
+        "deferred-update.json",
+      ]);
+    } finally {
+      await chmod(directory, 0o700);
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("fails loudly when the quarantine listing cannot be read", async () => {
+    if (process.platform === "win32" || process.getuid?.() === 0) return;
+    const directory = await mkdtemp(join(tmpdir(), "skills-deferred-update-"));
+    const path = join(directory, "deferred-update.json");
+    try {
+      // Record file absent and the directory execute-only: stat resolves
+      // ENOENT while readdir fails, so the quarantine check cannot decide
+      // whether a corrupt record exists.
+      await chmod(directory, 0o100);
+      await expect(
+        createJsonDeferredUpdateRecords({ id: () => "q-1", path }).load(),
+      ).rejects.toThrow("quarantine state is unreadable");
+    } finally {
+      await chmod(directory, 0o700);
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("rejects an invalid file identity before touching the record", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "skills-deferred-update-"));
+    const path = join(directory, "deferred-update.json");
+    try {
+      await writeFile(path, "{ not json", "utf8");
+      await expect(
+        createJsonDeferredUpdateRecords({ id: () => "../evil", path }).load(),
+      ).rejects.toThrow("identity is invalid");
+      // The invalid document stays in place; no quarantine name was minted.
+      await expect(readdir(directory)).resolves.toEqual([
+        "deferred-update.json",
+      ]);
+    } finally {
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("skips directory fsync when the platform is declared win32", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "skills-deferred-update-"));
+    const path = join(directory, "deferred-update.json");
+    try {
+      const records = createJsonDeferredUpdateRecords({
+        id: () => "w1",
+        path,
+        platform: "win32",
+      });
+      await records.save(record);
+      await expect(records.load()).resolves.toEqual(record);
+      await records.clear();
+      await expect(records.load()).resolves.toBeNull();
+    } finally {
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+});
+
+describe("JSON deferred update records failure tails", () => {
+  it("rethrows a removal failure that is not a missing file", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "skills-deferred-update-"));
+    try {
+      const records = createJsonDeferredUpdateRecords({
+        id: () => "w1",
+        path: directory,
+      });
+      await expect(records.clear()).rejects.toThrow();
+    } finally {
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("quarantines a directory at the record path as invalid state", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "skills-deferred-update-"));
+    const path = join(directory, "record");
+    try {
+      await mkdir(path);
+      const records = createJsonDeferredUpdateRecords({
+        id: () => "w1",
+        path,
+      });
+      await expect(records.load()).rejects.toThrow(
+        "Invalid deferred update state was quarantined.",
+      );
+      await expect(readdir(directory)).resolves.toEqual([
+        "record.corrupt.w1",
+      ]);
+    } finally {
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("removes its temporary file when the atomic open fails", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "skills-deferred-update-"));
+    const path = join(directory, "deferred-update.json");
+    try {
+      const records = createJsonDeferredUpdateRecords({
+        id: () => "fixed-write",
+        path,
+      });
+      const temporaryPath = join(
+        directory,
+        ".deferred-update.json.fixed-write.tmp",
+      );
+      await writeFile(temporaryPath, "stale temp", "utf8");
+      await expect(records.save(record)).rejects.toThrow();
+      await expect(readdir(directory)).resolves.toEqual([]);
     } finally {
       await rm(directory, { force: true, recursive: true });
     }
