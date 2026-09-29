@@ -187,4 +187,39 @@ describe(".skillpack v1 codec (#203)", () => {
       toRelease: 3,
     });
   });
+
+  it("orders prefix-related keys by length after the shared prefix", () => {
+    expect(canonicalizeJson({ ab: 1, a: 2 })).toBe('{"a":2,"ab":1}');
+  });
+
+  it("rejects a codec that returns a malformed digest", () => {
+    expect(() => skillpackDocumentDigest(pkg, { sha256Hex: () => "not-hex" })).toThrow(
+      /malformed SHA-256 digest/,
+    );
+  });
+
+  it("bounds JSON reader depth, literals, escapes and malformed containers", () => {
+    const message = (input: string) => {
+      const parsed = parseSkillpack(text(input), codec);
+      return parsed.ok ? "ok" : parsed.error.message;
+    };
+
+    expect(message(`${"[".repeat(18)}1${"]".repeat(18)}`)).toBe("JSON nesting is too deep.");
+    expect(message("{} trailing")).toBe("Unexpected trailing characters.");
+    expect(message("{1:2}")).toBe("Expected an object key.");
+    expect(message('{"a" 1}')).toBe("Expected ':'.");
+    expect(message('{"a":1 "b":2}')).toBe("Expected ',' or '}'.");
+    expect(message("[1 2]")).toBe("Expected ',' or ']'.");
+    expect(message('["a\x01b"]')).toBe("Unescaped control character in string.");
+    expect(message('["abc')).toBe("Unterminated string.");
+
+    // Literals, escape sequences and empty containers still parse; the
+    // document then fails kind validation rather than JSON.
+    for (const input of ['{"a":[true,false,null]}', '{"a":"x\\ny"}', "{}"]) {
+      expect(parseSkillpack(text(input), codec)).toMatchObject({
+        error: { code: "unsupported_schema", path: "kind" },
+        ok: false,
+      });
+    }
+  });
 });

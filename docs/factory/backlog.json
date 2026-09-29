@@ -1240,6 +1240,32 @@
       "notes": [
         "ssh-skills-process.ts ~538-542 confirmation_expired, ~545-549 observing/mutating conflict; wireHarnessId arm at 566 unreachable (prepare guards it first) — noted dead"
       ]
+    },
+    {
+      "id": "SDF-048",
+      "title": "Cover strict skillpack JSON-reader rejection arms",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 480,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "StrictJsonReader rejection arms are asserted by message: trailing characters, depth >16, non-string object key, missing ':', missing ',' in object and array, unescaped control character, unterminated string",
+        "literal (true/false/null), escape-skip and empty-container arms parse successfully and then fail kind validation",
+        "canonicalizeJson orders prefix-related keys by length after the shared prefix",
+        "skillpackDocumentDigest rejects a codec returning a malformed SHA-256 hex",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "dependsOn": [],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "skillpack.ts strict reader + codec digest arms; serialize >1MiB arm (line 270) unreachable by construction (all package fields schema-bounded) - noted dead"
+      ]
     }
   ]
 }
