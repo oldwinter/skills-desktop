@@ -120,16 +120,19 @@ function harness(input: {
   publisher?: GitPublisher | undefined;
   initialGuard?: Parameters<typeof publicationGuardRecordSchema.parse>[0];
   failCommit?: boolean;
+  failCommitAt?: number;
 }) {
   const guards: unknown[] = [];
   let changes = 0;
+  let commitCalls = 0;
   let counter = 0;
   let now = Date.parse("2026-09-15T10:00:00.000Z");
   const coordinator = createPublicationCoordinator({
     clock: () => new Date(now),
     codec,
     async commitGuard(guard) {
-      if (input.failCommit === true) {
+      commitCalls += 1;
+      if (input.failCommit === true || commitCalls === input.failCommitAt) {
         return {
           error: {
             code: "persist_failed",
@@ -624,5 +627,188 @@ describe("publication coordinator (ADR 0019 / ADR 0020)", () => {
     if (!second.ok) expect(second.error.code).toBe("mutation_conflict");
     release?.();
     expect((await first).ok).toBe(true);
+  });
+
+  it("propagates a failed source-folder read", async () => {
+    const host = fakeHost({
+      async readSourceFolder() {
+        return {
+          error: {
+            code: "export_invalid" as const,
+            effects: "none" as const,
+            message: "Permission denied.",
+            phase: "choosing",
+            retryable: true,
+          },
+          ok: false,
+        };
+      },
+    });
+    const h = harness({ host });
+    const result = await h.coordinator.chooseSource();
+    expect(result).toMatchObject({
+      error: { code: "export_invalid", message: "Permission denied." },
+      ok: false,
+    });
+    expect(h.coordinator.state().source).toBeNull();
+  });
+
+  it("refuses an empty source folder as export_invalid", async () => {
+    const host = fakeHost({
+      async readSourceFolder() {
+        return { ok: true, value: [] };
+      },
+    });
+    const h = harness({ host });
+    const result = await h.coordinator.chooseSource();
+    expect(result).toMatchObject({
+      error: { code: "export_invalid" },
+      ok: false,
+    });
+    expect(h.coordinator.state().source).toBeNull();
+  });
+
+  it("propagates a failed export write", async () => {
+    const host = fakeHost({
+      async writeExport() {
+        return {
+          error: {
+            code: "export_invalid" as const,
+            effects: "none" as const,
+            message: "Destination is not writable.",
+            phase: "exporting",
+            retryable: true,
+          },
+          ok: false,
+        };
+      },
+    });
+    const h = harness({ host });
+    expect((await h.coordinator.chooseSource()).ok).toBe(true);
+    const result = await h.coordinator.export();
+    expect(result).toMatchObject({
+      error: { code: "export_invalid" },
+      ok: false,
+    });
+    expect(h.coordinator.state().export).toBeNull();
+  });
+
+  it("propagates a failed plan preparation", async () => {
+    const publisher = fakePublisher();
+    publisher.prepare = async () => ({
+      error: {
+        code: "git_unavailable" as const,
+        effects: "none" as const,
+        message: "git is not on PATH.",
+        phase: "preparing",
+        retryable: true,
+      },
+      ok: false,
+    });
+    const h = harness({ host: fakeHost(), publisher });
+    expect((await h.coordinator.chooseSource()).ok).toBe(true);
+    const result = await h.coordinator.prepare(
+      "https://github.com/acme/skills.git",
+      "main",
+    );
+    expect(result).toMatchObject({
+      error: { code: "git_unavailable" },
+      ok: false,
+    });
+    expect(h.coordinator.state().plan).toBeNull();
+  });
+
+  it("refuses approval while a restored Guard is unresolved", async () => {
+    const { coordinator, plan } = await planned();
+    coordinator.restoreGuard(
+      publicationGuardRecordSchema.parse({
+        committedAt: "2026-09-15T09:00:00.000Z",
+        lastReadback: "uncertain",
+        lastReadbackAt: "2026-09-15T09:00:05.000Z",
+        phase: "uncertain",
+        plan,
+      }),
+    );
+    const result = await coordinator.approve(plan.id);
+    expect(result).toMatchObject({
+      error: { code: "publication_guarded" },
+      ok: false,
+    });
+  });
+
+  it("ignores restoreGuard and refuses discard while a step is running", async () => {
+    let release: (() => void) | undefined;
+    const host = fakeHost({
+      chooseSourceFolder: () =>
+        new Promise<FolderPick>((resolve) => {
+          release = () =>
+            resolve({ label: "skills", path: "/p", status: "picked" });
+        }),
+    });
+    const { plan } = await planned();
+    const h = harness({ host });
+    const first = h.coordinator.chooseSource();
+    h.coordinator.restoreGuard(
+      publicationGuardRecordSchema.parse({
+        committedAt: "2026-09-15T09:00:00.000Z",
+        lastReadback: "uncertain",
+        lastReadbackAt: "2026-09-15T09:00:05.000Z",
+        phase: "uncertain",
+        plan: plan as PublicationPlanV1,
+      }),
+    );
+    expect(h.coordinator.state().guard).toBeNull();
+    const discarded = await h.coordinator.discard("any");
+    expect(discarded).toMatchObject({
+      error: { code: "mutation_conflict" },
+      ok: false,
+    });
+    release?.();
+    expect((await first).ok).toBe(true);
+  });
+
+  it("propagates a failed Guard commit after a push", async () => {
+    const publisher = fakePublisher();
+    const host = fakeHost();
+    const h = harness({ failCommitAt: 2, host, publisher });
+    expect((await h.coordinator.chooseSource()).ok).toBe(true);
+    expect(
+      (
+        await h.coordinator.prepare(
+          "https://github.com/acme/skills.git",
+          "main",
+        )
+      ).ok,
+    ).toBe(true);
+    const plan = h.coordinator.state().plan;
+    if (plan === null) throw new Error("plan expected");
+    const result = await h.coordinator.approve(plan.id);
+    expect(result).toMatchObject({
+      error: { code: "persist_failed" },
+      ok: false,
+    });
+    // The push still happened; the failure is bookkeeping, not the push.
+    expect(publisher.pushes).toBe(1);
+  });
+
+  it("propagates a failed Guard commit during reconcile", async () => {
+    const publisher = fakePublisher();
+    const { plan } = await planned();
+    const restored = harness({
+      failCommit: true,
+      initialGuard: {
+        committedAt: "2026-09-15T09:00:00.000Z",
+        lastReadback: "uncertain",
+        lastReadbackAt: "2026-09-15T09:00:05.000Z",
+        phase: "uncertain",
+        plan: plan as PublicationPlanV1,
+      },
+      publisher,
+    });
+    const result = await restored.coordinator.reconcile();
+    expect(result).toMatchObject({
+      error: { code: "persist_failed" },
+      ok: false,
+    });
   });
 });

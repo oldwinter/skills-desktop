@@ -1294,6 +1294,36 @@
       "notes": [
         "application/studio.ts guard tails: no-host validate, readTree failure, grant dedup on re-open, missing-draft guards, mid-observe release, draftQueue catch tail; saveDraft >128KiB text arm unreachable (request schema caps skillMd at STUDIO_MAX_DRAFT_TEXT_LENGTH) - noted dead"
       ]
+    },
+    {
+      "id": "SDF-050",
+      "title": "Cover publication coordinator failure tails",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 500,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "chooseSource propagates a failed readSourceFolder and leaves source null",
+        "chooseSource maps an empty source folder to export_invalid",
+        "export propagates a failed writeExport and leaves export null",
+        "prepare propagates a failed publisher.prepare and leaves plan null",
+        "approve returns publication_guarded while a restored Guard is unresolved",
+        "restoreGuard is ignored and discard returns busy while a step is running",
+        "a failed Guard commit after a successful push propagates persist_failed and the push still ran",
+        "a failed Guard commit during reconcile propagates persist_failed",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "dependsOn": [],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "publication.ts arms: 244 restoreGuard-while-running, 256/309 host IO errors, 348 empty export, 370 prepare failure, 417 guarded approve, 498/573 guard-commit failures, 504 discard busy; planRef throw at 117 unreachable (schema pins refs/heads/*) - noted dead; harness gains failCommitAt counter"
+      ]
     }
   ]
 }
