@@ -1613,6 +1613,37 @@
       "notes": [
         "local-skills-process.ts residual map after SDF-011: ~74.7% branches under focused coverage; injectable failure arms remain in npx resolvers, spawn capture prep, verifyDialect/observeInventory, inspectSource, and executeConfirmed; posix npx resolution needs the real ~/.nvm-style directory scan only for arms injectable through the environment + isExecutable seams"
       ]
+    },
+    {
+      "id": "SDF-061",
+      "title": "Cover release-integrity candidate-package, draft-payload, attestation, and GitHub release verification arms",
+      "kind": "code-change",
+      "state": "delivered",
+      "order": 610,
+      "source": {
+        "type": "local"
+      },
+      "acceptance": [
+        "identifyCandidatePackage covers the candidate-root shape, non-regular-file entry, checksum mismatch, manifest JSON/schema/source/workflow/build-input/build-output/artifact-evidence arms, unexpected file set, artifact byte mismatch, lockfile digest mismatch, matrix identity, and directory identity",
+        "inspectCandidateSubjects covers the full four-target candidate set plus non-directory entry, missing target, and mixed-version failures",
+        "verifyDraftPayload covers digest pattern, empty/non-file payload, changed bytes, and the matching happy path",
+        "assertVerifiedAttestationResult covers result shape, statement shape, predicate-type and predicate mismatches, subject validation, and subject-set mismatches",
+        "verifyGitHubDraftRelease and verifyGitHubPreviewRelease cover input-context validation, draft/preview guards, identity mismatches, and the asset-verification arms including a consistent happy path",
+        "assertTaggedPreviewVersions covers tag-ref parsing, versions-map validation, and version divergence",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "dependsOn": [
+        "SDF-055"
+      ],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": [
+        "release-integrity.mjs residual map after SDF-055: candidate-package validation, draft payload, attestation result, and GitHub release verification arms; the evidence pipeline (createSpdxDocument, evidenceFilePlan, finalizeReleaseEvidence, verifyReleaseEvidence, assembleVerifiedDraft, generateReleaseEvidence) plus two near-unreachable file-type arms (312, 391) remain for a follow-up item",
+        "new tests/release-integrity.test.ts builds digest-addressed candidate packages through a manifest mutator + artifact-content fixture builder; no production changes"
+      ]
     }
   ]
 }
