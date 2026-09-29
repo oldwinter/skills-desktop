@@ -2803,7 +2803,9 @@ describe("Local SkillsProcess boundary failure arms", () => {
     );
   });
 
-  it("resolves Posix npx from the newest managed version directory when other roots fail", async () => {
+  it.skipIf(process.platform === "win32")(
+    "resolves Posix npx from the newest managed version directory when other roots fail",
+    async () => {
     const home = await mkdtemp(join(tmpdir(), "lsd-posix-home-"));
     try {
       const versionsRoot = join(home, ".nvm", "versions", "node");
@@ -2824,9 +2826,12 @@ describe("Local SkillsProcess boundary failure arms", () => {
     } finally {
       await rm(home, { force: true, recursive: true });
     }
-  });
+    },
+  );
 
-  it("resolves Posix npx as the bare command when a PATH directory provides both tools", async () => {
+  it.skipIf(process.platform === "win32")(
+    "resolves Posix npx as the bare command when a PATH directory provides both tools",
+    async () => {
     const resolved = await resolvePosixNpxCommand(
       { PATH: `/injected${delimiter}/other` },
       "linux",
@@ -2835,7 +2840,8 @@ describe("Local SkillsProcess boundary failure arms", () => {
 
     expect(resolved.executable).toBe("npx");
     expect(resolved.path.split(":")).toEqual(["/injected", "/other"]);
-  });
+    },
+  );
 
   it("rejects a run whose output capture directory cannot be prepared", async () => {
     const directory = await mkdtemp(join(tmpdir(), "lsd-capture-"));
@@ -3286,5 +3292,305 @@ describe("Local SkillsProcess boundary failure arms", () => {
       ok: true,
       value: { process: { disposition: "cancelled", exitCode: null } },
     });
+  });
+});
+
+describe("Local process runner termination internals", () => {
+  const hangInvocation = (
+    signal: AbortSignal,
+    overrides?: Partial<ProcessInvocation>,
+  ): ProcessInvocation => ({
+    args: ["-e", "setInterval(() => undefined, 1000)"],
+    cwd: process.cwd(),
+    env: { PATH: process.env.PATH ?? "" },
+    executable: process.execPath,
+    maxOutputBytes: 1_024,
+    shell: false,
+    signal,
+    timeoutMs: 10_000,
+    windowsHide: true,
+    ...overrides,
+  });
+
+  it.skipIf(process.platform === "win32")(
+    "rejects timed-out when the invocation exceeds its time limit",
+    async () => {
+      const runner = createSpawnProcessRunner({
+        cancellationGraceMs: 40,
+        platform: "linux",
+      });
+      await expect(
+        runner.run(
+          hangInvocation(new AbortController().signal, { timeoutMs: 80 }),
+        ),
+      ).rejects.toMatchObject({
+        disposition: "timed-out",
+        message: "Process invocation exceeded its time limit.",
+        started: true,
+        termination: "known",
+      });
+    },
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "rejects when live stdout capture exceeds the byte limit",
+    async () => {
+      const runner = createSpawnProcessRunner({
+        cancellationGraceMs: 40,
+        platform: "linux",
+      });
+      await expect(
+        runner.run(
+          hangInvocation(new AbortController().signal, {
+            args: [
+              "-e",
+              'process.stdout.write("x".repeat(4096)); setInterval(() => undefined, 1000)',
+            ],
+            maxOutputBytes: 64,
+          }),
+        ),
+      ).rejects.toMatchObject({
+        disposition: "failed",
+        message: "Process output exceeded its byte limit.",
+      });
+    },
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "resolves a SIGTERM-resistant child after SIGKILL escalation",
+    async () => {
+      const controller = new AbortController();
+      const runner = createSpawnProcessRunner({
+        cancellationGraceMs: 60,
+        platform: "linux",
+      });
+      const pending = runner.run(
+        hangInvocation(controller.signal, {
+          args: [
+            "-e",
+            'process.on("SIGTERM", () => {}); setInterval(() => undefined, 1000)',
+          ],
+        }),
+      );
+      controller.abort();
+      await expect(pending).resolves.toMatchObject({ exitCode: 1 });
+    },
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "maps a missing executable to an unavailable process failure",
+    async () => {
+      const runner = createSpawnProcessRunner({ platform: "linux" });
+      const directory = await mkdtemp(join(tmpdir(), "skills-run-missing-"));
+      try {
+        await expect(
+          runner.run(
+            hangInvocation(new AbortController().signal, {
+              cwd: directory,
+              executable: join(directory, "definitely-missing-binary"),
+            }),
+          ),
+        ).rejects.toMatchObject({
+          disposition: "failed",
+          message: "Process executable is unavailable.",
+          started: false,
+        });
+      } finally {
+        await rm(directory, { force: true, recursive: true });
+      }
+    },
+  );
+
+  it("fails the cancellation when Windows tree termination never resolves", async () => {
+    const controller = new AbortController();
+    let startedPid: number | undefined;
+    const runner = createSpawnProcessRunner({
+      killWindowsTree: (pid) => {
+        startedPid = pid;
+        return new Promise(() => {});
+      },
+      platform: "win32",
+      windowsTreeTerminationTimeoutMs: 40,
+    });
+    try {
+      const pending = runner.run(hangInvocation(controller.signal));
+      controller.abort();
+      await expect(pending).rejects.toMatchObject({
+        disposition: "failed",
+        message: "Process tree termination could not be confirmed.",
+        termination: "unknown",
+      });
+    } finally {
+      if (startedPid !== undefined) {
+        try {
+          process.kill(startedPid, "SIGKILL");
+        } catch {
+          // The wrapper may already have exited.
+        }
+      }
+    }
+  });
+
+  it("ignores a late Windows tree termination result after the bounded wait", async () => {
+    const controller = new AbortController();
+    const killed: number[] = [];
+    const runner = createSpawnProcessRunner({
+      async killWindowsTree(pid) {
+        killed.push(pid);
+        process.kill(pid, "SIGKILL");
+        await new Promise((resolve) => setTimeout(resolve, 150));
+      },
+      platform: "win32",
+      windowsTreeTerminationTimeoutMs: 40,
+    });
+    const pending = runner.run(hangInvocation(controller.signal));
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({
+      disposition: "failed",
+      message: "Process tree termination could not be confirmed.",
+    });
+    expect(killed).toHaveLength(1);
+  });
+});
+
+describe("Local SkillsProcess cancellation passthrough edges", () => {
+  const binding = {
+    generation: 3,
+    harness: "Codex",
+    targetId: "00000000-0000-4000-8000-000000000018",
+  };
+
+  function localProcess(runner: ProcessRunner) {
+    return createLocalSkillsProcess({
+      binding,
+      clock: () => new Date("2026-08-21T10:00:00.000Z"),
+      id: () => "edge-1",
+      platform: "linux",
+      posixNpxCommand: scriptedPosixNpxCommand,
+      runner,
+      workspace: "/workspace",
+    });
+  }
+
+  it("cancels observation when the signal aborts during listing", async () => {
+    const controller = new AbortController();
+    const runner: ProcessRunner = {
+      async run(invocation) {
+        const operation = invocation.args
+          .slice(invocation.args.indexOf(CLI_PACKAGE) + 1)
+          .join(" ");
+        if (operation === "--version") {
+          return { exitCode: 0, stderr: "", stdout: `${CLI_VERSION}\n` };
+        }
+        controller.abort();
+        if (operation === "list --json") {
+          return { exitCode: 0, stderr: "", stdout: projectOutput };
+        }
+        return { exitCode: 0, stderr: "", stdout: globalOutput };
+      },
+    };
+
+    const observed = await localProcess(runner).observeInventory({
+      signal: controller.signal,
+    });
+    expect(observed).toMatchObject({
+      error: { code: "cancelled" },
+      ok: false,
+    });
+  });
+
+  it("cancels source inspection before any spawn when aborted", async () => {
+    const runner: ProcessRunner = {
+      async run() {
+        throw new Error("must not spawn");
+      },
+    };
+    const descriptor = describeSource("vercel-labs/skills");
+    if (!descriptor.ok) throw new Error("fixture descriptor failed");
+    const controller = new AbortController();
+    controller.abort();
+
+    const inspected = await localProcess(runner).inspectSource({
+      descriptor: descriptor.value,
+      signal: controller.signal,
+    });
+    expect(inspected).toMatchObject({
+      error: { code: "cancelled" },
+      ok: false,
+    });
+  });
+
+  it("maps a cancelled dialect check during inspection to cancelled", async () => {
+    const controller = new AbortController();
+    const runner: ProcessRunner = {
+      async run() {
+        controller.abort();
+        throw new ProcessBoundaryError(
+          "Process invocation exceeded its time limit.",
+          "timed-out",
+        );
+      },
+    };
+    const descriptor = describeSource("vercel-labs/skills");
+    if (!descriptor.ok) throw new Error("fixture descriptor failed");
+
+    const inspected = await localProcess(runner).inspectSource({
+      descriptor: descriptor.value,
+      signal: controller.signal,
+    });
+    expect(inspected).toMatchObject({
+      error: { code: "cancelled" },
+      ok: false,
+    });
+  });
+
+  it("cancels source inspection when the signal aborts during listing", async () => {
+    const controller = new AbortController();
+    const runner: ProcessRunner = {
+      async run(invocation) {
+        const operation = invocation.args
+          .slice(invocation.args.indexOf(CLI_PACKAGE) + 1)
+          .join(" ");
+        if (operation === "--version") {
+          return { exitCode: 0, stderr: "", stdout: `${CLI_VERSION}\n` };
+        }
+        controller.abort();
+        return {
+          exitCode: 0,
+          stderr: "",
+          stdout: "[]",
+        };
+      },
+    };
+    const descriptor = describeSource("vercel-labs/skills");
+    if (!descriptor.ok) throw new Error("fixture descriptor failed");
+
+    const inspected = await localProcess(runner).inspectSource({
+      descriptor: descriptor.value,
+      signal: controller.signal,
+    });
+    expect(inspected).toMatchObject({
+      error: { code: "cancelled" },
+      ok: false,
+    });
+  });
+
+  it("returns the mutation plan failure unchanged", async () => {
+    const prepared = await localProcess(scriptedRunner()).prepareMutation({
+      freshness: "fresh",
+      intent: {
+        names: [],
+        scope: "project",
+        type: "remove",
+      },
+      inventory: {
+        cliVersion: CLI_VERSION,
+        entries: [],
+        observedAt: "2026-08-21T10:00:00.000Z",
+        schemaVersion: 1,
+      },
+      inventoryId: "inventory-local-1",
+    });
+    expect(prepared.ok).toBe(false);
   });
 });

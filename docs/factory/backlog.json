@@ -1730,6 +1730,27 @@
         "test:coverage"
       ],
       "notes": "ssh-skills-process.ts 87% -> ~92% statements; remaining arms need non-ESRCH kill failures or are unreachable via the public API (wireHarnessId is gated at prepare)."
+    },
+    {
+      "id": "SDF-066",
+      "title": "Fix Windows-host posix resolver fixtures; cover local runner termination and cancellation arms; SiteHeader pointer dismissal",
+      "kind": "code-change",
+      "priority": "p1",
+      "state": "delivered",
+      "order": 66,
+      "acceptance": [
+        "The two resolvePosixNpxCommand tests asserting POSIX path content skip on win32 hosts (Windows CI job109245775896 failures at test lines 2823/2830 are closed)",
+        "local-skills-process.test.ts covers spawn-runner timeout, mid-run stdout byte-limit termination, SIGTERM-resistant SIGKILL escalation, missing-executable mapping, and the bounded Windows tree-kill never-resolves/late-resolve arms",
+        "Observation/inspection cancellation passthroughs and prepareMutation plan-failure passthrough are covered",
+        "SiteHeader.test.tsx covers outside-pointerdown dismissal and inside-pointerdown retention",
+        "npm run test:coverage stays above all thresholds"
+      ],
+      "gates": [
+        "typecheck",
+        "lint",
+        "test:coverage"
+      ],
+      "notes": "Windows root cause: the posix resolver tests assert join()-built path content and a ':'-joined PATH that are only well-formed on posix hosts; the resolver is never invoked for win32 targets in production. Coverage additions are in the same file and verified locally."
     }
   ]
 }
