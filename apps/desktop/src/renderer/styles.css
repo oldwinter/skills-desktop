@@ -210,11 +210,14 @@ select option {
 }
 :root[data-appearance="dark"] .status-pill--healthy,
 :root[data-appearance="dark"] .preferences-saved,
-:root[data-appearance="dark"] .collection-status--missing,
 :root[data-appearance="dark"] .collection-status--unchanged,
 :root[data-appearance="dark"] .comparison-status--matched {
   color: var(--healthy);
   background-color: var(--healthy-soft);
+}
+:root[data-appearance="dark"] .collection-status--missing {
+  color: var(--warning);
+  background-color: var(--warning-soft);
 }
 @media (prefers-color-scheme: dark) {
   :root[data-appearance="system"] select,
@@ -236,11 +239,14 @@ select option {
   }
   :root[data-appearance="system"] .status-pill--healthy,
   :root[data-appearance="system"] .preferences-saved,
-  :root[data-appearance="system"] .collection-status--missing,
   :root[data-appearance="system"] .collection-status--unchanged,
   :root[data-appearance="system"] .comparison-status--matched {
     color: var(--healthy);
     background-color: var(--healthy-soft);
+  }
+  :root[data-appearance="system"] .collection-status--missing {
+    color: var(--warning);
+    background-color: var(--warning-soft);
   }
 }
 button { cursor: pointer; }
@@ -472,6 +478,7 @@ html[data-appearance="system"] .status-pill.status-pill--neutral {
 .segmented-control { display: inline-grid; grid-template-columns: repeat(3, minmax(78px, auto)); min-height: 40px; padding: 3px; background: var(--surface-muted); border-radius: var(--radius-control); }
 .segmented-control button { min-height: 34px; padding: 0 10px; color: var(--text-secondary); background: transparent; border: 0; border-radius: 4px; font-size: var(--font-size-meta); }
 .segmented-control button[aria-pressed="true"] { color: var(--text); background: var(--surface); box-shadow: 0 0 0 1px var(--line); font-weight: 500; }
+.segmented-control button:disabled { opacity: 0.55; cursor: default; }
 .segmented-control--compact { width: 100%; grid-template-columns: repeat(2, 1fr); }
 .text-button { min-height: 40px; justify-content: center; gap: 7px; padding: 0 12px; color: var(--text); background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--radius-control); font-size: var(--font-size-meta); font-weight: 600; }
 .text-button:hover:not(:disabled) { border-color: var(--focus); }
@@ -612,8 +619,8 @@ html[data-appearance="system"] .status-pill.status-pill--neutral {
 .collection-table td { min-width: 0; height: 52px; padding: 7px 10px; border-bottom: 1px solid var(--line); font-size: var(--font-size-meta); overflow-wrap: anywhere; }
 .collection-table tr:last-child td { border-bottom: 0; }
 .collection-status { display: inline-flex; min-height: 24px; align-items: center; padding: 2px 7px; border-radius: 4px; font-size: var(--font-size-meta); font-weight: 600; }
-.collection-status--missing, .collection-status--unchanged { color: var(--healthy); background: var(--healthy-soft); }
-.collection-status--present-content-unknown, .collection-status--removal-candidate { color: var(--warning); background: var(--warning-soft); }
+.collection-status--unchanged { color: var(--healthy); background: var(--healthy-soft); }
+.collection-status--missing, .collection-status--present-content-unknown, .collection-status--removal-candidate { color: var(--warning); background: var(--warning-soft); }
 .collection-status--source-conflict, .collection-status--incompatible { color: var(--danger); background: var(--danger-soft); }
 .collection-description { padding: 14px 0; color: var(--text-secondary); font-size: var(--font-size-meta); border-bottom: 1px solid var(--line); }
 .collection-primary-action { width: 100%; margin-top: 16px; }

@@ -425,6 +425,8 @@ export const en = {
     "SSH · Not available in V1; it cannot be saved as a Target Definition.",
   "targets.editor.kind": "Target kind",
   "targets.editor.kindSsh": "Kind: SSH · Not available in V1",
+  "targets.editor.kindSshNext": "SSH · next scope",
+  "targets.editor.kindSshNextTitle": "SSH · next scope · not available in V1 Local-only",
   "targets.editor.displayLabel": "Display label",
   "targets.editor.workspace": "Canonical workspace",
   "targets.editor.connectionReference": "OpenSSH connection reference",

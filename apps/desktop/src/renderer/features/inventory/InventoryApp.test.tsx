@@ -3790,11 +3790,13 @@ describe("Local Target Inventory shell", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Targets" }));
     fireEvent.click(screen.getByRole("button", { name: "New Target" }));
-    expect(screen.queryByRole("button", { name: "SSH" })).toBeNull();
     expect(screen.getByRole("button", { name: "Local" })).toHaveAttribute(
       "aria-pressed",
       "true",
     );
+    const sshNext = screen.getByRole("button", { name: "SSH · next scope" });
+    expect(sshNext).toBeDisabled();
+    expect(sshNext).toHaveAttribute("aria-pressed", "false");
     expect(screen.getByText(/V1 is Local-only/i)).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Display label"), {
       target: { value: "Local workspace" },

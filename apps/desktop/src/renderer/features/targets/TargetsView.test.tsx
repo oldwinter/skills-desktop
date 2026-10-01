@@ -325,6 +325,13 @@ describe("TargetsView", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: "New Target" }));
+    expect(screen.getByRole("button", { name: "Local" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(
+      screen.getByRole("button", { name: "SSH · next scope" }),
+    ).toBeDisabled();
     fireEvent.change(screen.getByLabelText("Display label"), {
       target: { value: "Local workspace" },
     });
