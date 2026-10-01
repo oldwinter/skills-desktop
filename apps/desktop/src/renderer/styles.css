@@ -705,6 +705,8 @@ html[data-appearance="system"] .status-pill.status-pill--neutral {
 .recovery-section .target-form { max-width: 72ch; padding-top: 4px; }
 .recovery-section .target-form small { color: var(--text-tertiary); font-size: var(--font-size-meta); }
 .publish-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
+.studio-draft-search { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 12px; }
+.studio-draft-search > [role="status"] { color: var(--text-secondary); font-size: var(--font-size-meta); }
 .publish-actions .studio-draft-select { display: flex; align-items: center; gap: 8px; color: var(--text-tertiary); font-size: var(--font-size-meta); }
 .publish-actions .studio-draft-select select { min-width: 0; max-width: 360px; height: 40px; padding: 0 9px; color: var(--text); background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--radius-control); }
 .studio-grant-body, .studio-editor { display: grid; gap: 10px; min-width: 0; }

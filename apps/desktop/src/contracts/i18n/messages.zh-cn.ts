@@ -797,6 +797,13 @@ export const zhCN: Readonly<Record<keyof typeof en, string>> = {
     "每个草稿都是独立的版本化记录。自动保存基于版本号做比较交换，别处的修改会被报告而不会被覆盖。",
   "studio.drafts.new": "新建草稿",
   "studio.drafts.select": "草稿",
+  "studio.drafts.search": "搜索草稿",
+  "studio.drafts.searchPlaceholder": "名称或描述",
+  "studio.drafts.clearSearch": "清除草稿搜索",
+  "studio.drafts.searchCount": "显示 {visible} / {total} 个草稿",
+  "studio.drafts.searchEmpty":
+    "没有匹配的草稿。清除搜索可查看全部草稿；当前打开的草稿保持不变。",
+  "studio.drafts.selectMatch": "选择匹配的草稿",
   "studio.drafts.none": "尚无草稿。",
   "studio.drafts.untitled": "未命名",
   "studio.drafts.name": "Skill 名称",

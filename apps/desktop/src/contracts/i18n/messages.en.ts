@@ -851,6 +851,13 @@ export const en = {
     "Each Draft is its own versioned record. Autosave is compare-and-swap on the revision, so a change made elsewhere is reported instead of overwritten.",
   "studio.drafts.new": "New Draft",
   "studio.drafts.select": "Draft",
+  "studio.drafts.search": "Search Drafts",
+  "studio.drafts.searchPlaceholder": "Name or description",
+  "studio.drafts.clearSearch": "Clear Draft search",
+  "studio.drafts.searchCount": "{visible} of {total} Drafts",
+  "studio.drafts.searchEmpty":
+    "No matching Drafts. Clear the search to see all Drafts; your open Draft stays in place.",
+  "studio.drafts.selectMatch": "Choose a matching Draft",
   "studio.drafts.none": "No Drafts yet.",
   "studio.drafts.untitled": "Untitled",
   "studio.drafts.name": "Skill name",
