@@ -852,6 +852,7 @@ export const en = {
   "studio.drafts.new": "New Draft",
   "studio.drafts.select": "Draft",
   "studio.drafts.search": "Search Drafts",
+  "studio.drafts.searchShortcut": "Press / to focus Draft search",
   "studio.drafts.searchPlaceholder": "Name or description",
   "studio.drafts.clearSearch": "Clear Draft search",
   "studio.drafts.searchCount": "{visible} of {total} Drafts",

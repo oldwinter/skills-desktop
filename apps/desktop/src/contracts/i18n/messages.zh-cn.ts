@@ -798,6 +798,7 @@ export const zhCN: Readonly<Record<keyof typeof en, string>> = {
   "studio.drafts.new": "新建草稿",
   "studio.drafts.select": "草稿",
   "studio.drafts.search": "搜索草稿",
+  "studio.drafts.searchShortcut": "按 / 聚焦草稿搜索",
   "studio.drafts.searchPlaceholder": "名称或描述",
   "studio.drafts.clearSearch": "清除草稿搜索",
   "studio.drafts.searchCount": "显示 {visible} / {total} 个草稿",

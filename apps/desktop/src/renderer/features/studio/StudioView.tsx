@@ -449,6 +449,33 @@ export function StudioView({
   const drafts = useMemo(() => studioDraftSessionsFor(client), [client]);
   const sessions = useSyncExternalStore(drafts.subscribe, drafts.getSnapshot);
 
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (
+        event.defaultPrevented ||
+        event.key !== "/" ||
+        event.altKey ||
+        event.ctrlKey ||
+        event.metaKey ||
+        event.isComposing ||
+        !(event.target instanceof HTMLElement) ||
+        event.target.matches("input, select, textarea") ||
+        event.target.isContentEditable ||
+        event.target.closest(
+          "dialog, [role='dialog'], [role='alertdialog'], [aria-modal='true']",
+        ) !== null
+      ) {
+        return;
+      }
+      const search = searchRef.current;
+      if (search === null) return;
+      event.preventDefault();
+      search.focus();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
   // Save outcomes surface through whichever Studio view is mounted.
   useEffect(() => {
     drafts.onError = setError;
@@ -645,6 +672,7 @@ export function StudioView({
               <Search aria-hidden="true" size={16} />
               <input
                 aria-label={t("studio.drafts.search")}
+                aria-keyshortcuts="/"
                 onChange={(event) => setSearchQuery(event.target.value)}
                 onKeyDown={(event) => {
                   if (event.key === "Escape") {
@@ -654,6 +682,7 @@ export function StudioView({
                 }}
                 placeholder={t("studio.drafts.searchPlaceholder")}
                 ref={searchRef}
+                title={t("studio.drafts.searchShortcut")}
                 type="search"
                 value={searchQuery}
               />
