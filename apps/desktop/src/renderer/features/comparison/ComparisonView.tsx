@@ -172,6 +172,33 @@ export function ComparisonView({
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (
+        event.defaultPrevented ||
+        event.key !== "/" ||
+        event.altKey ||
+        event.ctrlKey ||
+        event.metaKey ||
+        event.isComposing ||
+        !(event.target instanceof HTMLElement) ||
+        event.target.matches("input, select, textarea") ||
+        event.target.isContentEditable ||
+        event.target.closest(
+          "dialog, [role='dialog'], [role='alertdialog'], [aria-modal='true']",
+        ) !== null
+      ) {
+        return;
+      }
+      const search = searchRef.current;
+      if (search === null) return;
+      event.preventDefault();
+      search.focus();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
+  useEffect(() => {
     const locals = targets.filter(({ target }) => target.kind !== "ssh");
     const pickDefault = (excludeId?: string) =>
       locals.find(({ target }) => target.id !== excludeId)?.target.id ??
@@ -382,6 +409,7 @@ export function ComparisonView({
                 <Search aria-hidden="true" size={16} />
                 <input
                   aria-label={t("comparison.search")}
+                  aria-keyshortcuts="/"
                   onChange={(event) => setSearchQuery(event.currentTarget.value)}
                   onKeyDown={(event) => {
                     if (event.key === "Escape" && !event.nativeEvent.isComposing) {
@@ -391,6 +419,7 @@ export function ComparisonView({
                   }}
                   placeholder={t("comparison.searchPlaceholder")}
                   ref={searchRef}
+                  title={t("comparison.searchShortcut")}
                   type="search"
                   value={searchQuery}
                 />
