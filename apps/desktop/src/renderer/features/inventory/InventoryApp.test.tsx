@@ -1761,6 +1761,32 @@ describe("Local Target Inventory shell", () => {
     );
   });
 
+  it("keeps selected Skill evidence readable instead of collapsing (#261)", async () => {
+    render(<InventoryApp client={clientFor(snapshot)} />);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Case-Sensitive-Skill" }),
+    );
+
+    const details = await screen.findByLabelText("Skill evidence details");
+    expect(details).toHaveClass("evidence-list");
+    expect(
+      screen.getByRole("button", { name: "Prepare update" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Prepare removal" }),
+    ).toBeInTheDocument();
+
+    // Floor + scrollable inspector: evidence body stays readable at short
+    // desktop heights while Prepare update / Prepare removal stay reachable.
+    expect(rendererStyles).toMatch(
+      /\.evidence-list\s*\{(?=[^}]*flex:\s*1\s+1\s+auto)(?=[^}]*min-height:\s*9rem)(?=[^}]*overflow:\s*auto)[^}]*\}/s,
+    );
+    expect(rendererStyles).toMatch(
+      /\.inspector\s*\{(?=[^}]*overflow:\s*auto)(?![^}]*overflow:\s*hidden)[^}]*\}/s,
+    );
+  });
+
   it("requires explicit eligible Collection selections before preparing", async () => {
     const prepareCollectionAcrossTargets = vi.fn(async () => ({
       ok: true as const,
