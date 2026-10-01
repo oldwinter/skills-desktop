@@ -438,6 +438,7 @@ export const en = {
   "harnessPicker.remove": "Remove {label}",
   "harnessPicker.filter": "Filter harnesses",
   "harnessPicker.filterPlaceholder": "Search by name or CLI id",
+  "harnessPicker.clearFilter": "Clear harness filter",
   "harnessPicker.available": "Available harnesses",
   "harnessPicker.noMatch": "No harness matches “{query}”.",
   "harnessPicker.projectOnly": "project only",

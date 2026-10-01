@@ -400,6 +400,7 @@ export const zhCN: Readonly<Record<keyof typeof en, string>> = {
   "harnessPicker.remove": "移除 {label}",
   "harnessPicker.filter": "筛选 Harness",
   "harnessPicker.filterPlaceholder": "按名称或 CLI id 搜索",
+  "harnessPicker.clearFilter": "清除 Harness 筛选",
   "harnessPicker.available": "可用的 Harness",
   "harnessPicker.noMatch": "没有匹配“{query}”的 Harness。",
   "harnessPicker.projectOnly": "仅项目范围",

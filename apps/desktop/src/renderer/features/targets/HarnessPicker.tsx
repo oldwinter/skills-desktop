@@ -1,5 +1,5 @@
-import { useId, useState } from "react";
-import { X } from "lucide-react";
+import { useId, useRef, useState } from "react";
+import { Search, X } from "lucide-react";
 
 import {
   HARNESS_OPTIONS,
@@ -20,6 +20,8 @@ export function HarnessPicker({
   const { t, tc } = useTranslator();
   const [query, setQuery] = useState("");
   const [notice, setNotice] = useState<string>();
+  const filterId = useId();
+  const filterRef = useRef<HTMLInputElement>(null);
   const noticeId = useId();
   const selected = new Set(value);
   const visible = HARNESS_OPTIONS.filter((option) =>
@@ -45,6 +47,12 @@ export function HarnessPicker({
         ? [...value, harnessId]
         : value.filter((candidate) => candidate !== harnessId),
     );
+  };
+
+  const clearFilter = () => {
+    if (disabled) return;
+    setQuery("");
+    filterRef.current?.focus();
   };
 
   return (
@@ -79,16 +87,39 @@ export function HarnessPicker({
           ))}
         </ul>
       ) : null}
-      <label className="harness-picker-filter">
-        <span>{t("harnessPicker.filter")}</span>
-        <input
-          autoComplete="off"
-          onChange={(event) => setQuery(event.currentTarget.value)}
-          placeholder={t("harnessPicker.filterPlaceholder")}
-          type="search"
-          value={query}
-        />
-      </label>
+      <div className="harness-picker-filter">
+        <label htmlFor={filterId}>{t("harnessPicker.filter")}</label>
+        <div className="search-control">
+          <Search aria-hidden="true" size={16} />
+          <input
+            autoComplete="off"
+            disabled={disabled}
+            id={filterId}
+            onChange={(event) => setQuery(event.currentTarget.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Escape" && !event.nativeEvent.isComposing) {
+                event.preventDefault();
+                clearFilter();
+              }
+            }}
+            placeholder={t("harnessPicker.filterPlaceholder")}
+            ref={filterRef}
+            type="search"
+            value={query}
+          />
+          {query !== "" ? (
+            <button
+              aria-label={t("harnessPicker.clearFilter")}
+              className="search-clear"
+              disabled={disabled}
+              onClick={clearFilter}
+              type="button"
+            >
+              <X aria-hidden="true" size={14} />
+            </button>
+          ) : null}
+        </div>
+      </div>
       <div
         aria-label={t("harnessPicker.available")}
         className="harness-option-list"
