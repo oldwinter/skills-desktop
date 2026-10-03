@@ -1777,10 +1777,10 @@ describe("Local Target Inventory shell", () => {
       screen.getByRole("button", { name: "Prepare removal" }),
     ).toBeInTheDocument();
 
-    // Floor + scrollable inspector: evidence body stays readable at short
-    // desktop heights while Prepare update / Prepare removal stay reachable.
+    // One inspector scrollbar keeps evidence and actions in the same flow.
+    // tests/ui-craft/desktop.mjs also checks actual packaged geometry.
     expect(rendererStyles).toMatch(
-      /\.evidence-list\s*\{(?=[^}]*flex:\s*1\s+1\s+auto)(?=[^}]*min-height:\s*9rem)(?=[^}]*overflow:\s*auto)[^}]*\}/s,
+      /\.evidence-list\s*\{(?=[^}]*flex:\s*0\s+0\s+auto)(?![^}]*overflow:\s*(auto|hidden))[^}]*\}/s,
     );
     expect(rendererStyles).toMatch(
       /\.inspector\s*\{(?=[^}]*overflow:\s*auto)(?![^}]*overflow:\s*hidden)[^}]*\}/s,

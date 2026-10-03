@@ -9,6 +9,7 @@ import {
   type HarnessCard,
 } from "../content/harnesses.js";
 import { SECTION_IDS } from "./SiteHeader.js";
+import { ChevronIcon } from "./icons.js";
 
 function HarnessItem({
   harness,
@@ -37,15 +38,14 @@ export function HarnessSection({ copy }: { readonly copy: Copy }): ReactElement 
   const section = copy.harnesses;
   return (
     <section className="band" id={SECTION_IDS.harnesses}>
-      <div className="shell">
-        <div className="split">
+      <div className="shell harness-layout">
+        <div className="harness-intro">
           <div>
-            <p className="eyebrow eyebrow--mark">{section.eyebrow}</p>
-            <h2 className="display-2 mt-5 text-balance">{section.title}</h2>
+            <h2 className="display-2 text-balance">{section.title}</h2>
           </div>
-          <p className="prose-body split__aside">{section.body}</p>
+          <p className="prose-body mt-5">{section.body}</p>
         </div>
-        <div className="card harness-card mt-12">
+        <div className="harness-card">
           <ul className="harness-grid" aria-label={section.eyebrow}>
             {FEATURED_HARNESSES.map((harness) => (
               <HarnessItem harness={harness} key={harness.id} projectOnly={section.projectOnly} />
@@ -55,6 +55,7 @@ export function HarnessSection({ copy }: { readonly copy: Copy }): ReactElement 
             <summary className="link-underline">
               <span className="details-toggle__all">{section.showAll(HARNESS_TOTAL)}</span>
               <span className="details-toggle__fewer">{section.showFewer}</span>
+              <ChevronIcon />
             </summary>
             <ul className="harness-grid">
               {REMAINING_HARNESSES.map((harness) => (

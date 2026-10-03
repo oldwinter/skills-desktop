@@ -40,6 +40,11 @@ export interface Copy {
     readonly viewSource: string;
     readonly meta: string;
     readonly figure: {
+      readonly example: string;
+      readonly present: string;
+      readonly absent: string;
+      readonly covered: string;
+      readonly uncovered: string;
       readonly inventory: string;
       readonly inventoryPath: string;
       readonly targets: string;
@@ -250,6 +255,11 @@ const en: Copy = {
     download: "Download preview",
     eyebrow: "v0.1.0 · Unsigned Developer Preview · macOS · Windows · Linux · MIT",
     figure: {
+      example: "Interactive example",
+      present: "Present in this example Target",
+      absent: "Absent from this example Target",
+      covered: "Covered in this example Target",
+      uncovered: "Not covered in this example Target",
       caption:
         "Pick a Target. Skills Desktop observes it through one npx skills list --json call per scope and shows which harnesses are covered. Nothing is written until you confirm a Command Plan.",
       freshness: "Fresh evidence",
@@ -466,6 +476,11 @@ const zh: Copy = {
     download: "下载预览版",
     eyebrow: "v0.1.0 · Unsigned Developer Preview · macOS · Windows · Linux · MIT",
     figure: {
+      example: "交互示例",
+      present: "此示例 Target 中存在",
+      absent: "此示例 Target 中不存在",
+      covered: "此示例 Target 已覆盖",
+      uncovered: "此示例 Target 未覆盖",
       caption:
         "选一个 Target。Skills Desktop 对每个 scope 各执行一次 npx skills list --json 来观察它，并显示覆盖了哪些 harness。在你确认 Command Plan 之前，什么都不会被写入。",
       freshness: "Fresh evidence",

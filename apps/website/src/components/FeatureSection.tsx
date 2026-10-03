@@ -31,7 +31,6 @@ export interface FeatureSectionProps {
   readonly deep?: boolean;
 }
 
-/** Two-column feature band: text plus bullets on one side, a real screenshot on the other. */
 export function FeatureSection({
   copy,
   deep = false,
@@ -41,21 +40,21 @@ export function FeatureSection({
 }: FeatureSectionProps): ReactElement {
   const layout = ["split--media", reverse ? "split--reverse" : ""].filter(Boolean).join(" ");
   return (
-    <section className={deep ? "band band--deep" : "band"} id={id}>
+    <section className={`band feature-band${deep ? " band--deep" : ""}`} id={id}>
       <div className="shell">
         <div className={layout}>
           <div className="split__text">
-            <p className="eyebrow eyebrow--mark">{copy.eyebrow}</p>
-            <h2 className="display-2 mt-5 text-balance">{copy.title}</h2>
+            <h2 className="display-2 text-balance">{copy.title}</h2>
             <p className="prose-body mt-5">{copy.body}</p>
-            <BulletList bullets={copy.bullets} />
           </div>
           <div className="split__media">
             <figure className="screenshot">
-              <img alt={copy.screenshotAlt} loading="lazy" src={screenshot} />
+              <img alt={copy.screenshotAlt} height={800} loading="lazy" src={screenshot} width={1280} />
             </figure>
+            <p className="media-label">{copy.eyebrow}</p>
           </div>
         </div>
+        <BulletList bullets={copy.bullets} grid />
       </div>
     </section>
   );
@@ -70,7 +69,7 @@ export interface WideSectionProps {
   readonly screenshotAlt: string;
 }
 
-/** Heading and body side by side, then one wide screenshot underneath. */
+/** Mutation walkthrough with a larger, uncropped product view. */
 export function WideSection({
   body,
   eyebrow,
@@ -80,18 +79,20 @@ export function WideSection({
   title,
 }: WideSectionProps): ReactElement {
   return (
-    <section className="band" id={id}>
+    <section className="band mutation-band" id={id}>
       <div className="shell">
-        <div className="split">
-          <div>
-            <p className="eyebrow eyebrow--mark">{eyebrow}</p>
-            <h2 className="display-2 mt-5 text-balance">{title}</h2>
+        <div className="split--media">
+          <div className="split__text">
+            <h2 className="display-2 text-balance">{title}</h2>
+            <p className="prose-body mt-5">{body}</p>
           </div>
-          <p className="prose-body split__aside">{body}</p>
+          <div className="split__media">
+            <figure className="screenshot">
+              <img alt={screenshotAlt} height={800} loading="lazy" src={screenshot} width={1280} />
+            </figure>
+            <p className="media-label">{eyebrow}</p>
+          </div>
         </div>
-        <figure className="screenshot mt-12">
-          <img alt={screenshotAlt} loading="lazy" src={screenshot} />
-        </figure>
       </div>
     </section>
   );

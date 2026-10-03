@@ -30,6 +30,7 @@ export function SiteHeader({ copy, onToggleLocale }: SiteHeaderProps): ReactElem
   const [menuOpen, setMenuOpen] = useState(false);
   const menuId = useId();
   const menuRef = useRef<HTMLDivElement | null>(null);
+  const menuButtonRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
     if (!menuOpen) {
@@ -39,6 +40,7 @@ export function SiteHeader({ copy, onToggleLocale }: SiteHeaderProps): ReactElem
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.key === "Escape") {
         setMenuOpen(false);
+        menuButtonRef.current?.focus();
       }
     };
     const onPointerDown = (event: MouseEvent): void => {
@@ -96,6 +98,7 @@ export function SiteHeader({ copy, onToggleLocale }: SiteHeaderProps): ReactElem
               aria-haspopup="true"
               aria-label={menuOpen ? copy.nav.menuClose : undefined}
               className="site-nav__menu-button"
+              ref={menuButtonRef}
               onClick={() => {
                 setMenuOpen((open) => !open);
               }}

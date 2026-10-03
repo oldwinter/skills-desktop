@@ -10,8 +10,7 @@ export function SafetySection({ copy }: { readonly copy: Copy }): ReactElement {
       <div className="shell">
         <div className="split">
           <div>
-            <p className="eyebrow eyebrow--mark">{section.eyebrow}</p>
-            <h2 className="display-2 mt-5 text-balance">{section.title}</h2>
+            <h2 className="display-2 text-balance">{section.title}</h2>
           </div>
           <p className="prose-body split__aside">{section.body}</p>
         </div>
