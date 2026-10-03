@@ -8,6 +8,7 @@ import {
   ILLUSTRATIVE_TARGETS,
   targetById,
 } from "../content/illustrative-inventory.js";
+import { CheckIcon } from "./icons.js";
 
 export interface HeroFigureProps {
   readonly copy: Copy["hero"]["figure"];
@@ -20,34 +21,18 @@ export function HeroFigure({ copy }: HeroFigureProps): ReactElement {
   const coveredHarnesses = new Set<string>(target.harnesses);
 
   return (
-    <figure className="mt-12">
+    <figure aria-label={copy.example} className="hero-figure">
       <div className="paper-panel">
-        <div className="figure-grid">
-          <div className="figure-grid__column">
-            <p className="eyebrow">{copy.inventory}</p>
-            <p className="path mt-1">{copy.inventoryPath}</p>
-            <ul className="figure-list" aria-label={copy.inventory}>
-              {ILLUSTRATIVE_SKILLS.map((skill) => {
-                const present = presentSkills.has(skill.name);
-                return (
-                  <li
-                    className={present ? "figure-row" : "figure-row figure-row--dim"}
-                    data-present={present}
-                    key={skill.name}
-                  >
-                    <span className={present ? "dot dot--on" : "dot"} />
-                    <span className="path">{skill.name}</span>
-                    <span className="scope-tag">
-                      {skill.scope === "global" ? copy.scopeGlobal : copy.scopeProject}
-                    </span>
-                  </li>
-                );
-              })}
-            </ul>
-          </div>
-
-          <div className="target-pills">
-            <p className="eyebrow">{copy.targets}</p>
+        <div className="figure-titlebar">
+          <span className="figure-titlebar__brand">
+            <img alt="" height={22} src="./icon.png" width={22} />
+            Skills Desktop
+          </span>
+          <span className="figure-example">{copy.example}</span>
+        </div>
+        <div className="target-pills">
+          <div className="target-pills__controls">
+            <p className="figure-label">{copy.targets}</p>
             <div aria-label={copy.targets} className="pill-group" role="group">
               {ILLUSTRATIVE_TARGETS.map((candidate) => (
                 <button
@@ -61,17 +46,42 @@ export function HeroFigure({ copy }: HeroFigureProps): ReactElement {
                 </button>
               ))}
             </div>
-            <p className="meta path" style={{ color: "var(--paper-ink-3)" }}>
-              {target.workspace}
-            </p>
-            <p className="meta" style={{ color: "var(--paper-ink-3)" }}>
-              {copy.targetsHint}
-            </p>
+          </div>
+          <div className="target-pills__context">
+            <p className="path">{target.workspace}</p>
+            <p className="meta">{copy.targetsHint}</p>
+          </div>
+        </div>
+        <div className="figure-grid">
+          <div className="figure-grid__column">
+            <p className="figure-label">{copy.inventory}</p>
+            <p className="path figure-command">{copy.inventoryPath}</p>
+            <ul className="figure-list" aria-label={copy.inventory}>
+              {ILLUSTRATIVE_SKILLS.map((skill) => {
+                const present = presentSkills.has(skill.name);
+                return (
+                  <li
+                    className={present ? "figure-row" : "figure-row figure-row--dim"}
+                    data-present={present}
+                    key={skill.name}
+                  >
+                    <span aria-hidden="true" className={present ? "presence presence--on" : "presence"}>
+                      {present ? <CheckIcon /> : null}
+                    </span>
+                    <span className="path">{skill.name}</span>
+                    <span className="visually-hidden">{present ? copy.present : copy.absent}</span>
+                    <span className="scope-tag">
+                      {skill.scope === "global" ? copy.scopeGlobal : copy.scopeProject}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
           </div>
 
-          <div className="figure-grid__column">
-            <p className="eyebrow">{copy.harnesses}</p>
-            <p className="path mt-1">{copy.harnessesPath}</p>
+          <div className="figure-grid__column figure-grid__coverage">
+            <p className="figure-label">{copy.harnesses}</p>
+            <p className="path figure-command">{copy.harnessesPath}</p>
             <ul className="figure-list" aria-label={copy.harnesses}>
               {ILLUSTRATIVE_HARNESSES.map((harness) => {
                 const covered = coveredHarnesses.has(harness.id);
@@ -84,7 +94,12 @@ export function HeroFigure({ copy }: HeroFigureProps): ReactElement {
                     <span aria-hidden="true" className="harness-tile harness-tile--paper">
                       {tileLabel(harness.label)}
                     </span>
-                    <span className="path">{harness.path}</span>
+                    <span className="figure-harness">
+                      <span className="figure-harness__name">{harness.label}</span>
+                      <span className="path" title={harness.path}>{harness.path}</span>
+                    </span>
+                    <span className="visually-hidden">{covered ? copy.covered : copy.uncovered}</span>
+                    {covered ? <CheckIcon /> : null}
                   </li>
                 );
               })}
@@ -92,7 +107,10 @@ export function HeroFigure({ copy }: HeroFigureProps): ReactElement {
           </div>
         </div>
         <div className="figure-footer">
-          <span className="path">{copy.summary(target.skills.length, target.harnesses.length)}</span>
+          <span aria-atomic="true" className="path" role="status">
+            <span className="visually-hidden">{copy.example}, {target.label}: </span>
+            {copy.summary(target.skills.length, target.harnesses.length)}
+          </span>
           <span className="fresh-badge">{copy.freshness}</span>
         </div>
       </div>

@@ -42,9 +42,11 @@ describe("SiteHeader narrow menu", () => {
       `#${SECTION_IDS.cli}`,
     );
 
+    within(panel).getByRole("link", { name: COPY.en.nav.cli }).focus();
     fireEvent.keyDown(document, { key: "Escape" });
     expect(screen.queryByRole("list", { name: COPY.en.nav.menu })).not.toBeInTheDocument();
     expect(menuButton).toHaveAttribute("aria-expanded", "false");
+    expect(menuButton).toHaveFocus();
   });
 
   it("keeps language and Download outside the menu and closes after an anchor click", () => {
