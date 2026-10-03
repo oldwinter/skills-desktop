@@ -143,6 +143,70 @@ describe("StudioView (ADR 0018)", () => {
     expect(screen.getByRole("button", { name: "New Draft" })).toBeEnabled();
   });
 
+  it("focuses Draft search with slash without changing the query or selected Draft", () => {
+    render(<StudioView client={bridge()} studio={state({ drafts: [draft, secondDraft] })} />);
+    const search = screen.getByRole("searchbox");
+    expect(search).toHaveAttribute("aria-keyshortcuts", "/");
+    expect(search).toHaveAttribute("title", "Press / to focus Draft search");
+    fireEvent.change(search, { target: { value: "other" } });
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: secondDraft.id } });
+    const button = screen.getByRole("button", { name: "New Draft" });
+    button.focus();
+    expect(fireEvent.keyDown(button, { key: "/", shiftKey: true })).toBe(false);
+    expect(search).toHaveFocus();
+    expect(search).toHaveValue("other");
+    expect(screen.getByRole("combobox")).toHaveValue(secondDraft.id);
+    expect(screen.getByTestId("studio-editor-textarea")).toHaveValue(secondDraft.skillMd);
+  });
+
+  it("does not intercept slash while editing or operating the Draft picker", () => {
+    render(<StudioView client={bridge()} studio={state({ drafts: [draft, secondDraft] })} />);
+    for (const control of [screen.getByRole("searchbox"), screen.getByRole("combobox"), screen.getByTestId("studio-editor-textarea")]) {
+      control.focus();
+      expect(fireEvent.keyDown(control, { key: "/" })).toBe(true);
+      expect(control).toHaveFocus();
+    }
+  });
+
+  it("ignores modified, composing, prevented, editable and modal slash events", () => {
+    render(<StudioView client={bridge()} studio={state({ drafts: [draft] })} />);
+    const button = screen.getByRole("button", { name: "New Draft" });
+    for (const extra of [{ altKey: true }, { ctrlKey: true }, { metaKey: true }, { isComposing: true }, { key: "x" }]) {
+      button.focus();
+      expect(fireEvent.keyDown(button, { key: "/", ...extra })).toBe(true);
+      expect(button).toHaveFocus();
+    }
+    button.focus();
+    const prevented = new KeyboardEvent("keydown", { key: "/", bubbles: true, cancelable: true });
+    prevented.preventDefault();
+    fireEvent(button, prevented);
+    expect(button).toHaveFocus();
+    const editable = document.createElement("div");
+    Object.defineProperty(editable, "isContentEditable", { value: true });
+    document.body.append(editable);
+    expect(fireEvent.keyDown(editable, { key: "/" })).toBe(true);
+    editable.remove();
+    for (const attributes of [{ role: "dialog" }, { role: "alertdialog" }, { "aria-modal": "true" }]) {
+      const modal = document.createElement("div");
+      for (const [name, value] of Object.entries(attributes)) modal.setAttribute(name, value);
+      const child = document.createElement("button");
+      modal.append(child);
+      document.body.append(modal);
+      child.focus();
+      expect(fireEvent.keyDown(child, { key: "/" })).toBe(true);
+      expect(child).toHaveFocus();
+      modal.remove();
+    }
+  });
+
+  it("leaves slash alone when search is unavailable and after Studio unmounts", () => {
+    const { rerender, unmount } = render(<StudioView client={bridge()} studio={state()} />);
+    expect(fireEvent.keyDown(document.body, { key: "/" })).toBe(true);
+    rerender(<StudioView client={bridge()} studio={state({ drafts: [draft] })} />);
+    unmount();
+    expect(fireEvent.keyDown(document.body, { key: "/" })).toBe(true);
+  });
+
   it("filters Draft names and descriptions, trimming whitespace and ignoring case", () => {
     render(
       <StudioView
@@ -221,6 +285,7 @@ describe("StudioView (ADR 0018)", () => {
     const { rerender } = render(view([draft, untitled]));
     const search = screen.getByRole("searchbox", { name: "搜索草稿" });
     expect(search).toHaveAttribute("placeholder", "名称或描述");
+    expect(search).toHaveAttribute("title", "按 / 聚焦草稿搜索");
     fireEvent.change(search, { target: { value: "未命名" } });
     expect(screen.getByText("显示 1 / 2 个草稿")).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "未命名 · r1" })).toBeInTheDocument();
