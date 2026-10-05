@@ -14,7 +14,7 @@
   "dependencies": {
     "@skills-desktop/remote-bootstrap": "0.1.0",
     "@skills-desktop/skills-runtime": "0.1.0",
-    "lucide-react": "1.48.0",
+    "lucide-react": "1.49.0",
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "zod": "4.6.5"
