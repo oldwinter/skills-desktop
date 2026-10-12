@@ -52,7 +52,7 @@ packaged UI QA：
 | React lint | `eslint-plugin-react@7.37.5`、`eslint-plugin-react-hooks@7.1.1`、`globals@17.11.0` |
 | 类型 | `@types/node@26.4.0`、`@types/react@19.2.18`、`@types/react-dom@19.2.5` |
 | 测试 | `vitest@4.1.11`、`@vitest/coverage-v8@4.1.11`、`jsdom@30.0.1` |
-| UI/可访问性测试 | `@testing-library/jest-dom@7.0.1`、`@testing-library/react@16.3.3`、`axe-core@4.13.0` |
+| UI/可访问性测试 | `@testing-library/jest-dom@7.0.1`、`@testing-library/react@16.3.3`、`axe-core@4.14.0` |
 
 Biome 没有写入 manifest；`lint:biome` 通过
 `npx --yes @biomejs/biome@1.9.4` 固定按需运行。
