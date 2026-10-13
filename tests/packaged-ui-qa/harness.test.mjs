@@ -1245,12 +1245,12 @@ describe("packaged UI QA scenario contract", () => {
         "utf8",
       ),
     );
-    expect(packageJson.devDependencies["axe-core"]).toBe("4.13.0");
-    expect(packageLock.packages[""].devDependencies["axe-core"]).toBe("4.13.0");
+    expect(packageJson.devDependencies["axe-core"]).toBe("4.14.0");
+    expect(packageLock.packages[""].devDependencies["axe-core"]).toBe("4.14.0");
     expect(packageLock.packages["node_modules/axe-core"]).toMatchObject({
       integrity:
-        "sha512-UzGt8zg7Ny8djbYMhxl2zuEevVa7r2gJjYY5Lwr1xM7+XU2nd6CkIWFTVcCIbAP63vSz71NaVyyuSk9lHKcy0A==",
-      version: "4.13.0",
+        "sha512-9WTZxEjsZ7b13TH8JPmbV2z8CHbl80/2hm3XPEG4JgNdQLK81IBRXmSxHfMAOkSqQeRxT/0dwNDz2GOm3zzpcQ==",
+      version: "4.14.0",
     });
   });
 
