@@ -353,6 +353,7 @@ export const zhCN: Readonly<Record<keyof typeof en, string>> = {
 
   "targets.title": "Targets",
   "targets.search": "搜索 Target",
+  "targets.searchShortcut": "按 / 聚焦搜索",
   "targets.searchPlaceholder": "名称、工作区、Harness 或 SSH 别名",
   "targets.clearSearch": "清除 Target 搜索",
   "targets.searchCount": "显示 {visible} / {total} 个 Target",
