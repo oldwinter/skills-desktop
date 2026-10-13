@@ -2,9 +2,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
   Boxes,
+  Check,
   CheckCircle2,
   CircleHelp,
   Clock3,
+  Copy,
   ExternalLink,
   FolderGit2,
   HardDrive,
@@ -108,6 +110,39 @@ function isTextEditingTarget(target: EventTarget | null): boolean {
       target instanceof HTMLSelectElement ||
       target instanceof HTMLTextAreaElement)
   );
+}
+
+// Skill names are case-sensitive identity; copying avoids retyping them for
+// CLI use. Prefers the async Clipboard API with a legacy fallback for
+// clipboard-less contexts. Returns false instead of throwing.
+async function copyTextToClipboard(text: string): Promise<boolean> {
+  try {
+    const clipboard = navigator.clipboard;
+    if (
+      clipboard !== undefined &&
+      typeof clipboard.writeText === "function"
+    ) {
+      await clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    // Fall through to the legacy path below.
+  }
+  try {
+    const area = document.createElement("textarea");
+    area.value = text;
+    area.setAttribute("readonly", "");
+    area.style.position = "fixed";
+    area.style.opacity = "0";
+    document.body.appendChild(area);
+    area.focus();
+    area.select();
+    const copied = document.execCommand("copy");
+    area.remove();
+    return copied;
+  } catch {
+    return false;
+  }
 }
 
 function InventoryStatus({
@@ -290,6 +325,8 @@ function InventoryWorkspace({
   const [query, setQuery] = useState("");
   const [scope, setScope] = useState<ScopeFilter>("all");
   const [selectedIdentity, setSelectedIdentity] = useState<SelectedIdentity>();
+  const [copiedSkillName, setCopiedSkillName] = useState<string>();
+  const [copyNameFailed, setCopyNameFailed] = useState(false);
   const [preparedMutationContext, setPreparedMutationContext] = useState<{
     readonly generation: number;
     readonly operationId: string;
@@ -762,6 +799,16 @@ function InventoryWorkspace({
     } else {
       setSkillsShHandoff(undefined);
       setActionError(result.error);
+    }
+  };
+  const copySelectedName = async () => {
+    if (selected === undefined) return;
+    setCopyNameFailed(false);
+    if (await copyTextToClipboard(selected.name)) {
+      setCopiedSkillName(selected.name);
+    } else {
+      setCopiedSkillName(undefined);
+      setCopyNameFailed(true);
     }
   };
   const prepareSelected = async (type: "remove" | "update") => {
@@ -1374,7 +1421,37 @@ function InventoryWorkspace({
                       <p>{t("inventory.inspector.heading")}</p>
                       <h2>{selected.name}</h2>
                     </div>
+                    <button
+                      aria-label={t("inventory.inspector.copyName")}
+                      className="icon-button"
+                      onClick={() => void copySelectedName()}
+                      title={t("inventory.inspector.copyName")}
+                      type="button"
+                    >
+                      {copiedSkillName === selected.name ? (
+                        <Check aria-hidden="true" size={16} />
+                      ) : (
+                        <Copy aria-hidden="true" size={16} />
+                      )}
+                    </button>
                   </header>
+                  {copyNameFailed ? (
+                    <p
+                      className="inspector-copy-status"
+                      data-testid="inspector-copy-failed"
+                      role="alert"
+                    >
+                      {t("inventory.inspector.copyFailed")}
+                    </p>
+                  ) : copiedSkillName === selected.name ? (
+                    <p
+                      className="inspector-copy-status"
+                      data-testid="inspector-copied"
+                      role="status"
+                    >
+                      {t("inventory.inspector.copied")}
+                    </p>
+                  ) : null}
                   <dl
                     aria-label={t("inventory.inspector.detailsLabel")}
                     className="evidence-list"

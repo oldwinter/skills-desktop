@@ -137,6 +137,7 @@ Inventory 是对当前 Target 一次只读 `npx skills list --json` 的归一化
 - 点击搜索框里的清除按钮，或按 `Escape`，会清空搜索并把焦点留在搜索框，方便继续输入。
 - 筛选后没有结果时，点 **Clear filters** 可一次清空搜索词并恢复 All scopes。
 - 点选一行，右侧 **Skill evidence** 显示 scope、harness agents、source type、declared source、revision、content fingerprint。未知证据会明确标 Unknown，不会被捏造成版本号。
+- Skill 名称大小写敏感；点标题旁的复制按钮可一键复制 exact 名称，方便在终端或文档里引用，复制成功会有确认提示。
 
 ### 变更（必须先计划、再确认）
 

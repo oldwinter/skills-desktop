@@ -607,6 +607,176 @@ describe("Local Target Inventory shell", () => {
     ).toBeInTheDocument();
   });
 
+  it("copies the selected skill name through the Clipboard API", async () => {
+    const writeText = vi.fn(async (_text: string) => {});
+    const descriptor = Object.getOwnPropertyDescriptor(
+      window.navigator,
+      "clipboard",
+    );
+    Object.defineProperty(window.navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    try {
+      render(<InventoryApp client={clientFor(snapshot)} />);
+      fireEvent.click(
+        await screen.findByRole("button", { name: "Case-Sensitive-Skill" }),
+      );
+      fireEvent.click(
+        await screen.findByRole("button", { name: "Copy skill name" }),
+      );
+
+      expect(writeText).toHaveBeenCalledWith("Case-Sensitive-Skill");
+      expect(await screen.findByTestId("inspector-copied")).toHaveTextContent(
+        "Skill name copied.",
+      );
+    } finally {
+      if (descriptor === undefined) {
+        Reflect.deleteProperty(window.navigator, "clipboard");
+      } else {
+        Object.defineProperty(window.navigator, "clipboard", descriptor);
+      }
+    }
+  });
+
+  it("reports copy failure when no clipboard path succeeds", async () => {
+    const clipboardDescriptor = Object.getOwnPropertyDescriptor(
+      window.navigator,
+      "clipboard",
+    );
+    Object.defineProperty(window.navigator, "clipboard", {
+      configurable: true,
+      value: undefined,
+    });
+    try {
+      render(<InventoryApp client={clientFor(snapshot)} />);
+      fireEvent.click(
+        await screen.findByRole("button", { name: "Case-Sensitive-Skill" }),
+      );
+      fireEvent.click(
+        await screen.findByRole("button", { name: "Copy skill name" }),
+      );
+
+      expect(
+        await screen.findByTestId("inspector-copy-failed"),
+      ).toHaveTextContent("Could not copy the skill name.");
+      expect(screen.queryByTestId("inspector-copied")).not.toBeInTheDocument();
+    } finally {
+      if (clipboardDescriptor === undefined) {
+        Reflect.deleteProperty(window.navigator, "clipboard");
+      } else {
+        Object.defineProperty(
+          window.navigator,
+          "clipboard",
+          clipboardDescriptor,
+        );
+      }
+    }
+  });
+
+  it("copies through the legacy path when the Clipboard API is missing", async () => {
+    const clipboardDescriptor = Object.getOwnPropertyDescriptor(
+      window.navigator,
+      "clipboard",
+    );
+    Object.defineProperty(window.navigator, "clipboard", {
+      configurable: true,
+      value: undefined,
+    });
+    const execCommandDescriptor = Object.getOwnPropertyDescriptor(
+      document,
+      "execCommand",
+    );
+    const execCommand = vi.fn(() => true);
+    Object.defineProperty(document, "execCommand", {
+      configurable: true,
+      value: execCommand,
+    });
+    try {
+      render(<InventoryApp client={clientFor(snapshot)} />);
+      fireEvent.click(
+        await screen.findByRole("button", { name: "Case-Sensitive-Skill" }),
+      );
+      fireEvent.click(
+        await screen.findByRole("button", { name: "Copy skill name" }),
+      );
+
+      expect(execCommand).toHaveBeenCalledWith("copy");
+      expect(await screen.findByTestId("inspector-copied")).toHaveTextContent(
+        "Skill name copied.",
+      );
+    } finally {
+      if (clipboardDescriptor === undefined) {
+        Reflect.deleteProperty(window.navigator, "clipboard");
+      } else {
+        Object.defineProperty(
+          window.navigator,
+          "clipboard",
+          clipboardDescriptor,
+        );
+      }
+      if (execCommandDescriptor === undefined) {
+        Reflect.deleteProperty(document, "execCommand");
+      } else {
+        Object.defineProperty(document, "execCommand", execCommandDescriptor);
+      }
+    }
+  });
+
+  it("clears the copied confirmation when selection changes", async () => {
+    const writeText = vi.fn(async (_text: string) => {});
+    const descriptor = Object.getOwnPropertyDescriptor(
+      window.navigator,
+      "clipboard",
+    );
+    Object.defineProperty(window.navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    try {
+      render(
+        <InventoryApp
+          client={clientFor({
+            ...snapshot,
+            inventory: {
+              ...snapshot.inventory,
+              entries: [
+                snapshot.inventory.entries[0]!,
+                {
+                  ...snapshot.inventory.entries[0]!,
+                  name: "Another-Skill",
+                },
+              ],
+            },
+          })}
+        />,
+      );
+      fireEvent.click(
+        await screen.findByRole("button", { name: "Case-Sensitive-Skill" }),
+      );
+      fireEvent.click(
+        await screen.findByRole("button", { name: "Copy skill name" }),
+      );
+      expect(await screen.findByTestId("inspector-copied")).toBeInTheDocument();
+
+      fireEvent.click(
+        await screen.findByRole("button", { name: "Another-Skill" }),
+      );
+      expect(
+        screen.queryByTestId("inspector-copied"),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "Copy skill name" }),
+      ).toBeInTheDocument();
+    } finally {
+      if (descriptor === undefined) {
+        Reflect.deleteProperty(window.navigator, "clipboard");
+      } else {
+        Object.defineProperty(window.navigator, "clipboard", descriptor);
+      }
+    }
+  });
+
   it("shows a bounded opening error returned by the IPC boundary", async () => {
     const client: DesktopBridge = {
       ...clientFor(snapshot),
