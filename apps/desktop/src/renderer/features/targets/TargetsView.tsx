@@ -75,6 +75,32 @@ export function TargetsView({
     setSearchQuery("");
     searchRef.current?.focus();
   };
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (
+        event.defaultPrevented ||
+        event.key !== "/" ||
+        event.altKey ||
+        event.ctrlKey ||
+        event.metaKey ||
+        event.isComposing ||
+        !(event.target instanceof HTMLElement) ||
+        event.target.matches("input, select, textarea") ||
+        event.target.isContentEditable ||
+        event.target.closest(
+          "dialog, [role='dialog'], [role='alertdialog'], [aria-modal='true']",
+        ) !== null
+      ) {
+        return;
+      }
+      const search = searchRef.current;
+      if (search === null) return;
+      event.preventDefault();
+      search.focus();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
   const [editingTargetId, setEditingTargetId] = useState<string>();
   const [draft, setDraft] = useState<TargetDraft>(blankTarget);
   const [error, setError] = useState<RendererError>();
@@ -186,6 +212,7 @@ export function TargetsView({
             <Search aria-hidden="true" size={16} />
             <input
               aria-label={t("targets.search")}
+              aria-keyshortcuts="/"
               onChange={(event) => setSearchQuery(event.currentTarget.value)}
               onKeyDown={(event) => {
                 if (event.key === "Escape" && !event.nativeEvent.isComposing) {
@@ -195,6 +222,7 @@ export function TargetsView({
               }}
               placeholder={t("targets.searchPlaceholder")}
               ref={searchRef}
+              title={t("targets.searchShortcut")}
               type="search"
               value={searchQuery}
             />

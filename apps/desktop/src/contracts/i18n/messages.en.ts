@@ -390,6 +390,7 @@ export const en = {
 
   "targets.title": "Targets",
   "targets.search": "Search Targets",
+  "targets.searchShortcut": "Press / to focus search",
   "targets.searchPlaceholder": "Name, workspace, harness or SSH alias",
   "targets.clearSearch": "Clear Target search",
   "targets.searchCount": "{visible} of {total} Targets",

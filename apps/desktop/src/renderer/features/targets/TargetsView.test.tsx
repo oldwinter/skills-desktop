@@ -291,6 +291,85 @@ describe("TargetsView", () => {
     expect(screen.getAllByRole("article")).toHaveLength(2);
   });
 
+  it("exposes the search shortcut and focuses search with /", () => {
+    const onSelected = vi.fn();
+    render(
+      <>
+        <button type="button">Sidebar action</button>
+        <TargetsView
+          client={bridge()}
+          onSelected={onSelected}
+          targets={[targetState(localTarget), targetState(secondTarget)]}
+        />
+      </>,
+    );
+    const search = screen.getByRole("searchbox", { name: "Search Targets" });
+    expect(search).toHaveAttribute("aria-keyshortcuts", "/");
+    expect(search).toHaveAttribute("title", "Press / to focus search");
+    fireEvent.change(search, { target: { value: "second" } });
+
+    const sidebar = screen.getByRole("button", { name: "Sidebar action" });
+    sidebar.focus();
+    expect(fireEvent.keyDown(sidebar, { key: "/" })).toBe(false);
+    expect(search).toHaveFocus();
+    expect(search).toHaveValue("second");
+
+    search.blur();
+    expect(document.activeElement).toBe(document.body);
+    expect(fireEvent.keyDown(document.body, { key: "/" })).toBe(false);
+    expect(search).toHaveFocus();
+    expect(onSelected).not.toHaveBeenCalled();
+  });
+
+  it("leaves editing, composing, dialog, and modified shortcuts untouched", () => {
+    render(
+      <>
+        <input aria-label="Editor input" />
+        <div contentEditable suppressContentEditableWarning>
+          <span data-testid="contenteditable-child" tabIndex={0}>
+            Editable child
+          </span>
+        </div>
+        <div role="dialog">
+          <button type="button">Role dialog action</button>
+        </div>
+        <TargetsView
+          client={bridge()}
+          onSelected={vi.fn()}
+          targets={[targetState(localTarget)]}
+        />
+      </>,
+    );
+    const search = screen.getByRole("searchbox", { name: "Search Targets" });
+    const contentEditableChild = screen.getByTestId("contenteditable-child");
+    Object.defineProperty(contentEditableChild, "isContentEditable", {
+      configurable: true,
+      value: true,
+    });
+    const guardedTargets = [
+      screen.getByRole("textbox", { name: "Editor input" }),
+      contentEditableChild,
+      screen.getByRole("button", { name: "Role dialog action" }),
+    ];
+    for (const target of guardedTargets) {
+      target.focus();
+      expect(fireEvent.keyDown(target, { key: "/" })).toBe(true);
+      expect(target).toHaveFocus();
+    }
+    const article = screen.getByRole("article");
+    for (const event of [
+      { key: "/", altKey: true },
+      { key: "/", ctrlKey: true },
+      { key: "/", metaKey: true },
+      { key: "/", isComposing: true },
+      { key: "?" },
+    ]) {
+      (article as HTMLElement).focus?.();
+      expect(fireEvent.keyDown(article, event)).toBe(true);
+      expect(search).not.toHaveFocus();
+    }
+  });
+
   it("keeps the query and recomputes results after a Target snapshot changes", () => {
     const client = bridge();
     const onSelected = vi.fn();
