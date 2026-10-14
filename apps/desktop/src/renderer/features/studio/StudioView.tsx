@@ -706,7 +706,13 @@ export function StudioView({
           </div>
         ) : null}
         {studio.drafts.length > 0 && matchingDrafts.length === 0 ? (
-          <p>{t("studio.drafts.searchEmpty")}</p>
+          <div className="empty-state">
+            <Search aria-hidden="true" size={22} />
+            <p>{t("studio.drafts.searchEmpty")}</p>
+            <button className="text-button" onClick={clearSearch} type="button">
+              {t("studio.drafts.clearSearch")}
+            </button>
+          </div>
         ) : null}
         <div className="publish-actions">
           <button
