@@ -287,19 +287,32 @@ export function CollectionsView({
   const skillFilterStats = (() => {
     const total = new Set<string>();
     const visible = new Set<string>();
+    // Only the first Target with no matching rows shows the full empty state
+    // (with its heading); later Targets show a compact line instead.
+    let firstEmptyTargetId: string | undefined;
     for (const targetState of targetStates) {
       const input =
         inputs[targetState.target.id] ??
         inputFor(targetState.target.id, snapshot.target.id, targetState.target.kind);
+      let targetVisible = 0;
       for (const entry of assessmentFor(targetState, input.scope)?.entries ??
         []) {
         total.add(entry.name);
         if (entry.name.toLowerCase().includes(normalizedSkillFilter)) {
           visible.add(entry.name);
+          targetVisible += 1;
         }
+      }
+      if (
+        normalizedSkillFilter !== "" &&
+        targetVisible === 0 &&
+        firstEmptyTargetId === undefined
+      ) {
+        firstEmptyTargetId = targetState.target.id;
       }
     }
     return {
+      firstEmptyTargetId,
       total: total.size,
       visible: normalizedSkillFilter === "" ? total.size : visible.size,
     };
@@ -877,7 +890,15 @@ export function CollectionsView({
                     </span>
                   ) : null}
                 </div>
-                {normalizedSkillFilter !== "" && visibleEntries.length === 0 ? (
+                {normalizedSkillFilter !== "" &&
+                visibleEntries.length === 0 &&
+                skillFilterStats.firstEmptyTargetId !==
+                  targetState.target.id ? (
+                  <p className="collection-filter-empty-compact">
+                    {t("collections.skillFilterEmpty")}
+                  </p>
+                ) : normalizedSkillFilter !== "" &&
+                  visibleEntries.length === 0 ? (
                   <div className="empty-state">
                     <Search aria-hidden="true" size={22} />
                     <h2>{t("collections.skillFilterEmpty")}</h2>

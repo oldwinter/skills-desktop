@@ -545,3 +545,56 @@ describe("CollectionsView skill filter", () => {
     });
   });
 });
+
+describe("CollectionsView skill filter across Targets", () => {
+  it("shows the no-match heading once when several Targets are empty", () => {
+    const secondId = "00000000-0000-4000-8000-000000000002";
+    const secondTarget: TargetDefinition = {
+      ...localTarget,
+      id: secondId,
+      label: "Second device",
+      workspace: "/work/second",
+      workspaceLabel: "second",
+    };
+    const secondCollections: NonNullable<WorkspaceSnapshot["collections"]> = {
+      ...collections,
+      releases: collections.releases.map((release) => ({
+        ...release,
+        assessments: release.assessments.map((candidate) => ({
+          ...candidate,
+          targetId: secondId,
+        })),
+      })),
+    };
+    const base = snapshot();
+    const multi: WorkspaceSnapshot = {
+      ...base,
+      targets: [
+        {
+          collections,
+          deletionBlocked: false,
+          inventory,
+          mutation,
+          target: localTarget,
+        },
+        {
+          collections: secondCollections,
+          deletionBlocked: false,
+          inventory,
+          mutation,
+          target: secondTarget,
+        },
+      ],
+    };
+    render(<CollectionsView client={bridge()} snapshot={multi} />);
+    fireEvent.change(screen.getByRole("searchbox", { name: "Filter skills" }), {
+      target: { value: "zzz" },
+    });
+
+    expect(
+      screen.getAllByRole("heading", { name: "No matching skills" }),
+    ).toHaveLength(1);
+    expect(screen.getAllByText("No matching skills")).toHaveLength(2);
+    expect(screen.getAllByText("Clear skill filter")).toHaveLength(1);
+  });
+});
