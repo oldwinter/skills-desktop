@@ -719,12 +719,22 @@ export function CollectionsView({
             );
             const locked =
               busy || plan !== null || execution?.phase === "running";
-            const missingEntries = (assessment?.entries ?? []).filter(
+            // "Select missing" only acts on rows the user can see; selections
+            // made before filtering (hidden rows) are left untouched.
+            const skillFilterActive = normalizedSkillFilter !== "";
+            const missingEntries = visibleEntries.filter(
               (entry) =>
                 entry.status === "missing" &&
                 entry.selectable &&
                 entry.selectionModes.includes("add"),
             );
+            const selectedNames = Object.keys(input.selected);
+            const visibleNames = new Set(
+              visibleEntries.map((entry) => entry.name),
+            );
+            const hiddenSelectedCount = skillFilterActive
+              ? selectedNames.filter((name) => !visibleNames.has(name)).length
+              : 0;
             const TargetIcon =
               targetState.target.kind === "ssh" ? Server : Laptop;
             return (
@@ -804,9 +814,12 @@ export function CollectionsView({
                 <div className="collection-selection-actions">
                   <button
                     className="text-button"
-                    aria-label={t("collections.selectMissingOn", {
-                      label: targetState.target.label,
-                    })}
+                    aria-label={t(
+                      skillFilterActive
+                        ? "collections.selectVisibleMissingOn"
+                        : "collections.selectMissingOn",
+                      { label: targetState.target.label },
+                    )}
                     disabled={
                       locked ||
                       !included ||
@@ -827,7 +840,11 @@ export function CollectionsView({
                     }
                     type="button"
                   >
-                    {t("collections.selectMissing")}
+                    {t(
+                      skillFilterActive
+                        ? "collections.selectVisibleMissing"
+                        : "collections.selectMissing",
+                    )}
                   </button>
                   <button
                     className="text-button"
@@ -850,6 +867,15 @@ export function CollectionsView({
                   >
                     {t("collections.clearSelection")}
                   </button>
+                  {hiddenSelectedCount > 0 ? (
+                    <span className="collection-selection-hidden-note">
+                      {tc(
+                        "collections.selectionHiddenByFilter",
+                        selectedNames.length,
+                        { hidden: hiddenSelectedCount },
+                      )}
+                    </span>
+                  ) : null}
                 </div>
                 {normalizedSkillFilter !== "" && visibleEntries.length === 0 ? (
                   <div className="empty-state">

@@ -397,4 +397,151 @@ describe("CollectionsView skill filter", () => {
     expect(fireEvent.keyDown(scope, { key: "/", ctrlKey: true })).toBe(true);
     expect(filter).not.toHaveFocus();
   });
+
+  describe("Select missing with an active filter", () => {
+    function threeMissingSnapshot(): WorkspaceSnapshot {
+      const base = snapshot();
+      const [release] = collections.releases;
+      if (release === undefined) throw new Error("fixture release missing");
+      return {
+        ...base,
+        collections: {
+          ...collections,
+          releases: [
+            {
+              ...release,
+              assessments: [
+                assessment("project", [
+                  {
+                    inRelease: true,
+                    name: "code-review",
+                    selectable: true,
+                    selectionModes: ["add"],
+                    status: "missing",
+                  },
+                  {
+                    inRelease: true,
+                    name: "commit-helper",
+                    selectable: true,
+                    selectionModes: ["add"],
+                    status: "missing",
+                  },
+                  {
+                    inRelease: true,
+                    name: "release-notes",
+                    selectable: true,
+                    selectionModes: ["add"],
+                    status: "missing",
+                  },
+                  {
+                    inRelease: true,
+                    name: "docs-writer",
+                    selectable: true,
+                    selectionModes: ["reapply"],
+                    status: "unchanged",
+                  },
+                ]),
+              ],
+            },
+          ],
+        },
+      };
+    }
+
+    it("switches the button label while a filter is active", () => {
+      render(
+        <CollectionsView client={bridge()} snapshot={threeMissingSnapshot()} />,
+      );
+      expect(
+        screen.getByRole("button", { name: "Select missing skills on This device" }),
+      ).toHaveTextContent("Select missing skills");
+
+      const filter = screen.getByRole("searchbox", { name: "Filter skills" });
+      fireEvent.change(filter, { target: { value: "review" } });
+      expect(
+        screen.getByRole("button", {
+          name: "Select visible missing skills on This device",
+        }),
+      ).toHaveTextContent("Select visible missing");
+
+      fireEvent.change(filter, { target: { value: "" } });
+      expect(
+        screen.getByRole("button", { name: "Select missing skills on This device" }),
+      ).toHaveTextContent("Select missing skills");
+    });
+
+    it("only selects missing skills that match the filter", async () => {
+      render(
+        <CollectionsView client={bridge()} snapshot={threeMissingSnapshot()} />,
+      );
+      const filter = screen.getByRole("searchbox", { name: "Filter skills" });
+      fireEvent.change(filter, { target: { value: "review" } });
+      expect(skillCheckboxes()).toHaveLength(1);
+
+      await act(async () => {
+        fireEvent.click(
+          screen.getByRole("button", {
+            name: "Select visible missing skills on This device",
+          }),
+        );
+      });
+      expect(
+        screen.getByRole("checkbox", { name: "Select code-review" }),
+      ).toBeChecked();
+
+      fireEvent.change(filter, { target: { value: "" } });
+      expect(
+        screen.getByRole("checkbox", { name: "Select code-review" }),
+      ).toBeChecked();
+      expect(
+        screen.getByRole("checkbox", { name: "Select commit-helper" }),
+      ).not.toBeChecked();
+      expect(
+        screen.getByRole("checkbox", { name: "Select release-notes" }),
+      ).not.toBeChecked();
+    });
+
+    it("keeps manually selected hidden skills and reports them", async () => {
+      render(
+        <CollectionsView client={bridge()} snapshot={threeMissingSnapshot()} />,
+      );
+      await act(async () => {
+        fireEvent.click(
+          screen.getByRole("checkbox", { name: "Select commit-helper" }),
+        );
+      });
+      expect(
+        screen.queryByText(/hidden by filter/),
+      ).not.toBeInTheDocument();
+
+      const filter = screen.getByRole("searchbox", { name: "Filter skills" });
+      fireEvent.change(filter, { target: { value: "review" } });
+      expect(
+        screen.getByText("1 skill selected, 1 hidden by filter"),
+      ).toBeInTheDocument();
+
+      await act(async () => {
+        fireEvent.click(
+          screen.getByRole("button", {
+            name: "Select visible missing skills on This device",
+          }),
+        );
+      });
+      expect(
+        screen.getByText("2 skills selected, 1 hidden by filter"),
+      ).toBeInTheDocument();
+
+      fireEvent.change(filter, { target: { value: "" } });
+      expect(screen.queryByText(/hidden by filter/)).not.toBeInTheDocument();
+      expect(
+        screen.getByRole("checkbox", { name: "Select commit-helper" }),
+      ).toBeChecked();
+      expect(
+        screen.getByRole("checkbox", { name: "Select code-review" }),
+      ).toBeChecked();
+      expect(
+        screen.getByRole("checkbox", { name: "Select release-notes" }),
+      ).not.toBeChecked();
+    });
+  });
 });

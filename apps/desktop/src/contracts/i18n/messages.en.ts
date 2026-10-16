@@ -613,6 +613,12 @@ export const en = {
   "collections.clearSelectionOn": "Clear selection on {label}",
   "collections.selectMissing": "Select missing skills",
   "collections.selectMissingOn": "Select missing skills on {label}",
+  "collections.selectVisibleMissing": "Select visible missing",
+  "collections.selectVisibleMissingOn": "Select visible missing skills on {label}",
+  "collections.selectionHiddenByFilter.one":
+    "{count} skill selected, {hidden} hidden by filter",
+  "collections.selectionHiddenByFilter.other":
+    "{count} skills selected, {hidden} hidden by filter",
   "collections.select": "Select {name}",
   "collections.selectOn": "Select {name} on {label}",
   "collections.skillFilter": "Filter skills",

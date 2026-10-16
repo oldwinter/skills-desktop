@@ -563,6 +563,12 @@ export const zhCN: Readonly<Record<keyof typeof en, string>> = {
   "collections.clearSelectionOn": "清空选择（{label}）",
   "collections.selectMissing": "选择缺失技能",
   "collections.selectMissingOn": "选择缺失技能（{label}）",
+  "collections.selectVisibleMissing": "选择可见的缺失技能",
+  "collections.selectVisibleMissingOn": "选择可见的缺失技能（{label}）",
+  "collections.selectionHiddenByFilter.one":
+    "已选 {count} 个技能，其中 {hidden} 个被筛选隐藏",
+  "collections.selectionHiddenByFilter.other":
+    "已选 {count} 个技能，其中 {hidden} 个被筛选隐藏",
   "collections.select": "选择 {name}",
   "collections.selectOn": "在 {label} 上选择 {name}",
   "collections.skillFilter": "筛选技能",
