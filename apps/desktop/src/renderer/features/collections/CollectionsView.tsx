@@ -11,8 +11,10 @@ import {
   Package,
   PackagePlus,
   RotateCcw,
+  Search,
   Server,
   ShieldCheck,
+  X,
 } from "lucide-react";
 
 import type { MessageKey } from "../../../contracts/i18n/translate.js";
@@ -60,8 +62,22 @@ type EntryStatus = NonNullable<
   Release["assessments"]
 >[number]["entries"][number]["status"];
 
+type AssessmentEntry = NonNullable<
+  Release["assessments"]
+>[number]["entries"][number];
+
 const statusKey = (status: EntryStatus): MessageKey =>
   `collections.status.${status}`;
+
+function filterEntries(
+  entries: readonly AssessmentEntry[],
+  normalizedQuery: string,
+): readonly AssessmentEntry[] {
+  if (normalizedQuery === "") return entries;
+  return entries.filter((entry) =>
+    entry.name.toLowerCase().includes(normalizedQuery),
+  );
+}
 
 function recipeKey(recipe: Recipe) {
   return `${recipe.origin}:${recipe.id}:${recipe.releaseNumber}:${recipe.digest}`;
@@ -157,6 +173,13 @@ export function CollectionsView({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<RendererError>();
   const statusHeadingRef = useRef<HTMLHeadingElement>(null);
+  const [skillFilter, setSkillFilter] = useState("");
+  const skillFilterRef = useRef<HTMLInputElement>(null);
+  const normalizedSkillFilter = skillFilter.trim().toLowerCase();
+  const clearSkillFilter = () => {
+    setSkillFilter("");
+    skillFilterRef.current?.focus();
+  };
 
   const release =
     recipes.find((candidate) => recipeKey(candidate) === releaseSelection) ??
@@ -175,6 +198,33 @@ export function CollectionsView({
     // inputs without resetting them for unrelated Snapshot updates.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [releaseSelection, snapshot.target.id, targetKey]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (
+        event.defaultPrevented ||
+        event.key !== "/" ||
+        event.altKey ||
+        event.ctrlKey ||
+        event.metaKey ||
+        event.isComposing ||
+        !(event.target instanceof HTMLElement) ||
+        event.target.matches("input, select, textarea") ||
+        event.target.isContentEditable ||
+        event.target.closest(
+          "dialog, [role='dialog'], [role='alertdialog'], [aria-modal='true']",
+        ) !== null
+      ) {
+        return;
+      }
+      const search = skillFilterRef.current;
+      if (search === null) return;
+      event.preventDefault();
+      search.focus();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
 
   useEffect(() => {
     if (
@@ -231,6 +281,42 @@ export function CollectionsView({
     }
     return blockers;
   };
+
+  // Unique skill names across every Target table for the active scopes. The
+  // filter only hides rows; selection state is preserved for hidden entries.
+  const skillFilterStats = (() => {
+    const total = new Set<string>();
+    const visible = new Set<string>();
+    // Only the first Target with no matching rows shows the full empty state
+    // (with its heading); later Targets show a compact line instead.
+    let firstEmptyTargetId: string | undefined;
+    for (const targetState of targetStates) {
+      const input =
+        inputs[targetState.target.id] ??
+        inputFor(targetState.target.id, snapshot.target.id, targetState.target.kind);
+      let targetVisible = 0;
+      for (const entry of assessmentFor(targetState, input.scope)?.entries ??
+        []) {
+        total.add(entry.name);
+        if (entry.name.toLowerCase().includes(normalizedSkillFilter)) {
+          visible.add(entry.name);
+          targetVisible += 1;
+        }
+      }
+      if (
+        normalizedSkillFilter !== "" &&
+        targetVisible === 0 &&
+        firstEmptyTargetId === undefined
+      ) {
+        firstEmptyTargetId = targetState.target.id;
+      }
+    }
+    return {
+      firstEmptyTargetId,
+      total: total.size,
+      visible: normalizedSkillFilter === "" ? total.size : visible.size,
+    };
+  })();
 
   const selectedTargets = targetStates.flatMap((targetState) => {
     const input = inputs[targetState.target.id];
@@ -497,6 +583,44 @@ export function CollectionsView({
           </div>
         ) : null}
 
+        <div className="collections-skill-filter">
+          <div className="search-control">
+            <Search aria-hidden="true" size={16} />
+            <input
+              aria-label={t("collections.skillFilter")}
+              aria-keyshortcuts="/"
+              onChange={(event) => setSkillFilter(event.currentTarget.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Escape" && !event.nativeEvent.isComposing) {
+                  event.preventDefault();
+                  clearSkillFilter();
+                }
+              }}
+              placeholder={t("collections.skillFilterPlaceholder")}
+              ref={skillFilterRef}
+              title={t("collections.skillFilterShortcut")}
+              type="search"
+              value={skillFilter}
+            />
+            {skillFilter !== "" ? (
+              <button
+                aria-label={t("collections.clearSkillFilter")}
+                className="search-clear"
+                onClick={clearSkillFilter}
+                type="button"
+              >
+                <X aria-hidden="true" size={14} />
+              </button>
+            ) : null}
+          </div>
+          <span role="status">
+            {t("collections.skillFilterCount", {
+              total: skillFilterStats.total,
+              visible: skillFilterStats.visible,
+            })}
+          </span>
+        </div>
+
         {execution === null || execution === undefined ? null : (
           <section className="collection-execution" aria-live="polite">
             <header>
@@ -592,6 +716,10 @@ export function CollectionsView({
             const assessment = assessmentFor(targetState, input.scope);
             const blockers = targetBlockers(targetState, input);
             const targetRelease = releaseFor(targetState);
+            const visibleEntries = filterEntries(
+              assessment?.entries ?? [],
+              normalizedSkillFilter,
+            );
             const included = input.included;
             const inventoryFreshness =
               assessment?.inventoryFreshness ?? targetState.inventory.freshness;
@@ -604,12 +732,22 @@ export function CollectionsView({
             );
             const locked =
               busy || plan !== null || execution?.phase === "running";
-            const missingEntries = (assessment?.entries ?? []).filter(
+            // "Select missing" only acts on rows the user can see; selections
+            // made before filtering (hidden rows) are left untouched.
+            const skillFilterActive = normalizedSkillFilter !== "";
+            const missingEntries = visibleEntries.filter(
               (entry) =>
                 entry.status === "missing" &&
                 entry.selectable &&
                 entry.selectionModes.includes("add"),
             );
+            const selectedNames = Object.keys(input.selected);
+            const visibleNames = new Set(
+              visibleEntries.map((entry) => entry.name),
+            );
+            const hiddenSelectedCount = skillFilterActive
+              ? selectedNames.filter((name) => !visibleNames.has(name)).length
+              : 0;
             const TargetIcon =
               targetState.target.kind === "ssh" ? Server : Laptop;
             return (
@@ -689,9 +827,12 @@ export function CollectionsView({
                 <div className="collection-selection-actions">
                   <button
                     className="text-button"
-                    aria-label={t("collections.selectMissingOn", {
-                      label: targetState.target.label,
-                    })}
+                    aria-label={t(
+                      skillFilterActive
+                        ? "collections.selectVisibleMissingOn"
+                        : "collections.selectMissingOn",
+                      { label: targetState.target.label },
+                    )}
                     disabled={
                       locked ||
                       !included ||
@@ -712,7 +853,11 @@ export function CollectionsView({
                     }
                     type="button"
                   >
-                    {t("collections.selectMissing")}
+                    {t(
+                      skillFilterActive
+                        ? "collections.selectVisibleMissing"
+                        : "collections.selectMissing",
+                    )}
                   </button>
                   <button
                     className="text-button"
@@ -735,93 +880,127 @@ export function CollectionsView({
                   >
                     {t("collections.clearSelection")}
                   </button>
+                  {hiddenSelectedCount > 0 ? (
+                    <span className="collection-selection-hidden-note">
+                      {tc(
+                        "collections.selectionHiddenByFilter",
+                        selectedNames.length,
+                        { hidden: hiddenSelectedCount },
+                      )}
+                    </span>
+                  ) : null}
                 </div>
-                <div className="collection-table-wrap">
-                  <table className="collection-table">
-                    <caption className="sr-only">
-                      {t("collections.assessmentCaption", {
-                        label: targetState.target.label,
-                      })}
-                    </caption>
-                    <thead>
-                      <tr>
-                        <th scope="col">{t("collections.table.include")}</th>
-                        <th scope="col">{t("common.skill")}</th>
-                        <th scope="col">{t("collections.table.assessment")}</th>
-                        <th scope="col">{t("collections.table.action")}</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {(assessment?.entries ?? []).map((entry) => {
-                        const mode = entry.selectionModes[0];
-                        const selectionLabel =
-                          targetStates.length === 1
-                            ? t("collections.select", { name: entry.name })
-                            : t("collections.selectOn", {
-                                label: targetState.target.label,
-                                name: entry.name,
-                              });
-                        return (
-                          <tr key={`${input.scope}:${entry.name}`}>
-                            <td data-label={t("collections.table.include")}>
-                              <label className="collection-checkbox-hit-area">
-                                <input
-                                  aria-label={selectionLabel}
-                                  checked={
-                                    input.selected[entry.name] !== undefined
-                                  }
-                                  disabled={
-                                    locked ||
-                                    !included ||
-                                    !targetRelease?.executable ||
-                                    !entry.selectable ||
-                                    mode === undefined
-                                  }
-                                  onChange={(event) => {
-                                    const checked = event.currentTarget.checked;
-                                    updateInput(
-                                      targetState.target.id,
-                                      (current) => {
-                                        const selected = {
-                                          ...current.selected,
-                                        };
-                                        if (!checked)
-                                          delete selected[entry.name];
-                                        else if (mode !== undefined)
-                                          selected[entry.name] = mode;
-                                        return { ...current, selected };
-                                      },
-                                    );
-                                  }}
-                                  type="checkbox"
-                                />
-                              </label>
-                            </td>
-                            <td data-label={t("common.skill")}>
-                              <strong>{entry.name}</strong>
-                            </td>
-                            <td data-label={t("collections.table.assessment")}>
-                              <span
-                                className={`collection-status collection-status--${entry.status}`}
-                              >
-                                {t(statusKey(entry.status))}
-                              </span>
-                            </td>
-                            <td data-label={t("collections.table.action")}>
-                              {t(
-                                mode === undefined
-                                  ? "collections.action.notSelectable"
-                                  : mode === "add"
-                                    ? "collections.action.add"
-                                    : "collections.action.reapply",
-                              )}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
+                {normalizedSkillFilter !== "" &&
+                visibleEntries.length === 0 &&
+                skillFilterStats.firstEmptyTargetId !==
+                  targetState.target.id ? (
+                  <p className="collection-filter-empty-compact">
+                    {t("collections.skillFilterEmpty")}
+                  </p>
+                ) : normalizedSkillFilter !== "" &&
+                  visibleEntries.length === 0 ? (
+                  <div className="empty-state">
+                    <Search aria-hidden="true" size={22} />
+                    <h2>{t("collections.skillFilterEmpty")}</h2>
+                    <p>{t("collections.skillFilterEmptyHint")}</p>
+                    <button
+                      className="text-button"
+                      onClick={clearSkillFilter}
+                      type="button"
+                    >
+                      {t("collections.clearSkillFilter")}
+                    </button>
+                  </div>
+                ) : (
+                  <div className="collection-table-wrap">
+                    <table className="collection-table">
+                      <caption className="sr-only">
+                        {t("collections.assessmentCaption", {
+                          label: targetState.target.label,
+                        })}
+                      </caption>
+                      <thead>
+                        <tr>
+                          <th scope="col">{t("collections.table.include")}</th>
+                          <th scope="col">{t("common.skill")}</th>
+                          <th scope="col">
+                            {t("collections.table.assessment")}
+                          </th>
+                          <th scope="col">{t("collections.table.action")}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {visibleEntries.map((entry) => {
+                          const mode = entry.selectionModes[0];
+                          const selectionLabel =
+                            targetStates.length === 1
+                              ? t("collections.select", { name: entry.name })
+                              : t("collections.selectOn", {
+                                  label: targetState.target.label,
+                                  name: entry.name,
+                                });
+                          return (
+                            <tr key={`${input.scope}:${entry.name}`}>
+                              <td data-label={t("collections.table.include")}>
+                                <label className="collection-checkbox-hit-area">
+                                  <input
+                                    aria-label={selectionLabel}
+                                    checked={
+                                      input.selected[entry.name] !== undefined
+                                    }
+                                    disabled={
+                                      locked ||
+                                      !included ||
+                                      !targetRelease?.executable ||
+                                      !entry.selectable ||
+                                      mode === undefined
+                                    }
+                                    onChange={(event) => {
+                                      const checked = event.currentTarget.checked;
+                                      updateInput(
+                                        targetState.target.id,
+                                        (current) => {
+                                          const selected = {
+                                            ...current.selected,
+                                          };
+                                          if (!checked)
+                                            delete selected[entry.name];
+                                          else if (mode !== undefined)
+                                            selected[entry.name] = mode;
+                                          return { ...current, selected };
+                                        },
+                                      );
+                                    }}
+                                    type="checkbox"
+                                  />
+                                </label>
+                              </td>
+                              <td data-label={t("common.skill")}>
+                                <strong>{entry.name}</strong>
+                              </td>
+                              <td data-label={t("collections.table.assessment")}>
+                                <span
+                                  className={`collection-status collection-status--${entry.status}`}
+                                >
+                                  {t(statusKey(entry.status))}
+                                </span>
+                              </td>
+                              <td data-label={t("collections.table.action")}>
+                                {t(
+                                  mode === undefined
+                                    ? "collections.action.notSelectable"
+                                    : mode === "add"
+                                      ? "collections.action.add"
+                                      : "collections.action.reapply",
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </section>
             );
           })}
