@@ -2921,12 +2921,14 @@ describe("Local Target Inventory shell", () => {
     expect(focusTimers.pendingCount()).toBe(0);
 
     rerender(<InventoryApp client={clientFor(plannedSnapshot, reviewClose)} />);
-    await waitFor(() =>
+    // The enabled button is committed before the passive phase effect
+    // schedules the focus retry, so wait for both instead of racing them.
+    await waitFor(() => {
       expect(
         screen.getByRole("button", { name: "Open Trusted Review" }),
-      ).toBeEnabled(),
-    );
-    expect(focusTimers.pendingCount()).toBe(1);
+      ).toBeEnabled();
+      expect(focusTimers.pendingCount()).toBe(1);
+    });
     for (let tick = 0; tick < 60; tick += 1) {
       act(() => focusTimers.runTick());
     }
