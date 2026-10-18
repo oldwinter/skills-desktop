@@ -252,7 +252,7 @@ describe("StudioView (ADR 0018)", () => {
       expect(saveStudioDraft).toHaveBeenCalledWith(draft.id, draft.revision, edited),
     );
     expect(saveStudioDraft).toHaveBeenCalledTimes(1);
-    fireEvent.click(screen.getByRole("button", { name: "Clear Draft search" }));
+    fireEvent.click(screen.getByText("Clear Draft search", { selector: "button" }));
     expect(editor).toHaveValue(edited);
   });
 
@@ -293,9 +293,23 @@ describe("StudioView (ADR 0018)", () => {
     expect(search).toHaveValue("未命名");
     expect(screen.getByText("显示 0 / 2 个草稿")).toBeInTheDocument();
     expect(screen.getByText(/没有匹配的草稿/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "清除草稿搜索" }));
+    fireEvent.click(screen.getByText("清除草稿搜索", { selector: "button" }));
     expect(search).toHaveFocus();
     expect(screen.getByText("显示 2 / 2 个草稿")).toBeInTheDocument();
+  });
+
+  it("offers a one-click reset from an empty Draft search", () => {
+    render(<StudioView client={bridge()} studio={state({ drafts: [draft, secondDraft] })} />);
+    const search = screen.getByRole("searchbox");
+    fireEvent.change(search, { target: { value: "no match" } });
+    expect(screen.getByText("0 of 2 Drafts")).toBeInTheDocument();
+    const reset = screen.getByText("Clear Draft search", { selector: "button" });
+    expect(reset).toHaveClass("text-button");
+    fireEvent.click(reset);
+    expect(search).toHaveFocus();
+    expect(search).toHaveValue("");
+    expect(screen.getByText("2 of 2 Drafts")).toBeInTheDocument();
+    expect(screen.queryByText("Clear Draft search", { selector: "button" })).not.toBeInTheDocument();
   });
 
   it("explains unavailability without offering any action", () => {
