@@ -29,6 +29,6 @@
     "@electron-forge/plugin-fuses": "8.0.1",
     "@electron-forge/shared-types": "8.0.1",
     "@electron/fuses": "1.8.0",
-    "electron": "44.7.0"
+    "electron": "44.7.2"
   }
 }
