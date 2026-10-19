@@ -114,7 +114,9 @@ function isTextEditingTarget(target: EventTarget | null): boolean {
 
 // Skill names are case-sensitive identity; copying avoids retyping them for
 // CLI use. Prefers the async Clipboard API with a legacy fallback for
-// clipboard-less contexts. Returns false instead of throwing.
+// clipboard-less contexts. Returns false instead of throwing. Packaged
+// Electron denies the Clipboard permission, so the fallback is the normal path
+// there; it must hand focus back to whatever had it (#300).
 async function copyTextToClipboard(text: string): Promise<boolean> {
   try {
     const clipboard = navigator.clipboard;
@@ -128,8 +130,12 @@ async function copyTextToClipboard(text: string): Promise<boolean> {
   } catch {
     // Fall through to the legacy path below.
   }
+  const previousFocus =
+    document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+  const area = document.createElement("textarea");
   try {
-    const area = document.createElement("textarea");
     area.value = text;
     area.setAttribute("readonly", "");
     area.style.position = "fixed";
@@ -137,11 +143,14 @@ async function copyTextToClipboard(text: string): Promise<boolean> {
     document.body.appendChild(area);
     area.focus();
     area.select();
-    const copied = document.execCommand("copy");
-    area.remove();
-    return copied;
+    return document.execCommand("copy");
   } catch {
     return false;
+  } finally {
+    area.remove();
+    if (previousFocus !== null && previousFocus.isConnected) {
+      previousFocus.focus({ preventScroll: true });
+    }
   }
 }
 

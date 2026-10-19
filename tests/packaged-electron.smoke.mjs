@@ -740,6 +740,56 @@ try {
     `document.querySelector("h1")?.textContent === "Inventory"`,
     "Inventory navigation after About",
   );
+  // #300: the packaged app denies the Clipboard permission, so copying a
+  // skill name always takes the textarea fallback. Focus must come back to the
+  // copy button instead of dropping to <body>.
+  await first.page.evaluate(`(() => {
+    const row = [...document.querySelectorAll("button.skill-button")].find(
+      (candidate) => candidate.textContent?.includes("packaged-project-skill"),
+    );
+    if (!(row instanceof HTMLButtonElement)) throw new Error("packaged-project-skill row is unavailable.");
+    row.click();
+  })()`);
+  await first.page.waitFor(
+    `document.querySelector('button[aria-label="Copy skill name"]') instanceof HTMLButtonElement`,
+    "Inventory copy skill name button",
+  );
+  const copyNameFocus = await first.page.evaluate(`(() => {
+    const button = document.querySelector('button[aria-label="Copy skill name"]');
+    if (!(button instanceof HTMLButtonElement)) throw new Error("Copy skill name is unavailable.");
+    button.focus();
+    button.click();
+    return new Promise((resolve, reject) => {
+      const started = Date.now();
+      const check = () => {
+        const copied = document.querySelector('[data-testid="inspector-copied"]');
+        const failed = document.querySelector('[data-testid="inspector-copy-failed"]');
+        if (copied !== null || failed !== null) {
+          const active = document.activeElement;
+          resolve({
+            activeLabel: active?.getAttribute("aria-label") ?? null,
+            activeTag: active?.tagName ?? null,
+            outcome: copied !== null ? "copied" : "failed",
+          });
+          return;
+        }
+        if (Date.now() - started > 10000) {
+          reject(new Error("Timed out waiting for the copy skill name result."));
+          return;
+        }
+        setTimeout(check, 50);
+      };
+      check();
+    });
+  })()`);
+  if (copyNameFocus.activeLabel !== "Copy skill name") {
+    throw new Error(
+      `Copy skill name lost keyboard focus: ${JSON.stringify(copyNameFocus)}`,
+    );
+  }
+  console.log(
+    `packaged smoke: copy skill name keeps focus (${copyNameFocus.outcome})`,
+  );
   await first.page.evaluate(`(() => {
     const button = document.querySelector('button[aria-label="Collections"]');
     if (!(button instanceof HTMLButtonElement)) throw new Error("Collections navigation is unavailable.");
