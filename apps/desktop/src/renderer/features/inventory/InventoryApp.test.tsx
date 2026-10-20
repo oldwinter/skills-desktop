@@ -723,6 +723,96 @@ describe("Local Target Inventory shell", () => {
     }
   });
 
+  // #300: packaged Electron denies the Clipboard permission, so every copy
+  // takes the textarea fallback. Removing that textarea must not drop keyboard
+  // focus to <body>; it has to come back to the copy button.
+  it.each([
+    ["succeeds", true],
+    ["fails", false],
+  ])(
+    "keeps focus on the copy button when the legacy copy %s after the Clipboard API is denied",
+    async (_label, execResult) => {
+      const clipboardDescriptor = Object.getOwnPropertyDescriptor(
+        window.navigator,
+        "clipboard",
+      );
+      const writeText = vi.fn(async (_text: string) => {
+        throw new DOMException("Write permission denied.", "NotAllowedError");
+      });
+      Object.defineProperty(window.navigator, "clipboard", {
+        configurable: true,
+        value: { writeText },
+      });
+      const execCommandDescriptor = Object.getOwnPropertyDescriptor(
+        document,
+        "execCommand",
+      );
+      const execCommand = vi.fn(() => {
+        // The fallback must have moved focus to its hidden textarea here.
+        expect(document.activeElement).toBeInstanceOf(HTMLTextAreaElement);
+        return execResult;
+      });
+      Object.defineProperty(document, "execCommand", {
+        configurable: true,
+        value: execCommand,
+      });
+      try {
+        render(<InventoryApp client={clientFor(snapshot)} />);
+        fireEvent.click(
+          await screen.findByRole("button", { name: "Case-Sensitive-Skill" }),
+        );
+        const copyButton = await screen.findByRole("button", {
+          name: "Copy skill name",
+        });
+        copyButton.focus();
+        expect(document.activeElement).toBe(copyButton);
+
+        // First activation (Enter / click on the focused button).
+        fireEvent.click(copyButton);
+        await waitFor(() => expect(execCommand).toHaveBeenCalledTimes(1));
+        expect(writeText).toHaveBeenCalledWith("Case-Sensitive-Skill");
+        if (execResult) {
+          expect(
+            await screen.findByTestId("inspector-copied"),
+          ).toHaveTextContent("Skill name copied.");
+        } else {
+          expect(
+            await screen.findByTestId("inspector-copy-failed"),
+          ).toHaveTextContent("Could not copy the skill name.");
+        }
+        expect(document.activeElement).toBe(
+          screen.getByRole("button", { name: "Copy skill name" }),
+        );
+        expect(document.activeElement).not.toBe(document.body);
+        expect(document.querySelector("textarea[readonly]")).toBeNull();
+
+        // Second activation (Space right after Enter) still lands on the button.
+        fireEvent.click(document.activeElement as HTMLElement);
+        await waitFor(() => expect(execCommand).toHaveBeenCalledTimes(2));
+        await waitFor(() =>
+          expect(document.activeElement).toBe(
+            screen.getByRole("button", { name: "Copy skill name" }),
+          ),
+        );
+      } finally {
+        if (clipboardDescriptor === undefined) {
+          Reflect.deleteProperty(window.navigator, "clipboard");
+        } else {
+          Object.defineProperty(
+            window.navigator,
+            "clipboard",
+            clipboardDescriptor,
+          );
+        }
+        if (execCommandDescriptor === undefined) {
+          Reflect.deleteProperty(document, "execCommand");
+        } else {
+          Object.defineProperty(document, "execCommand", execCommandDescriptor);
+        }
+      }
+    },
+  );
+
   it("clears the copied confirmation when selection changes", async () => {
     const writeText = vi.fn(async (_text: string) => {});
     const descriptor = Object.getOwnPropertyDescriptor(
