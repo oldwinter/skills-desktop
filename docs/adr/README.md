@@ -47,7 +47,7 @@ validators passed.
 10. [ADR 0023: Native bilingual accessible shell](0023-ship-a-native-bilingual-accessible-shell.md)
 11. [ADR 0024: Mission qualification and unsigned outcome](0024-qualify-an-unsigned-mission-candidate.md)
 
-The foundation records above remain in force except where one of these
-evolution records explicitly narrows or supersedes a statement. In particular,
-the installed-state authority, typed execution, Trusted Review, Guard,
-recovery, renderer isolation, and Stable Release requirements remain in force.
+ADRs 0001 through 0013 remain accepted except where one of these records
+explicitly narrows or supersedes a statement. In particular, the installed
+state authority, typed execution, Trusted Review, Guard, recovery, renderer
+isolation, and Stable Release requirements remain in force.
