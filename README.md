@@ -34,6 +34,17 @@ The prototype was imported from SimplexAI Agent-First Control Plane commit
 `e4c5cb0f41a1944b369fbe20da72af456f806d2f`. It is evidence, not the production
 foundation.
 
+## Documentation
+
+| Audience | Start here |
+| --- | --- |
+| End user | [User guide](docs/user-guide.md) (Simplified Chinese). Add Skill is under Inventory; authoring a `SKILL.md` is under Studio. |
+| Contributor | [CONTRIBUTING.md](CONTRIBUTING.md) and [AGENTS.md](AGENTS.md) |
+| In-repo Cursor skills | [`.cursor/skills/README.md`](.cursor/skills/README.md) |
+| Domain language | [CONTEXT.md](CONTEXT.md) |
+| Architecture | [docs/adr/](docs/adr/) |
+| Agent tracker notes | [docs/agents/](docs/agents/) |
+
 ## Product Boundary
 
 - Delegate skill discovery and mutations to `npx skills`; do not build another
@@ -77,9 +88,9 @@ reading or changing developer inventory.
 
 The production workspaces are `apps/desktop`, `packages/skills-runtime`, and
 `packages/remote-bootstrap`. `packages/remote-bootstrap` is retained for
-`packages/remote-bootstrap` is retained for gated SSH work; it is not a current
-public capability. Production skill discovery and mutation must keep using
-argument-array invocations of the pinned `npx skills` package.
+gated SSH work; it is not a current public capability. Production skill
+discovery and mutation must keep using argument-array invocations of the
+pinned `npx skills` package.
 
 ## Landing Page
 

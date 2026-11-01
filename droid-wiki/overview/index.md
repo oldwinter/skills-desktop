@@ -34,3 +34,4 @@ packages/remote-bootstrap/     后续 SSH 路径使用的固定远端 Node 程�
 - 需要改功能时，从[贡献指南](../how-to-contribute/index.md)和[模式与约定](../how-to-contribute/patterns-and-conventions.md)开始。
 - 需要理解 Target、Fresh Inventory、Prepared Mutation 等术语时，查阅[术语表](glossary.md)。
 - 需要确认当前用户可见行为时，以 `docs/user-guide.md` 为准，而不是把 `docs/adr/` 中的目标架构当作已交付能力。
+- 仓库内 Cursor 技能（含如何新增技能）见 [`.cursor/skills/README.md`](../../.cursor/skills/README.md)。
