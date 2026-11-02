@@ -8,6 +8,12 @@ This repository uses a single product context.
 - Read relevant records under `docs/adr/`.
 - Read prototype documents only as interaction and design evidence.
 
+## Agent skills
+
+Cursor skills for this repository are catalogued in
+[`.cursor/skills/README.md`](../../.cursor/skills/README.md). They are agent
+runbooks, not product Skills, and they do not replace `npx skills`.
+
 ## Consumer rules
 
 - Use the canonical vocabulary from `CONTEXT.md`.

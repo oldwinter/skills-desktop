@@ -10,6 +10,19 @@ Target，也会标成「SSH · 未在 V1 开放」，不能当作当前可用路
 
 实际技能发现与变更仍交给 `npx skills`；本应用不另起一套安装器，也不自行扫描技能目录。
 
+## 目录
+
+- [1. 安装与启动](#1-安装与启动)
+- [2. Local Target](#2-local-target)
+- [3. Inventory（清单）](#3-inventory清单) — 浏览、筛选，以及 [Add Skill](#变更必须先计划再确认)
+- [4. Comparison（对比）](#4-comparison对比)
+- [5. Collections（官方合集）](#5-collections官方合集)
+- [6. About 与更新](#6-about-与更新)
+- [7. Publish（发布）](#7-publish发布)
+- [8. Studio（编写 Skill）](#8-studio编写-skill)
+- [9. Recovery（恢复）](#9-recovery恢复)
+- [10. 常见问题](#10-常见问题)
+
 ---
 
 ## 1. 安装与启动
@@ -423,5 +436,6 @@ A：预览字符串仅供审阅，不是可执行输入。请在 Trusted Review 
 - Unsigned 安装与校验细节：[unsigned-developer-preview.md](unsigned-developer-preview.md)
 - 概念定义：[CONTEXT.md](../CONTEXT.md)
 - 架构决策：[`docs/adr/`](adr/)
+- 贡献与仓库内 Cursor 技能目录：[CONTRIBUTING.md](../CONTRIBUTING.md)、[`.cursor/skills/README.md`](../.cursor/skills/README.md)
 
 有问题或复现步骤，请到 [oldwinter/skills-desktop](https://github.com/oldwinter/skills-desktop/issues) 开 Issue。
