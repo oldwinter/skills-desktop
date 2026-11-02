@@ -41,13 +41,13 @@
     "lint:biome": "npx --yes @biomejs/biome@1.9.4 check apps/desktop/src"
   },
   "devDependencies": {
-    "@babel/core": "8.0.7",
+    "@babel/core": "8.0.10",
     "@babel/eslint-parser": "8.0.7",
-    "@babel/parser": "8.0.7",
+    "@babel/parser": "8.0.10",
     "@eslint/js": "9.39.5",
     "@testing-library/jest-dom": "7.0.1",
     "@testing-library/react": "16.3.3",
-    "@types/node": "26.6.5",
+    "@types/node": "26.6.6",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "@vitejs/plugin-react": "6.1.2",
