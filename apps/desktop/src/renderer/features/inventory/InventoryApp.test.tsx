@@ -554,6 +554,94 @@ describe("Local Target Inventory shell", () => {
     expect(addButtons.every((button) => button.tabIndex === 0)).toBe(true);
   });
 
+  it("sorts the visible inventory by name while preserving the selected skill", async () => {
+    const entries = [
+      {
+        ...snapshot.inventory.entries[0]!,
+        name: "zeta-skill",
+        scope: "project" as const,
+      },
+      {
+        ...snapshot.inventory.entries[0]!,
+        name: "Alpha-skill",
+        scope: "global" as const,
+      },
+      {
+        ...snapshot.inventory.entries[0]!,
+        name: "beta-skill",
+        scope: "project" as const,
+      },
+    ];
+    render(
+      <InventoryApp
+        client={clientFor({
+          ...snapshot,
+          inventory: { ...snapshot.inventory, entries },
+        })}
+      />,
+    );
+
+    const table = await screen.findByRole("table");
+    const namesInOrder = () =>
+      within(table)
+        .getAllByRole("row")
+        .slice(1)
+        .map(
+          (row) =>
+            within(row).getByRole("button").textContent?.trim() ?? "",
+        );
+    const sort = screen.getByRole("combobox", { name: "Sort inventory" });
+
+    expect(sort).toHaveDisplayValue("Observed order");
+    expect(
+      within(sort)
+        .getAllByRole("option")
+        .map((option) => option.textContent),
+    ).toEqual(["Observed order", "Name A-Z", "Name Z-A"]);
+    expect(namesInOrder()).toEqual([
+      "zeta-skill",
+      "Alpha-skill",
+      "beta-skill",
+    ]);
+    expect(
+      screen.getByRole("heading", { name: "zeta-skill" }),
+    ).toBeInTheDocument();
+
+    fireEvent.change(sort, { target: { value: "name-asc" } });
+
+    expect(namesInOrder()).toEqual([
+      "Alpha-skill",
+      "beta-skill",
+      "zeta-skill",
+    ]);
+    expect(
+      screen.getByRole("heading", { name: "zeta-skill" }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "beta-skill" }));
+    fireEvent.change(sort, { target: { value: "name-desc" } });
+    expect(namesInOrder()).toEqual([
+      "zeta-skill",
+      "beta-skill",
+      "Alpha-skill",
+    ]);
+    expect(
+      screen.getByRole("heading", { name: "beta-skill" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("3 shown")).toBeInTheDocument();
+    expect(screen.getAllByText("example/skills").length).toBeGreaterThan(0);
+
+    fireEvent.change(sort, { target: { value: "observed" } });
+    expect(namesInOrder()).toEqual([
+      "zeta-skill",
+      "Alpha-skill",
+      "beta-skill",
+    ]);
+    expect(
+      screen.getByRole("heading", { name: "beta-skill" }),
+    ).toBeInTheDocument();
+  });
+
   it("keeps the inspector aligned with visible search results and clears search", async () => {
     const client = clientFor({
       ...snapshot,

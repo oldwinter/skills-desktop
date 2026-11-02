@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
+  ArrowUpDown,
   Boxes,
   Check,
   CheckCircle2,
@@ -80,6 +81,7 @@ import {
 } from "./inventory-state.js";
 
 type ScopeFilter = "all" | "global" | "project";
+type InventorySort = "name-asc" | "name-desc" | "observed";
 type SelectedIdentity = Pick<PublicInventoryEntry, "name" | "scope">;
 interface ReviewFocusIntent {
   closed: boolean;
@@ -333,6 +335,7 @@ function InventoryWorkspace({
   const [bootstrapAttempt, setBootstrapAttempt] = useState(0);
   const [query, setQuery] = useState("");
   const [scope, setScope] = useState<ScopeFilter>("all");
+  const [sort, setSort] = useState<InventorySort>("observed");
   const [selectedIdentity, setSelectedIdentity] = useState<SelectedIdentity>();
   const [copiedSkillName, setCopiedSkillName] = useState<string>();
   const [copyNameFailed, setCopyNameFailed] = useState(false);
@@ -693,6 +696,23 @@ function InventoryWorkspace({
       );
     });
   }, [inventory, query, scope]);
+  const nameCollator = useMemo(
+    () =>
+      new Intl.Collator(locale, {
+        numeric: true,
+        sensitivity: "base",
+      }),
+    [locale],
+  );
+  const sortedEntries = useMemo(() => {
+    if (sort === "observed") return filteredEntries;
+    const direction = sort === "name-asc" ? 1 : -1;
+    return [...filteredEntries].sort((left, right) => {
+      const byName = nameCollator.compare(left.name, right.name);
+      if (byName !== 0) return byName * direction;
+      return left.scope.localeCompare(right.scope) * direction;
+    });
+  }, [filteredEntries, nameCollator, sort]);
 
   const clearInventoryFilters = () => {
     setQuery("");
@@ -708,14 +728,14 @@ function InventoryWorkspace({
 
   const selected = useMemo(() => {
     if (selectedIdentity !== undefined) {
-      return filteredEntries.find(
+      return sortedEntries.find(
         (entry) =>
           entry.name === selectedIdentity.name &&
           entry.scope === selectedIdentity.scope,
       );
     }
-    return filteredEntries[0];
-  }, [filteredEntries, selectedIdentity]);
+    return sortedEntries[0];
+  }, [selectedIdentity, sortedEntries]);
 
   if (snapshot === undefined) {
     if (bootstrapError !== undefined) {
@@ -1266,6 +1286,33 @@ function InventoryWorkspace({
                       })
                     : t("inventory.shown", { count: filteredEntries.length })}
                 </span>
+                <label className="inventory-sort">
+                  <ArrowUpDown aria-hidden="true" size={15} />
+                  <span>{t("inventory.sort.label")}</span>
+                  <select
+                    aria-label={t("inventory.sort")}
+                    onChange={(event) => {
+                      if (selectedIdentity === undefined && selected !== undefined) {
+                        setSelectedIdentity({
+                          name: selected.name,
+                          scope: selected.scope,
+                        });
+                      }
+                      setSort(event.currentTarget.value as InventorySort);
+                    }}
+                    value={sort}
+                  >
+                    <option value="observed">
+                      {t("inventory.sort.observed")}
+                    </option>
+                    <option value="name-asc">
+                      {t("inventory.sort.nameAsc")}
+                    </option>
+                    <option value="name-desc">
+                      {t("inventory.sort.nameDesc")}
+                    </option>
+                  </select>
+                </label>
                 <div
                   className="segmented-control"
                   aria-label={t("inventory.scopeFilter")}
@@ -1331,7 +1378,7 @@ function InventoryWorkspace({
                       </tr>
                     </thead>
                     <tbody>
-                      {filteredEntries.map((entry) => {
+                      {sortedEntries.map((entry) => {
                         const selectedRow =
                           selected?.name === entry.name &&
                           selected.scope === entry.scope;

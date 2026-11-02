@@ -484,6 +484,9 @@ html[data-appearance="system"] .status-pill.status-pill--neutral {
 .search-clear { display: inline-grid; width: 28px; height: 28px; flex: 0 0 auto; place-items: center; color: var(--text-tertiary); background: transparent; border: 0; border-radius: 4px; }
 .search-clear:hover { color: var(--text); background: var(--surface-hover); }
 .inventory-result-count { flex: 0 0 auto; color: var(--text-tertiary); font-size: var(--font-size-meta); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.inventory-sort { display: inline-flex; min-height: 40px; align-items: center; gap: 7px; color: var(--text-tertiary); font-size: var(--font-size-meta); }
+.inventory-sort select { min-width: 0; height: 40px; min-height: 40px; padding: 0 9px; color: var(--text); background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--radius-control); }
+.inventory-sort:focus-within { color: var(--text); }
 .segmented-control { display: inline-grid; grid-template-columns: repeat(3, minmax(78px, auto)); min-height: 40px; padding: 3px; background: var(--surface-muted); border-radius: var(--radius-control); }
 .segmented-control button { min-height: 34px; padding: 0 10px; color: var(--text-secondary); background: transparent; border: 0; border-radius: 4px; font-size: var(--font-size-meta); }
 .segmented-control button[aria-pressed="true"] { color: var(--text); background: var(--surface); box-shadow: 0 0 0 1px var(--line); font-weight: 500; }
@@ -841,6 +844,8 @@ html[data-appearance="system"] .status-pill.status-pill--neutral {
   .inventory-toolbar { position: static; align-items: stretch; flex-direction: column; padding: 8px 14px 16px; }
   .search-control { max-width: none; }
   .inventory-result-count { align-self: flex-start; }
+  .inventory-sort { width: 100%; }
+  .inventory-sort select { flex: 1; }
   .segmented-control { grid-template-columns: repeat(3, 1fr); }
   .inventory-table-wrap { overflow: visible; padding: 0 14px 14px; }
   .comparison-controls { grid-template-columns: minmax(0, 1fr) 40px; padding: 0 14px 12px; }
