@@ -1058,7 +1058,11 @@ describe("Local Target Inventory shell", () => {
     expect(
       screen.getByRole("heading", { name: "No matching skills" }),
     ).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+    fireEvent.click(
+      within(screen.getByRole("status")).getByRole("button", {
+        name: "Clear filters",
+      }),
+    );
 
     expect(search).toHaveValue("");
     expect(search).toHaveFocus();
@@ -1067,6 +1071,28 @@ describe("Local Target Inventory shell", () => {
     expect(
       screen.getByRole("button", { name: "Case-Sensitive-Skill" }),
     ).toBeInTheDocument();
+  });
+
+  it("clears active filters from the toolbar before results become empty", async () => {
+    render(<InventoryApp client={clientFor(snapshot)} />);
+
+    const search = await screen.findByRole("searchbox", {
+      name: "Search inventory",
+    });
+    fireEvent.change(search, { target: { value: "case" } });
+
+    const clearFilters = screen.getByRole("button", {
+      name: "Clear filters",
+    });
+    expect(clearFilters).toBeInTheDocument();
+
+    fireEvent.click(clearFilters);
+
+    expect(search).toHaveValue("");
+    expect(search).toHaveFocus();
+    expect(
+      screen.queryByRole("button", { name: "Clear filters" }),
+    ).not.toBeInTheDocument();
   });
 
   it("clears Inspector when the visible table is empty (#143)", async () => {
