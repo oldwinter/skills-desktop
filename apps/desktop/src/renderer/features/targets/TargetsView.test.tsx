@@ -611,6 +611,73 @@ describe("TargetsView", () => {
     expect(await screen.findByText("Refresh requested")).toBeInTheDocument();
   });
 
+  it("copies a Target workspace path and reports clipboard failure", async () => {
+    const clipboardDescriptor = Object.getOwnPropertyDescriptor(
+      window.navigator,
+      "clipboard",
+    );
+    const writeText = vi.fn(async (_text: string) => {});
+    Object.defineProperty(window.navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    try {
+      render(
+        <TargetsView
+          client={bridge()}
+          onSelected={vi.fn()}
+          targets={[targetState(localTarget)]}
+        />,
+      );
+
+      const copy = screen.getByRole("button", {
+        name: "Copy workspace path for This device",
+      });
+      fireEvent.click(copy);
+      await waitFor(() =>
+        expect(writeText).toHaveBeenCalledExactlyOnceWith(
+          localTarget.workspace,
+        ),
+      );
+      expect(await screen.findByText("Workspace path copied")).toBeInTheDocument();
+
+      cleanup();
+      const failingWrite = vi.fn(async (_text: string) => {
+        throw new Error("clipboard denied");
+      });
+      Object.defineProperty(window.navigator, "clipboard", {
+        configurable: true,
+        value: { writeText: failingWrite },
+      });
+      Object.defineProperty(document, "execCommand", {
+        configurable: true,
+        value: vi.fn(() => false),
+      });
+      render(
+        <TargetsView
+          client={bridge()}
+          onSelected={vi.fn()}
+          targets={[targetState(localTarget)]}
+        />,
+      );
+      fireEvent.click(
+        screen.getByRole("button", {
+          name: "Copy workspace path for This device",
+        }),
+      );
+      expect(
+        await screen.findByRole("alert"),
+      ).toHaveTextContent("Could not copy the workspace path.");
+    } finally {
+      vi.restoreAllMocks();
+      if (clipboardDescriptor === undefined) {
+        Reflect.deleteProperty(window.navigator, "clipboard");
+      } else {
+        Object.defineProperty(window.navigator, "clipboard", clipboardDescriptor);
+      }
+    }
+  });
+
   it("hides Generation from the default list and humanizes inventory status (#141)", () => {
     const emptyHost = {
       ...sshTarget,
