@@ -437,6 +437,24 @@ function emptyMutationState(): PublicMutationState {
 function projectCommandPlan(plan: PreparedMutation["commandPlan"]) {
   return {
     ...plan,
+    ...(plan.affectedSkills === undefined
+      ? {}
+      : {
+          affectedSkills: plan.affectedSkills.map((skill) => ({
+            name: skill.name,
+            path: skill.path,
+            revision:
+              skill.revision.status === "unknown"
+                ? { status: "unknown" as const }
+                : {
+                    authority: skill.revision.authority,
+                    kind: skill.revision.kind,
+                    status: "known" as const,
+                    value: skill.revision.value,
+                  },
+            scope: skill.scope,
+          })),
+        }),
     names: [...plan.names],
     source: plan.source === null ? null : { ...plan.source },
   };

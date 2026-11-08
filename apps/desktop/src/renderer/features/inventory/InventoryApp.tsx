@@ -1850,6 +1850,28 @@ function InventoryWorkspace({
                         }
                       </dd>
                     </div>
+                    {snapshot.mutation.commandPlan.affectedSkills !==
+                    undefined ? (
+                      <div>
+                        <dt>{t("inventory.plan.affectedSkills")}</dt>
+                        <dd>
+                          <ul className="affected-skill-list">
+                            {snapshot.mutation.commandPlan.affectedSkills.map(
+                              (skill, index) => (
+                                <li
+                                  key={`${skill.scope}:${skill.name}:${skill.path}:${index}`}
+                                >
+                                  <span>{skill.name}</span>
+                                  <span className="wrapping-value">
+                                    {skill.path}
+                                  </span>
+                                </li>
+                              ),
+                            )}
+                          </ul>
+                        </dd>
+                      </div>
+                    ) : null}
                   </dl>
                   <code className="command-preview wrapping-value">
                     {snapshot.mutation.commandPlan.preview}

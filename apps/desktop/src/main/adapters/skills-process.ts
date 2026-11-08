@@ -71,7 +71,27 @@ export type CommandPlanSource =
       readonly sourceType: "inspected";
     };
 
+/**
+ * CLI-reported evidence a remove or update can affect. Paths come only from
+ * the Fresh Inventory the plan is bound to. Skills Desktop does not scan
+ * skill directories to invent additional paths.
+ */
+export interface CommandPlanAffectedSkill {
+  readonly name: string;
+  readonly path: string;
+  readonly revision:
+    | { readonly status: "unknown" }
+    | {
+        readonly authority: string;
+        readonly kind: string;
+        readonly status: "known";
+        readonly value: string;
+      };
+  readonly scope: "global" | "project";
+}
+
 export interface CommandPlan {
+  readonly affectedSkills?: CommandPlanAffectedSkill[];
   readonly harness: string;
   readonly harnessEffect?: CommandPlanHarnessEffect;
   readonly harnessIds?: string[];
@@ -414,6 +434,8 @@ export function prepareMutationPlan(options: {
   if (!boundHarness.ok) return boundHarness;
   const boundHarnessIds = boundHarness.value;
 
+  const affected = affectedSkillsFor(mutation, matchingEntries);
+  if (!affected.ok) return affected;
   const args = mutationArguments(mutation, boundHarnessIds);
   const harnessEffect: CommandPlanHarnessEffect =
     mutation.type === "update"
@@ -423,6 +445,9 @@ export function prepareMutationPlan(options: {
         }
       : { harnessIds: [...boundHarnessIds], kind: "bound" };
   const commandPlan: CommandPlan = {
+    ...(affected.value === undefined
+      ? {}
+      : { affectedSkills: affected.value }),
     harness:
       boundHarnessIds.length === scopedHarness.value.length
         ? (options.binding.harness ?? scopedHarness.value.join(" "))
@@ -481,6 +506,59 @@ export function prepareMutationPlan(options: {
  * without a subset binds the whole scoped set. Update ignores subsets
  * because the pinned CLI cannot scope `update` by harness.
  */
+const MAX_AFFECTED_SKILLS = 5_000;
+
+/**
+ * Lists Fresh Inventory rows a remove or update names. The path and revision
+ * are copied from those rows; nothing is read from the filesystem.
+ */
+function affectedSkillsFor(
+  mutation: NormalizedMutation,
+  matchingEntries: Inventory["entries"],
+): Result<CommandPlanAffectedSkill[] | undefined, MutationPreparationError> {
+  if (mutation.type === "add") return { ok: true, value: undefined };
+  const wanted = new Set(mutation.names);
+  const affected = matchingEntries.filter((entry) => wanted.has(entry.name));
+  if (
+    affected.length === 0 ||
+    affected.length > MAX_AFFECTED_SKILLS ||
+    mutation.names.some(
+      (name) => !affected.some((entry) => entry.name === name),
+    ) ||
+    affected.some(
+      (entry) => typeof entry.path !== "string" || entry.path.length === 0,
+    )
+  ) {
+    return mutationPreparationFailure(
+      "mutation_ineligible",
+      "The Fresh Inventory does not name a CLI-reported path for every selected Skill.",
+    );
+  }
+  return {
+    ok: true,
+    value: affected.map((entry) => ({
+      name: entry.name,
+      path: entry.path,
+      revision: affectedRevision(entry.revision),
+      scope: entry.scope,
+    })),
+  };
+}
+
+function affectedRevision(
+  revision: Inventory["entries"][number]["revision"] | undefined,
+): CommandPlanAffectedSkill["revision"] {
+  if (revision === undefined || revision.status !== "known") {
+    return { status: "unknown" };
+  }
+  return {
+    authority: revision.authority,
+    kind: revision.kind,
+    status: "known",
+    value: revision.value,
+  };
+}
+
 function resolveBoundHarnessSubset(
   intent: MutationIntent,
   scopedHarnessIds: readonly HarnessId[],

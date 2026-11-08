@@ -445,6 +445,77 @@ describe("Trusted Review surface", () => {
     expect(closeWindow).toHaveBeenCalledOnce();
   });
 
+  it("lists CLI-reported paths on a removal review and keeps them out of the preview", async () => {
+    const client: ReviewBridge = {
+      async approve() {
+        return { ok: true, value: { operationId: "mutation-1" } };
+      },
+      async getReview() {
+        return {
+          ok: true,
+          value: {
+            projection: {
+              commandPlan: {
+                affectedSkills: [
+                  {
+                    name: "tdd",
+                    path: "/work/skills-desktop/.agents/skills/tdd",
+                    revision: {
+                      authority: "npx-skills",
+                      kind: "git",
+                      status: "known",
+                      value: "abc123",
+                    },
+                    scope: "project",
+                  },
+                ],
+                harness: "Codex",
+                names: ["tdd"],
+                operation: "remove",
+                preview: "npx skills@1.5.23 remove tdd --agent codex --yes",
+                schemaVersion: 1,
+                scope: "project",
+                source: null,
+                targetId: "00000000-0000-4000-8000-000000000001",
+                timeoutMs: 120_000,
+              },
+              expiresAt: "2026-08-21T10:10:00.000Z",
+              purpose: "execute",
+              reviewId: "review-affected",
+              target: {
+                ...targetV4Metadata,
+                generation: 1,
+                id: "00000000-0000-4000-8000-000000000001",
+                kind: "local",
+                label: "This device",
+                workspace: "/work/skills-desktop",
+                workspaceLabel: "skills-desktop",
+              },
+            },
+            schemaVersion: 2,
+            status: "pending",
+          },
+        };
+      },
+      async reject() {
+        return { ok: true as const, value: { operationId: "review-affected" } };
+      },
+    };
+    render(<ReviewSurface client={client} />);
+    expect(
+      await screen.findByRole("heading", {
+        name: "CLI-reported paths this change can affect",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("/work/skills-desktop/.agents/skills/tdd"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Revision abc123")).toBeInTheDocument();
+    expect(
+      screen.getByText("npx skills@1.5.23 remove tdd --agent codex --yes"),
+    ).not.toHaveTextContent("/work/skills-desktop/.agents/skills/tdd");
+  });
+
   it("offers a skip-link into the review body ahead of Approve / Reject (#193)", async () => {
     const client: ReviewBridge = {
       async approve() {

@@ -21,6 +21,33 @@ describe("Command Plan harness effect", () => {
     expect(
       commandPlanSchema.safeParse({
         ...basePlan,
+        affectedSkills: [
+          {
+            name: "tdd",
+            path: "/work/.agents/skills/tdd",
+            revision: { status: "unknown" },
+            scope: "project",
+          },
+        ],
+      }).success,
+    ).toBe(true);
+    expect(
+      commandPlanSchema.safeParse({
+        ...basePlan,
+        affectedSkills: [
+          {
+            name: "tdd",
+            path: "/work/.agents/skills/tdd",
+            revision: { status: "unknown" },
+            scope: "project",
+            scanned: true,
+          },
+        ],
+      }).success,
+    ).toBe(false);
+    expect(
+      commandPlanSchema.safeParse({
+        ...basePlan,
         harnessEffect: { harnessIds: ["codex"], kind: "bound" },
       }).success,
     ).toBe(true);

@@ -324,6 +324,7 @@ export const en = {
   "inventory.plan.operation": "Operation",
   "inventory.plan.source": "Source",
   "inventory.plan.harnessEffect": "Harness effect",
+  "inventory.plan.affectedSkills": "CLI-reported paths",
 
   "source.family.git": "Git repository",
   "source.family.github": "GitHub repository",
@@ -754,6 +755,10 @@ export const en = {
   "review.mutation.workspace": "Workspace",
   "review.mutation.approveCancellation": "Approve cancellation",
   "review.mutation.approveMutation": "Approve mutation",
+  "review.mutation.affectedSkills":
+    "CLI-reported paths this change can affect",
+  "review.mutation.affectedRevision": "Revision {value}",
+  "review.mutation.affectedRevisionUnknown": "Revision unknown",
   "review.publication.title": "Review Git publication",
   "review.publication.remote": "Remote",
   "review.publication.remoteKind": "Transport",
