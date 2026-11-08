@@ -22,6 +22,38 @@ import {
   useTranslator,
 } from "../renderer/i18n/LocaleProvider.js";
 
+function AffectedSkills({
+  commandPlan,
+  headingId,
+}: {
+  readonly commandPlan: CommandPlan;
+  readonly headingId: string;
+}) {
+  const { t } = useTranslator();
+  const skills = commandPlan.affectedSkills;
+  if (skills === undefined || skills.length === 0) return null;
+  return (
+    <section className="review-plan" aria-labelledby={headingId}>
+      <h2 id={headingId}>{t("review.mutation.affectedSkills")}</h2>
+      <ul className="review-file-list">
+        {skills.map((skill, index) => (
+          <li key={`${skill.scope}:${skill.name}:${skill.path}:${index}`}>
+            <code>{skill.name}</code>
+            <small>{skill.path}</small>
+            <small>
+              {skill.revision.status === "known"
+                ? t("review.mutation.affectedRevision", {
+                    value: skill.revision.value,
+                  })
+                : t("review.mutation.affectedRevisionUnknown")}
+            </small>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 function scopeLabel(t: Translator["t"], scope: "global" | "project") {
   return t(
     scope === "project" ? "common.scope.project" : "common.scope.global",
@@ -541,6 +573,10 @@ function ReviewContent({
                       .join(", ")}
                   </p>
                   <code>{child.commandPlan.preview}</code>
+                  <AffectedSkills
+                    commandPlan={child.commandPlan}
+                    headingId={`review-affected-${child.target.id}`}
+                  />
                   <DigestDetails>
                     <dl className="review-child-evidence">
                       <div>
@@ -646,6 +682,10 @@ function ReviewContent({
         <section className="review-plan" aria-labelledby="review-plan-heading">
           <h2 id="review-plan-heading">{t("review.collection.childPlan")}</h2>
           <code>{collectionPlan.childCommandPlan.preview}</code>
+          <AffectedSkills
+            commandPlan={collectionPlan.childCommandPlan}
+            headingId="review-affected-child"
+          />
         </section>
         <div className="review-actions">
           {rejectButton}
@@ -779,6 +819,10 @@ function ReviewContent({
         <code>{commandPlan.preview}</code>
       </section>
 
+      <AffectedSkills
+        commandPlan={commandPlan}
+        headingId="review-affected-heading"
+      />
       <SourceDisclosure commandPlan={commandPlan} />
       <HarnessEffectDisclosure commandPlan={commandPlan} />
 

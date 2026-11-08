@@ -1048,6 +1048,7 @@ describe("Local SkillsProcess mutation contract", () => {
     }
 
     // Update is CLI-unscoped: no `--agent`, and the plan says so.
+    // The affected path is the CLI-reported inventory path, not a scan.
     expect(
       plan({ names: ["shared-skill"], scope: "project", type: "update" }),
     ).toMatchObject({
@@ -1056,6 +1057,14 @@ describe("Local SkillsProcess mutation contract", () => {
         args: ["update", "shared-skill", "--project", "--yes"],
         prepared: {
           commandPlan: {
+            affectedSkills: [
+              {
+                name: "shared-skill",
+                path: "/workspace/.agents/skills/shared-skill",
+                revision: { status: "unknown" },
+                scope: "project",
+              },
+            ],
             harnessEffect: {
               kind: "cli-unscoped",
               targetHarnessIds: ["amp", "codex", "cursor"],
@@ -1064,6 +1073,107 @@ describe("Local SkillsProcess mutation contract", () => {
         },
       },
     });
+    const updated = plan({
+      names: ["shared-skill"],
+      scope: "project",
+      type: "update",
+    });
+    expect(updated.ok ? updated.value.args : []).not.toContain(
+      "/workspace/.agents/skills/shared-skill",
+    );
+  });
+
+  it("binds remove and update confirmation to CLI-reported paths without scanning", () => {
+    const binding = {
+      generation: 1,
+      harnessIds: ["codex"],
+      targetId: "00000000-0000-4000-8000-000000000001",
+    };
+    const entry = {
+      agents: ["codex"],
+      contentFingerprint: { status: "unknown" as const },
+      declaredSource: { source: "example/skills", sourceType: "github" },
+      extensions: {},
+      name: "shared-skill",
+      path: "/workspace/.agents/skills/shared-skill",
+      revision: {
+        authority: "npx-skills",
+        kind: "git",
+        status: "known" as const,
+        value: "abc123",
+      },
+      scope: "project" as const,
+      sourceUrl: null,
+    };
+    const inventory: Inventory = {
+      cliVersion: CLI_VERSION,
+      entries: [entry],
+      observedAt: "2026-08-22T06:00:00.000Z",
+      schemaVersion: 1,
+    };
+    const prepare = (path: string, revisionValue: string) =>
+      prepareMutationPlan({
+        binding,
+        clock: () => new Date("2026-08-22T06:00:00.000Z"),
+        id: () => "affected-plan",
+        input: {
+          freshness: "fresh",
+          intent: {
+            names: ["shared-skill"],
+            scope: "project",
+            type: "remove",
+          },
+          inventory: {
+            ...inventory,
+            entries: [{ ...entry, path, revision: { ...entry.revision, value: revisionValue } }],
+          },
+          inventoryId: "canonical-inventory",
+        },
+      });
+
+    const removed = prepare(entry.path, entry.revision.value);
+    expect(removed.ok).toBe(true);
+    if (!removed.ok) return;
+    expect(removed.value.prepared.commandPlan.affectedSkills).toEqual([
+      {
+        name: "shared-skill",
+        path: entry.path,
+        revision: entry.revision,
+        scope: "project",
+      },
+    ]);
+    expect(removed.value.args).not.toContain(entry.path);
+    expect(removed.value.prepared.commandPlan.preview).not.toContain(entry.path);
+
+    const moved = prepare("/elsewhere/shared-skill", entry.revision.value);
+    const revised = prepare(entry.path, "def456");
+    expect(moved.ok && revised.ok).toBe(true);
+    if (!moved.ok || !revised.ok) return;
+    expect(moved.value.prepared.digest).not.toBe(removed.value.prepared.digest);
+    expect(revised.value.prepared.digest).not.toBe(removed.value.prepared.digest);
+    expect(moved.value.prepared.commandPlan.affectedSkills?.[0]?.path).toBe(
+      "/elsewhere/shared-skill",
+    );
+
+    const added = prepareMutationPlan({
+      binding,
+      clock: () => new Date("2026-08-22T06:00:00.000Z"),
+      id: () => "add-plan",
+      input: {
+        freshness: "fresh",
+        intent: {
+          names: ["new-skill"],
+          scope: "project",
+          source: { source: "example/skills", sourceType: "github" },
+          type: "add",
+        },
+        inventory,
+        inventoryId: "canonical-inventory",
+      },
+    });
+    expect(added.ok).toBe(true);
+    if (!added.ok) return;
+    expect(added.value.prepared.commandPlan).not.toHaveProperty("affectedSkills");
   });
 
   it("uses canonical Codex availability for remove, update, and update-all", () => {

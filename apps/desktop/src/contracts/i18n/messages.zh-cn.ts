@@ -288,6 +288,7 @@ export const zhCN: Readonly<Record<keyof typeof en, string>> = {
   "inventory.plan.operation": "操作",
   "inventory.plan.source": "来源",
   "inventory.plan.harnessEffect": "Harness 影响",
+  "inventory.plan.affectedSkills": "CLI 已报告的路径",
 
   "source.family.git": "Git 仓库",
   "source.family.github": "GitHub 仓库",
@@ -702,6 +703,9 @@ export const zhCN: Readonly<Record<keyof typeof en, string>> = {
   "review.mutation.workspace": "工作区",
   "review.mutation.approveCancellation": "批准取消",
   "review.mutation.approveMutation": "批准变更",
+  "review.mutation.affectedSkills": "此次变更可能影响的 CLI 已报告路径",
+  "review.mutation.affectedRevision": "Revision {value}",
+  "review.mutation.affectedRevisionUnknown": "Revision 未知",
   "review.publication.title": "复核 Git 发布",
   "review.publication.remote": "远端",
   "review.publication.remoteKind": "传输方式",

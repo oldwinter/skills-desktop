@@ -1446,6 +1446,39 @@ describe("Local Target Inventory shell", () => {
     ).toBeInTheDocument();
   });
 
+  it("lists CLI-reported paths on a planned removal without treating them as a command", async () => {
+    const path = "/work/skills-desktop/.agents/skills/Case-Sensitive-Skill";
+    render(
+      <InventoryApp
+        client={clientFor({
+          ...reviewableSnapshot,
+          mutation: {
+            ...reviewableSnapshot.mutation,
+            commandPlan: {
+              ...reviewableSnapshot.mutation.commandPlan!,
+              affectedSkills: [
+                {
+                  name: "Case-Sensitive-Skill",
+                  path,
+                  revision: { status: "unknown" },
+                  scope: "project",
+                },
+              ],
+              operation: "remove",
+              preview:
+                "npx skills@1.5.23 remove Case-Sensitive-Skill --agent codex --yes",
+            },
+          },
+        })}
+      />,
+    );
+    expect(await screen.findByText("CLI-reported paths")).toBeInTheDocument();
+    expect(screen.getByText(path)).toBeInTheDocument();
+    expect(screen.getByText(/npx skills@1\.5\.23 remove/)).not.toHaveTextContent(
+      path,
+    );
+  });
+
   it("explains invalid GitHub source next to Add Skill instead of an unsupported request (#138)", async () => {
     const prepareMutation = vi.fn();
     render(

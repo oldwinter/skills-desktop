@@ -272,8 +272,27 @@ export const commandPlanSourceSchema = z.discriminatedUnion("sourceType", [
 
 export type CommandPlanSource = z.infer<typeof commandPlanSourceSchema>;
 
+/**
+ * Remove and update plans list the Fresh Inventory rows the names can affect.
+ * `path` is CLI-reported evidence, not a scanned directory listing. Add plans
+ * omit the field so older plans stay valid.
+ */
+export const commandPlanAffectedSkillSchema = z
+  .object({
+    name: z.string().min(1).max(256),
+    path: z.string().min(1).max(8_192),
+    revision: inventoryEvidenceSchema,
+    scope: z.enum(["global", "project"]),
+  })
+  .strict();
+
 export const commandPlanSchema = z
   .object({
+    affectedSkills: z
+      .array(commandPlanAffectedSkillSchema)
+      .min(1)
+      .max(5_000)
+      .optional(),
     harness: z.string().min(1).max(128),
     harnessEffect: commandPlanHarnessEffectSchema.optional(),
     harnessIds: harnessIdsSchema.optional(),

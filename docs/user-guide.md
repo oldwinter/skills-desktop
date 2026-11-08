@@ -151,7 +151,7 @@ Inventory 是对当前 Target 一次只读 `npx skills list --json` 的归一化
 常见操作：
 
 1. **Add Skill**：在 **Source** 填来源，点 **Inspect source**。主进程会用 pinned 的 `skills` CLI 以只读方式（`add <source> --list`）列出该来源里的技能，**不会安装任何东西**；列表出来后勾选要添加的技能、选 project/global，点 **Prepare add of selected Skills**。不检视时，只能按精确名称直接添加 GitHub `owner/repository`。
-2. 选中技能后 **Prepare update** / **Prepare removal**。
+2. 选中技能后 **Prepare update** / **Prepare removal**。Command Plan 与 Trusted Review 会逐条列出这份 Fresh Inventory 里 CLI 已报告的技能名、路径与 revision。路径只来自这次清单证据，应用不会为此扫描技能目录。清单里的路径或 revision 变了，原确认即失效，需要重新规划。
 3. 在 Project 或 Global 范围（不能是 All）可 **Update scope**。
 4. 出现 Command Plan 后，点 **Open Trusted Review**，在独立确认界面审阅后再执行。
 

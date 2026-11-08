@@ -47,6 +47,13 @@ across every CLI-managed link in the scope regardless of the Target's set.
 Trusted Review and the Inventory Command Plan render that field; a plan
 without it is read as bound unless its operation is `update`.
 
+Remove and update plans also carry `affectedSkills`: the Fresh Inventory rows
+whose names the intent selected, each with the CLI-reported `path` and
+`revision`. Add plans omit the field. The list is part of the prepared-mutation
+digest, so a changed path or revision invalidates confirmation. Skills Desktop
+does not scan skill directories to build it, and the path is evidence in the
+review surface, not an argument in the preview string.
+
 The only browser-opening capability is the closed `handoff.skills-sh`
 request (ADR 0021). Main derives `skillsShHandoffs` records from Fresh
 Inventory entries whose declared source is a GitHub `owner/repository`; each

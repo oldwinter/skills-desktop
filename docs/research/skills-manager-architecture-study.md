@@ -190,7 +190,7 @@ SQLite 本身**不进 git**。可随库同步的元数据另存为 JSON
 
 按对 V1 Local-only 承诺的贴合度排序：
 
-1. **Mutation 预览的"会删除什么"清单**（对应 `removals.rs`）
+1. **Mutation 预览的"会删除什么"清单**（对应 `removals.rs`；2026-11-08 已在 Local-only 计划里落地：`affectedSkills` 只复制 Fresh Inventory 的 CLI 路径与 revision，不扫描目录）
    - 位置：`packages/skills-runtime/src/mutation.ts` 的计划输出 + Trusted Review。
    - 做法：对 `remove` / `update` 类 `MutationIntent`，在 Inventory Snapshot 的
      证据里标出受影响的 skill 路径与名称，确认对话框逐条列出。
