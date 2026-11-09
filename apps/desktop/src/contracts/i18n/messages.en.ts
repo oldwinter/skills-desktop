@@ -294,6 +294,10 @@ export const en = {
   "inventory.inspector.copyName": "Copy skill name",
   "inventory.inspector.copied": "Skill name copied.",
   "inventory.inspector.copyFailed": "Could not copy the skill name.",
+  "inventory.inspector.copySource": "Copy declared source",
+  "inventory.inspector.sourceCopied": "Declared source copied.",
+  "inventory.inspector.sourceCopyFailed":
+    "Could not copy the declared source.",
   "inventory.prepareUpdate": "Prepare update",
   "inventory.prepareRemoval": "Prepare removal",
   "inventory.skillsSh.open": "Open on skills.sh",

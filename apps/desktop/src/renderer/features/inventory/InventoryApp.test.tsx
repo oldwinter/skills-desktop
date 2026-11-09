@@ -674,6 +674,38 @@ describe("Local Target Inventory shell", () => {
     }
   });
 
+  it("copies the selected Skill's declared source", async () => {
+    const clipboardDescriptor = Object.getOwnPropertyDescriptor(
+      window.navigator,
+      "clipboard",
+    );
+    const writeText = vi.fn(async (_text: string) => undefined);
+    Object.defineProperty(window.navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    try {
+      render(<InventoryApp client={clientFor(snapshot)} />);
+      fireEvent.click(
+        await screen.findByRole("button", { name: "Case-Sensitive-Skill" }),
+      );
+      fireEvent.click(
+        await screen.findByRole("button", { name: "Copy declared source" }),
+      );
+
+      expect(writeText).toHaveBeenCalledWith("example/skills");
+      expect(
+        await screen.findByTestId("inspector-source-copied"),
+      ).toHaveTextContent("Declared source copied.");
+    } finally {
+      if (clipboardDescriptor === undefined) {
+        Reflect.deleteProperty(window.navigator, "clipboard");
+      } else {
+        Object.defineProperty(window.navigator, "clipboard", clipboardDescriptor);
+      }
+    }
+  });
+
   it("copies through the legacy path when the Clipboard API is missing", async () => {
     const clipboardDescriptor = Object.getOwnPropertyDescriptor(
       window.navigator,

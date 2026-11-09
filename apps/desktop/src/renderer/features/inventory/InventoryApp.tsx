@@ -336,6 +336,8 @@ function InventoryWorkspace({
   const [selectedIdentity, setSelectedIdentity] = useState<SelectedIdentity>();
   const [copiedSkillName, setCopiedSkillName] = useState<string>();
   const [copyNameFailed, setCopyNameFailed] = useState(false);
+  const [copiedSkillSource, setCopiedSkillSource] = useState<string>();
+  const [copySourceFailed, setCopySourceFailed] = useState(false);
   const [preparedMutationContext, setPreparedMutationContext] = useState<{
     readonly generation: number;
     readonly operationId: string;
@@ -818,6 +820,18 @@ function InventoryWorkspace({
     } else {
       setCopiedSkillName(undefined);
       setCopyNameFailed(true);
+    }
+  };
+  const copySelectedSource = async () => {
+    if (selected?.declaredSource.source === null) return;
+    const source = selected?.declaredSource.source;
+    if (source === undefined) return;
+    setCopySourceFailed(false);
+    if (await copyTextToClipboard(source)) {
+      setCopiedSkillSource(source);
+    } else {
+      setCopiedSkillSource(undefined);
+      setCopySourceFailed(true);
     }
   };
   const prepareSelected = async (type: "remove" | "update") => {
@@ -1461,6 +1475,23 @@ function InventoryWorkspace({
                       {t("inventory.inspector.copied")}
                     </p>
                   ) : null}
+                  {copySourceFailed ? (
+                    <p
+                      className="inspector-copy-status"
+                      data-testid="inspector-source-copy-failed"
+                      role="alert"
+                    >
+                      {t("inventory.inspector.sourceCopyFailed")}
+                    </p>
+                  ) : copiedSkillSource === selected.declaredSource.source ? (
+                    <p
+                      className="inspector-copy-status"
+                      data-testid="inspector-source-copied"
+                      role="status"
+                    >
+                      {t("inventory.inspector.sourceCopied")}
+                    </p>
+                  ) : null}
                   <dl
                     aria-label={t("inventory.inspector.detailsLabel")}
                     className="evidence-list"
@@ -1487,9 +1518,31 @@ function InventoryWorkspace({
                     <div>
                       <dt>{t("inventory.table.declaredSource")}</dt>
                       <dd>
-                        <code className="wrapping-value">
-                          {sourceLabel(t, selected)}
-                        </code>
+                        {selected.declaredSource.source === null ? (
+                          <code className="wrapping-value">
+                            {sourceLabel(t, selected)}
+                          </code>
+                        ) : (
+                          <>
+                            <code className="wrapping-value">
+                              {selected.declaredSource.source}
+                            </code>{" "}
+                            <button
+                              aria-label={t("inventory.inspector.copySource")}
+                              className="icon-button"
+                              onClick={() => void copySelectedSource()}
+                              title={t("inventory.inspector.copySource")}
+                              type="button"
+                            >
+                              {copiedSkillSource ===
+                              selected.declaredSource.source ? (
+                                <Check aria-hidden="true" size={14} />
+                              ) : (
+                                <Copy aria-hidden="true" size={14} />
+                              )}
+                            </button>
+                          </>
+                        )}
                       </dd>
                     </div>
                     <div>
