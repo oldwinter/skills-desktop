@@ -1335,6 +1335,13 @@ function InventoryWorkspace({
                         const selectedRow =
                           selected?.name === entry.name &&
                           selected.scope === entry.scope;
+                        const linkedHarnessIds =
+                          snapshot.target.harnessIds.filter((harnessId) =>
+                            isInventoryEntryAvailableToHarness(
+                              entry,
+                              harnessId,
+                            ),
+                          );
                         return (
                           <tr
                             className={selectedRow ? "is-selected" : undefined}
@@ -1361,14 +1368,9 @@ function InventoryWorkspace({
                               </span>
                             </td>
                             <td data-label={t("common.harness")}>
-                              {snapshot.target.harnessIds.every((harnessId) =>
-                                isInventoryEntryAvailableToHarness(
-                                  entry,
-                                  harnessId,
-                                ),
-                              )
-                                ? snapshot.target.harnessIds.join(", ")
-                                : t("inventory.table.notLinked")}
+                              {linkedHarnessIds.length === 0
+                                ? t("inventory.table.notLinked")
+                                : linkedHarnessIds.join(", ")}
                             </td>
                             <td
                               data-label={t("inventory.table.declaredSource")}
