@@ -103,6 +103,14 @@ xvfb-run -a npm run qa:packaged-ui
 
 `.github/workflows/packaged-ui-qa.yml` 在 hosted Linux x64、macOS arm64/x64 与 Windows x64 上运行真实打包 QA。失败时 CI 只上传 allowlisted 的 `failure.json`；原始异常文本、Electron 输出、截图与视频留在一次性 fixture。不要提交这些视觉或日志产物。
 
+## Packaged CDP 验证技能
+
+用户可见的 Local-only 改动，不要只用 `qa:packaged-ui` 代替真实窗口证据。仓库技能
+[`verify-skills-desktop`](../../.cursor/skills/verify-skills-desktop/SKILL.md)
+通过 CDP 驱动打包应用。技能目录与“如何新增技能”见
+[`.cursor/skills/README.md`](../../.cursor/skills/README.md)。文档-only
+改动不需要跑该技能。
+
 ## 如何选择证据
 
 - parser、diff、状态机或组件变化：聚焦 Unit，再跑默认测试与 `verify`。
