@@ -1370,6 +1370,64 @@ describe("Local Target Inventory shell", () => {
     );
   });
 
+  it("lists only the Target harnesses that see a Skill, not a blanket Not linked", async () => {
+    const partialCoverage: WorkspaceSnapshot = {
+      ...snapshot,
+      inventory: {
+        ...snapshot.inventory,
+        entries: [{ ...snapshot.inventory.entries[0]!, agents: ["codex"] }],
+      },
+      target: { ...snapshot.target, harnessIds: ["amp", "codex"] },
+    };
+    render(<InventoryApp client={clientFor(partialCoverage)} />);
+
+    const row = await screen.findByRole("row", {
+      name: /Case-Sensitive-Skill/,
+    });
+    expect(within(row).getByRole("cell", { name: "codex" })).toBeInTheDocument();
+    expect(within(row).queryByText("Not linked")).toBeNull();
+  });
+
+  it("keeps Not linked when no Target harness sees a Skill", async () => {
+    const noCoverage: WorkspaceSnapshot = {
+      ...snapshot,
+      inventory: {
+        ...snapshot.inventory,
+        entries: [{ ...snapshot.inventory.entries[0]!, agents: ["amp"] }],
+      },
+      target: { ...snapshot.target, harnessIds: ["codex"] },
+    };
+    render(<InventoryApp client={clientFor(noCoverage)} />);
+
+    const row = await screen.findByRole("row", {
+      name: /Case-Sensitive-Skill/,
+    });
+    expect(
+      within(row).getByRole("cell", { name: "Not linked" }),
+    ).toBeInTheDocument();
+  });
+
+  it("still lists the whole Target harness set when every harness sees a Skill", async () => {
+    const fullCoverage: WorkspaceSnapshot = {
+      ...snapshot,
+      inventory: {
+        ...snapshot.inventory,
+        entries: [
+          { ...snapshot.inventory.entries[0]!, agents: ["amp", "codex"] },
+        ],
+      },
+      target: { ...snapshot.target, harnessIds: ["amp", "codex"] },
+    };
+    render(<InventoryApp client={clientFor(fullCoverage)} />);
+
+    const row = await screen.findByRole("row", {
+      name: /Case-Sensitive-Skill/,
+    });
+    expect(
+      within(row).getByRole("cell", { name: "amp, codex" }),
+    ).toBeInTheDocument();
+  });
+
   it("offers Open on skills.sh only for a record main derived, and says opened rather than published (#208)", async () => {
     const recordId = "d".repeat(64);
     const handoffSkillsSh = vi.fn(async (id: string) => ({
