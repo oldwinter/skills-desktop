@@ -1266,6 +1266,16 @@ function InventoryWorkspace({
                       })
                     : t("inventory.shown", { count: filteredEntries.length })}
                 </span>
+                {isFiltered ? (
+                  <button
+                    className="text-button"
+                    onClick={clearInventoryFilters}
+                    type="button"
+                  >
+                    <RotateCcw aria-hidden="true" size={15} />
+                    {t("inventory.empty.clearFilters")}
+                  </button>
+                ) : null}
                 <div
                   className="segmented-control"
                   aria-label={t("inventory.scopeFilter")}
