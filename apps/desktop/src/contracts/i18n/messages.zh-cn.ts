@@ -278,6 +278,9 @@ export const zhCN: Readonly<Record<keyof typeof en, string>> = {
   "inventory.add.candidateCount.other": "列出 {count} 个 Skill",
   "inventory.add.noCandidates": "该来源未列出可添加的 Skill。",
   "inventory.add.selectCandidates": "至少选择一个列出的 Skill。",
+  "inventory.add.selectedCount": "已选 {selected} / {total}",
+  "inventory.add.selectAll": "全选",
+  "inventory.add.clearSelection": "清空选择",
   "inventory.add.prepareSelected": "准备添加所选 Skill",
   "inventory.add.exactName": "Skill 的准确名称",
   "inventory.add.directHint":

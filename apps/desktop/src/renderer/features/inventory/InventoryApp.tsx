@@ -881,6 +881,10 @@ function InventoryWorkspace({
       : currentInspection.candidates
           .map((candidate) => candidate.name)
           .filter((name) => selectedCandidates.includes(name));
+  const allCandidatesSelected =
+    currentInspection !== undefined &&
+    currentInspection.candidates.length > 0 &&
+    selectedCandidateNames.length === currentInspection.candidates.length;
   const inspectSource = async () => {
     if (inspectionBlocked || trimmedAddSource === "") return;
     setAddSourceError(undefined);
@@ -1697,42 +1701,80 @@ function InventoryWorkspace({
                         {t("inventory.add.noCandidates")}
                       </p>
                     ) : (
-                      <ul className="add-skill-form__candidate-list">
-                        {currentInspection.candidates.map((candidate) => (
-                          <li key={candidate.name}>
-                            <label>
-                              <input
-                                checked={selectedCandidates.includes(
-                                  candidate.name,
-                                )}
-                                onChange={(event) => {
-                                  const { checked } = event.currentTarget;
-                                  setAddSourceError(undefined);
-                                  setSelectedCandidates((current) =>
-                                    checked
-                                      ? [...current, candidate.name]
-                                      : current.filter(
-                                          (name) => name !== candidate.name,
-                                        ),
-                                  );
-                                }}
-                                type="checkbox"
-                              />
-                              <span>
-                                <strong>{candidate.name}</strong>
-                                {candidate.group !== null ? (
-                                  <span className="add-skill-form__group">
-                                    {candidate.group}
+                      <>
+                        <div className="add-skill-form__candidate-toolbar">
+                          <span>
+                            {t("inventory.add.selectedCount", {
+                              selected: selectedCandidateNames.length,
+                              total: currentInspection.candidates.length,
+                            })}
+                          </span>
+                          <div className="add-skill-form__candidate-actions">
+                            <button
+                              className="text-button"
+                              disabled={allCandidatesSelected}
+                              onClick={() => {
+                                setAddSourceError(undefined);
+                                setSelectedCandidates(
+                                  currentInspection.candidates.map(
+                                    (candidate) => candidate.name,
+                                  ),
+                                );
+                              }}
+                              type="button"
+                            >
+                              {t("inventory.add.selectAll")}
+                            </button>
+                            <button
+                              className="text-button"
+                              disabled={selectedCandidateNames.length === 0}
+                              onClick={() => {
+                                setAddSourceError(undefined);
+                                setSelectedCandidates([]);
+                              }}
+                              type="button"
+                            >
+                              {t("inventory.add.clearSelection")}
+                            </button>
+                          </div>
+                        </div>
+                        <ul className="add-skill-form__candidate-list">
+                          {currentInspection.candidates.map((candidate) => (
+                            <li key={candidate.name}>
+                              <label>
+                                <input
+                                  checked={selectedCandidates.includes(
+                                    candidate.name,
+                                  )}
+                                  onChange={(event) => {
+                                    const { checked } = event.currentTarget;
+                                    setAddSourceError(undefined);
+                                    setSelectedCandidates((current) =>
+                                      checked
+                                        ? [...current, candidate.name]
+                                        : current.filter(
+                                            (name) => name !== candidate.name,
+                                          ),
+                                    );
+                                  }}
+                                  type="checkbox"
+                                />
+                                <span>
+                                  <strong>{candidate.name}</strong>
+                                  {candidate.group !== null ? (
+                                    <span className="add-skill-form__group">
+                                      {candidate.group}
+                                    </span>
+                                  ) : null}
+                                  <span className="add-skill-form__description">
+                                    {candidate.description}
                                   </span>
-                                ) : null}
-                                <span className="add-skill-form__description">
-                                  {candidate.description}
                                 </span>
-                              </span>
-                            </label>
-                          </li>
-                        ))}
-                      </ul>
+                              </label>
+                            </li>
+                          ))}
+                        </ul>
+                      </>
                     )}
                     <p className="add-skill-form__hint">
                       {t("inventory.add.inspectedHint")}

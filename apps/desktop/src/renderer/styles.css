@@ -543,6 +543,9 @@ html[data-appearance="system"] .status-pill.status-pill--neutral {
 .add-skill-form__hint { margin: 0; color: var(--text-tertiary); font-size: var(--font-size-meta); line-height: 1.5; }
 .add-skill-form__candidates { display: grid; gap: 8px; margin: 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius-control); }
 .add-skill-form__candidates legend { padding: 0 4px; color: var(--text); font-size: var(--font-size-meta); font-weight: 600; overflow-wrap: anywhere; }
+.add-skill-form__candidate-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.add-skill-form__candidate-toolbar > span { color: var(--text-tertiary); font-size: var(--font-size-meta); }
+.add-skill-form__candidate-actions { display: flex; flex-wrap: wrap; gap: 4px; }
 .add-skill-form__candidate-list { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; max-height: 240px; overflow: auto; }
 .add-skill-form__candidate-list label { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px; align-items: start; color: var(--text); }
 .add-skill-form__candidate-list input[type="checkbox"] { width: 16px; height: 16px; margin-top: 2px; }

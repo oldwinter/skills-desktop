@@ -1639,9 +1639,32 @@ describe("Local Target Inventory shell", () => {
     expect(listing).toHaveTextContent("Skills listed in vercel-labs/skills");
     expect(listing).toHaveTextContent("2 Skills listed · Mutable source");
     expect(listing).toHaveTextContent("Helps users discover skills.");
+    expect(listing).toHaveTextContent("Selected 0 of 2");
     expect(
       screen.queryByRole("textbox", { name: "Exact skill name" }),
     ).not.toBeInTheDocument();
+
+    const selectAll = within(listing).getByRole("button", {
+      name: "Select all",
+    });
+    const clearSelection = within(listing).getByRole("button", {
+      name: "Clear selection",
+    });
+    expect(clearSelection).toBeDisabled();
+    fireEvent.click(selectAll);
+    expect(listing).toHaveTextContent("Selected 2 of 2");
+    expect(selectAll).toBeDisabled();
+    expect(clearSelection).toBeEnabled();
+    expect(
+      within(listing).getByRole("checkbox", { name: /code-review/ }),
+    ).toBeChecked();
+    expect(
+      within(listing).getByRole("checkbox", { name: /find-skills/ }),
+    ).toBeChecked();
+    fireEvent.click(clearSelection);
+    expect(listing).toHaveTextContent("Selected 0 of 2");
+    expect(selectAll).toBeEnabled();
+    expect(clearSelection).toBeDisabled();
 
     const prepare = screen.getByRole("button", {
       name: "Prepare add of selected Skills",
