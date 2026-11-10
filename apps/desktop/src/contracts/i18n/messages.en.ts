@@ -314,6 +314,9 @@ export const en = {
   "inventory.add.candidateCount.other": "{count} Skills listed",
   "inventory.add.noCandidates": "The source lists no Skills to add.",
   "inventory.add.selectCandidates": "Select at least one listed Skill.",
+  "inventory.add.selectedCount": "Selected {selected} of {total}",
+  "inventory.add.selectAll": "Select all",
+  "inventory.add.clearSelection": "Clear selection",
   "inventory.add.prepareSelected": "Prepare add of selected Skills",
   "inventory.add.exactName": "Exact skill name",
   "inventory.add.directHint":
