@@ -3,6 +3,7 @@
 import "@testing-library/jest-dom/vitest";
 
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -1235,6 +1236,101 @@ describe("ComparisonView", () => {
         .length,
     ).toBeGreaterThanOrEqual(1);
     expect(screen.getByRole("button", { name: "Compare" })).toBeEnabled();
+  });
+
+  it("refreshes both Local inventories in order and locks duplicate actions", async () => {
+    let releaseLeft!: () => void;
+    const leftGate = new Promise<void>((resolve) => {
+      releaseLeft = resolve;
+    });
+    const refreshInventory = vi
+      .fn()
+      .mockImplementationOnce(async () => {
+        await leftGate;
+        return { ok: true as const, value: { operationId: "left-refresh" } };
+      })
+      .mockImplementationOnce(async () => ({
+        ok: true as const,
+        value: { operationId: "right-refresh" },
+      }));
+    render(
+      <ComparisonView
+        client={bridge({ refreshInventory })}
+        onPrepared={vi.fn()}
+        snapshot={baseSnapshot()}
+        targets={[targetState(leftTarget), targetState(rightTarget)]}
+      />,
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Refresh both inventories" }),
+    );
+    await waitFor(() => expect(refreshInventory).toHaveBeenCalledTimes(1));
+    expect(refreshInventory).toHaveBeenNthCalledWith(1, leftId);
+    expect(screen.getByTestId("comparison-refresh-both")).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "Refreshing both inventories" }),
+    ).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Compare" })).toBeDisabled();
+    expect(refreshInventory).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      releaseLeft();
+      await leftGate;
+    });
+    await waitFor(() => expect(refreshInventory).toHaveBeenCalledTimes(2));
+    expect(refreshInventory).toHaveBeenNthCalledWith(2, rightId);
+    await waitFor(() =>
+      expect(screen.getByTestId("comparison-refresh-both")).toBeEnabled(),
+    );
+    expect(screen.getByTestId("comparison-refresh-both")).toHaveTextContent(
+      "Refresh both inventories",
+    );
+  });
+
+  it("surfaces a failure while still refreshing the other side", async () => {
+    const refreshInventory = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: false as const, error })
+      .mockResolvedValueOnce({
+        ok: true as const,
+        value: { operationId: "right-refresh" },
+      });
+    render(
+      <ComparisonView
+        client={bridge({ refreshInventory })}
+        onPrepared={vi.fn()}
+        snapshot={baseSnapshot()}
+        targets={[targetState(leftTarget), targetState(rightTarget)]}
+      />,
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Refresh both inventories" }),
+    );
+    await waitFor(() => expect(refreshInventory).toHaveBeenCalledTimes(2));
+    expect(refreshInventory).toHaveBeenNthCalledWith(2, rightId);
+    expect(
+      await screen.findByText(
+        "The Target is unavailable right now. Check it, then try again.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId("comparison-refresh-both")).toBeEnabled();
+  });
+
+  it("does not offer paired refresh without two Local Targets", () => {
+    render(
+      <ComparisonView
+        client={bridge()}
+        onPrepared={vi.fn()}
+        snapshot={baseSnapshot()}
+        targets={[targetState(leftTarget), targetState(sshTarget)]}
+      />,
+    );
+
+    expect(
+      screen.queryByTestId("comparison-refresh-both"),
+    ).not.toBeInTheDocument();
   });
 
   it("blocks planning on stale evidence, reconciliation, and compare failures", async () => {

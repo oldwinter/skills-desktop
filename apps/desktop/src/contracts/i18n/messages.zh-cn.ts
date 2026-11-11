@@ -503,6 +503,9 @@ export const zhCN: Readonly<Record<keyof typeof en, string>> = {
   "comparison.needsTwo.sshBody":
     "对比需要两个 Local Target。SSH · 未在 V1 开放，不能作为可规划对比侧。请在 Targets 中添加另一个 Local Target，然后回到此处对比库存。",
   "comparison.refreshTarget": "刷新 {label}",
+  "comparison.refreshBoth": "刷新两侧库存",
+  "comparison.refreshBoth.busy": "正在刷新两侧库存",
+  "comparison.refreshBoth.hint": "依次刷新左侧和右侧的库存",
   "comparison.empty.none": "未选择对比",
   "comparison.empty.noEvidence": "两个 Target 上都没有 Skill 证据",
   "comparison.empty.noEvidenceBody":
