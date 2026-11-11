@@ -678,6 +678,7 @@ html[data-appearance="system"] .status-pill.status-pill--neutral {
 .paired-status > div > span:not(:first-child):not(.paired-status-error) { grid-column: 2; color: var(--text-tertiary); font-size: var(--font-size-meta); }
 .paired-status > div > .paired-status-error { grid-column: 2; display: block; margin-top: 4px; color: var(--danger); font-size: var(--font-size-meta); }
 .paired-status .icon-button { grid-column: 3; grid-row: 1 / span 3; }
+.paired-status > div.paired-status-actions { display: flex; grid-column: 1 / -1; justify-content: flex-end; padding: 6px 12px; border-top: 1px solid var(--line); }
 .comparison-table-wrap { min-width: 0; min-height: 0; overflow: auto; padding: 0 20px 20px; }
 .comparison-table { width: 100%; border-spacing: 0; background: var(--surface); box-shadow: 0 0 0 1px var(--line); border-radius: var(--radius-panel); overflow: hidden; table-layout: fixed; }
 .comparison-table th { height: 36px; padding: 0 10px; color: var(--text-tertiary); background: var(--surface-raised); border-bottom: 1px solid var(--line); font-size: var(--font-size-meta); font-weight: 600; text-align: left; }

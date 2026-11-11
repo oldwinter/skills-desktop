@@ -170,6 +170,7 @@ export function ComparisonView({
   const normalizedQuery = searchQuery.trim().toLowerCase();
   const [error, setError] = useState<RendererError>();
   const [busy, setBusy] = useState(false);
+  const [refreshingBoth, setRefreshingBoth] = useState(false);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -249,6 +250,12 @@ export function ComparisonView({
   );
   const leftTarget = targets.find(({ target }) => target.id === leftTargetId);
   const rightTarget = targets.find(({ target }) => target.id === rightTargetId);
+  const leftInventoryLoading = leftTarget?.inventory.phase === "loading";
+  const rightInventoryLoading = rightTarget?.inventory.phase === "loading";
+  const canRefreshBoth =
+    leftTarget?.target.kind === "local" &&
+    rightTarget?.target.kind === "local" &&
+    leftTargetId !== rightTargetId;
   const clearSearch = () => {
     setSearchQuery("");
     searchRef.current?.focus();
@@ -268,6 +275,34 @@ export function ComparisonView({
     } finally {
       setBusy(false);
     }
+  };
+  const refreshBoth = async () => {
+    if (
+      busy ||
+      refreshingBoth ||
+      leftTarget?.target.kind !== "local" ||
+      rightTarget?.target.kind !== "local" ||
+      leftInventoryLoading ||
+      rightInventoryLoading
+    ) {
+      return;
+    }
+    setBusy(true);
+    setRefreshingBoth(true);
+    setError(undefined);
+    let failure: RendererError | undefined;
+    try {
+      // Main owns one Inventory observation at a time. Refresh the pair in
+      // order so the second request never races the first into a conflict.
+      for (const targetId of [leftTargetId, rightTargetId]) {
+        const result = await client.refreshInventory(targetId);
+        if (!result.ok) failure = result.error;
+      }
+    } finally {
+      setBusy(false);
+      setRefreshingBoth(false);
+    }
+    if (failure !== undefined) setError(failure);
   };
   const prepare = async (destinationTargetId: string) => {
     if (comparison === null || selectedRow === undefined) return;
@@ -624,6 +659,29 @@ export function ComparisonView({
               </div>
             ),
           )}
+          {canRefreshBoth ? (
+            <div className="paired-status-actions">
+              <button
+                className="text-button"
+                data-testid="comparison-refresh-both"
+                disabled={busy || leftInventoryLoading || rightInventoryLoading}
+                onClick={() => void refreshBoth()}
+                title={t("comparison.refreshBoth.hint")}
+                type="button"
+              >
+                <RefreshCw
+                  aria-hidden="true"
+                  className={refreshingBoth ? "spin" : undefined}
+                  size={15}
+                />
+                {t(
+                  refreshingBoth
+                    ? "comparison.refreshBoth.busy"
+                    : "comparison.refreshBoth",
+                )}
+              </button>
+            </div>
+          ) : null}
         </div>
 
         <div className="comparison-table-wrap">

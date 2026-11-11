@@ -547,6 +547,9 @@ export const en = {
   "comparison.needsTwo.sshBody":
     "Comparison needs two Local Targets. SSH · Not available in V1; it cannot be a plannable comparison side. Add another Local Target under Targets, then return here to compare inventories.",
   "comparison.refreshTarget": "Refresh {label}",
+  "comparison.refreshBoth": "Refresh both inventories",
+  "comparison.refreshBoth.busy": "Refreshing both inventories",
+  "comparison.refreshBoth.hint": "Refresh the Left and Right inventories one after another",
   "comparison.empty.none": "No comparison selected",
   "comparison.empty.noEvidence": "No skill evidence on either Target",
   "comparison.empty.noEvidenceBody":

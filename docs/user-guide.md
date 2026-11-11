@@ -208,6 +208,8 @@ skills.sh 交接：
 
 两侧证据最好都是 fresh；一侧 stale 时仍可查看，但向该侧准备变更会受限。选中一行可查看左右证据详情，并在条件满足时准备跨 Target 的更新/同步类操作（仍需 Trusted Review）。
 
+两个对比侧都是 Local Target 时，状态卡下方有 **刷新两侧库存 / Refresh both inventories**。它会按左、右顺序依次重新观察两侧 Inventory；不会自动对比、准备或执行变更。
+
 常见维度标签：Source mismatch、Unknown evidence、Revision or content drift 等。
 
 ---
