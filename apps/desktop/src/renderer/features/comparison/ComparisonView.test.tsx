@@ -332,6 +332,30 @@ const driftRow: PublicComparison["rows"][number] = {
 };
 
 describe("ComparisonView", () => {
+  it("shows when each side's inventory was last observed", () => {
+    render(
+      <ComparisonView
+        client={bridge()}
+        onPrepared={vi.fn()}
+        snapshot={baseSnapshot()}
+        targets={[targetState(leftTarget), targetState(rightTarget)]}
+      />,
+    );
+
+    const leftObserved = screen.getByTestId("comparison-observed-0");
+    const rightObserved = screen.getByTestId("comparison-observed-1");
+    expect(leftObserved).toHaveTextContent("Last observed");
+    expect(rightObserved).toHaveTextContent("Last observed");
+    expect(leftObserved.querySelector("time")).toHaveAttribute(
+      "dateTime",
+      inventory.observedAt,
+    );
+    expect(rightObserved.querySelector("time")).toHaveAttribute(
+      "dateTime",
+      inventory.observedAt,
+    );
+  });
+
   it("navigates from the focused row and keeps focus, inspector, and Prepare together", async () => {
     const prepareComparison = vi.fn(async () => ({
       ok: false as const,

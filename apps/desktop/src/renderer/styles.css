@@ -460,6 +460,8 @@ html[data-appearance="system"] .status-pill.status-pill--neutral {
 .page-heading { justify-content: space-between; gap: 16px; padding: 28px var(--workspace-gutter) 20px; }
 .page-heading > div { min-width: 0; }
 .page-heading p { margin-top: 6px; color: var(--text-secondary); font-size: var(--font-size-row); }
+.page-heading .inventory-observed-at { color: var(--text-tertiary); font-size: var(--font-size-meta); font-variant-numeric: tabular-nums; }
+.page-heading .inventory-observed-at time { color: var(--text-secondary); }
 .mobile-target-summary { display: none; }
 .inventory-target-chooser { display: none; }
 .icon-button { display: inline-grid; flex: 0 0 auto; width: 40px; height: 40px; padding: 0; place-items: center; color: var(--text-secondary); background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-control); }
@@ -676,6 +678,7 @@ html[data-appearance="system"] .status-pill.status-pill--neutral {
 .paired-status strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .paired-status code { grid-column: 2; min-width: 0; overflow: hidden; color: var(--text-secondary); text-overflow: ellipsis; white-space: nowrap; }
 .paired-status > div > span:not(:first-child):not(.paired-status-error) { grid-column: 2; color: var(--text-tertiary); font-size: var(--font-size-meta); }
+.paired-status-observed { display: inline-flex; align-items: baseline; gap: 4px; font-variant-numeric: tabular-nums; }
 .paired-status > div > .paired-status-error { grid-column: 2; display: block; margin-top: 4px; color: var(--danger); font-size: var(--font-size-meta); }
 .paired-status .icon-button { grid-column: 3; grid-row: 1 / span 3; }
 .comparison-table-wrap { min-width: 0; min-height: 0; overflow: auto; padding: 0 20px 20px; }
