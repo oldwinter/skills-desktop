@@ -36,6 +36,8 @@ export const zhCN: Readonly<Record<keyof typeof en, string>> = {
   "common.freshness.fresh": "证据新鲜",
   "common.freshness.stale": "证据过期",
   "common.freshness.none": "暂无证据",
+  "common.lastObserved": "上次观察",
+  "common.notObserved": "尚未观察",
 
   "error.fallback": "操作未能完成。请重试；若持续失败可导出诊断查看详情。",
   "error.githubSource":

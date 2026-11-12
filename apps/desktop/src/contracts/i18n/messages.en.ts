@@ -34,6 +34,8 @@ export const en = {
   "common.freshness.fresh": "Fresh evidence",
   "common.freshness.stale": "Stale evidence",
   "common.freshness.none": "No evidence",
+  "common.lastObserved": "Last observed",
+  "common.notObserved": "Not observed yet",
 
   "error.fallback":
     "The operation could not be completed. Try again; if it keeps failing, export diagnostics for details.",

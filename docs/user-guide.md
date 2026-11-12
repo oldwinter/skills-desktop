@@ -132,6 +132,7 @@ Inventory 是对当前 Target 一次只读 `npx skills list --json` 的归一化
 ### 浏览与筛选
 
 - 表格列：Skill、Scope、Harness、Declared source、Evidence（revision）。
+- 标题下方会显示 **上次观察 / Last observed** 的本地时间；尚未成功观察时显示 **尚未观察 / Not observed yet**。对比页也会分别显示左右两侧的观察时间，便于判断证据的新旧。
 - 搜索框可按名称 / 源过滤；范围可切 All / Project / Global。
 - 工具栏会显示当前可见条目数；启用搜索或范围筛选后，会显示“当前显示 / 全部”数量，便于确认筛选结果。
 - 点击搜索框里的清除按钮，或按 `Escape`，会清空搜索并把焦点留在搜索框，方便继续输入。
