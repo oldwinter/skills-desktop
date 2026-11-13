@@ -211,6 +211,7 @@ export const zhCN: Readonly<Record<keyof typeof en, string>> = {
   "inventory.search": "搜索库存",
   "inventory.searchPlaceholder": "搜索 Skill 或来源",
   "inventory.clearSearch": "清除库存搜索",
+  "inventory.browseHint": "用 ↑ / ↓ · Home / End 浏览 Skill",
   "inventory.shown": "显示 {count} 项",
   "inventory.shownOf": "显示 {shown} / 共 {total} 项",
   "inventory.scopeFilter": "库存范围",
