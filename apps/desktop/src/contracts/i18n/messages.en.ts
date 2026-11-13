@@ -246,6 +246,7 @@ export const en = {
   "inventory.search": "Search inventory",
   "inventory.searchPlaceholder": "Search skills or sources",
   "inventory.clearSearch": "Clear inventory search",
+  "inventory.browseHint": "Browse skills with ↑ / ↓ · Home / End",
   "inventory.shown": "{count} shown",
   "inventory.shownOf": "{shown} of {total} shown",
   "inventory.scopeFilter": "Inventory scope",

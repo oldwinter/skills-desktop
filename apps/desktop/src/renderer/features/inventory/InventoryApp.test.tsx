@@ -522,6 +522,84 @@ describe("Local Target Inventory shell", () => {
     );
   });
 
+  it("navigates visible Inventory rows while keeping focus and evidence together", async () => {
+    const entries = ["Alpha", "Beta", "Gamma"].map((name) => ({
+      ...snapshot.inventory.entries[0]!,
+      name,
+    }));
+    render(
+      <InventoryApp
+        client={clientFor({
+          ...snapshot,
+          inventory: { ...snapshot.inventory, entries },
+        })}
+      />,
+    );
+
+    const table = await screen.findByRole("table");
+    const first = within(table).getByRole("button", { name: "Alpha" });
+    const middle = within(table).getByRole("button", { name: "Beta" });
+    const last = within(table).getByRole("button", { name: "Gamma" });
+    const expectSelected = (button: HTMLElement, name: string) => {
+      expect(button).toHaveFocus();
+      expect(
+        screen.getByRole("heading", { name, level: 2 }),
+      ).toBeInTheDocument();
+    };
+
+    first.focus();
+    fireEvent.keyDown(first, { key: "ArrowDown" });
+    expectSelected(middle, "Beta");
+    fireEvent.keyDown(middle, { key: "End" });
+    expectSelected(last, "Gamma");
+    fireEvent.keyDown(last, { key: "ArrowDown" });
+    expectSelected(last, "Gamma");
+    fireEvent.keyDown(last, { key: "Home" });
+    expectSelected(first, "Alpha");
+    fireEvent.keyDown(first, { key: "ArrowUp" });
+    expectSelected(first, "Alpha");
+
+    fireEvent.change(
+      screen.getByRole("searchbox", { name: "Search inventory" }),
+      { target: { value: "Al" } },
+    );
+    expect(within(table).queryByRole("button", { name: "Beta" })).toBeNull();
+    expect(within(table).queryByRole("button", { name: "Gamma" })).toBeNull();
+    first.focus();
+    fireEvent.keyDown(first, { key: "End" });
+    expectSelected(first, "Alpha");
+  });
+
+  it("leaves modified, composing, and unrelated Inventory row keys untouched", async () => {
+    render(<InventoryApp client={clientFor(snapshot)} />);
+
+    const table = await screen.findByRole("table");
+    const first = within(table).getByRole("button", {
+      name: "Case-Sensitive-Skill",
+    });
+    first.focus();
+    for (const event of [
+      { key: "ArrowDown", altKey: true },
+      { key: "ArrowDown", ctrlKey: true },
+      { key: "End", metaKey: true },
+      { key: "End", shiftKey: true },
+      { key: "ArrowDown", isComposing: true },
+      { key: "Tab" },
+      { key: "Enter" },
+      { key: " " },
+      { key: "ArrowRight" },
+    ]) {
+      expect(fireEvent.keyDown(first, event)).toBe(true);
+      expect(first).toHaveFocus();
+      expect(
+        screen.getByRole("heading", {
+          name: "Case-Sensitive-Skill",
+          level: 2,
+        }),
+      ).toBeInTheDocument();
+    }
+  });
+
   it("exposes Inventory and Add scopes as named groups with ordered pressed buttons", async () => {
     render(<InventoryApp client={clientFor(snapshot)} />);
 

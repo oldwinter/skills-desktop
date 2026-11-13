@@ -361,6 +361,7 @@ function InventoryWorkspace({
   const [applicationMenu, setApplicationMenu] = useState<ApplicationMenu>();
   const menuFocusPendingRef = useRef(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const inventoryTableRef = useRef<HTMLTableElement>(null);
   const addSourceInputRef = useRef<HTMLInputElement>(null);
   const mutationOutcomeRef = useRef<HTMLParagraphElement>(null);
   const reviewReturnFocusRef = useRef<HTMLButtonElement | null>(null);
@@ -1317,7 +1318,7 @@ function InventoryWorkspace({
                     />
                   )
                 ) : (
-                  <table className="inventory-table">
+                  <table className="inventory-table" ref={inventoryTableRef}>
                     <caption className="sr-only">
                       {t("inventory.table.caption")}
                     </caption>
@@ -1331,7 +1332,7 @@ function InventoryWorkspace({
                       </tr>
                     </thead>
                     <tbody>
-                      {filteredEntries.map((entry) => {
+                      {filteredEntries.map((entry, index) => {
                         const selectedRow =
                           selected?.name === entry.name &&
                           selected.scope === entry.scope;
@@ -1349,6 +1350,51 @@ function InventoryWorkspace({
                                     scope: entry.scope,
                                   })
                                 }
+                                onKeyDown={(event) => {
+                                  if (
+                                    event.altKey ||
+                                    event.ctrlKey ||
+                                    event.metaKey ||
+                                    event.shiftKey ||
+                                    event.nativeEvent.isComposing
+                                  ) {
+                                    return;
+                                  }
+                                  let nextIndex: number;
+                                  switch (event.key) {
+                                    case "ArrowDown":
+                                      nextIndex = Math.min(
+                                        index + 1,
+                                        filteredEntries.length - 1,
+                                      );
+                                      break;
+                                    case "ArrowUp":
+                                      nextIndex = Math.max(index - 1, 0);
+                                      break;
+                                    case "Home":
+                                      nextIndex = 0;
+                                      break;
+                                    case "End":
+                                      nextIndex = filteredEntries.length - 1;
+                                      break;
+                                    default:
+                                      return;
+                                  }
+                                  const nextEntry =
+                                    filteredEntries[nextIndex];
+                                  if (nextEntry === undefined) return;
+                                  event.preventDefault();
+                                  setSelectedIdentity({
+                                    name: nextEntry.name,
+                                    scope: nextEntry.scope,
+                                  });
+                                  const nextButton =
+                                    inventoryTableRef.current?.querySelectorAll<HTMLButtonElement>(
+                                      ".skill-button",
+                                    )[nextIndex];
+                                  nextButton?.focus();
+                                }}
+                                title={t("inventory.browseHint")}
                                 type="button"
                               >
                                 <FolderGit2 aria-hidden="true" size={16} />
