@@ -38,6 +38,34 @@ const inventory: PublicInventoryState = {
   phase: "ready",
 };
 
+const entry: PublicInventoryState["entries"][number] = {
+  agents: ["Codex"],
+  contentFingerprint: { status: "unknown" },
+  declaredSource: { source: "example/skills", sourceType: "github" },
+  name: "example-skill",
+  revision: { status: "unknown" },
+  scope: "project",
+};
+
+function targetStateFor(
+  definition: WorkspaceSnapshot["target"],
+  state: PublicInventoryState,
+) {
+  return {
+    deletionBlocked: false,
+    inventory: state,
+    mutation: {
+      activeOperationId: null,
+      commandPlan: null,
+      lastError: null,
+      outcome: null,
+      phase: "idle" as const,
+      reconciliationDeadline: null,
+    },
+    target: definition,
+  };
+}
+
 function renderNavigation(state: PublicInventoryState) {
   return render(
     <LocaleProvider locale="en">
@@ -46,21 +74,7 @@ function renderNavigation(state: PublicInventoryState) {
         onSelectTarget={vi.fn()}
         onViewChange={vi.fn()}
         target={target}
-        targetStates={[
-          {
-            deletionBlocked: false,
-            inventory: state,
-            mutation: {
-              activeOperationId: null,
-              commandPlan: null,
-              lastError: null,
-              outcome: null,
-              phase: "idle",
-              reconciliationDeadline: null,
-            },
-            target,
-          },
-        ]}
+        targetStates={[targetStateFor(target, state)]}
         view="inventory"
       />
     </LocaleProvider>,
@@ -96,5 +110,112 @@ describe("WorkspaceNavigation rail (#179)", () => {
     renderNavigation({ ...inventory, cliVersion: null, freshness: "none" });
     expect(screen.getByText("skills version unobserved")).toBeInTheDocument();
     expect(screen.queryByText(/1\.5\.23/)).toBeNull();
+  });
+
+  it("shows each Target's inventory state and Skill count in the switcher", () => {
+    const staleTarget = {
+      ...target,
+      id: "00000000-0000-4000-8000-00000000000a",
+      label: "Stale project",
+      workspaceLabel: "stale-project",
+    };
+    const emptyTarget = {
+      ...target,
+      id: "00000000-0000-4000-8000-00000000000b",
+      label: "Empty project",
+      workspaceLabel: "empty-project",
+    };
+    render(
+      <LocaleProvider locale="en">
+        <WorkspaceNavigation
+          inventory={{ ...inventory, entries: [entry], freshness: "fresh" }}
+          onSelectTarget={vi.fn()}
+          onViewChange={vi.fn()}
+          target={target}
+          targetStates={[
+            targetStateFor(target, {
+              ...inventory,
+              entries: [entry],
+              freshness: "fresh",
+            }),
+            targetStateFor(staleTarget, {
+              ...inventory,
+              entries: [entry, { ...entry, name: "second-skill" }],
+              freshness: "stale",
+            }),
+            targetStateFor(emptyTarget, {
+              ...inventory,
+              entries: [],
+              freshness: "none",
+              phase: "error",
+            }),
+          ]}
+          view="inventory"
+        />
+      </LocaleProvider>,
+    );
+
+    const fresh = screen.getByRole("button", {
+      name: "This device, skills-desktop, Fresh evidence · 1 Skill",
+    });
+    expect(fresh).toHaveAttribute("data-inventory-state", "fresh");
+    expect(within(fresh).getByText("Fresh · 1 Skill")).toBeVisible();
+
+    const stale = screen.getByRole("button", {
+      name: "Stale project, stale-project, Stale evidence · 2 Skills",
+    });
+    expect(stale).toHaveAttribute("data-inventory-state", "stale");
+    expect(within(stale).getByText("Stale · 2 Skills")).toBeVisible();
+
+    const empty = screen.getByRole("button", {
+      name: "Empty project, empty-project, No evidence",
+    });
+    expect(empty).toHaveAttribute("data-inventory-state", "none");
+    expect(within(empty).getByText("No evidence")).toBeVisible();
+  });
+
+  it("does not show a stale Skill count while a Target refresh is loading", () => {
+    renderNavigation({
+      ...inventory,
+      entries: [entry],
+      phase: "loading",
+    });
+
+    const row = screen.getByRole("button", {
+      name: "This device, skills-desktop, Loading",
+    });
+    expect(row).toHaveAttribute("data-inventory-state", "loading");
+    expect(within(row).getByText("Loading")).toBeVisible();
+    expect(within(row).queryByText(/Skill/)).toBeNull();
+  });
+
+  it("keeps SSH availability in the switcher's accessible name", () => {
+    const sshTarget = {
+      ...target,
+      connectionReference: "build-host",
+      kind: "ssh" as const,
+      label: "Build host",
+      workspaceLabel: "build-host",
+    };
+    render(
+      <LocaleProvider locale="en">
+        <WorkspaceNavigation
+          inventory={{ ...inventory, freshness: "none" }}
+          onSelectTarget={vi.fn()}
+          onViewChange={vi.fn()}
+          target={sshTarget}
+          targetStates={[
+            targetStateFor(sshTarget, { ...inventory, freshness: "none" }),
+          ]}
+          view="inventory"
+        />
+      </LocaleProvider>,
+    );
+
+    expect(
+      screen.getByRole("button", {
+        name: "Build host, build-host, No evidence, SSH · Not available in V1",
+      }),
+    ).toBeInTheDocument();
   });
 });

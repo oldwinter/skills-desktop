@@ -153,6 +153,8 @@ export const en = {
   "nav.pending.one": "{label}, {count} item pending",
   "nav.pending.other": "{label}, {count} items pending",
   "nav.activeTarget": "Active Target",
+  "nav.targetSkillCount.one": "{count} Skill",
+  "nav.targetSkillCount.other": "{count} Skills",
   "nav.cliVersion": "skills {version}",
   "nav.cliVersionUnobserved": "skills version unobserved",
 
