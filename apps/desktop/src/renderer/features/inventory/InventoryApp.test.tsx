@@ -1208,6 +1208,15 @@ describe("Local Target Inventory shell", () => {
     expect(
       screen.getByText("1 skill across project and global scopes"),
     ).toBeInTheDocument();
+    const updateScope = screen.getByRole("button", { name: "Update scope" });
+    expect(updateScope).toBeDisabled();
+    expect(updateScope).toHaveAttribute(
+      "aria-describedby",
+      "inventory-update-scope-reason",
+    );
+    expect(
+      screen.getByText("Choose project or global scope first"),
+    ).toBeInTheDocument();
     unmount();
 
     render(<InventoryApp client={clientFor(twoSkills)} />);

@@ -166,32 +166,34 @@ export function AboutView({
             </div>
           </section>
 
-          <dl className="about-facts">
-            <div>
-              <dt>{t("about.lastCheck")}</dt>
-              <dd>
-                {snapshot.lastCheckAt === null ? (
-                  t("about.neverChecked")
-                ) : (
-                  <time dateTime={snapshot.lastCheckAt}>
-                    {snapshot.lastCheckAt}
-                  </time>
-                )}
-              </dd>
-            </div>
-            <div>
-              <dt>{t("about.nextEligibility")}</dt>
-              <dd>
-                {snapshot.nextAutomaticCheckAt === null ? (
-                  t("about.notScheduled")
-                ) : (
-                  <time dateTime={snapshot.nextAutomaticCheckAt}>
-                    {snapshot.nextAutomaticCheckAt}
-                  </time>
-                )}
-              </dd>
-            </div>
-          </dl>
+          {snapshot.policy.mode === "automatic" ? (
+            <dl className="about-facts">
+              <div>
+                <dt>{t("about.lastCheck")}</dt>
+                <dd>
+                  {snapshot.lastCheckAt === null ? (
+                    t("about.neverChecked")
+                  ) : (
+                    <time dateTime={snapshot.lastCheckAt}>
+                      {snapshot.lastCheckAt}
+                    </time>
+                  )}
+                </dd>
+              </div>
+              <div>
+                <dt>{t("about.nextEligibility")}</dt>
+                <dd>
+                  {snapshot.nextAutomaticCheckAt === null ? (
+                    t("about.notScheduled")
+                  ) : (
+                    <time dateTime={snapshot.nextAutomaticCheckAt}>
+                      {snapshot.nextAutomaticCheckAt}
+                    </time>
+                  )}
+                </dd>
+              </div>
+            </dl>
+          ) : null}
 
           {snapshot.policy.mode === "automatic" ? (
             <section

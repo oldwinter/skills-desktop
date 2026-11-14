@@ -398,9 +398,17 @@ export function TargetsView({
                 ? t("targets.editor.new")
                 : t("targets.editor.edit")}
             </p>
-            <h2>{draft.label || t("targets.editor.untitled")}</h2>
+            <h2>
+              {draft.label ||
+                (editingTargetId === undefined
+                  ? t("targets.editor.newTitle")
+                  : t("targets.editor.untitled"))}
+            </h2>
           </div>
         </header>
+        {editingTargetId === undefined && draft.kind === "local" ? (
+          <p className="target-editor-hint">{t("targets.editor.newHint")}</p>
+        ) : null}
         <form
           className="target-form"
           onSubmit={(event) => {

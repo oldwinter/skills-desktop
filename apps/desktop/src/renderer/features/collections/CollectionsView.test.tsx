@@ -302,6 +302,17 @@ describe("CollectionsView skill filter", () => {
     expect(filter).toHaveAttribute("title", "Press / to focus skill filter");
     expect(screen.getByRole("status")).toHaveTextContent("3 of 3 skills");
     expect(skillCheckboxes()).toHaveLength(3);
+    const prepare = screen.getByRole("button", { name: "Prepare plan" });
+    expect(prepare).toBeDisabled();
+    expect(prepare).toHaveAttribute(
+      "aria-describedby",
+      "collection-prepare-reason",
+    );
+    expect(
+      screen.getByText(
+        "Select at least one skill on an included Local Target, then prepare a plan.",
+      ),
+    ).toBeInTheDocument();
 
     fireEvent.change(filter, { target: { value: "code" } });
     expect(filter).toHaveValue("code");

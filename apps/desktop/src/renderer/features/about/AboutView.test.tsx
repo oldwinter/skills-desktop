@@ -67,8 +67,9 @@ describe("About surface", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("Version 0.1.0")).toBeInTheDocument();
     expect(screen.getByText("linux / x64")).toBeInTheDocument();
-    expect(screen.getByText("Never checked")).toBeInTheDocument();
-    expect(screen.getByText("Not scheduled")).toBeInTheDocument();
+    expect(screen.queryByText("Never checked")).not.toBeInTheDocument();
+    expect(screen.queryByText("Not scheduled")).not.toBeInTheDocument();
+    expect(screen.queryByText("Last check")).not.toBeInTheDocument();
     expect(screen.getByText("Manual upgrade")).toBeInTheDocument();
     expect(
       screen.getByText(

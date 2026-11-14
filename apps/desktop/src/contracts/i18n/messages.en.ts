@@ -11,6 +11,7 @@ export const en = {
 
   "common.details": "Details",
   "common.openInventory": "Open Inventory",
+  "common.openTargets": "Open Targets",
   "common.unknown": "Unknown",
   "common.local": "Local",
   "common.close": "Close",
@@ -424,6 +425,9 @@ export const en = {
   "targets.deletionBlocked": "Target deletion is blocked",
   "targets.editor.label": "Target Definition editor",
   "targets.editor.new": "New Definition",
+  "targets.editor.newTitle": "New Local Target",
+  "targets.editor.newHint":
+    "This form adds a Local Target. It does not change Targets already in the list. Use Edit on a row to change one.",
   "targets.editor.edit": "Edit Definition",
   "targets.editor.untitled": "Untitled Target",
   "targets.editor.sshBanner":
@@ -592,6 +596,13 @@ export const en = {
   "collections.release": "Release",
   "collections.releaseOption": "{title} / release {release}",
   "collections.preparePlan": "Prepare plan",
+  "collections.prepare.selectSkill":
+    "Select at least one skill on an included Local Target, then prepare a plan.",
+  "collections.prepare.includeTarget":
+    "Include a Local Target before preparing a plan.",
+  "collections.prepare.blocked":
+    "Resolve the Target blockers below before preparing a plan.",
+  "collections.prepare.noRelease": "Choose a release before preparing a plan.",
   "collections.blocker.noRelease":
     "No executable reviewed release for this Target.",
   "collections.blocker.incompatible":

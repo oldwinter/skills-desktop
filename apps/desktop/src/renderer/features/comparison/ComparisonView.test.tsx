@@ -1065,9 +1065,11 @@ describe("ComparisonView", () => {
   });
 
   it("gives an executable next step when only one Local Target is present (#140)", () => {
+    const onOpenTargets = vi.fn();
     render(
       <ComparisonView
         client={bridge()}
+        onOpenTargets={onOpenTargets}
         onPrepared={vi.fn()}
         snapshot={baseSnapshot({
           target: leftTarget,
@@ -1105,6 +1107,8 @@ describe("ComparisonView", () => {
     expect(
       document.getElementById("comparison-needs-two-targets"),
     ).toHaveTextContent("Comparison needs two Local Targets");
+    fireEvent.click(screen.getByRole("button", { name: "Open Targets" }));
+    expect(onOpenTargets).toHaveBeenCalledOnce();
   });
 
   it("explains disabled Compare when Left and Right stay the same after a second Target is added (#140)", () => {

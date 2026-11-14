@@ -7,6 +7,7 @@ import {
   PackagePlus,
   RefreshCw,
   Search,
+  Settings2,
   X,
 } from "lucide-react";
 
@@ -135,12 +136,14 @@ function prepareDisabledReason(
 export function ComparisonView({
   client,
   onOpenInventory,
+  onOpenTargets,
   onPrepared,
   snapshot,
   targets,
 }: {
   readonly client: WorkspaceBridge;
   readonly onOpenInventory?: () => void;
+  readonly onOpenTargets?: () => void;
   readonly onPrepared: (
     preparedId: string,
     destinationTargetId: string,
@@ -632,6 +635,16 @@ export function ComparisonView({
               <CircleHelp aria-hidden="true" size={22} />
               <h2>{t("comparison.empty.none")}</h2>
               <p>{emptyNextStep}</p>
+              {plannableTargets.length < 2 && onOpenTargets !== undefined ? (
+                <button
+                  className="text-button text-button--primary"
+                  onClick={onOpenTargets}
+                  type="button"
+                >
+                  <Settings2 aria-hidden="true" size={15} />
+                  {t("common.openTargets")}
+                </button>
+              ) : null}
             </div>
           ) : comparison.rows.length === 0 ? (
             <div className="empty-state" role="status">

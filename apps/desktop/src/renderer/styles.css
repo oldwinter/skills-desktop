@@ -484,6 +484,7 @@ html[data-appearance="system"] .status-pill.status-pill--neutral {
 .search-clear { display: inline-grid; width: 28px; height: 28px; flex: 0 0 auto; place-items: center; color: var(--text-tertiary); background: transparent; border: 0; border-radius: 4px; }
 .search-clear:hover { color: var(--text); background: var(--surface-hover); }
 .inventory-result-count { flex: 0 0 auto; color: var(--text-tertiary); font-size: var(--font-size-meta); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.toolbar-hint { flex: 1 0 100%; margin: 0; color: var(--text-secondary); font-size: var(--font-size-meta); }
 .segmented-control { display: inline-grid; grid-template-columns: repeat(3, minmax(78px, auto)); min-height: 40px; padding: 3px; background: var(--surface-muted); border-radius: var(--radius-control); }
 .segmented-control button { min-height: 34px; padding: 0 10px; color: var(--text-secondary); background: transparent; border: 0; border-radius: 4px; font-size: var(--font-size-meta); }
 .segmented-control button[aria-pressed="true"] { color: var(--text); background: var(--surface); box-shadow: 0 0 0 1px var(--line); font-weight: 500; }
@@ -611,6 +612,7 @@ html[data-appearance="system"] .status-pill.status-pill--neutral {
 .comparison-workspace > .comparison-table-wrap, .comparison-workspace > .empty-state { flex: 1; min-height: 0; overflow: auto; }
 .collections-workspace { display: flex; min-width: 0; min-height: 0; flex-direction: column; overflow: hidden; }
 .collection-controls { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(180px, 240px); align-items: end; gap: 12px; padding: 0 20px 14px; }
+.collection-prepare-hint { grid-column: 1 / -1; margin: 0; color: var(--text-secondary); font-size: var(--font-size-meta); }
 .collection-controls label { display: grid; gap: 5px; color: var(--text-tertiary); font-size: var(--font-size-meta); }
 .collection-controls select { width: 100%; height: 40px; padding: 0 9px; color: var(--text); background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--radius-control); }
 .collection-machine-list { min-width: 0; min-height: 0; flex: 1; overflow: auto; padding: 0 20px 20px; }
@@ -765,6 +767,7 @@ html[data-appearance="system"] .status-pill.status-pill--neutral {
 .target-state-error { grid-column: 1 / -1; color: var(--danger); font-size: var(--font-size-meta); overflow-wrap: anywhere; }
 .target-item-actions { display: flex; gap: 6px; }
 .icon-button--danger { color: var(--danger); }
+.target-editor-hint { margin: 12px 0 0; color: var(--text-secondary); font-size: var(--font-size-meta); line-height: 1.5; }
 .target-form { display: grid; gap: 13px; padding-top: 16px; }
 .target-form fieldset { min-width: 0; padding: 0; border: 0; }
 .target-form legend { margin-bottom: 5px; color: var(--text-tertiary); font-size: var(--font-size-meta); }

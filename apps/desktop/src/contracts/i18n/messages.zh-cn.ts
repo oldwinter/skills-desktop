@@ -13,6 +13,7 @@ export const zhCN: Readonly<Record<keyof typeof en, string>> = {
 
   "common.details": "详情",
   "common.openInventory": "打开 Inventory",
+  "common.openTargets": "打开 Targets",
   "common.unknown": "未知",
   "common.local": "本机",
   "common.close": "关闭",
@@ -386,6 +387,9 @@ export const zhCN: Readonly<Record<keyof typeof en, string>> = {
   "targets.deletionBlocked": "当前不能删除该 Target",
   "targets.editor.label": "Target Definition 编辑器",
   "targets.editor.new": "新建 Definition",
+  "targets.editor.newTitle": "新建 Local Target",
+  "targets.editor.newHint":
+    "此表单用于添加一个 Local Target，不会改动列表中已有的 Target。要修改已有 Target，请使用该行上的编辑。",
   "targets.editor.edit": "编辑 Definition",
   "targets.editor.untitled": "未命名 Target",
   "targets.editor.sshBanner":
@@ -544,6 +548,13 @@ export const zhCN: Readonly<Record<keyof typeof en, string>> = {
   "collections.release": "发布",
   "collections.releaseOption": "{title} / 发布 {release}",
   "collections.preparePlan": "准备计划",
+  "collections.prepare.selectSkill":
+    "请先在已包含的 Local Target 上至少选择一个 Skill，然后再准备计划。",
+  "collections.prepare.includeTarget":
+    "准备计划前，请先包含一个 Local Target。",
+  "collections.prepare.blocked":
+    "请先处理下方的 Target 阻止项，然后再准备计划。",
+  "collections.prepare.noRelease": "准备计划前，请先选择一个发布。",
   "collections.blocker.noRelease": "该 Target 没有可执行的已复核发布。",
   "collections.blocker.incompatible": "发布与该 Target 不兼容。",
   "collections.blocker.freshness": "需要新鲜的库存证据。",

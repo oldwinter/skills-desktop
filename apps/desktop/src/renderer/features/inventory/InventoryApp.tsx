@@ -1286,7 +1286,9 @@ function InventoryWorkspace({
                 </div>
                 <button
                   aria-describedby={
-                    scope === "all" ? undefined : mutationBlockedDescribedBy
+                    scope === "all"
+                      ? "inventory-update-scope-reason"
+                      : mutationBlockedDescribedBy
                   }
                   className="text-button"
                   disabled={scope === "all" || mutationBlocked}
@@ -1301,6 +1303,11 @@ function InventoryWorkspace({
                   <RefreshCw aria-hidden="true" size={15} />
                   {t("inventory.updateScope")}
                 </button>
+                {scope === "all" ? (
+                  <p className="toolbar-hint" id="inventory-update-scope-reason">
+                    {t("inventory.updateScope.chooseFirst")}
+                  </p>
+                ) : null}
               </div>
 
               <div className="inventory-table-wrap">
@@ -1910,6 +1917,7 @@ function InventoryWorkspace({
           <ComparisonView
             client={client}
             onOpenInventory={() => setView("inventory")}
+            onOpenTargets={() => setView("targets")}
             onPrepared={(preparedId, destinationTargetId) => {
               const destination = targetStates.find(
                 ({ target }) => target.id === destinationTargetId,

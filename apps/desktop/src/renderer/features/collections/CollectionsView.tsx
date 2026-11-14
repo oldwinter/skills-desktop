@@ -336,6 +336,20 @@ export function CollectionsView({
         selections.length > 0 &&
         targetBlockers(targetState, input).length === 0,
     );
+  const prepareHintKey: MessageKey | undefined = (() => {
+    if (canPrepare || busy || collections?.plan !== null) return undefined;
+    if (release === undefined) return "collections.prepare.noRelease";
+    if (selectedTargets.length === 0) return "collections.prepare.includeTarget";
+    if (
+      selectedTargets.some(
+        ({ input, targetState }) =>
+          targetBlockers(targetState, input).length > 0,
+      )
+    ) {
+      return "collections.prepare.blocked";
+    }
+    return "collections.prepare.selectSkill";
+  })();
 
   const updateInput = (
     targetId: string,
@@ -555,14 +569,27 @@ export function CollectionsView({
             </select>
           </label>
           <button
+            aria-describedby={
+              prepareHintKey === undefined
+                ? undefined
+                : "collection-prepare-reason"
+            }
             className="text-button text-button--primary"
             disabled={!canPrepare}
             onClick={() => void prepare()}
+            title={
+              prepareHintKey === undefined ? undefined : t(prepareHintKey)
+            }
             type="button"
           >
             <PackagePlus aria-hidden="true" size={15} />
             {t("collections.preparePlan")}
           </button>
+          {prepareHintKey === undefined ? null : (
+            <p className="collection-prepare-hint" id="collection-prepare-reason">
+              {t(prepareHintKey)}
+            </p>
+          )}
         </div>
 
         {importOutcome}

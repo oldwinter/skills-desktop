@@ -250,6 +250,14 @@ describe("TargetsView", () => {
         ]}
       />,
     );
+    expect(
+      screen.getByRole("heading", { name: "New Local Target" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "This form adds a Local Target. It does not change Targets already in the list. Use Edit on a row to change one.",
+      ),
+    ).toBeInTheDocument();
     fireEvent.change(screen.getByRole("searchbox", { name: "Search Targets" }), {
       target: { value: query },
     });
@@ -534,6 +542,11 @@ describe("TargetsView", () => {
       );
     });
     expect(screen.getByText("New Definition")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "This form adds a Local Target. It does not change Targets already in the list. Use Edit on a row to change one.",
+      ),
+    ).toBeInTheDocument();
   });
 
   it("deletes a Target and selects a remaining peer", async () => {
