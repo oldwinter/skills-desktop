@@ -10,3 +10,6 @@ release-candidates/
 visual-qa/
 
 coverage/
+
+# e2e run output
+.e2e/

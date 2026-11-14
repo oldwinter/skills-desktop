@@ -8,11 +8,16 @@
     "build": "vite build",
     "dev": "vite",
     "preview": "vite preview",
-    "typecheck": "tsc -b --pretty false"
+    "typecheck": "tsc -b --pretty false",
+    "test:e2e": "e2e run"
   },
   "dependencies": {
     "@skills-desktop/skills-runtime": "0.1.0",
     "react": "19.3.1",
     "react-dom": "19.3.1"
+  },
+  "devDependencies": {
+    "@e2e-dev/web": "0.16.0",
+    "e2e": "0.23.1"
   }
 }

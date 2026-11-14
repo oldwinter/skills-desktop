@@ -7,5 +7,6 @@
     "types": ["node", "vite/client", "vitest/globals"]
   },
   "include": ["src/**/*.ts", "src/**/*.tsx", "*.ts"],
+  "exclude": ["e2e.config.ts", "e2e"],
   "references": [{ "path": "../../packages/skills-runtime" }]
 }
