@@ -10,3 +10,7 @@ release-candidates/
 visual-qa/
 
 coverage/
+
+# Verification skill run artifacts (screenshots + drive receipts)
+.claude/skills/verify/evidence/
+/.codex/runtime/
