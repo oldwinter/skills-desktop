@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import {
   AlertCircle,
+  Check,
+  Copy,
   HardDrive,
   Pencil,
   Plus,
@@ -49,6 +51,38 @@ const blankTarget = (): TargetDraft => ({
   label: "",
   workspace: "",
 });
+
+async function copyTextToClipboard(text: string): Promise<boolean> {
+  try {
+    const clipboard = navigator.clipboard;
+    if (clipboard !== undefined && typeof clipboard.writeText === "function") {
+      await clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    // Fall through to the legacy path for packaged Electron contexts.
+  }
+  const previousFocus =
+    document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  const area = document.createElement("textarea");
+  try {
+    area.value = text;
+    area.setAttribute("readonly", "");
+    area.style.position = "fixed";
+    area.style.opacity = "0";
+    document.body.appendChild(area);
+    area.focus();
+    area.select();
+    return document.execCommand("copy");
+  } catch {
+    return false;
+  } finally {
+    area.remove();
+    if (previousFocus !== null && previousFocus.isConnected) {
+      previousFocus.focus({ preventScroll: true });
+    }
+  }
+}
 
 export function TargetsView({
   client,
@@ -105,6 +139,8 @@ export function TargetsView({
   const [draft, setDraft] = useState<TargetDraft>(blankTarget);
   const [error, setError] = useState<RendererError>();
   const [savedMessage, setSavedMessage] = useState<MessageKey>();
+  const [copiedTargetId, setCopiedTargetId] = useState<string>();
+  const [copyFailed, setCopyFailed] = useState(false);
   const [refreshingTargetId, setRefreshingTargetId] = useState<string>();
 
   useEffect(() => {
@@ -182,6 +218,18 @@ export function TargetsView({
     }
   };
 
+  const copyWorkspace = async (state: TargetState) => {
+    setCopyFailed(false);
+    setSavedMessage(undefined);
+    if (await copyTextToClipboard(state.target.workspace)) {
+      setCopiedTargetId(state.target.id);
+      setSavedMessage("targets.workspaceCopied");
+    } else {
+      setCopiedTargetId(undefined);
+      setCopyFailed(true);
+    }
+  };
+
   return (
     <>
       <main className="targets-workspace" id="workspace-main" tabIndex={-1}>
@@ -205,6 +253,12 @@ export function TargetsView({
           <div className="state-banner state-banner--loading" role="status">
             <Save aria-hidden="true" size={16} />
             <span>{t(savedMessage)}</span>
+          </div>
+        ) : null}
+        {copyFailed ? (
+          <div className="state-banner state-banner--danger" role="alert">
+            <AlertCircle aria-hidden="true" size={16} />
+            <span>{t("targets.workspaceCopyFailed")}</span>
           </div>
         ) : null}
         <div className="targets-search-toolbar">
@@ -326,6 +380,23 @@ export function TargetsView({
                 </div>
               ) : null}
               <div className="target-item-actions">
+                <button
+                  aria-label={t("targets.copyWorkspace", {
+                    label: state.target.label,
+                  })}
+                  className="icon-button"
+                  onClick={() => void copyWorkspace(state)}
+                  title={t("targets.copyWorkspace", {
+                    label: state.target.label,
+                  })}
+                  type="button"
+                >
+                  {copiedTargetId === state.target.id ? (
+                    <Check aria-hidden="true" size={15} />
+                  ) : (
+                    <Copy aria-hidden="true" size={15} />
+                  )}
+                </button>
                 <button
                   aria-label={t("targets.refresh", {
                     label: state.target.label,
