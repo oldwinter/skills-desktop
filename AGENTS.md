@@ -23,6 +23,21 @@ Electron desktop app over `npx skills`. Read `CONTEXT.md` and the relevant `docs
 
 ## Agent skills
 
-- Issue tracker: GitHub Issues on `oldwinter/skills-desktop`, see `docs/agents/issue-tracker.md`.
-- Triage labels: the five canonical labels, see `docs/agents/triage-labels.md`.
-- Domain docs: single context, see `docs/agents/domain.md`.
+In-repo Cursor skills live under `.cursor/skills/`. Catalog:
+[`.cursor/skills/README.md`](.cursor/skills/README.md).
+
+| Skill | When to use |
+| --- | --- |
+| [verify-skills-desktop](.cursor/skills/verify-skills-desktop/SKILL.md) | Prove a user-visible Local-only change by driving the packaged app over CDP. Feature map: [features/README.md](.cursor/skills/verify-skills-desktop/features/README.md). |
+
+### How to add a skill
+
+1. Add `.cursor/skills/<kebab-name>/SKILL.md` with `name` and `description`
+   frontmatter (`name` matches the directory; `description` says when to load it).
+2. List it in [`.cursor/skills/README.md`](.cursor/skills/README.md) and in the
+   table above.
+3. Reuse existing helpers and tests. Do not add runtime code, secrets, or a
+   second skill installer. Packaged-app drivers must keep the Chromium sandbox
+   on and reuse `tests/packaged-ui-qa/`.
+
+Tracker and domain notes are not skills: see [`docs/agents/`](docs/agents/).

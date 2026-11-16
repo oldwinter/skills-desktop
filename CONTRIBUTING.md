@@ -10,6 +10,10 @@ V1 public commitment is **Local-only**. SSH Target, remote-bootstrap, and cross-
 2. Prefer narrow interfaces for process, persistence, and renderer boundaries.
 3. Never commit secrets, credentials, signing keys, raw sensitive SSH output, or generated visual-QA artifacts.
 
+In-repo Cursor skills (how agents verify the packaged UI, and how to add a
+new skill) are catalogued in [`.cursor/skills/README.md`](.cursor/skills/README.md).
+They do not replace `npx skills` or change runtime behavior.
+
 ## Pull request format
 
 Use this body structure (Chinese is preferred for this repo):
@@ -27,6 +31,11 @@ npm run verify
 ```
 
 This covers typecheck, lint when configured, import checks, tests, and build. Do not skip it for behavior changes.
+
+User-visible Local-only UI changes also need a packaged-window proof. Use
+[`.cursor/skills/verify-skills-desktop/SKILL.md`](.cursor/skills/verify-skills-desktop/SKILL.md)
+rather than treating `npm run qa:packaged-ui` as a substitute. Docs-only
+changes do not require that skill.
 
 ## Issues
 

@@ -5,6 +5,9 @@ description: Drive the packaged Skills Desktop Electron app over CDP. Use when p
 
 # Verify Skills Desktop
 
+Catalog: [../README.md](../README.md). Feature map:
+[features/README.md](features/README.md).
+
 This skill is for the next agent, mid-task, who has never seen the app.
 
 Skills Desktop is a packaged Electron client. The user-facing surface is the
@@ -22,6 +25,18 @@ Do not use `prototype/` as the verification surface. It is design evidence
 only. Do not run `npm run qa:packaged-ui` as a substitute for this skill:
 that suite is a closed accessibility/keyboard gate and deletes its fixture
 artifacts on teardown.
+
+## Contents
+
+- [Launch](#launch)
+- [Doctor](#doctor)
+- [Drive](#drive)
+- [Evidence](#evidence)
+- [Cleanup](#cleanup)
+- [Helpers](#helpers)
+- Surfaces: [Inventory](features/inventory.md), [Targets](features/targets.md),
+  [Comparison](features/comparison.md), [Collections](features/collections.md),
+  [About](features/about.md)
 
 ## Launch
 

@@ -69,5 +69,6 @@ npm run prototype:electron
 2. 确认改动没有把 SSH 或跨机器行为写成当前 V1 承诺。
 3. 保持 `npx skills` 为发现和变更的权威，不自行扫描技能目录。
 4. 新增边界行为时，优先补充解析、IPC、持久化、差异语义或确认流程的测试。
+5. 仓库内 Cursor 技能目录见 [`.cursor/skills/README.md`](../../.cursor/skills/README.md)；用户可见的 Local-only 界面证明用 [`verify-skills-desktop`](../../.cursor/skills/verify-skills-desktop/SKILL.md)。
 
 更多测试分层与排错命令见[测试](../how-to-contribute/testing.md)和[调试](../how-to-contribute/debugging.md)。

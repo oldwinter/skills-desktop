@@ -1,5 +1,8 @@
 # Skills Desktop feature map
 
+Parent skill: [SKILL.md](../SKILL.md). Catalog:
+[README.md](../../README.md).
+
 Verification source for the packaged Electron workspace. V1 is Local-only.
 Drive the real window over CDP (`helpers/drive.mjs`). Do not treat
 `prototype/` or unit tests as a user-facing proof.
