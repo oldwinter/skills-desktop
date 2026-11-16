@@ -1,9 +1,13 @@
 import {
+  CheckCircle2,
+  Circle,
+  Clock3,
   HardDrive,
   Info,
   LibraryBig,
   LifeBuoy,
   ListFilter,
+  LoaderCircle,
   MonitorCog,
   PenLine,
   Server,
@@ -50,6 +54,44 @@ const navigationItems: readonly {
   { view: "recovery", label: "nav.recovery", icon: LifeBuoy },
   { view: "about", label: "nav.about", icon: Info },
 ];
+
+function targetInventoryStatus(state: TargetState): {
+  readonly icon: LucideIcon;
+  readonly label: MessageKey;
+  readonly shortLabel: MessageKey;
+  readonly tone: "healthy" | "neutral" | "warning";
+} {
+  if (state.inventory.phase === "loading") {
+    return {
+      icon: LoaderCircle,
+      label: "targets.pill.loading",
+      shortLabel: "targets.pill.loading",
+      tone: "neutral",
+    };
+  }
+  if (state.inventory.freshness === "fresh") {
+    return {
+      icon: CheckCircle2,
+      label: "common.freshness.fresh",
+      shortLabel: "targets.pill.fresh",
+      tone: "healthy",
+    };
+  }
+  if (state.inventory.freshness === "stale") {
+    return {
+      icon: Clock3,
+      label: "common.freshness.stale",
+      shortLabel: "targets.pill.stale",
+      tone: "warning",
+    };
+  }
+  return {
+    icon: Circle,
+    label: "common.freshness.none",
+    shortLabel: "targets.pill.none",
+    tone: "neutral",
+  };
+}
 
 export function WorkspaceNavigation({
   applicationMenu,
@@ -116,33 +158,74 @@ export function WorkspaceNavigation({
 
       <section className="target-section" aria-labelledby="target-heading">
         <h2 id="target-heading">{t("nav.activeTarget")}</h2>
-        {targetStates.map((state) => (
-          <button
-            className={`target-row${state.target.id === target.id ? " target-row--active" : ""}`}
-            key={state.target.id}
-            onClick={() => onSelectTarget(state.target.id)}
-            type="button"
-          >
-            {state.target.kind === "local" ? (
-              <HardDrive aria-hidden="true" size={16} />
-            ) : (
-              <Server aria-hidden="true" size={16} />
-            )}
-            <span>
-              <strong>{state.target.label}</strong>
-              <small>{state.target.workspaceLabel}</small>
-            </span>
-            {state.target.kind === "ssh" ? (
-              <span
-                aria-label={t("common.ssh.badgeLabel")}
-                className="scope-badge"
-                title={t("common.ssh.notInV1")}
-              >
-                {t("common.ssh.badge")}
+        {targetStates.map((state) => {
+          const status = targetInventoryStatus(state);
+          const StatusIcon = status.icon;
+          const showCount =
+            state.inventory.phase !== "loading" &&
+            state.inventory.freshness !== "none";
+          const skillCount =
+            showCount ? state.inventory.entries.length : undefined;
+          const statusSummary =
+            skillCount === undefined
+              ? t(status.label)
+              : `${t(status.label)} · ${tc("nav.targetSkillCount", skillCount)}`;
+          const visibleSummary =
+            skillCount === undefined
+              ? t(status.shortLabel)
+              : `${t(status.shortLabel)} · ${tc("nav.targetSkillCount", skillCount)}`;
+          const inventoryState =
+            state.inventory.phase === "loading"
+              ? "loading"
+              : state.inventory.freshness;
+          const sshSummary =
+            state.target.kind === "ssh"
+              ? `, ${t("common.ssh.notInV1")}`
+              : "";
+          return (
+            <button
+              aria-label={`${state.target.label}, ${state.target.workspaceLabel}, ${statusSummary}${sshSummary}`}
+              className={`target-row${state.target.id === target.id ? " target-row--active" : ""}`}
+              data-inventory-state={inventoryState}
+              key={state.target.id}
+              onClick={() => onSelectTarget(state.target.id)}
+              type="button"
+            >
+              {state.target.kind === "local" ? (
+                <HardDrive aria-hidden="true" size={16} />
+              ) : (
+                <Server aria-hidden="true" size={16} />
+              )}
+              <span>
+                <strong>{state.target.label}</strong>
+                <small>{state.target.workspaceLabel}</small>
+                <span
+                  className="target-row-inventory"
+                  data-tone={status.tone}
+                  title={statusSummary}
+                >
+                  <StatusIcon
+                    aria-hidden="true"
+                    className={
+                      state.inventory.phase === "loading" ? "spin" : undefined
+                    }
+                    size={12}
+                  />
+                  <span>{visibleSummary}</span>
+                </span>
               </span>
-            ) : null}
-          </button>
-        ))}
+              {state.target.kind === "ssh" ? (
+                <span
+                  aria-label={t("common.ssh.badgeLabel")}
+                  className="scope-badge"
+                  title={t("common.ssh.notInV1")}
+                >
+                  {t("common.ssh.badge")}
+                </span>
+              ) : null}
+            </button>
+          );
+        })}
         <dl className="target-facts">
           <div>
             <dt>{t("common.harness")}</dt>

@@ -450,6 +450,12 @@ html[data-appearance="system"] .status-pill.status-pill--neutral {
 .target-row > span { display: grid; min-width: 0; }
 .target-row strong { font-size: var(--font-size-row); font-weight: 600; }
 .target-row small { overflow: hidden; color: var(--text-secondary); font-size: var(--font-size-meta); text-overflow: ellipsis; white-space: nowrap; }
+.target-row-inventory { display: flex; min-width: 0; align-items: center; gap: 4px; margin-top: 3px; overflow: hidden; color: var(--text-secondary); font-size: var(--font-size-meta); white-space: nowrap; }
+.target-row-inventory svg { flex: 0 0 auto; }
+.target-row-inventory > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.target-row-inventory[data-tone="healthy"] svg { color: var(--healthy); }
+.target-row-inventory[data-tone="warning"] svg { color: var(--warning); }
+.target-row-inventory[data-tone="neutral"] svg { color: var(--text-tertiary); }
 .target-facts { display: grid; gap: 8px; margin: 14px 10px 0; }
 .target-facts div { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 12px; font-size: var(--font-size-meta); }
 .target-facts dt { color: var(--text-tertiary); }

@@ -103,7 +103,7 @@ Target 较多时，可在列表上方按名称、工作区路径、Harness ID �
 
 ![Inventory Target 选择器中的 SSH · 未开放](images/user-guide/inventory-ssh-unavailable.png)
 
-页眉会显示当前 Target 标签与工作区路径。侧栏 **Active Target** 区可切换当前观察对象（这是会话级切换器；编辑 Target Definition 请进入主导航的 **Targets** 页）。侧栏底部显示实际观察到的 `skills` CLI 版本，尚未观察时显示 unobserved。
+页眉会显示当前 Target 标签与工作区路径。侧栏 **Active Target** 区可切换当前观察对象（这是会话级切换器；编辑 Target Definition 请进入主导航的 **Targets** 页）。每个 Target 行会显示当前库存证据状态（Fresh / Stale / No evidence）与该次完整清单中的 Skill 数，方便先判断该 Target 是否需要刷新，或是否值得切换过去查看。侧栏底部显示实际观察到的 `skills` CLI 版本，尚未观察时显示 unobserved。
 
 ### 本机前提
 
