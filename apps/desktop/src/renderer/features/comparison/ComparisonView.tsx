@@ -22,6 +22,7 @@ import type {
 } from "../../../contracts/workspace.js";
 import { useTranslator } from "../../i18n/LocaleProvider.js";
 import { UserFacingErrorCopy } from "../../UserFacingErrorCopy.js";
+import { formatObservedAt } from "../inventory/inventory-state.js";
 
 type TargetState = NonNullable<WorkspaceSnapshot["targets"]>[number];
 type RowSummary = PublicComparison["rows"][number]["summary"];
@@ -148,7 +149,7 @@ export function ComparisonView({
   readonly snapshot: WorkspaceSnapshot;
   readonly targets: readonly TargetState[];
 }) {
-  const { t, tc } = useTranslator();
+  const { locale, t, tc } = useTranslator();
   const plannableTargets = useMemo(
     () => targets.filter(({ target }) => target.kind !== "ssh"),
     [targets],
@@ -601,7 +602,28 @@ export function ComparisonView({
                 </span>
                 <strong>{state.target.label}</strong>
                 <code>{state.target.workspaceLabel}</code>
-                <span>{inventoryStatus(t, state)}</span>
+                <span>
+                  {inventoryStatus(t, state)}
+                  <span
+                    className="paired-status-observed"
+                    data-testid={`comparison-observed-${index}`}
+                  >
+                    {" · "}
+                    {state.inventory.observedAt === null ? (
+                      t("common.notObserved")
+                    ) : (
+                      <>
+                        {t("common.lastObserved")}{" "}
+                        <time dateTime={state.inventory.observedAt}>
+                          {formatObservedAt(
+                            locale,
+                            state.inventory.observedAt,
+                          )}
+                        </time>
+                      </>
+                    )}
+                  </span>
+                </span>
                 {state.inventory.lastError !== null ? (
                   <span className="paired-status-error" role="status">
                     <UserFacingErrorCopy error={state.inventory.lastError} />

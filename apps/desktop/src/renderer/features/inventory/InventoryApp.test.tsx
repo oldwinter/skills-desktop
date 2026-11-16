@@ -522,6 +522,35 @@ describe("Local Target Inventory shell", () => {
     );
   });
 
+  it("shows when the current inventory evidence was last observed", async () => {
+    const { unmount } = render(<InventoryApp client={clientFor(snapshot)} />);
+
+    const observedAt = await screen.findByTestId("inventory-observed-at");
+    expect(observedAt).toHaveTextContent("Last observed");
+    expect(observedAt.querySelector("time")).toHaveAttribute(
+      "dateTime",
+      snapshot.inventory.observedAt,
+    );
+
+    unmount();
+    render(
+      <InventoryApp
+        client={clientFor({
+          ...snapshot,
+          inventory: {
+            ...snapshot.inventory,
+            entries: [],
+            freshness: "none",
+            observedAt: null,
+          },
+        })}
+      />,
+    );
+    expect(await screen.findByTestId("inventory-observed-at")).toHaveTextContent(
+      "Not observed yet",
+    );
+  });
+
   it("exposes Inventory and Add scopes as named groups with ordered pressed buttons", async () => {
     render(<InventoryApp client={clientFor(snapshot)} />);
 

@@ -1,8 +1,19 @@
 import type { Translator } from "../../../contracts/i18n/translate.js";
+import type { Locale } from "../../../contracts/preferences.js";
 import type {
   PublicInventoryEntry,
   WorkspaceSnapshot,
 } from "../../../contracts/workspace.js";
+
+export function formatObservedAt(locale: Locale, observedAt: string): string {
+  const parsed = Date.parse(observedAt);
+  return Number.isNaN(parsed)
+    ? observedAt
+    : new Date(parsed).toLocaleString(locale, {
+        dateStyle: "medium",
+        timeStyle: "short",
+      });
+}
 
 export function freshnessLabel(
   t: Translator["t"],

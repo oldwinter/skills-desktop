@@ -71,6 +71,7 @@ import {
 } from "../navigation/WorkspaceNavigation.js";
 import {
   freshnessLabel,
+  formatObservedAt,
   isTargetOffline,
   scopeFilterLabel,
   scopeLabel,
@@ -1102,6 +1103,24 @@ function InventoryWorkspace({
                       / {snapshot.target.harnessIds.join(", ")}
                     </p>
                   )}
+                  <p
+                    className="inventory-observed-at"
+                    data-testid="inventory-observed-at"
+                  >
+                    {snapshot.inventory.observedAt === null ? (
+                      t("common.notObserved")
+                    ) : (
+                      <>
+                        {t("common.lastObserved")}{" "}
+                        <time dateTime={snapshot.inventory.observedAt}>
+                          {formatObservedAt(
+                            locale,
+                            snapshot.inventory.observedAt,
+                          )}
+                        </time>
+                      </>
+                    )}
+                  </p>
                 </div>
                 {snapshot.inventory.phase === "loading" &&
                 activeOperationId !== null ? (
